@@ -20,6 +20,11 @@ readable by a non-expert — if a section gets too jargon-heavy, that's a bug.
 3. I can see the model in a **live 3D viewer** and rotate/zoom before exporting.
 4. The app supports **both** precise/mechanical parts and organic/artistic shapes.
 5. It runs **on my own machine** with **my own API keys**, costing only what the AI providers charge.
+6. Parametric designs export as **STEP** so they open in **Shapr3D as fully editable solid
+   bodies** — not just as frozen print meshes. (STL/OBJ are always available for printing.)
+7. **Apple-simple.** The app should feel like Apple made it: no home page, no login, no visible
+   complexity. Open the app → you're on the canvas → describe a thing. One primary action per
+   screen; everything else is quiet or hidden until needed (progressive disclosure).
 
 **Non-goals (for now — explicitly out of scope):**
 - No user accounts, login, or payment system in the initial build.
@@ -31,7 +36,7 @@ readable by a non-expert — if a section gets too jargon-heavy, that's a bug.
 - **Reliability over flash.** A boring bracket that prints beats a gorgeous mesh that won't.
 - **Local-first & private.** Your keys and designs stay on your machine by default.
 - **Two engines, one chat.** The user shouldn't have to know which AI engine is being used.
-- **Always escape-hatch to the raw output.** Power users can view/edit the OpenSCAD code or the
+- **Always escape-hatch to the raw output.** Power users can view/edit the CAD code or the
   raw mesh.
 
 ---
@@ -48,13 +53,19 @@ readable by a non-expert — if a section gets too jargon-heavy, that's a bug.
 
 The heart of the app is routing a request to the right generation engine.
 
-### Engine A — Parametric (LLM → OpenSCAD) — **Phase 1, the reliable core**
-- The LLM (Claude by default) is prompted to output **OpenSCAD** code for the described part.
-- The app compiles that code to an STL **in the browser** using `openscad-wasm` (OpenSCAD
-  compiled to WebAssembly). **No server needed.**
-- **Why this is great:** output is parametric, watertight, manifold, and reliably printable.
-  Refinements are just edits to the code, which LLMs do well. The code is human-readable, so it's
-  debuggable and the model "remembers" the design exactly.
+### Engine A — Parametric (LLM → replicad) — **Phase 1, the reliable core**
+- The LLM (Claude by default) is prompted to output **replicad** code — JavaScript CAD built on
+  **OpenCascade** (the same class of B-rep kernel real CAD apps use), running in the browser via
+  WebAssembly (`opencascade.js`). **No server needed.**
+- The app executes that code in the browser and exports **STL/OBJ** (printing) **and STEP**
+  (real solid geometry → **fully editable in Shapr3D**, Fusion, FreeCAD…).
+- **Why replicad over OpenSCAD** (the original plan): OpenSCAD compiles only to meshes (STL) —
+  it **cannot produce STEP**, so its output would never be Shapr3D-editable. Replicad gives the
+  same "AI writes code → solid model" workflow *plus* B-rep output. The Shapr3D requirement
+  decided this.
+- **Why this is great:** output is parametric, watertight, and reliably printable. Refinements
+  are just edits to the code. The code is human-readable, so it's debuggable and the model
+  "remembers" the design exactly.
 - **Best for:** brackets, enclosures, holders, mounts, spacers, gears, jigs, replacement parts.
 
 ### Engine B — Generative mesh (text/image → 3D) — **Phase 2**
@@ -83,7 +94,7 @@ clean upgrade path to a hosted product later.
 | Build/dev | **Vite** | Instant dev server, simple builds. |
 | UI framework | **React** | Huge ecosystem, easy to hire/learn, pairs with the 3D viewer. |
 | 3D viewer | **three.js** via **react-three-fiber** + **drei** | The standard for web 3D; renders STL/meshes, orbit controls, etc. |
-| Parametric engine | **openscad-wasm** | Runs OpenSCAD in the browser → STL, **no server**. |
+| Parametric engine | **replicad** (on `opencascade.js`) | Code-CAD in the browser → **STL + STEP**, no server. STEP = Shapr3D-editable. |
 | AI calls | **Anthropic SDK** (`@anthropic-ai/sdk`) | BYO key from browser — officially supported via the SDK's `dangerouslyAllowBrowser: true` option (sends the API's CORS opt-in header). Safe here because the only key in the browser is the user's own. **No proxy/backend needed.** |
 | State/storage | React state + **localStorage** / **IndexedDB** | Keys + project history stay on-device. |
 | Styling | **Tailwind CSS** (or plain CSS modules) | Fast, consistent UI. |
@@ -100,8 +111,10 @@ clean upgrade path to a hosted product later.
 What's genuinely solid vs. where the risk lives — so there are no surprises.
 
 **Solid / proven:**
-- LLM-writes-OpenSCAD is a well-trodden, reliable approach for parametric parts. ✅
-- `openscad-wasm` in-browser STL generation works and removes the need for a backend. ✅
+- LLM-writes-code-CAD is a well-trodden, reliable approach for parametric parts. ✅
+- In-browser CAD kernels work: replicad/`opencascade.js` export STL **and STEP** with no backend
+  (CascadeStudio proves the same stack in production). ✅
+- Shapr3D officially imports STEP as fully editable solid bodies (per their docs). ✅
 - three.js / react-three-fiber 3D viewing is mature. ✅
 - BYO-key, local-first apps are a common, low-cost pattern. ✅
 
@@ -115,12 +128,19 @@ What's genuinely solid vs. where the risk lives — so there are no surprises.
 - **LLM geometry mistakes.** The AI sometimes produces parts that compile but are subtly wrong
   (overlapping, wrong dimensions). Mitigation: show the 3D result immediately, show dimensions,
   let the user iterate, expose the code.
-- **Compile failures.** Generated OpenSCAD occasionally won't compile. Mitigation: a
-  **self-healing loop** — feed the compiler error back to Claude automatically for one retry,
-  plus a visible "Fix it for me" action. Never show the user a raw stack trace as a dead end.
-- **`openscad-wasm` performance.** The wasm binary is a multi-MB first load, and complex models
-  take seconds to compile. Mitigation: run compilation in a **Web Worker** (UI never freezes),
-  cache the wasm, show a compile spinner in the viewer.
+- **Compile failures.** Generated code occasionally won't run. Mitigation: a **self-healing
+  loop** — feed the error back to Claude automatically for one retry, plus a visible
+  "Fix it for me" action. Never show the user a raw stack trace as a dead end.
+- **LLM fluency with replicad.** Claude knows OpenSCAD from vast training data; replicad is a
+  smaller library with less. Mitigation: embed the replicad API reference + worked examples in
+  the system prompt (it's a compact, well-documented API), and lean on the self-healing loop.
+  If quality proves insufficient, fallback is OpenSCAD for geometry + accepting mesh-only export
+  — but that sacrifices the Shapr3D goal, so replicad gets a real attempt first.
+- **CAD-kernel wasm performance.** `opencascade.js` is a multi-MB first load and complex models
+  take seconds to build. Mitigation: run the kernel in a **Web Worker** (UI never freezes),
+  cache the wasm, show a build spinner in the viewer.
+- **Shapr3D import tiers.** STEP import is supported per Shapr3D's docs, but feature access can
+  vary by Shapr3D plan (free vs. paid). Verify on your own Shapr3D account early in Phase 1.
 
 **Harder / Phase 2+ risk:**
 - **Generative meshes are often not print-ready** (non-manifold, thin walls, floating bits).
@@ -142,21 +162,23 @@ Each phase ends with something usable.
 - Goals, scope, architecture, wireframe content. **← we are here.**
 
 ### Phase 1 — Parametric MVP (the core)
-**Deliverable:** Chat → Claude writes OpenSCAD → compile to STL in-browser → view in 3D →
-refine by chatting → export STL.
+**Deliverable:** Chat → Claude writes replicad code → build in-browser → view in 3D →
+refine by chatting → export **STL (print) / STEP (Shapr3D) / OBJ**.
 - [ ] Project scaffold (Vite + React + TS + Tailwind).
-- [ ] Settings screen: paste & store API key locally; pick model.
+- [ ] First-run key card (no login/account — one field, one button), key stored locally.
 - [ ] Chat UI with streaming responses.
-- [ ] Prompt design that makes Claude reliably emit valid OpenSCAD.
-- [ ] `openscad-wasm` integration: code → STL (in a **Web Worker** so the UI stays responsive).
-- [ ] **Self-healing compile loop:** on compile error, auto-send the error to Claude for a fix
+- [ ] Prompt design: replicad API reference + examples embedded so Claude reliably emits valid code.
+- [ ] replicad/`opencascade.js` integration: code → solid (in a **Web Worker** so the UI stays
+      responsive).
+- [ ] **Self-healing compile loop:** on build error, auto-send the error to Claude for a fix
       (1 retry), plus a "Fix it for me" button in the error state.
-- [ ] 3D viewer (react-three-fiber) rendering the STL.
-- [ ] "Export STL" button.
+- [ ] 3D viewer (react-three-fiber) rendering the model.
+- [ ] **Export menu: STL · STEP · OBJ.** Verify a STEP file opens as an editable solid in Shapr3D
+      (this is the Phase 1 acceptance test).
 - [ ] Conversational refinement (keeps prior code as context).
 - [ ] **Design version history:** every model-changing turn snapshots the code; "revert to an
       earlier version" from the chat (iterations sometimes make things worse).
-- [ ] Code panel (view/edit the OpenSCAD directly).
+- [ ] Code panel (view/edit the replicad code directly).
 - [ ] Save/load projects locally (history).
 
 ### Phase 2 — Generative mesh + image input
@@ -181,6 +203,16 @@ refine by chatting → export STL.
 
 - ~~CORS/proxy~~ — **Resolved:** Anthropic supports direct browser calls (`dangerouslyAllowBrowser`).
   No proxy needed for Phase 1. Phase 2 mesh providers must be re-checked individually for CORS.
+- ~~Home page / login?~~ — **Resolved (2026-06-12):** **Neither.** The app opens directly into
+  the workspace; the empty canvas with one centered prompt is the front door (Visual Electric /
+  Manus pattern). No accounts exist — the only first-run gate is a minimal one-field API-key
+  card, shown once. A marketing/landing page is out of scope unless the app is ever published.
+- ~~Local-first or web-based?~~ — **Resolved:** it's **both** — a *local-first web app*. Built
+  with web tech and opened in a browser, but with no server: keys, designs, and history live on
+  the device. This beats a native desktop app for v1 (faster to build, runs anywhere) and can be
+  wrapped with Tauri later without rewriting.
+- ~~OpenSCAD or replicad?~~ — **Resolved:** **replicad**, because Shapr3D-editability requires
+  STEP and OpenSCAD can't produce it (see §3 Engine A).
 - **Which mesh provider** to integrate first in Phase 2 (Meshy vs Tripo vs Hunyuan3D…): decide
   based on quality, price, and API friendliness at build time. *Data point: Krea AI's 3D tool
   runs Hunyuan3D-2.1 in production (see `docs/inspiration/INSPIRATION.md`).*
@@ -191,13 +223,20 @@ refine by chatting → export STL.
 
 ## 8. Glossary (plain-language)
 
-- **STL** — the standard 3D-printing file format (a mesh of triangles). What slicers eat.
+- **STL / OBJ** — mesh formats (triangles). Perfect for printing; **not** truly editable in CAD
+  apps — Shapr3D imports them as reference meshes only.
+- **STEP** — the universal *solid CAD* exchange format (B-rep, not triangles). Opens in Shapr3D,
+  Fusion, FreeCAD as **fully editable solid bodies**. Our parametric engine exports this.
+- **B-rep** — "boundary representation": exact mathematical surfaces (what real CAD uses),
+  versus a mesh's triangle approximation.
+- **replicad / OpenCascade** — our code-CAD engine: a JavaScript library on the OpenCascade
+  B-rep kernel (compiled to WebAssembly), so real CAD geometry runs in the browser.
 - **Slicer** — software (PrusaSlicer, Cura, Bambu Studio) that turns an STL into printer
   instructions (G-code).
-- **OpenSCAD** — a "describe shapes with code" CAD tool. Code in → solid model out. Ideal for AI.
+- **OpenSCAD** — a popular "shapes as code" tool (our original engine pick); dropped because it cannot export STEP.
 - **Parametric** — a model defined by adjustable parameters (e.g., `hole_diameter = 22`).
 - **Mesh** — a 3D surface made of triangles. Generative AI produces these.
 - **Manifold / watertight** — a mesh with no holes or self-intersections; required to print well.
-- **WebAssembly (wasm)** — lets heavy tools (like OpenSCAD) run fast *inside the browser*.
+- **WebAssembly (wasm)** — lets heavy tools (like a CAD kernel) run fast *inside the browser*.
 - **FDM** — fused-deposition (filament) 3D printing; the common desktop type.
 - **CORS** — a browser security rule that can block direct calls to some APIs from a web page.

@@ -32,10 +32,26 @@ The exact layout of our app, proven across the current generation of AI build to
 | **Krea AI** | [prompt bar over viewport](https://mobbin.com/screens/634bda59-688c-4d26-88e1-ddb5f5a6ef07) | Prompt input floats over the 3D scene; "Generating 10 meshes" progress pill at top. |
 | **Krea AI** | [result actions](https://mobbin.com/screens/cadf0bab-c557-4631-ad62-1213d30bf676) | Under-the-result actions: **Retry · Reuse parameters · Download** — adopt for organic results. |
 
+## Pattern 4 — No home page: launch straight into the canvas (our app flow)
+
+Added 2026-06-12 for the "Apple-simple" direction. These apps have **no home page** — opening
+the app *is* the empty state, with one prompt input:
+
+| App | Screen | Takeaway for us |
+| --- | --- | --- |
+| **Visual Electric** | [empty canvas + floating prompt](https://mobbin.com/screens/cb9eb41c-7413-4a89-a5c7-149ff25a8e23) · [with placeholder "What would you like to create?"](https://mobbin.com/screens/36a6c5c4-d0e4-418a-b0c6-5a218a26c6fe) | **The strongest reference for our launch experience.** Opens directly onto an "Untitled" canvas; a floating card holds the prompt; one Share button top-right (ours: Export). Zero navigation chrome. |
+| **Manus** | ["What can I do for you?"](https://mobbin.com/screens/156621d5-5d04-427e-acd0-a20be1c8d1ca) | Single centered question + input + a few capability chips — exactly our empty-state pattern ("What do you want to make?"). |
+| **ElevenLabs** | [single-purpose tool card](https://mobbin.com/screens/c61030c7-7dd0-4ba2-b209-175af5a3af94) | One card: title, one-line description, input, suggestions below. Template for our first-run key card. |
+| **Craft** (iOS) | [clean dotted canvas](https://mobbin.com/screens/6011086c-42ca-43e5-aa73-2d1d6de04934) | Apple-minimal canvas chrome: tiny corner controls, everything else is content. |
+| **Play** (iOS) | [floating inspector panels](https://mobbin.com/screens/e2228a8f-fd11-46e6-8321-76e7f46a608d) | Properties slide up as a translucent panel instead of a permanent sidebar — option for our Settings. |
+
+> Note: **Shapr3D itself isn't indexed in Mobbin's library** (searched iOS; nearest results were
+> adjacent canvas apps). For Shapr3D's actual UI conventions, reference the app directly.
+
 ## What we're deliberately doing differently
 
 - **Print-awareness everywhere:** dimensions readout, bed-fit check, wall-thickness warnings —
   none of the above tools have this; it's our differentiator.
 - **Code transparency:** Claude/Lovable hide most code by default; we keep an always-available
-  Code tab because OpenSCAD *is* the model and power users will want it.
+  Code tab because the code *is* the model and power users will want it.
 - **Local-first/BYO-key:** all of the above are hosted SaaS; we run in the user's browser.

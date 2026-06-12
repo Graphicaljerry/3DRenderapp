@@ -20,6 +20,30 @@ Figma, Excalidraw, or tldraw and sketch boxes for each item below. The goal is t
 
 ---
 
+## App flow & design principles (decided 2026-06-12)
+
+**Apple-simple. There is no home page and no login.**
+
+```
+Open app ──► API key saved? ──► YES ──► Main Workspace (empty canvas + one centered prompt)
+                    │
+                    NO ──► one minimal key card (one field · one button · privacy line) ──► Workspace
+```
+
+- **The workspace IS the front door.** Like Apple Freeform or Notes: open the app, you're on the
+  canvas. The empty state shows one centered question — *"What do you want to make?"* — with a
+  single input and three quiet suggestion chips. (Pattern proven by Visual Electric and Manus —
+  see `docs/inspiration/INSPIRATION.md`.)
+- **No accounts exist.** Local-first means there is nothing to log into. The only first-run gate
+  is the API-key card, shown exactly once.
+- **One primary action per screen.** Workspace → **Export**. Key card → **Continue**. Everything
+  else (Library, Settings, Code tab) is a quiet icon or hidden until relevant.
+- **Export is a menu, not a button:** **STL** (print) · **STEP** (open & edit in Shapr3D) ·
+  **OBJ**. STL/OBJ open in Shapr3D as reference meshes only — STEP is the editable one.
+- A marketing/landing page is out of scope unless the app is ever published publicly.
+
+---
+
 ## The big picture — app map
 
 ```
@@ -81,14 +105,14 @@ The screen you'll live in. Sketch it as two side-by-side panes under a thin top 
   must be one click.
 
 ### 1d. Code / Mesh tab (within or beside the viewer)
-- **[P1] Code tab**: shows the **OpenSCAD code**. Read-only by default with an "Edit" toggle.
+- **[P1] Code tab**: shows the **replicad (JavaScript CAD) code**. Read-only by default with an "Edit" toggle.
   - "Copy code" and "Re-run" buttons.
   - When the user edits and re-runs, the viewer updates.
 - **[P2] Mesh tab**: for generative results — shows mesh stats (triangle count, watertight?,
   min wall thickness) instead of code.
 
 ### 1e. Status / action bar (bottom)
-- **Export STL** button (primary action).
+- **Export ▾** menu (primary action): **STL** (print) · **STEP** (edit in Shapr3D) · **OBJ**.
 - **Model dimensions** readout (W × D × H mm) and whether it fits a typical bed (with a setting
   for bed size).
 - **Engine badge** + which AI model is in use.
@@ -114,15 +138,15 @@ Where the user pastes keys and sets preferences. Can be a modal or a side drawer
 
 ---
 
-## 3. Onboarding / first-run **[P1]**
+## 3. First-run key card **[P1]** — *not* a home page, *not* a login
 
-Shown the first time, or when no API key is set.
+Shown only when no API key is saved; never again after. Keep it to **one card**:
 
-- One-screen welcome: what the app does (one sentence), the two engines (one line each).
-- **"Add your Anthropic key to begin"** call-to-action → opens Settings.
-- A note that it's local-first and BYO-key (privacy reassurance).
-- Optional: a "Try an example" that loads a pre-made design so they can see the viewer before
-  spending any API calls.
+- One sentence on what the app does. One masked key field. One **Continue** button.
+- One small privacy line: *"No account. Your key stays on this device."*
+- Optional quiet link: "Try an example first" (loads a canned design, zero API spend).
+- That's it — resist adding tours, carousels, or feature lists. The app teaches itself via the
+  empty-state prompt and suggestion chips.
 
 ---
 
@@ -131,7 +155,7 @@ Shown the first time, or when no API key is set.
 Manage saved designs (stored locally).
 
 - **Grid of saved projects**: thumbnail (rendered preview), name, date, engine type.
-- Each card: open, rename, duplicate, delete, **export STL**.
+- Each card: open, rename, duplicate, delete, **export (STL · STEP · OBJ)**.
 - "New project" tile.
 - (P3) Search/filter by name or tag.
 

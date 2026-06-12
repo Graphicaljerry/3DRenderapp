@@ -133,6 +133,7 @@
 <header>
   <h1>3D Print AI Assistant — Wireframe Sheet</h1>
   <div class="sub">Companion to <b>docs/WIREFRAMES.md</b> · sketch these screens in order · numbers ① match the callout lists under each drawing</div>
+  <div class="sub" style="margin-top:4px"><b>App flow (Apple-simple): no home page, no login.</b> Open app → straight into the workspace. If no API key saved → one key card (screen 3), once, ever. Export = STL (print) · <b>STEP (editable in Shapr3D)</b> · OBJ.</div>
   <div class="legend">
     <span class="chip"><span class="dot p1"></span><b>P1</b>&nbsp;— build first (Parametric MVP)</span>
     <span class="chip"><span class="dot p2"></span><b>P2+</b>&nbsp;— later phase (mesh engine, image input)</span>
@@ -187,7 +188,7 @@
       <div class="viewer">
         <div class="vtabs" style="position:relative">
           <span class="num anchor" style="right:10px; top:6px;">7</span>
-          <span class="vtab on">3D View</span><span class="vtab">Code (OpenSCAD)</span><span class="vtab" style="color:var(--dash)">Mesh stats · P2</span>
+          <span class="vtab on">3D View</span><span class="vtab">Code</span><span class="vtab" style="color:var(--dash)">Mesh stats · P2</span>
         </div>
         <div class="canvas">
           <span class="num anchor" style="left:14px; top:12px;">5</span>
@@ -214,7 +215,7 @@
       <span>Fits bed ✔ (256×256)</span>
       <span class="warn">⚠ wall 1.0&nbsp;mm &lt; 1.2&nbsp;mm minimum</span>
       <span class="spacer"></span>
-      <span class="export">⬇ Export STL</span>
+      <span class="export">⬇ Export ▾ <span class="export">⬇ Export STL</span>nbsp;<span style="font-weight:400; font-size:11px">STL · STEP · OBJ</span></span>
     </div>
   </div>
 
@@ -225,8 +226,8 @@
     <div><span class="num">4</span><span><b>Input row:</b> multiline box + Send. Paperclip is visible but <i>dashed/disabled</i> with a "coming soon" tooltip until P2.</span></div>
     <div><span class="num">5</span><span><b>3D canvas:</b> orbit/zoom/pan, grid + print-bed outline, live model. Friendly empty &amp; error states (never a blank pane).</span></div>
     <div><span class="num">6</span><span><b>Viewer toolbar:</b> fit-to-screen · grid toggle · wireframe/solid · measure (bounding box W×D×H).</span></div>
-    <div><span class="num">7</span><span><b>Tabs:</b> 3D View | Code (read-only OpenSCAD with Edit toggle, Copy, Re-run) | Mesh stats (P2, greyed for now).</span></div>
-    <div><span class="num">8</span><span><b>Status bar:</b> engine + model in use · dimensions/bed-fit check · printability warnings · <b>Export STL</b> as the primary action.</span></div>
+    <div><span class="num">7</span><span><b>Tabs:</b> 3D View | Code (read-only replicad code with Edit toggle, Copy, Re-run) | Mesh stats (P2, greyed for now).</span></div>
+    <div><span class="num">8</span><span><b>Status bar:</b> engine + model in use · dimensions/bed-fit check · printability warnings · <b>Export ▾</b> menu as the primary action — STL (print) · <b>STEP (opens editable in Shapr3D)</b> · OBJ.</span></div>
   </div>
 </section>
 
@@ -271,28 +272,29 @@
     </div>
 
     <div>
-      <div class="sec-title"><h2>3 · Onboarding / first run</h2><span class="tag p1">P1</span><span class="note">shown when no key is set</span></div>
+      <div class="sec-title"><h2>3 · First-run key card</h2><span class="tag p1">P1</span><span class="note">NOT a home page, NOT a login — shown once, only when no key is saved</span></div>
       <div class="frame">
         <div class="onb">
           <div style="font-size:34px">◆</div>
           <h3>Describe it. See it. Print it.</h3>
-          <p>Chat with AI to design 3D-printable parts. Your API keys and designs stay on your device.</p>
-          <div class="engines" style="position:relative">
-            <span class="num anchor" style="left:-30px; top:8px;">1</span>
-            <div class="engcard"><b>⬡ Precise parts</b>AI writes real CAD code — brackets, boxes, mounts. Available now.</div>
-            <div class="engcard" style="border-style:dashed; color:var(--muted)"><b style="color:var(--p2)">✦ Organic shapes — soon</b>Figurines &amp; sculpts from text or a photo.</div>
+          <p>Design 3D-printable parts by chatting with AI.</p>
+          <div style="width:380px; position:relative">
+            <span class="num anchor" style="left:-32px; top:8px;">1</span>
+            <div class="input" style="background:#fff"><span>sk-ant-••••••••••••••••</span></div>
           </div>
-          <div style="display:flex; gap:10px; margin-top:6px; position:relative">
-            <span class="num anchor" style="left:-30px; top:8px;">2</span>
-            <span class="cta">Add your Anthropic key →</span>
-            <span class="ghostbtn">Try an example first</span>
+          <div style="display:flex; gap:10px; margin-top:2px; position:relative">
+            <span class="num anchor" style="left:-32px; top:8px;">2</span>
+            <span class="cta">Continue →</span>
           </div>
-          <p style="font-size:11px">No account. No server. You pay your AI provider directly.</p>
+          <p style="font-size:11px">🔒 No account. Your key stays on this device.</p>
+          <p style="font-size:11.5px; text-decoration:underline; color:var(--muted); position:relative">
+            <span class="num anchor" style="left:-32px; top:-2px;">3</span>Try an example first</p>
         </div>
       </div>
       <div class="callouts" style="grid-template-columns:1fr">
-        <div><span class="num">1</span><span><b>One-line pitch + the two engines</b>, one line each; the P2 engine is visible but clearly "soon".</span></div>
-        <div><span class="num">2</span><span><b>Two paths:</b> add key (→ Settings) or <b>"Try an example"</b> — loads a canned design so the viewer can be experienced before spending any API calls.</span></div>
+        <div><span class="num">1</span><span><b>One card, one field.</b> A sentence, a masked key input, nothing else. No tour, no carousel, no feature list — the empty-state workspace teaches the rest.</span></div>
+        <div><span class="num">2</span><span><b>Continue</b> → straight into the workspace. After this, the app always opens directly onto the canvas.</span></div>
+        <div><span class="num">3</span><span><b>"Try an example"</b> (quiet link): loads a canned design so the viewer can be explored with zero API spend.</span></div>
       </div>
     </div>
   </div>
@@ -307,13 +309,13 @@
         <div class="bar"><b>▦ Library</b><span class="spacer"></span><span class="pill ghost">Search… (P3)</span></div>
         <div class="libgrid">
           <div class="newtile">＋</div>
-          <div class="card"><div class="thumb">⬡</div><div class="meta"><b>Broom bracket</b><br>Parametric · Jun 12<br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ STL</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
-          <div class="card"><div class="thumb">⬡</div><div class="meta"><b>Phone stand</b><br>Parametric · Jun 10<br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ STL</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
-          <div class="card"><div class="thumb">✦</div><div class="meta"><b>Dragon figurine</b><br><span style="color:var(--p2)">Organic · P2</span><br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ STL</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
+          <div class="card"><div class="thumb">⬡</div><div class="meta"><b>Broom bracket</b><br>Parametric · Jun 12<br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ export</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
+          <div class="card"><div class="thumb">⬡</div><div class="meta"><b>Phone stand</b><br>Parametric · Jun 10<br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ export</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
+          <div class="card"><div class="thumb">✦</div><div class="meta"><b>Dragon figurine</b><br><span style="color:var(--p2)">Organic · P2</span><br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ export</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
         </div>
       </div>
       <div class="callouts" style="grid-template-columns:1fr">
-        <div><span class="num">1</span><span><b>Card grid:</b> thumbnail, name, engine type, date. Actions: open · export STL · menu (rename/duplicate/delete). "＋" tile starts a new project. All stored locally.</span></div>
+        <div><span class="num">1</span><span><b>Card grid:</b> thumbnail, name, engine type, date. Actions: open · export (STL · STEP · OBJ) · menu (rename/duplicate/delete). "＋" tile starts a new project. All stored locally.</span></div>
       </div>
     </div>
 

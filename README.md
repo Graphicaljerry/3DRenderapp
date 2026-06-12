@@ -2,7 +2,11 @@
 
 An AI assistant for designing 3D-printable objects by **describing them in plain language**
 (and later, by **uploading a photo or sketch**). Chat with an AI, watch the model appear in a
-live 3D viewer, tweak it by continuing the conversation, then export a print-ready STL.
+live 3D viewer, tweak it by continuing the conversation, then export — **STL/OBJ for printing,
+STEP for editing in real CAD apps like Shapr3D**.
+
+**Design philosophy: Apple-simple.** No home page, no login, no clutter. The app opens directly
+into the workspace; the empty canvas with one prompt input *is* the front door.
 
 > Status: **Planning.** No code yet — this repo currently contains the project plan and the
 > wireframe content outline. See [`docs/PLAN.md`](docs/PLAN.md) and
@@ -20,8 +24,8 @@ can dream up freeform shapes.
 
 | Engine | Best for | How it generates geometry |
 | --- | --- | --- |
-| **Parametric (Phase 1)** | Brackets, boxes, holders, gears, functional parts | An LLM (Claude by default) writes **OpenSCAD** code; the app compiles it to STL **in your browser** via WebAssembly. Clean, watertight, editable. |
-| **Generative mesh (Phase 2)** | Figurines, characters, organic/artistic shapes | A text/image-to-3D API (Meshy, Tripo, Hunyuan3D, etc.) returns a mesh; the app cleans it for printing. |
+| **Parametric (Phase 1)** | Brackets, boxes, holders, gears, functional parts | An LLM (Claude by default) writes **replicad** code (JavaScript CAD on the OpenCascade kernel); the app builds it **in your browser** via WebAssembly. Exports **STL for printing and STEP for Shapr3D-editable solids**. |
+| **Generative mesh (Phase 2)** | Figurines, characters, organic/artistic shapes | A text/image-to-3D API (Meshy, Tripo, Hunyuan3D, etc.) returns a mesh; the app cleans it for printing. (Mesh output prints fine but is not CAD-editable — that's inherent to meshes.) |
 
 ## Key design decisions
 

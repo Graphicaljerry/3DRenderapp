@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>3D Print AI Assistant — Wireframe Sheet</title>
+<style>
+  :root{
+    --ink:#1e2430; --line:#3b4456; --muted:#6b7487; --paper:#f4f5f7;
+    --panel:#ffffff; --accent:#2563eb; --accent2:#0ea5a4; --p2:#b45309;
+    --dash:#9aa3b5;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    background:var(--paper); color:var(--ink); width:1600px; padding:48px 56px 40px;
+  }
+  h1{font-size:34px; letter-spacing:-0.5px;}
+  .sub{color:var(--muted); font-size:15px; margin-top:6px;}
+  .legend{display:flex; gap:18px; margin-top:14px; font-size:13px; align-items:center;}
+  .chip{display:inline-flex; align-items:center; gap:7px; background:#fff; border:1px solid #d7dbe3; border-radius:999px; padding:5px 12px;}
+  .dot{width:10px;height:10px;border-radius:50%;}
+  .dot.p1{background:var(--accent);} .dot.p2{background:var(--p2);} .dot.act{background:var(--accent2);}
+
+  section{margin-top:42px;}
+  .sec-title{display:flex; align-items:baseline; gap:12px; margin-bottom:14px;}
+  .sec-title h2{font-size:21px;}
+  .sec-title .tag{font-size:12px; font-weight:700; padding:3px 10px; border-radius:999px; color:#fff;}
+  .tag.p1{background:var(--accent);} .tag.p2{background:var(--p2);}
+  .sec-title .note{color:var(--muted); font-size:13px;}
+
+  /* generic wireframe pieces */
+  .frame{background:var(--panel); border:2px solid var(--line); border-radius:10px; overflow:hidden;}
+  .bar{display:flex; align-items:center; gap:10px; padding:9px 14px; border-bottom:2px solid var(--line); font-size:12.5px; font-weight:600;}
+  .pill{border:1.5px solid var(--line); border-radius:999px; padding:3px 12px; font-size:11.5px; font-weight:600; background:#fff;}
+  .pill.solid{background:var(--ink); color:#fff; border-color:var(--ink);}
+  .pill.ghost{border-style:dashed; color:var(--muted);}
+  .spacer{flex:1;}
+  .ph{border:1.5px dashed var(--dash); border-radius:6px; color:var(--muted);}
+  .num{display:inline-flex; align-items:center; justify-content:center; width:22px; height:22px; min-width:22px;
+       border-radius:50%; background:var(--accent); color:#fff; font-size:12.5px; font-weight:700;}
+  .num.p2{background:var(--p2);}
+  .callouts{display:grid; grid-template-columns:repeat(3,1fr); gap:9px 26px; margin-top:14px; font-size:13px;}
+  .callouts div{display:flex; gap:9px; align-items:flex-start; line-height:1.45;}
+  .callouts b{font-weight:700;}
+
+  /* ===== main workspace ===== */
+  .workspace{display:grid; grid-template-rows:auto 1fr auto; height:680px;}
+  .ws-body{display:grid; grid-template-columns:38% 62%;}
+  .chat{border-right:2px solid var(--line); display:flex; flex-direction:column;}
+  .msgs{flex:1; padding:14px; display:flex; flex-direction:column; gap:10px; overflow:hidden;}
+  .msg{max-width:82%; border:1.5px solid var(--line); border-radius:12px; padding:9px 12px; font-size:12.5px; line-height:1.45; background:#fff;}
+  .msg.user{align-self:flex-end; background:#eef2ff; border-radius:12px 12px 3px 12px;}
+  .msg.ai{align-self:flex-start; border-radius:12px 12px 12px 3px;}
+  .chipline{display:flex; gap:6px; flex-wrap:wrap; padding:0 14px 8px;}
+  .inputrow{border-top:2px solid var(--line); padding:10px 14px; display:flex; gap:10px; align-items:center;}
+  .inputbox{flex:1; border:1.5px solid var(--line); border-radius:10px; padding:10px 12px; font-size:12.5px; color:var(--muted);}
+  .iconbtn{width:34px; height:34px; border:1.5px solid var(--line); border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:15px; background:#fff;}
+  .iconbtn.disabled{border-style:dashed; color:var(--dash);}
+  .sendbtn{background:var(--accent); color:#fff; border-radius:9px; padding:9px 16px; font-size:12.5px; font-weight:700;}
+
+  .viewer{position:relative; display:flex; flex-direction:column;}
+  .vtabs{display:flex; gap:0; border-bottom:2px solid var(--line); font-size:12px; font-weight:600;}
+  .vtab{padding:8px 18px; border-right:1.5px solid var(--line);}
+  .vtab.on{background:var(--ink); color:#fff;}
+  .canvas{flex:1; position:relative; background:
+      linear-gradient(#e8ebf0 1px, transparent 1px),
+      linear-gradient(90deg,#e8ebf0 1px, transparent 1px);
+    background-size:34px 34px; background-position:center;}
+  .vtoolbar{position:absolute; top:10px; right:10px; display:flex; flex-direction:column; gap:6px;}
+  .vtoolbar .iconbtn{width:30px;height:30px; font-size:12px;}
+  .dims{position:absolute; left:12px; bottom:12px; background:#fff; border:1.5px solid var(--line); border-radius:8px; padding:6px 11px; font-size:11.5px; font-weight:600;}
+  /* simple isometric cube */
+  .cube{position:absolute; left:50%; top:52%; transform:translate(-50%,-50%); width:210px; height:200px;}
+  .cube polygon{stroke:var(--line); stroke-width:2.5; fill:#dde3ec;}
+  .cube .top{fill:#eef1f6;} .cube .right{fill:#c8d0dd;}
+
+  .statusbar{display:flex; align-items:center; gap:12px; padding:9px 14px; border-top:2px solid var(--line); font-size:12px; font-weight:600;}
+  .warn{color:#b45309;}
+  .export{background:var(--accent2); color:#fff; border-radius:9px; padding:8px 18px; font-weight:700; font-size:12.5px;}
+
+  /* anchored number badges inside drawing */
+  .anchor{position:absolute; z-index:5;}
+
+  /* ===== two-up rows ===== */
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:28px;}
+  .row2 .frame{height:430px; position:relative;}
+
+  /* settings */
+  .settings-body{padding:16px 18px; display:flex; flex-direction:column; gap:11px; font-size:12.5px;}
+  .field label{display:block; font-weight:700; font-size:11.5px; margin-bottom:4px;}
+  .input{border:1.5px solid var(--line); border-radius:8px; padding:8px 11px; color:var(--muted); display:flex; justify-content:space-between; align-items:center;}
+  .btn-sm{border:1.5px solid var(--line); border-radius:7px; padding:4px 10px; font-size:11px; font-weight:700; background:#fff;}
+  .hr{border-top:1.5px dashed var(--dash); margin:4px 0;}
+  .grid2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .danger{color:#b91c1c; border-color:#e3b3b3;}
+
+  /* onboarding */
+  .onb{display:flex; flex-direction:column; align-items:center; justify-content:center; height:100%; gap:13px; padding:26px; text-align:center;}
+  .onb h3{font-size:19px;}
+  .onb p{font-size:12.5px; color:var(--muted); max-width:420px; line-height:1.55;}
+  .cta{background:var(--accent); color:#fff; border-radius:10px; padding:11px 22px; font-weight:700; font-size:13px;}
+  .ghostbtn{border:1.5px solid var(--line); border-radius:10px; padding:10px 20px; font-weight:700; font-size:12.5px; background:#fff;}
+  .engines{display:flex; gap:12px; margin-top:4px;}
+  .engcard{border:1.5px solid var(--line); border-radius:10px; padding:10px 14px; font-size:11.5px; width:185px; text-align:left; line-height:1.5; background:#fff;}
+  .engcard b{display:block; font-size:12px;}
+
+  /* library */
+  .libgrid{display:grid; grid-template-columns:repeat(3,1fr); gap:13px; padding:16px;}
+  .card{border:1.5px solid var(--line); border-radius:10px; overflow:hidden; background:#fff;}
+  .thumb{height:86px; background:
+      linear-gradient(#e8ebf0 1px, transparent 1px),
+      linear-gradient(90deg,#e8ebf0 1px, transparent 1px);
+    background-size:18px 18px; display:flex; align-items:center; justify-content:center; border-bottom:1.5px solid var(--line);}
+  .card .meta{padding:8px 10px; font-size:11px; line-height:1.5;}
+  .card .meta b{font-size:11.5px;}
+  .newtile{border:2px dashed var(--dash); border-radius:10px; display:flex; align-items:center; justify-content:center; color:var(--muted); font-size:26px; min-height:148px;}
+
+  /* phase 2 */
+  .p2row{display:grid; grid-template-columns:1fr 1fr; gap:28px;}
+  .p2row .frame{height:330px; position:relative; border-color:var(--p2);}
+  .p2row .bar{border-color:var(--p2);}
+  .dropzone{margin:16px; height:120px; border:2px dashed var(--p2); border-radius:10px; display:flex; flex-direction:column; gap:6px; align-items:center; justify-content:center; color:var(--p2); font-size:12.5px; font-weight:600;}
+  .seg{display:inline-flex; border:1.5px solid var(--line); border-radius:999px; overflow:hidden; font-size:11.5px; font-weight:700;}
+  .seg span{padding:7px 16px;}
+  .seg .on{background:var(--ink); color:#fff;}
+
+  footer{margin-top:40px; border-top:2px solid var(--line); padding-top:16px; font-size:12.5px; color:var(--muted); line-height:1.7;}
+  footer b{color:var(--ink);}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>3D Print AI Assistant — Wireframe Sheet</h1>
+  <div class="sub">Companion to <b>docs/WIREFRAMES.md</b> · sketch these screens in order · numbers ① match the callout lists under each drawing</div>
+  <div class="legend">
+    <span class="chip"><span class="dot p1"></span><b>P1</b>&nbsp;— build first (Parametric MVP)</span>
+    <span class="chip"><span class="dot p2"></span><b>P2+</b>&nbsp;— later phase (mesh engine, image input)</span>
+    <span class="chip"><span class="dot act"></span>Primary action</span>
+    <span class="chip" style="border-style:dashed; color:var(--muted)">dashed = placeholder / disabled</span>
+  </div>
+</header>
+
+<!-- ============ 1. MAIN WORKSPACE ============ -->
+<section>
+  <div class="sec-title">
+    <h2>1 · Main Workspace — split view</h2><span class="tag p1">P1</span>
+    <span class="note">80% of the app lives here. Chat left (~38%), 3D viewer right (~62%).</span>
+  </div>
+
+  <div class="frame workspace">
+    <!-- top bar -->
+    <div class="bar" style="position:relative">
+      <span class="num anchor" style="left:-11px; top:8px;">1</span>
+      <span style="font-weight:800">◆ App</span>
+      <span class="pill ghost">Project: Broom-handle bracket ✎</span>
+      <span class="spacer"></span>
+      <span class="pill">＋ New</span>
+      <span class="pill">▦ Library</span>
+      <span class="pill">⚙ Settings</span>
+      <span class="pill solid">Engine: Parametric</span>
+    </div>
+
+    <div class="ws-body">
+      <!-- chat -->
+      <div class="chat" style="position:relative">
+        <span class="num anchor" style="left:12px; top:10px;">2</span>
+        <div class="msgs">
+          <div class="msg user">A wall bracket for a 22&nbsp;mm broom handle, two screw holes 60&nbsp;mm apart.</div>
+          <div class="msg ai">Done — a 70×30×35&nbsp;mm bracket with a 22.4&nbsp;mm snap-fit cradle and two 4.2&nbsp;mm screw holes 60&nbsp;mm apart.<br><span class="pill" style="font-size:10px; margin-top:6px; display:inline-block">⬡ updated the model</span></div>
+          <div class="msg user">Make the screw holes 5&nbsp;mm and round the corners.</div>
+          <div class="msg ai">Updated — holes are now 5&nbsp;mm, corners filleted at 3&nbsp;mm.<br><span class="pill" style="font-size:10px; margin-top:6px; display:inline-block">⬡ updated the model</span></div>
+        </div>
+        <div class="chipline" style="position:relative">
+          <span class="num anchor" style="left:-3px; top:-2px;">3</span>
+          <span class="pill ghost">a phone stand</span><span class="pill ghost">a box with a lid 80×50×30</span><span class="pill ghost">cable clip</span>
+        </div>
+        <div class="inputrow" style="position:relative">
+          <span class="num anchor" style="left:2px; top:-13px;">4</span>
+          <span class="iconbtn disabled" title="image upload — P2">📎</span>
+          <span class="inputbox">Describe a change or a new part…</span>
+          <span class="sendbtn">Send ➤</span>
+        </div>
+      </div>
+
+      <!-- viewer -->
+      <div class="viewer">
+        <div class="vtabs" style="position:relative">
+          <span class="num anchor" style="right:10px; top:6px;">7</span>
+          <span class="vtab on">3D View</span><span class="vtab">Code (OpenSCAD)</span><span class="vtab" style="color:var(--dash)">Mesh stats · P2</span>
+        </div>
+        <div class="canvas">
+          <span class="num anchor" style="left:14px; top:12px;">5</span>
+          <svg class="cube" viewBox="0 0 210 200">
+            <polygon class="top"   points="105,18 195,58 105,98 15,58"/>
+            <polygon class="left"  points="15,58 105,98 105,188 15,148"/>
+            <polygon class="right" points="195,58 105,98 105,188 195,148"/>
+            <circle cx="60" cy="118" r="9" fill="#fff" stroke="#3b4456" stroke-width="2"/>
+            <circle cx="60" cy="158" r="9" fill="#fff" stroke="#3b4456" stroke-width="2"/>
+          </svg>
+          <div class="vtoolbar" style="position:absolute">
+            <span class="num anchor" style="right:-10px; top:-12px;">6</span>
+            <span class="iconbtn">⤢</span><span class="iconbtn">▦</span><span class="iconbtn">◇</span><span class="iconbtn">📐</span>
+          </div>
+          <div class="dims">W 70 × D 30 × H 35 mm</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- status bar -->
+    <div class="statusbar" style="position:relative">
+      <span class="num anchor" style="left:-11px; top:8px;">8</span>
+      <span class="pill">Parametric · Claude</span>
+      <span>Fits bed ✔ (256×256)</span>
+      <span class="warn">⚠ wall 1.0&nbsp;mm &lt; 1.2&nbsp;mm minimum</span>
+      <span class="spacer"></span>
+      <span class="export">⬇ Export STL</span>
+    </div>
+  </div>
+
+  <div class="callouts">
+    <div><span class="num">1</span><span><b>Top bar:</b> logo · editable project name · New · Library · Settings · engine badge (always "Parametric" in P1).</span></div>
+    <div><span class="num">2</span><span><b>Chat history:</b> user/AI bubbles; plain-language summaries only — code stays in the Code tab. "⬡ updated the model" chip marks geometry-changing turns.</span></div>
+    <div><span class="num">3</span><span><b>Suggestion chips:</b> shown on empty/first-run state to teach what to ask for.</span></div>
+    <div><span class="num">4</span><span><b>Input row:</b> multiline box + Send. Paperclip is visible but <i>dashed/disabled</i> with a "coming soon" tooltip until P2.</span></div>
+    <div><span class="num">5</span><span><b>3D canvas:</b> orbit/zoom/pan, grid + print-bed outline, live model. Friendly empty &amp; error states (never a blank pane).</span></div>
+    <div><span class="num">6</span><span><b>Viewer toolbar:</b> fit-to-screen · grid toggle · wireframe/solid · measure (bounding box W×D×H).</span></div>
+    <div><span class="num">7</span><span><b>Tabs:</b> 3D View | Code (read-only OpenSCAD with Edit toggle, Copy, Re-run) | Mesh stats (P2, greyed for now).</span></div>
+    <div><span class="num">8</span><span><b>Status bar:</b> engine + model in use · dimensions/bed-fit check · printability warnings · <b>Export STL</b> as the primary action.</span></div>
+  </div>
+</section>
+
+<!-- ============ 2 + 3. SETTINGS & ONBOARDING ============ -->
+<section>
+  <div class="row2">
+    <div>
+      <div class="sec-title"><h2>2 · Settings</h2><span class="tag p1">P1</span><span class="note">modal or side drawer</span></div>
+      <div class="frame">
+        <div class="bar"><b>⚙ Settings</b><span class="spacer"></span><span class="pill">✕</span></div>
+        <div class="settings-body">
+          <div class="field" style="position:relative">
+            <span class="num anchor" style="right:0; top:-2px;">1</span>
+            <label>Anthropic (Claude) API key</label>
+            <div class="input"><span>sk-ant-••••••••••••••••</span><span style="display:flex;gap:6px"><span class="btn-sm">Save</span><span class="btn-sm">Test ✓</span></span></div>
+          </div>
+          <div class="field">
+            <label style="color:var(--p2)">Mesh provider key (Meshy / Tripo…) — P2</label>
+            <div class="input" style="border-style:dashed"><span>coming with the organic engine</span></div>
+          </div>
+          <div style="font-size:11px; color:var(--muted)">🔒 Keys are stored only in your browser and sent only to the provider.</div>
+          <div class="hr"></div>
+          <div class="grid2" style="position:relative">
+            <span class="num anchor" style="right:0; top:-8px;">2</span>
+            <div class="field"><label>Model</label><div class="input">Claude (latest) ▾</div></div>
+            <div class="field"><label>Printer type</label><div class="input">FDM filament ▾</div></div>
+            <div class="field"><label>Print-bed size</label><div class="input">256 × 256 × 256 mm</div></div>
+            <div class="field"><label>Min wall warning</label><div class="input">1.2 mm</div></div>
+          </div>
+          <div class="hr"></div>
+          <div style="display:flex; gap:8px; position:relative">
+            <span class="num anchor" style="right:0; top:-6px;">3</span>
+            <span class="btn-sm danger">Clear stored keys</span><span class="btn-sm danger">Clear project history</span>
+          </div>
+        </div>
+      </div>
+      <div class="callouts" style="grid-template-columns:1fr">
+        <div><span class="num">1</span><span><b>BYO keys:</b> masked field, Save, Test connection. Privacy note right beneath. P2 provider slot visible but dashed.</span></div>
+        <div><span class="num">2</span><span><b>Defaults:</b> model picker, printer type (FDM default), bed size (feeds the fit check), min-wall threshold (feeds warnings). Units fixed to mm.</span></div>
+        <div><span class="num">3</span><span><b>Danger zone:</b> wipe keys / local history.</span></div>
+      </div>
+    </div>
+
+    <div>
+      <div class="sec-title"><h2>3 · Onboarding / first run</h2><span class="tag p1">P1</span><span class="note">shown when no key is set</span></div>
+      <div class="frame">
+        <div class="onb">
+          <div style="font-size:34px">◆</div>
+          <h3>Describe it. See it. Print it.</h3>
+          <p>Chat with AI to design 3D-printable parts. Your API keys and designs stay on your device.</p>
+          <div class="engines" style="position:relative">
+            <span class="num anchor" style="left:-30px; top:8px;">1</span>
+            <div class="engcard"><b>⬡ Precise parts</b>AI writes real CAD code — brackets, boxes, mounts. Available now.</div>
+            <div class="engcard" style="border-style:dashed; color:var(--muted)"><b style="color:var(--p2)">✦ Organic shapes — soon</b>Figurines &amp; sculpts from text or a photo.</div>
+          </div>
+          <div style="display:flex; gap:10px; margin-top:6px; position:relative">
+            <span class="num anchor" style="left:-30px; top:8px;">2</span>
+            <span class="cta">Add your Anthropic key →</span>
+            <span class="ghostbtn">Try an example first</span>
+          </div>
+          <p style="font-size:11px">No account. No server. You pay your AI provider directly.</p>
+        </div>
+      </div>
+      <div class="callouts" style="grid-template-columns:1fr">
+        <div><span class="num">1</span><span><b>One-line pitch + the two engines</b>, one line each; the P2 engine is visible but clearly "soon".</span></div>
+        <div><span class="num">2</span><span><b>Two paths:</b> add key (→ Settings) or <b>"Try an example"</b> — loads a canned design so the viewer can be experienced before spending any API calls.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. LIBRARY ============ -->
+<section>
+  <div class="row2">
+    <div>
+      <div class="sec-title"><h2>4 · Project Library</h2><span class="tag p1">P1</span><span class="note">lightweight now, polish in P3</span></div>
+      <div class="frame">
+        <div class="bar"><b>▦ Library</b><span class="spacer"></span><span class="pill ghost">Search… (P3)</span></div>
+        <div class="libgrid">
+          <div class="newtile">＋</div>
+          <div class="card"><div class="thumb">⬡</div><div class="meta"><b>Broom bracket</b><br>Parametric · Jun 12<br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ STL</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
+          <div class="card"><div class="thumb">⬡</div><div class="meta"><b>Phone stand</b><br>Parametric · Jun 10<br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ STL</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
+          <div class="card"><div class="thumb">✦</div><div class="meta"><b>Dragon figurine</b><br><span style="color:var(--p2)">Organic · P2</span><br><span class="pill" style="font-size:9.5px">open</span> <span class="pill" style="font-size:9.5px">⬇ STL</span> <span class="pill" style="font-size:9.5px">⋯</span></div></div>
+        </div>
+      </div>
+      <div class="callouts" style="grid-template-columns:1fr">
+        <div><span class="num">1</span><span><b>Card grid:</b> thumbnail, name, engine type, date. Actions: open · export STL · menu (rename/duplicate/delete). "＋" tile starts a new project. All stored locally.</span></div>
+      </div>
+    </div>
+
+    <!-- ============ 5+6. PHASE 2 ============ -->
+    <div>
+      <div class="sec-title"><h2>5 · Image input &amp; engine toggle</h2><span class="tag p2">P2+</span><span class="note">rough sketch is enough for now</span></div>
+      <div class="frame" style="border-color:var(--p2)">
+        <div class="bar"><b>📎 Add a reference photo / sketch</b><span class="spacer"></span><span class="pill">✕</span></div>
+        <div class="dropzone">⬆ Drag &amp; drop a photo or sketch<br><span style="font-weight:400">…or click to browse</span></div>
+        <div style="display:flex; gap:12px; padding:0 16px; align-items:center;">
+          <div class="ph" style="width:92px; height:64px; display:flex; align-items:center; justify-content:center; font-size:11px">preview</div>
+          <div class="inputbox" style="flex:1">"make it ~10 cm tall, hollow"</div>
+          <span class="sendbtn" style="background:var(--p2)">Generate ✦</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:12px; padding:14px 16px;">
+          <span style="font-size:11.5px; font-weight:700">Engine:</span>
+          <span class="seg"><span>⬡ Precise</span><span class="on">Auto</span><span>✦ Organic</span></span>
+          <span style="font-size:11px; color:var(--muted)">auto-routes; user can force either engine</span>
+        </div>
+        <div style="padding:0 16px; font-size:11px; color:var(--muted); line-height:1.6">
+          Progress UI for slower mesh generation → result lands in the same 3D viewer; <b>Mesh stats</b> tab shows triangles · watertight? · min wall. Photo→3D is approximate by nature — say so in the UI.
+        </div>
+      </div>
+      <div class="callouts" style="grid-template-columns:1fr">
+        <div><span class="num p2">1</span><span><b>Upload + prompt together:</b> picture for shape, words for size/constraints. Engine badge flips to Organic automatically.</span></div>
+        <div><span class="num p2">2</span><span><b>Segmented toggle</b> near the chat input: Precise ▸ Auto ▸ Organic, with a one-line tooltip per mode.</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <b>Inspiration (Mobbin):</b> &nbsp;<b>Lovable / Base44 / Claude</b> — chat-left + live-preview-right split, plan-then-build messages, "updated" chips ·
+  <b>Spline</b> — floating viewport toolbar, orbit hint on first run, orthographic/perspective toggle ·
+  <b>Krea AI (runs Hunyuan3D!)</b> — prompt bar overlaid on the viewport, Image-to-3D/Text-to-3D/Mesh-only toggle, Retry · Download actions under the result. &nbsp;Links in <b>docs/inspiration/INSPIRATION.md</b>.
+</footer>
+
+</body>
+</html>

@@ -84,7 +84,7 @@ clean upgrade path to a hosted product later.
 | UI framework | **React** | Huge ecosystem, easy to hire/learn, pairs with the 3D viewer. |
 | 3D viewer | **three.js** via **react-three-fiber** + **drei** | The standard for web 3D; renders STL/meshes, orbit controls, etc. |
 | Parametric engine | **openscad-wasm** | Runs OpenSCAD in the browser → STL, **no server**. |
-| AI calls | Provider SDKs / `fetch` (Anthropic first) | BYO key from browser. (See §7 on the CORS caveat.) |
+| AI calls | **Anthropic SDK** (`@anthropic-ai/sdk`) | BYO key from browser — officially supported via the SDK's `dangerouslyAllowBrowser: true` option (sends the API's CORS opt-in header). Safe here because the only key in the browser is the user's own. **No proxy/backend needed.** |
 | State/storage | React state + **localStorage** / **IndexedDB** | Keys + project history stay on-device. |
 | Styling | **Tailwind CSS** (or plain CSS modules) | Fast, consistent UI. |
 | Packaging (optional later) | **Tauri** or **Electron** | If we ever want a desktop app for local file/slicer access. |
@@ -105,14 +105,22 @@ What's genuinely solid vs. where the risk lives — so there are no surprises.
 - three.js / react-three-fiber 3D viewing is mature. ✅
 - BYO-key, local-first apps are a common, low-cost pattern. ✅
 
+**Resolved (2026-06-12 review):**
+- ~~Browser → AI API CORS~~ — **Anthropic officially supports direct browser calls.** The SDK's
+  `dangerouslyAllowBrowser: true` option enables it (it sends the API's CORS opt-in header). The
+  docs flag it as risky only when an app ships *the developer's* key to other users; in our
+  BYO-key local-first app the only key in the browser is the user's own. No proxy needed. ✅
+
 **Medium risk / needs care:**
-- **Browser → AI API CORS.** Some providers (including Anthropic) are designed for server-side
-  calls and may block direct browser requests, or you may need a special header/opt-in. Mitigation:
-  a tiny optional local proxy, or a serverless function, or use providers that allow browser calls.
-  (See §7.)
 - **LLM geometry mistakes.** The AI sometimes produces parts that compile but are subtly wrong
   (overlapping, wrong dimensions). Mitigation: show the 3D result immediately, show dimensions,
   let the user iterate, expose the code.
+- **Compile failures.** Generated OpenSCAD occasionally won't compile. Mitigation: a
+  **self-healing loop** — feed the compiler error back to Claude automatically for one retry,
+  plus a visible "Fix it for me" action. Never show the user a raw stack trace as a dead end.
+- **`openscad-wasm` performance.** The wasm binary is a multi-MB first load, and complex models
+  take seconds to compile. Mitigation: run compilation in a **Web Worker** (UI never freezes),
+  cache the wasm, show a compile spinner in the viewer.
 
 **Harder / Phase 2+ risk:**
 - **Generative meshes are often not print-ready** (non-manifold, thin walls, floating bits).
@@ -140,10 +148,14 @@ refine by chatting → export STL.
 - [ ] Settings screen: paste & store API key locally; pick model.
 - [ ] Chat UI with streaming responses.
 - [ ] Prompt design that makes Claude reliably emit valid OpenSCAD.
-- [ ] `openscad-wasm` integration: code → STL.
+- [ ] `openscad-wasm` integration: code → STL (in a **Web Worker** so the UI stays responsive).
+- [ ] **Self-healing compile loop:** on compile error, auto-send the error to Claude for a fix
+      (1 retry), plus a "Fix it for me" button in the error state.
 - [ ] 3D viewer (react-three-fiber) rendering the STL.
 - [ ] "Export STL" button.
 - [ ] Conversational refinement (keeps prior code as context).
+- [ ] **Design version history:** every model-changing turn snapshots the code; "revert to an
+      earlier version" from the chat (iterations sometimes make things worse).
 - [ ] Code panel (view/edit the OpenSCAD directly).
 - [ ] Save/load projects locally (history).
 
@@ -167,10 +179,11 @@ refine by chatting → export STL.
 
 ## 7. Open questions / decisions to revisit
 
-- **CORS/proxy:** Confirm whether we call Anthropic directly from the browser or need a tiny local
-  proxy / serverless function. (Likely a small proxy for reliability.)
+- ~~CORS/proxy~~ — **Resolved:** Anthropic supports direct browser calls (`dangerouslyAllowBrowser`).
+  No proxy needed for Phase 1. Phase 2 mesh providers must be re-checked individually for CORS.
 - **Which mesh provider** to integrate first in Phase 2 (Meshy vs Tripo vs Hunyuan3D…): decide
-  based on quality, price, and API friendliness at build time.
+  based on quality, price, and API friendliness at build time. *Data point: Krea AI's 3D tool
+  runs Hunyuan3D-2.1 in production (see `docs/inspiration/INSPIRATION.md`).*
 - **App name / branding** (working title: "3D Print AI Assistant").
 - **Units & defaults** for FDM: default wall thickness, etc.
 

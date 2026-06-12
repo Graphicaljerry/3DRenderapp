@@ -9,6 +9,14 @@ Figma, Excalidraw, or tldraw and sketch boxes for each item below. The goal is t
 
 > Scope note: Screens marked **[P1]** are needed for the Phase 1 Parametric MVP. Screens marked
 > **[P2+]** come later. Sketch the [P1] ones first.
+>
+> 🖼️ **Visual companion:** see [`docs/wireframes/wireframe-sheet.png`](wireframes/wireframe-sheet.png)
+> — a rendered, annotated version of every screen below, made to be redrawn by hand.
+> (`wireframe-sheet.html` is the editable source.) UI inspiration references live in
+> [`docs/inspiration/INSPIRATION.md`](inspiration/INSPIRATION.md).
+>
+> **Desktop-first.** The split view assumes a laptop/desktop screen; mobile is out of scope for
+> now (3D modeling on a phone isn't the use case).
 
 ---
 
@@ -65,8 +73,12 @@ The screen you'll live in. Sketch it as two side-by-side panes under a thin top 
   - Toggle wireframe vs solid.
   - Measurement / show bounding-box dimensions (W × D × H in mm).
 - **Empty state**: a friendly placeholder ("Describe something to get started").
-- **Error state**: if the code fails to compile, show a clear inline message ("Couldn't build the
-  model — ask me to fix it") rather than a blank screen.
+- **Error state**: if the code fails to compile, show a clear inline message with a
+  **"Fix it for me" button** (triggers the self-healing loop from PLAN.md §5) — never a blank
+  screen or raw stack trace.
+- **Version history**: each "updated the model" chip in chat doubles as a **"restore this
+  version"** affordance (hover → restore). Iterations sometimes make things worse; going back
+  must be one click.
 
 ### 1d. Code / Mesh tab (within or beside the viewer)
 - **[P1] Code tab**: shows the **OpenSCAD code**. Read-only by default with an "Edit" toggle.

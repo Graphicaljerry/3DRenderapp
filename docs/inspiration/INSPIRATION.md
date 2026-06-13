@@ -3,8 +3,12 @@
 _Last updated: 2026-06-12_
 
 Reference screens for our wireframes, found via Mobbin. Click the links to view full-size.
-(Direct image files aren't stored in the repo — the dev environment's network policy blocks
-downloading from mobbin.com — so this doc is the index. The screenshots were reviewed in-session.)
+
+Local captures of each screen are stored in [`screens/`](./screens) (filenames match the order in the
+tables below). These are page captures taken via Firecrawl, lightly cropped to remove Mobbin's site
+chrome — the source PNGs on `mobbin.com` / `bytescale.mobbin.com` can't be fetched directly because
+both hosts are blocked by the dev environment's network egress allowlist. The Mobbin links remain the
+canonical, full-resolution source.
 
 ## Pattern 1 — Chat-left + live-preview-right split (our Main Workspace)
 

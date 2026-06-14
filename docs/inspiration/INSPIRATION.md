@@ -4,11 +4,11 @@ _Last updated: 2026-06-12_
 
 Reference screens for our wireframes, found via Mobbin. Click the links to view full-size.
 
-Local captures of each screen are stored in [`screens/`](./screens) (filenames match the order in the
-tables below). These are page captures taken via Firecrawl, lightly cropped to remove Mobbin's site
-chrome — the source PNGs on `mobbin.com` / `bytescale.mobbin.com` can't be fetched directly because
-both hosts are blocked by the dev environment's network egress allowlist. The Mobbin links remain the
-canonical, full-resolution source.
+Local captures of all 21 screens are stored in [`screens/`](./screens) (filenames match the order in the
+tables below). Screens 01–15 are Firecrawl page captures, lightly cropped to remove Mobbin's site chrome.
+Screens 16–21 are the original Mobbin app-screen PNGs themselves — fetched at full resolution via each
+page's OpenGraph `screenUrl` and cropped to the moodboard tile ratio. The Mobbin links remain the
+canonical source.
 
 ## Pattern 1 — Chat-left + live-preview-right split (our Main Workspace)
 
@@ -51,6 +51,19 @@ the app *is* the empty state, with one prompt input:
 
 > Note: **Shapr3D itself isn't indexed in Mobbin's library** (searched iOS; nearest results were
 > adjacent canvas apps). For Shapr3D's actual UI conventions, reference the app directly.
+
+## Pattern 5 — More 3D generation & export (found via Mobbin)
+
+Added 2026-06-14 to round out the 3D-generation and export story for Phase 2:
+
+| App | Screen | Takeaway for us |
+| --- | --- | --- |
+| **Krea AI** | [text→3D scene building](https://mobbin.com/screens/26034a96-934d-4a5c-bd25-06d3af820c5a) | Whole-scene composition from a prompt ("Add 3D objects to the scene…") plus a skybox/ambient-lighting panel — a richer take on our text-to-3D than single-object generation. |
+| **Runway** | [text→3D texture generation](https://mobbin.com/screens/157dd717-d291-4852-b67d-63fffc90098e) | Texturing a bare mesh from a text prompt with a side settings panel — validates a future "texture this model" step on top of geometry. |
+| **Spline** | [export & share (GLTF/URL/PNG)](https://mobbin.com/screens/56356620-0316-47fc-ad17-b2b241e682a0) | Single export dialog offering multiple targets + a "Done" confirmation — model for our **Export STL** dialog (add format choices later). |
+| **Spline** | [export: 3D printing / STL](https://mobbin.com/screens/644fe085-a067-4017-9f91-36f8ecb20a02) | Form-style export/viewer settings — the closest reference to our print-export configuration. |
+| **Krea AI** | [transform gizmo + inspector](https://mobbin.com/screens/4339d6ba-27e4-4020-9e1c-6d4aa6f9fe75) | Selected object shows a transform gizmo in the viewport and a properties inspector on the right — our object-edit pattern. |
+| **Spline** | [orbit gizmo + 3D viewer](https://mobbin.com/screens/1800910b-adb8-403b-8f9a-31ed971d88ba) | Bottom-center orbit/orientation gizmo with orthographic/perspective toggle — reinforces the Pattern 2 viewport ergonomics. |
 
 ## What we're deliberately doing differently
 

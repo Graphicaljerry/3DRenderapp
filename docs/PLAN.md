@@ -216,7 +216,16 @@ refine by chatting → export **STL (print) / STEP (Shapr3D) / OBJ**.
 - **Which mesh provider** to integrate first in Phase 2 (Meshy vs Tripo vs Hunyuan3D…): decide
   based on quality, price, and API friendliness at build time. *Data point: Krea AI's 3D tool
   runs Hunyuan3D-2.1 in production (see `docs/inspiration/INSPIRATION.md`).*
-- **App name / branding** (working title: "3D Print AI Assistant").
+- **App name / branding** — *in active exploration; see [`NAMING.md`](./NAMING.md).* Working title
+  remains "3D Print AI Assistant." Finding: the 3D/AI/print namespace is heavily saturated — ~30+
+  candidates checked, nearly all taken in-space or with `.com`/`.ai` already registered. Cleanest
+  in-space shortlist: Billet · Moldable · Chamfer · Vorm · Maku (none with a clean domain). Direction
+  per discussion: a clever, "as-if-Apple-made-it," intuitive name spanning CAD-accurate ↔ artistic;
+  likely a coined/invented brandable chosen domain-first. Decision pending a naming brief.
+- **Architecture: standalone web app vs. plugin** — current lean is the **standalone local-first web
+  app** (per §4). Researched: a **Cura** plugin (Python) or **Fusion 360** add-in are feasible *later*
+  from the same portable core; **Shapr3D has no public SDK**, so its integration stays via **STEP
+  export** (already planned). Recommendation: web-app-first, optional plugins later. Decision pending.
 - **Units & defaults** for FDM: default wall thickness, etc.
 
 ---

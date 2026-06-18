@@ -1,0 +1,79 @@
+# Naming & Brand — working notes
+
+_Last updated: 2026-06-18_
+
+Working log for naming the app (working title: **"3D Print AI Assistant"**). Captures the brief, the
+conventions considered, every candidate we've checked and why it's in/out, and the strategic
+conclusion — so we don't re-explore names that are already taken.
+
+## What we're naming
+An AI builder for 3D-printable objects: **describe it in words (or show a reference) → get a
+print-ready model.** It spans a spectrum:
+- **CAD-accurate / parametric** — Engine A (LLM → replicad → STL/STEP), and
+- **Hobbyist / artistic** — Engine B (generative mesh), where geometric precision matters less as
+  long as the result faithfully reflects the reference.
+
+It should feel **intuitive and "as if Apple made it,"** be **3D-print-friendly**, and read as a
+**product** (not host-prefixed) — it's a standalone web app first (plugins possible later, see PLAN.md §7).
+
+## Naming brief (criteria)
+- Clever but clean; simple, confident, premium ("Apple / Figma energy").
+- Neutral enough to span precise **and** artistic (not "CAD-only" or "toy-only").
+- Short, easy to say/spell, globally pronounceable.
+- **Ownable** — the deciding constraint (see findings below).
+- Domain bar: TBD — note this category does **not** require a `.com` (krea.ai, spline.design,
+  lumalabs.ai, womp.com).
+
+## Naming conventions (frameworks)
+| Convention | Examples | Fit for us |
+| --- | --- | --- |
+| Descriptive | "3D Print AI Assistant" | Clear but generic; hard to own. |
+| Suggestive (evocative real word) | Apple *Pages, Keynote, Freeform* | Strong if findable — but most are taken in-space. |
+| Coined / abstract | *Figma, Spline, Krea, Luma, Womp* | **Best for ownability**; how our reference apps did it. |
+| Compound / two-word | *FaceTime, AirDrop*; "Form Foundry" | Very available, brandable. |
+| Real word repurposed | *Forge, Kiln, Loft* | Mostly taken in 3D/print. |
+
+## The finding: this namespace is saturated
+Across ~30+ candidates, nearly all are taken — often **in 3D/print specifically** — and the few that
+are clean in-space have their `.com`/`.ai` already registered.
+
+**Clean in-space, but no clean domain (shortlist still on the table on brand merit):**
+| Name | Type | Domain status |
+| --- | --- | --- |
+| **Vorm** | abstract; Dutch "form" | vorm.ai + vorm.design taken |
+| **Maku** | coined; "make" | maku.ai for-sale (Atom) |
+| **Billet** | real; raw stock → part | billet.ai taken |
+| **Moldable** | real; shapeable | moldable.ai owned by the "moldable development" creator |
+| **Chamfer** | real; CAD edge op | chamfer.ai taken; spelling friction |
+
+**Taken / collisions — do NOT revisit:**
+Maket (maket.ai — AI design), Makit (SaaS + Makita), Makette (luxury bags), Makely (agency),
+Maketto (restaurant), Maketa (parked), Modlr (finance), Reify (reify3d.com — 3D printing),
+Kiln (kiln3d.com — AI→3D printers), Loft (CAD command + loft3di), Formetry (formetry.in — 3D décor),
+Forme (architecture + apparel), Fingo (fintech + biometrics), Tactum/Tactus (Autodesk research + therapy),
+Carve (VCarve CNC), Relief (reliefmaker — 3D reliefs), Strata (strata.com — 3D modeling),
+Makeform (makeform.ai — AI form builder), Formwork (generic 3D-print term), Trueform (agency/fitness),
+Whittle (Dassault mine-planning CAD), Hewn (wood building products), Klae (hair care),
+Figmint (Target kitchen brand), Promptu (voice AI), Morfo (3D face app + engineering firm),
+Voxa/Voxo (multiple), Voro (voro.ai for-sale), Vormi (parked), Orma (woodworking machinery),
+Formcast (car-design podcast), Volm (packaging).
+
+> Method: brand collisions via web search (focused on 3D/CAD/AI/print/design); domain status via
+> live WHOIS lookups. Not a legal trademark clearance — confirm with a registrar + USPTO before committing.
+
+## Conclusion & next step
+A clean single dictionary word + matching domain is effectively unavailable in this category. The
+reliable routes are:
+1. **Coin a distinctive, invented brandable** (Figma/Krea style) and verify a domain is open
+   (**domain-first**) — best path to an ownable, Apple-style name.
+2. **Two-word / compound** brand (far more available).
+3. Keep a loved word and use **.ai / .app / .studio / .design** or a `get-`/`try-` domain (category norm).
+
+**Next:** finish the naming brief (interview in progress), then run a coined, **domain-first** round —
+generating invented names and presenting only those that are clean in-space **and** have an open domain.
+
+## Brand directions explored (in Figma)
+Three identity directions were mocked in the Figma file (frame "Brand directions"):
+**Workshop** (Billet · dark graphite · industrial grotesk), **Studio** (Moldable · light · rounded sans),
+**Precision** (Chamfer · near-black · geometric). Plus three color palettes — Graphite Pro, Paper
+Light, Molten — in the moodboard's section 07.

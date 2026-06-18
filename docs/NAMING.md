@@ -72,6 +72,29 @@ reliable routes are:
 **Next:** finish the naming brief (interview in progress), then run a coined, **domain-first** round —
 generating invented names and presenting only those that are clean in-space **and** have an open domain.
 
+## Naming brief — confirmed (2026-06-18 interview)
+- **Domain bar:** *brand-first* — pick the best name on merit, sort the domain after. A clean `.com`
+  is **not** required (`.ai` / `.app` / `.studio` / compound all acceptable).
+- **Style:** *best of any* — invented, real, or compound; optimize purely for the strongest name.
+- **Personality:** want options across **both** "calm & Apple-minimal" *and* "bold & energetic."
+- **Audience:** *equal blend* — a neutral name that fits precise CAD users and hobbyist/artistic users alike.
+
+## Round 2 — brand-first candidates (in-space checked; domain = sort later)
+**Calm / Apple-minimal**
+- **Cairn** — a deliberate form built from raw pieces; calm, premium, craft. ✓ clean in 3D/AI.
+- **Vorm** — abstract; means "form" (Dutch). ✓ clean in-space.
+- **Maku** — "make," softened; warm, globally easy. ✓ clean in-space.
+- **Etude** — "a study / small work"; artful, implies iteration. (likely clean — verify)
+
+**Bold / energetic**
+- **Utter** — you *utter* a description → it's made; punchy, clever, memorable. ✓ clean in 3D/AI.
+  (Caveat: the "utter disaster/nonsense" idiom.)
+- **Brik** — block / brick; solid, blocky, playful spelling. (likely clean — verify)
+- **Mallet** — a shaping tool; tactile, hands-on. (likely clean — verify)
+
+Avoid (in-space jargon / crowded): Strut (lattice "strut"), Stoke (Stoke Space + print services),
+Rivet (LLM-agent builder + Rivet CAD), Ply (PLY 3D file format), Vellum (Ashlar-Vellum CAD).
+
 ## Brand directions explored (in Figma)
 Three identity directions were mocked in the Figma file (frame "Brand directions"):
 **Workshop** (Billet · dark graphite · industrial grotesk), **Studio** (Moldable · light · rounded sans),

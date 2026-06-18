@@ -95,6 +95,22 @@ generating invented names and presenting only those that are clean in-space **an
 Avoid (in-space jargon / crowded): Strut (lattice "strut"), Stoke (Stoke Space + print services),
 Rivet (LLM-agent builder + Rivet CAD), Ply (PLY 3D file format), Vellum (Ashlar-Vellum CAD).
 
+## Round 3 — Spanish-origin candidates
+User feedback: **Cairn rejected** (unclear meaning / origin / pronunciation). Preference: if a name
+draws on another language, make it **Spanish** (phonetic → pronunciation reads clearly).
+
+Vetted clean in 3D / CAD / AI (brand-first; domain = sort later):
+- **Obra** — "a work / œuvre" (OH-brah). Calm, premium, artful — your design as a finished work. ✓ clean.
+- **Molde** — "mold / cast" (MOL-deh). Maker/industrial; pour an idea into form. ✓ clean.
+- **Trazo** — "a stroke / line" (TRAH-so). Design-y; from a single stroke to a form. ✓ clean.
+- **Trama** — "weave / mesh / plot" (TRAH-mah). Ties to a 3D *mesh*; techy energy. ✓ clean.
+
+Ruled out (in-space / crowded / generic descriptor):
+- Brío (Brio AI fashion imagery + BRIO toys), Forja (a "Forja 3D" print creator), Cubo (WASP *CUBO*
+  clay printer), Faro (FARO 3D metrology), Salto (Salto.io / SALTO AI), Seda (Seda research app),
+  Rayo (Rayo Innovations + *Rayon* CAD), Joya (Joya Software House), Nodo (Nodo motion-control app),
+  Chispa (dating app), Maqueta / Pieza / Boceto (generic in Spanish 3D tutorials; Boceto also used by Planner 5D).
+
 ## Brand directions explored (in Figma)
 Three identity directions were mocked in the Figma file (frame "Brand directions"):
 **Workshop** (Billet · dark graphite · industrial grotesk), **Studio** (Moldable · light · rounded sans),

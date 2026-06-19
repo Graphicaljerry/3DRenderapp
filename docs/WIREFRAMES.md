@@ -15,6 +15,10 @@ Figma, Excalidraw, or tldraw and sketch boxes for each item below. The goal is t
 > (`wireframe-sheet.html` is the editable source.) UI inspiration references live in
 > [`docs/inspiration/INSPIRATION.md`](inspiration/INSPIRATION.md).
 >
+> 🧩 **Built in Figma (2026-06-19):** low-fidelity wireframes for the screens below now live in the
+> Figma file under the **"WIREFRAMES — MOLDABLE"** section — Main workspace (from the hand sketch),
+> Empty state, Project library, Settings, First-run key card, Image input [P2], Engine toggle [P2].
+>
 > **Desktop-first.** The split view assumes a laptop/desktop screen; mobile is out of scope for
 > now (3D modeling on a phone isn't the use case).
 

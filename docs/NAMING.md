@@ -14,6 +14,19 @@ Moldable across all three visual styles (Workshop · Studio · Precision), and a
 frame holds the 28-icon set (also in `assets/icons/`). Domain still to settle — simple single-word
 `.com`s are largely taken (verified via RDAP), so `.ai`/`.app` or a coined/compound route stays open.
 
+## Visual direction chosen (2026-06-19): **Direction C · Precision**
+Of the three styles mocked in Figma (Workshop · Studio · Precision), **Precision (C)** is selected as
+Moldable's identity. Rationale (ties to PLAN.md): Phase 1 is the *parametric* engine — exact,
+printable mechanical parts — and the whole UI is dimensional (mm readouts, printability, STL/STEP).
+"Sharp, minimal, exact" + a clean geometric sans pairs with the minimalist Lucide-style icon set,
+and **teal + orange is more ownable** than the generic AI-blue of Studio. **One borrow from Studio (B):**
+its warmer, encouraging voice for the empty-state / first-run copy, so Precision reads exact without
+feeling cold.
+
+**Tokens** — ink `#15181E` · teal (primary) `#14B8A6` (hover `#0E9488`) · orange (accent / warning)
+`#FF6A2C` · neutrals `#FFFFFF` / surface `#F6F7F9` / border `#E3E6EA` / muted `#6B7280`.
+**Type** — Archivo (display, wide tracking) · Inter (UI / body).
+
 ## What we're naming
 An AI builder for 3D-printable objects: **describe it in words (or show a reference) → get a
 print-ready model.** It spans a spectrum:
@@ -120,7 +133,9 @@ Ruled out (in-space / crowded / generic descriptor):
   Chispa (dating app), Maqueta / Pieza / Boceto (generic in Spanish 3D tutorials; Boceto also used by Planner 5D).
 
 ## Brand directions explored (in Figma)
-Three identity directions were mocked in the Figma file (frame "Brand directions"):
-**Workshop** (Billet · dark graphite · industrial grotesk), **Studio** (Moldable · light · rounded sans),
-**Precision** (Chamfer · near-black · geometric). Plus three color palettes — Graphite Pro, Paper
-Light, Molten — in the moodboard's section 07.
+Three identity directions were mocked in the Figma file (frame "Brand directions — pick one"), all now
+showing the **Moldable** wordmark: **A · Workshop** (industrial grotesk, graphite + blue/green),
+**B · Studio** (rounded humanist sans, light, blue + orange), **C · Precision** (geometric sans, wide
+tracking, teal + orange). Plus three color palettes — Graphite Pro, Paper Light, Molten — in the
+moodboard's section 07. **→ Direction C · Precision is the chosen identity (2026-06-19);** see the
+"Visual direction chosen" section above for tokens, type, and rationale. The frame is badged "✓ Chosen".

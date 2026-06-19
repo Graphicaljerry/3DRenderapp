@@ -6,6 +6,14 @@ Working log for naming the app (working title: **"3D Print AI Assistant"**). Cap
 conventions considered, every candidate we've checked and why it's in/out, and the strategic
 conclusion — so we don't re-explore names that are already taken.
 
+## Decision (2026-06-19): working name = **Moldable** (English)
+Locked for design work: **Moldable** — plain English, instantly understood ("shape it, tweak it,
+print it"). English was the requirement; the earlier Spanish round (Obra/Molde/Trazo/Trama) is parked,
+not chosen. Reflected in the Figma file: the *Brand directions* and *Wordmark study* frames now show
+Moldable across all three visual styles (Workshop · Studio · Precision), and a new **Icon System**
+frame holds the 28-icon set (also in `assets/icons/`). Domain still to settle — simple single-word
+`.com`s are largely taken (verified via RDAP), so `.ai`/`.app` or a coined/compound route stays open.
+
 ## What we're naming
 An AI builder for 3D-printable objects: **describe it in words (or show a reference) → get a
 print-ready model.** It spans a spectrum:

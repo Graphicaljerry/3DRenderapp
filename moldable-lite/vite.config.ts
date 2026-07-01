@@ -14,6 +14,11 @@ const UPSTREAM: Record<string, string> = {
   replicate: "https://api.replicate.com",
   fal: "https://fal.run",
   falqueue: "https://queue.fal.run",
+  // LLM providers (CORS fallback for the Precise engine)
+  gemini: "https://generativelanguage.googleapis.com",
+  openai: "https://api.openai.com",
+  groq: "https://api.groq.com",
+  openrouter: "https://openrouter.ai",
 };
 
 function relayPlugin(): Plugin {

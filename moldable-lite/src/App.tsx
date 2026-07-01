@@ -6,7 +6,8 @@ import type { ViewerHandle } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
-import { generate, MODELS, type ApiMsg } from "./llm/anthropic";
+import { MODELS, type ApiMsg } from "./llm/anthropic";
+import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
@@ -28,6 +29,26 @@ const PRINTER_LS = "moldable_printer";
 const PKEYS_LS = "moldable_provider_keys";
 const PROXY_LS = "moldable_proxy";
 const GENENG_LS = "moldable_geneng";
+const LLM_LS = "moldable_llm";
+const LLMKEYS_LS = "moldable_llm_keys";
+
+function loadLlm(): LlmSettings {
+  try {
+    const raw = localStorage.getItem(LLM_LS);
+    if (raw) {
+      const v = JSON.parse(raw);
+      if (LLM_PRESETS.some((p) => p.id === v.provider)) return v;
+    }
+  } catch {}
+  return { provider: "anthropic", model: localStorage.getItem(MODEL_LS) ?? MODELS[0].id };
+}
+function loadLlmKeys(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(LLMKEYS_LS) ?? "{}");
+  } catch {
+    return {};
+  }
+}
 
 function loadPrinter(): PrinterDefaults {
   try {
@@ -76,6 +97,8 @@ export default function App() {
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>(loadProviderKeys);
   const [proxyBase, setProxyBase] = useState(() => localStorage.getItem(PROXY_LS) ?? "");
   const [genEng, setGenEng] = useState(loadGenEng);
+  const [llm, setLlm] = useState<LlmSettings>(loadLlm);
+  const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
 
   const [sel, setSel] = useState<EngineSelection | null>(null);
   const [booting, setBooting] = useState(false);
@@ -131,6 +154,15 @@ export default function App() {
     localStorage.setItem(PRINTER_LS, JSON.stringify(p));
     setPrinter(p);
   }
+  function saveLlmSettings(s: LlmSettings, keys2: Record<string, string>) {
+    localStorage.setItem(LLM_LS, JSON.stringify(s));
+    localStorage.setItem(LLMKEYS_LS, JSON.stringify(keys2));
+    setLlm(s);
+    setLlmKeys(keys2);
+    setEntered(true);
+    setShowSettings(false);
+  }
+
   function saveGenSettings(keys: Record<string, string>, provider: string, gmodel: string, proxy: string) {
     localStorage.setItem(PKEYS_LS, JSON.stringify(keys));
     localStorage.setItem(GENENG_LS, JSON.stringify({ provider, model: gmodel }));
@@ -285,16 +317,17 @@ export default function App() {
       return;
     }
 
-    // ---- precise (Claude -> replicad/primitive) ----
+    // ---- precise (LLM -> replicad/primitive) ----
     if (!p) return;
-    if (!key) {
-      // Never fail silently: say why, and point at the free path.
+    const effLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
+    if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
+      // Never fail silently: say why, and point at the free paths.
       setMessages((m) => [
         ...m,
         {
           id: mid(),
           role: "assistant",
-          text: "Precise (CAD) mode uses your own Anthropic API key — add one in Settings. Or switch to Generative (AI mesh) above: it's free via Hugging Face, no key needed.",
+          text: "Precise (CAD) mode needs an AI provider — set one in Settings → Precise CAD engine. Cheapest: a FREE Google Gemini key (aistudio.google.com/apikey). Best quality: an Anthropic Claude key. Or switch to Generative (AI mesh) above — free, no key at all.",
         },
       ]);
       setShowSettings(true);
@@ -324,7 +357,7 @@ export default function App() {
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await generate({ apiKey: key, model, system, messages: history }, { onToken: (_t, full) => setStreamingText(full) });
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full) }, proxyBase);
         finalRaw = raw;
         try {
           let bi: BuildInput;
@@ -519,12 +552,15 @@ export default function App() {
         <SettingsModal
           initialKey={key}
           initialModel={model}
+          llm={llm}
+          llmKeys={llmKeys}
           printer={printer}
           providerKeys={providerKeys}
           genProvider={genEng.provider}
           genModel={genEng.model}
           proxyBase={proxyBase}
           onSaveKey={saveKey}
+          onSaveLlm={saveLlmSettings}
           onSavePrinter={savePrinter}
           onSaveGen={saveGenSettings}
           onClose={() => setShowSettings(false)}
@@ -573,6 +609,7 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
           ))}
         </select>
         <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
+        <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
         <button className="link" onClick={onExample}>Or view the built-in example model →</button>
       </div>
     </div>
@@ -582,24 +619,30 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
 function SettingsModal({
   initialKey,
   initialModel,
+  llm,
+  llmKeys,
   printer,
   providerKeys,
   genProvider,
   genModel,
   proxyBase,
   onSaveKey,
+  onSaveLlm,
   onSavePrinter,
   onSaveGen,
   onClose,
 }: {
   initialKey: string;
   initialModel: string;
+  llm: LlmSettings;
+  llmKeys: Record<string, string>;
   printer: PrinterDefaults;
   providerKeys: Record<string, string>;
   genProvider: string;
   genModel: string;
   proxyBase: string;
   onSaveKey: (k: string, m: string) => void;
+  onSaveLlm: (s: LlmSettings, keys: Record<string, string>) => void;
   onSavePrinter: (p: PrinterDefaults) => void;
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
   onClose: () => void;
@@ -614,6 +657,25 @@ function SettingsModal({
   const [proxy, setProxy] = useState(proxyBase);
   const prov = getProvider(gp) ?? PROVIDERS[0];
 
+  // Precise-engine (LLM) picker state
+  const [lp, setLp] = useState<LlmProviderId>(llm.provider);
+  const [lmodel, setLmodel] = useState(llm.provider === "anthropic" ? "" : llm.model);
+  const [lbase, setLbase] = useState(llm.baseUrl ?? "");
+  const [lkeys, setLkeys] = useState<Record<string, string>>(llmKeys);
+  const lpre = llmPreset(lp);
+
+  function saveAi() {
+    if (lp === "anthropic") {
+      onSaveLlm({ provider: "anthropic", model: m }, lkeys);
+      onSaveKey(k, m);
+    } else {
+      onSaveLlm(
+        { provider: lp, model: (lmodel || lpre.defaultModel).trim(), baseUrl: lp === "custom" ? lbase.trim() : undefined },
+        lkeys,
+      );
+    }
+  }
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="card" onClick={(e) => e.stopPropagation()}>
@@ -622,16 +684,56 @@ function SettingsModal({
           <button className="x" onClick={onClose}>✕</button>
         </div>
 
-        <div className="sect-label">Precise CAD engine (Claude → replicad)</div>
-        <label>Anthropic API key</label>
-        <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
-        <label>Claude model</label>
-        <select value={m} onChange={(e) => setM(e.target.value)}>
-          {MODELS.map((x) => (
-            <option key={x.id} value={x.id}>{x.label}</option>
+        <div className="sect-label">Precise CAD engine — the AI that writes the CAD code</div>
+        <label>AI provider</label>
+        <select
+          value={lp}
+          onChange={(e) => {
+            const np = e.target.value as LlmProviderId;
+            setLp(np);
+            setLmodel(np === "anthropic" ? "" : llmPreset(np).defaultModel);
+          }}
+        >
+          {LLM_PRESETS.map((pr) => (
+            <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}</option>
           ))}
         </select>
-        <button className="primary block" onClick={() => onSaveKey(k, m)}>Save key & model</button>
+        {lp === "anthropic" ? (
+          <>
+            <label>Anthropic API key</label>
+            <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
+            <label>Claude model</label>
+            <select value={m} onChange={(e) => setM(e.target.value)}>
+              {MODELS.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
+              ))}
+            </select>
+          </>
+        ) : (
+          <>
+            {(lpre.needsKey || lp === "custom") && (
+              <>
+                <label>{lpre.label.split(" — ")[0]} API key{lp === "custom" ? " (if required)" : ""}</label>
+                <input
+                  type="password"
+                  value={lkeys[lp] ?? ""}
+                  onChange={(e) => setLkeys({ ...lkeys, [lp]: e.target.value })}
+                  placeholder={lpre.keyHint}
+                />
+              </>
+            )}
+            {lp === "custom" && (
+              <>
+                <label>Base URL (ends in /v1)</label>
+                <input value={lbase} onChange={(e) => setLbase(e.target.value)} placeholder="https://my-host/v1" />
+              </>
+            )}
+            <label>Model id</label>
+            <input value={lmodel} onChange={(e) => setLmodel(e.target.value)} placeholder={lpre.defaultModel || "model-name"} />
+            <p className="fine">{lpre.keyHint}</p>
+          </>
+        )}
+        <button className="primary block" onClick={saveAi}>Save AI settings</button>
 
         <div className="sect-label">Generative 3D engine (photo / text → mesh)</div>
         <label>Engine</label>

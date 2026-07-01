@@ -9,6 +9,14 @@ export interface EngineSelection {
   bootError?: string;
 }
 
+// Memoized so the (11 MB WASM) kernel boots exactly once, no matter how many
+// code paths ask for it (App effect + "try example" used to race a double boot).
+let selection: Promise<EngineSelection> | null = null;
+export function getEngineSelection(): Promise<EngineSelection> {
+  if (!selection) selection = selectEngine();
+  return selection;
+}
+
 /** Try replicad; on ANY OCCT boot failure, fall back to the primitive engine. */
 export async function selectEngine(): Promise<EngineSelection> {
   const replicad = new ReplicadEngine();

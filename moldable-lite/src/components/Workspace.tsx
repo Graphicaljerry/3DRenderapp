@@ -6,10 +6,11 @@ import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat } from "../engine/types";
 import type * as THREE from "three";
 
-const SUGGESTIONS = [
-  "a 60×40 mm bracket, 4 mm thick, with two 4 mm holes",
-  "a phone stand angled at 60 degrees",
-  "a low-poly fox figurine",
+// gen: true routes the chip to the free Generative engine instead of Precise CAD.
+const SUGGESTIONS: { text: string; gen?: boolean }[] = [
+  { text: "a 60×40 mm bracket, 4 mm thick, with two 4 mm holes" },
+  { text: "a phone stand angled at 60 degrees" },
+  { text: "a low-poly fox figurine", gen: true },
 ];
 
 const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
@@ -36,7 +37,7 @@ interface Props {
   status: "idle" | "generating";
   input: string;
   setInput: (v: string) => void;
-  onSend: (p: string) => void;
+  onSend: (p: string, forceMode?: Mode) => void;
   onExample: () => void;
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
@@ -124,7 +125,7 @@ export function Workspace(p: Props) {
               <div className="imgchip">
                 <img src={p.imageUrl} alt="reference" />
                 <span>reference image</span>
-                <button onClick={p.onClearImage}>✕</button>
+                <button aria-label="Remove reference image" onClick={p.onClearImage}>✕</button>
               </div>
             )}
 
@@ -139,6 +140,7 @@ export function Workspace(p: Props) {
                 type="button"
                 className="attach"
                 title="Upload a photo → 3D"
+                aria-label="Upload a photo to turn into a 3D model"
                 onClick={() => fileRef.current?.click()}
               >
                 📎
@@ -159,7 +161,7 @@ export function Workspace(p: Props) {
                 onChange={(e) => p.setInput(e.target.value)}
                 placeholder={p.mode === "generative" ? "Describe it, or just upload a photo…" : "Describe a part, or a change…"}
               />
-              <button type="submit" className="send" disabled={p.status === "generating"}>↑</button>
+              <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}>↑</button>
             </form>
           </div>
         </section>
@@ -215,7 +217,12 @@ export function Workspace(p: Props) {
   );
 }
 
-function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; onChip: (s: string) => void; onExample: () => void }) {
+function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void }) {
+  const endRef = useRef<HTMLDivElement>(null);
+  const lastText = messages[messages.length - 1]?.text;
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages.length, lastText]);
   return (
     <div className="messages">
       {messages.length === 0 && (
@@ -224,7 +231,7 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
           <p className="empty-sub">Type a description, or drop a photo (📎) to turn it into a 3D model.</p>
           <div className="chips">
             {SUGGESTIONS.map((s) => (
-              <button key={s} className="chip" onClick={() => onChip(s)}>{s}</button>
+              <button key={s.text} className="chip" onClick={() => onChip(s.text, s.gen ? "generative" : undefined)}>{s.text}</button>
             ))}
             <button className="chip subtle" onClick={onExample}>Try the built-in example (no API spend)</button>
           </div>
@@ -236,6 +243,7 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
           <div className={`bubble ${m.streaming ? "muted" : ""}`}>{m.text}</div>
         </div>
       ))}
+      <div ref={endRef} />
     </div>
   );
 }

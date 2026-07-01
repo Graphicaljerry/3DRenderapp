@@ -9,6 +9,11 @@ export function blobToDataURL(blob: Blob): Promise<string> {
   });
 }
 
+/** True when a relay exists: the dev server's built-in one, or a user-configured Worker URL. */
+export function relayAvailable(proxyBase = ""): boolean {
+  return !!proxyBase || import.meta.env.DEV;
+}
+
 /** Fetch a result file as a Blob; if the provider CDN blocks CORS, retry via the /prox/dl relay. */
 export async function fetchAsBlob(url: string, proxyBase = ""): Promise<Blob> {
   try {
@@ -17,8 +22,13 @@ export async function fetchAsBlob(url: string, proxyBase = ""): Promise<Blob> {
   } catch {
     /* fall through to relay */
   }
+  if (!relayAvailable(proxyBase)) {
+    throw new Error(
+      "The model was generated, but its file couldn't be downloaded directly (the provider blocks cross-site downloads) and no relay is configured. On the hosted site, deploy the proxy/ worker and paste its URL in Settings → Proxy base URL.",
+    );
+  }
   const r2 = await fetch(`${proxyBase}/prox/dl?url=${encodeURIComponent(url)}`);
-  if (!r2.ok) throw new Error(`Couldn't download the generated model (${r2.status}).`);
+  if (!r2.ok) throw new Error(`Couldn't download the generated model (relay HTTP ${r2.status}).`);
   return await r2.blob();
 }
 

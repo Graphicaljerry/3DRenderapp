@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import type { ViewerHandle } from "./components/Viewer";
-import { selectEngine, type EngineSelection } from "./engine/selectEngine";
+import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { generate, MODELS, type ApiMsg } from "./llm/anthropic";
@@ -46,7 +46,15 @@ function loadProviderKeys(): Record<string, string> {
 function loadGenEng(): { provider: string; model: string } {
   try {
     const raw = localStorage.getItem(GENENG_LS);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const v = JSON.parse(raw);
+      const prov = PROVIDERS.find((pp) => pp.id === v.provider);
+      if (prov) {
+        // Migrate stale stored model ids (renamed/dead Spaces) to the provider's current default.
+        const model = prov.models.some((m) => m.id === v.model) ? v.model : prov.models[0].id;
+        return { provider: prov.id, model };
+      }
+    }
   } catch {}
   return { provider: "hf", model: PROVIDERS[0].models[0].id };
 }
@@ -99,7 +107,7 @@ export default function App() {
     if (!entered || sel) return;
     let alive = true;
     setBooting(true);
-    selectEngine()
+    getEngineSelection() // memoized: boots the CAD kernel exactly once
       .then((s) => alive && setSel(s))
       .finally(() => alive && setBooting(false));
     return () => {
@@ -183,16 +191,37 @@ export default function App() {
     setReport(computeReport(res.geometry));
   }
 
+  /**
+   * Seed the LLM's context with the project's current source so refinements
+   * ("make it taller") edit THIS design instead of inventing a new one.
+   */
+  function seedHistory(engine: Project["engine"], code?: string, spec?: unknown) {
+    if (engine === "replicad" && code) {
+      apiHistory.current = [
+        { role: "user", content: "(Context) This is the current design we are refining." },
+        { role: "assistant", content: "```js\n" + code + "\n```" },
+      ];
+    } else if (engine === "primitive" && spec) {
+      apiHistory.current = [
+        { role: "user", content: "(Context) This is the current design we are refining." },
+        { role: "assistant", content: JSON.stringify(spec) },
+      ];
+    } else {
+      apiHistory.current = [];
+    }
+  }
+
   async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>) {
     const { geometry: g, dims: d } = await glbToGeometry(glb);
     applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
   }
 
   // ---------------- generate ----------------
-  async function send(promptText: string) {
+  async function send(promptText: string, forceMode?: Mode) {
     const p = promptText.trim();
     if (status === "generating") return;
-    const useGen = mode === "generative" || !!image;
+    if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
+    const useGen = (forceMode ?? mode) === "generative" || !!image;
 
     if (useGen) {
       if (!p && !image) return;
@@ -228,10 +257,25 @@ export default function App() {
     // ---- precise (Claude -> replicad/primitive) ----
     if (!p) return;
     if (!key) {
+      // Never fail silently: say why, and point at the free path.
+      setMessages((m) => [
+        ...m,
+        {
+          id: mid(),
+          role: "assistant",
+          text: "Precise (CAD) mode uses your own Anthropic API key — add one in Settings. Or switch to Generative (AI mesh) above: it's free via Hugging Face, no key needed.",
+        },
+      ]);
       setShowSettings(true);
       return;
     }
-    if (!sel) return;
+    if (!sel) {
+      setMessages((m) => [
+        ...m,
+        { id: mid(), role: "assistant", text: "One moment — the CAD engine is still starting (the first load fetches ~11 MB, then it's cached). Try again in a few seconds." },
+      ]);
+      return;
+    }
 
     const kind = sel.kind;
     setInput("");
@@ -242,7 +286,8 @@ export default function App() {
     setStatus("generating");
 
     const system = kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT;
-    let history: ApiMsg[] = [...apiHistory.current, { role: "user", content: p }];
+    // Cap the rolling context so long sessions don't slow down / blow the window.
+    let history: ApiMsg[] = [...apiHistory.current.slice(-16), { role: "user", content: p }];
     let finalRaw = "";
     let ok = false;
 
@@ -304,12 +349,18 @@ export default function App() {
     }
   }
 
+  /** Enter without any key: straight to the free generative engine. */
+  function enterFree() {
+    setEntered(true);
+    setMode("generative");
+  }
+
   async function loadExample() {
     setEntered(true);
     let s = sel;
     if (!s) {
       setBooting(true);
-      s = await selectEngine();
+      s = await getEngineSelection(); // same memoized boot as the effect — no double kernel
       setSel(s);
       setBooting(false);
     }
@@ -339,6 +390,8 @@ export default function App() {
     if (!project) return;
     const next = restoreVersion(project, versionId);
     persist(next);
+    seedHistory(next.engine, next.code, next.spec);
+    clearImage();
     try {
       if (next.engine === "generative" && next.glb) {
         await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
@@ -356,7 +409,9 @@ export default function App() {
     setShowLibrary(false);
     setProject(p);
     setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error })));
-    apiHistory.current = [];
+    seedHistory(p.engine, p.code, p.spec);
+    clearImage();
+    setMode(p.engine === "generative" ? "generative" : "precise");
     try {
       if (p.engine === "generative" && p.glb) {
         await showFromGlb(p.glb, { kind: "gen", provider: p.genSource?.provider ?? "", model: p.genSource?.model ?? "", prompt: p.genSource?.prompt });
@@ -385,7 +440,7 @@ export default function App() {
   const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");
 
   if (!entered) {
-    return <KeyCard model={model} onContinue={saveKey} onExample={loadExample} />;
+    return <KeyCard model={model} onContinue={saveKey} onExample={loadExample} onFree={enterFree} />;
   }
 
   return (
@@ -464,7 +519,7 @@ function CubeMark({ size = 22 }: { size?: number }) {
   );
 }
 
-function KeyCard({ model, onContinue, onExample }: { model: string; onContinue: (k: string, m: string) => void; onExample: () => void }) {
+function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onContinue: (k: string, m: string) => void; onExample: () => void; onFree: () => void }) {
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
   return (
@@ -475,7 +530,10 @@ function KeyCard({ model, onContinue, onExample }: { model: string; onContinue: 
           <span className="wordmark">Moldable</span>
         </div>
         <h1>Turn a description — or a photo — into a 3D-printable model.</h1>
-        <label>Anthropic API key (for the Precise CAD engine)</label>
+        <button className="primary block" onClick={onFree}>Start free — no key needed</button>
+        <p className="fine">Uses the free Hugging Face engine for photo/text → 3D mesh. No account; nothing leaves this browser except the generation request.</p>
+        <div className="sect-label">Optional: precise CAD mode (Claude)</div>
+        <label>Anthropic API key — exact parts, editable STEP export</label>
         <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
         <label>Model</label>
         <select value={m} onChange={(e) => setM(e.target.value)}>
@@ -483,9 +541,8 @@ function KeyCard({ model, onContinue, onExample }: { model: string; onContinue: 
             <option key={x.id} value={x.id}>{x.label}</option>
           ))}
         </select>
-        <button className="primary block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue</button>
-        <p className="fine">No account. Keys stay in this browser. Image→3D engines are set up later in Settings (free Hugging Face works with no key).</p>
-        <button className="link" onClick={onExample}>Try the built-in example first — zero API spend →</button>
+        <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
+        <button className="link" onClick={onExample}>Or view the built-in example model →</button>
       </div>
     </div>
   );

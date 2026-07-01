@@ -1,6 +1,7 @@
 import type { Engine, EngineResult, BuildInput, ExportFormat } from "./types";
 import type { GenProgress } from "../gen/types";
 import { getProvider } from "../gen/registry";
+import { relayAvailable } from "../gen/util";
 import { glbToGeometry } from "../gen/loadMesh";
 import { geometryToSTL, geometryToOBJ, geometryTo3MF } from "../print/exportClient";
 
@@ -20,6 +21,13 @@ export class GenerativeEngine implements Engine {
     if (!prov) throw new Error(`Unknown 3D provider: ${input.provider}`);
     if (prov.needsKey && !this.config.keyFor(prov.id)) {
       throw new Error(`Add your ${prov.label} API key in Settings to use it.`);
+    }
+    // Proxied providers need a relay. The dev server has one built in; a static
+    // host (e.g. GitHub Pages) does not — fail fast with the fix, not a 404 soup.
+    if (prov.viaProxy && !relayAvailable(this.config.proxyBase || "")) {
+      throw new Error(
+        `${prov.label} needs a relay server, which this hosted site doesn't have. Either run the app locally (npm run dev has one built in), deploy the tiny Cloudflare Worker in proxy/ and paste its URL in Settings → Proxy base URL, or use the free Hugging Face engine (no relay needed).`,
+      );
     }
     const { glb } = await prov.generate(
       {

@@ -90,6 +90,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const s = st.current;
     if (!s) return;
+    // Dispose the replaced model's GPU buffers (geometry + its edge overlay) —
+    // otherwise every regeneration leaks VRAM until the tab slows down.
+    if (s.mesh) {
+      const prevEdges = s.mesh.children[0] as THREE.LineSegments | undefined;
+      (prevEdges?.geometry as THREE.BufferGeometry | undefined)?.dispose();
+      const em = prevEdges?.material as THREE.Material | THREE.Material[] | undefined;
+      if (Array.isArray(em)) em.forEach((m) => m.dispose());
+      else em?.dispose();
+      s.mesh.geometry.dispose();
+    }
     s.content.clear();
     s.mesh = null;
     if (!geometry) return;

@@ -11,12 +11,13 @@ export const PROVIDERS: ProviderDef[] = [
     label: "Hugging Face (free)",
     free: true,
     needsKey: false,
-    keyHint: "optional free hf_… token — lifts the daily quota + queue priority",
+    keyHint: "free hf_… token from huggingface.co/settings/tokens — strongly recommended (5× the anonymous daily GPU quota + queue priority)",
     viaProxy: false,
     generate: hfGenerate,
     models: [
-      { id: "tencent/Hunyuan3D-2::/generation_all", label: "Hunyuan3D-2 — image or text", image: true, text: true },
-      { id: "JeffreyXiang/TRELLIS::/image_to_3d", label: "TRELLIS — image (best geometry)", image: true, text: false },
+      { id: "stabilityai/stable-fast-3d", label: "Stable Fast 3D — image (fast & reliable, default)", image: true, text: false },
+      { id: "tencent/Hunyuan3D-2", label: "Hunyuan3D-2 — image or text (higher quality, slower)", image: true, text: true },
+      { id: "trellis-community/TRELLIS", label: "TRELLIS — image (best geometry, ~1 free call/day)", image: true, text: false },
     ],
   },
   {
@@ -65,7 +66,7 @@ export const PROVIDERS: ProviderDef[] = [
     generate: falGenerate,
     models: [
       { id: "fal-ai/hyper3d/rodin", label: "Rodin Gen-2 — image or text", image: true, text: true },
-      { id: "fal-ai/hunyuan3d/v2", label: "Hunyuan3D v2 — image", image: true, text: false },
+      { id: "fal-ai/hunyuan3d-v21", label: "Hunyuan3D 2.1 — image", image: true, text: false },
     ],
   },
 ];

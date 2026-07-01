@@ -6,8 +6,9 @@ export const ANTHROPIC_VERSION = "2023-06-01";
 export const API_URL = "https://api.anthropic.com/v1/messages";
 
 export const MODELS = [
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced, default)" },
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (highest quality)" },
+  { id: "claude-fable-5", label: "Claude Fable 5 (newest, most capable — default)" },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)" },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fastest)" },
 ];
 

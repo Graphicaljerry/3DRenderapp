@@ -35,6 +35,8 @@ jobs:
           # Must match the repository name so asset URLs resolve under Pages.
           BUILD_BASE: /3DRenderapp/
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true # auto-turn-on Pages (works once the repo is Pages-eligible)
       - uses: actions/upload-pages-artifact@v3
         with:
           path: moldable-lite/dist

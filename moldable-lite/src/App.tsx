@@ -230,17 +230,48 @@ export default function App() {
         setShowSettings(true);
         return;
       }
+
+      // Text-only request on an image-only model? Auto-switch to a text-capable
+      // model from the same provider instead of dead-ending the user in Settings.
+      let genModel = genEng.model;
+      let switchedTo: string | null = null;
+      if (!image && p && prov) {
+        const cur = prov.models.find((mm) => mm.id === genModel);
+        if (cur && !cur.text) {
+          const textModel = prov.models.find((mm) => mm.text);
+          if (textModel) {
+            genModel = textModel.id;
+            switchedTo = textModel.label;
+            saveGenSettings(providerKeys, prov.id, textModel.id, proxyBase); // keep Settings in sync
+          } else {
+            setMessages((m) => [
+              ...m,
+              {
+                id: mid(),
+                role: "assistant",
+                text: `${prov.label}'s models here are image-only. Upload a photo with 📎, or pick a text-capable engine in Settings → Mesh model — Hugging Face (Hunyuan3D-2), Meshy, Tripo and fal (Rodin) all do text → 3D.`,
+                error: true,
+              },
+            ]);
+            return;
+          }
+        }
+      }
+
       setInput("");
       setMessages((m) => [...m, { id: mid(), role: "user", text: p ? (image ? `🖼️ ${p}` : p) : "🖼️ (image)" }]);
       const ph = mid();
-      setMessages((m) => [...m, { id: ph, role: "assistant", text: "Preparing…", streaming: true }]);
+      setMessages((m) => [
+        ...m,
+        { id: ph, role: "assistant", text: switchedTo ? `Switched to ${switchedTo} — it supports text → 3D. Preparing…` : "Preparing…", streaming: true },
+      ]);
       setStatus("generating");
 
       genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase };
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
       try {
-        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, prompt: p || undefined, provider: genEng.provider, model: genEng.model });
+        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, prompt: p || undefined, provider: genEng.provider, model: genModel });
         const name = deriveName(p || "Photo model");
         const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? genEng.provider})`;
         applyResult(res, name, summary, p || "(image upload)");
@@ -594,7 +625,7 @@ function SettingsModal({
         <div className="sect-label">Precise CAD engine (Claude → replicad)</div>
         <label>Anthropic API key</label>
         <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
-        <label>Model</label>
+        <label>Claude model</label>
         <select value={m} onChange={(e) => setM(e.target.value)}>
           {MODELS.map((x) => (
             <option key={x.id} value={x.id}>{x.label}</option>
@@ -616,7 +647,7 @@ function SettingsModal({
             <option key={p.id} value={p.id}>{p.label}{p.free ? " · free" : ""}</option>
           ))}
         </select>
-        <label>Model</label>
+        <label>Mesh model — “image or text” models can generate from a text prompt alone</label>
         <select value={gm} onChange={(e) => setGm(e.target.value)}>
           {prov.models.map((mm) => (
             <option key={mm.id} value={mm.id}>{mm.label}</option>

@@ -75,6 +75,9 @@ function relayPlugin(): Plugin {
 }
 
 export default defineConfig({
+  // GitHub Pages serves the app under /<repo>/; the deploy workflow sets BUILD_BASE.
+  // Local dev / other hosts keep "/".
+  base: process.env.BUILD_BASE || "/",
   plugins: [react(), relayPlugin()],
   worker: { format: "es" },
   optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },

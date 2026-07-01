@@ -6,6 +6,9 @@ This document captures the **goals, intentions, scope, architecture, and roadmap
 It is the source of truth we revise as the project evolves. It is intentionally written to be
 readable by a non-expert — if a section gets too jargon-heavy, that's a bug.
 
+> 🔬 **Methods & tooling research** (libraries, providers, formats — all source-cited) lives in
+> [`docs/RESEARCH.md`](./RESEARCH.md), last refreshed 2026-06-19. Key findings are folded in below.
+
 ---
 
 ## 1. Vision & goals
@@ -57,8 +60,11 @@ The heart of the app is routing a request to the right generation engine.
 - The LLM (Claude by default) is prompted to output **replicad** code — JavaScript CAD built on
   **OpenCascade** (the same class of B-rep kernel real CAD apps use), running in the browser via
   WebAssembly (`opencascade.js`). **No server needed.**
-- The app executes that code in the browser and exports **STL/OBJ** (printing) **and STEP**
-  (real solid geometry → **fully editable in Shapr3D**, Fusion, FreeCAD…).
+- The app executes that code in the browser and exports **3MF + STL** (printing — 3MF carries
+  real units & color, so it's the preferred print format), **STEP** (real solid geometry →
+  **fully editable in Shapr3D**, Fusion, FreeCAD…), and **OBJ**. (Format rationale: RESEARCH.md §1.5.)
+- Rendering path (confirmed): replicad → `replicad-threejs-helper` (`mesh()` + `meshEdges()` →
+  faces + crisp CAD edges) → **three.js / react-three-fiber**, with the OCCT kernel in a Web Worker.
 - **Why replicad over OpenSCAD** (the original plan): OpenSCAD compiles only to meshes (STL) —
   it **cannot produce STEP**, so its output would never be Shapr3D-editable. Replicad gives the
   same "AI writes code → solid model" workflow *plus* B-rep output. The Shapr3D requirement
@@ -69,8 +75,11 @@ The heart of the app is routing a request to the right generation engine.
 - **Best for:** brackets, enclosures, holders, mounts, spacers, gears, jigs, replacement parts.
 
 ### Engine B — Generative mesh (text/image → 3D) — **Phase 2**
-- Calls a 3rd-party text-to-3D / image-to-3D API to get an organic mesh (`.glb`/`.obj`).
-- Candidate providers (BYO key, decide at build time): **Meshy, Tripo, Hunyuan3D, Trellis, Rodin.**
+- Calls a 3rd-party text-to-3D / image-to-3D API to get an organic mesh (`.glb`/`.stl`).
+- **Provider decision (2026-06-19, see RESEARCH.md §2): Meshy first** — uniquely ships free
+  *Analyze Printability* + *Repair Printability* endpoints plus direct STL/3MF, `auto_size` and a
+  flat-base option; **Tripo** second (cheaper, native multiview); **Rodin** premium for figurines.
+  Caveat: mesh APIs likely need a **thin proxy / Tauri shell** (CORS), unlike Anthropic's browser SDK.
 - The mesh is run through **printability cleanup** (make watertight/manifold, check wall
   thickness) before STL export.
 - **Best for:** figurines, characters, ornaments, sculptural/organic shapes; this is also the
@@ -170,11 +179,16 @@ refine by chatting → export **STL (print) / STEP (Shapr3D) / OBJ**.
 - [ ] Prompt design: replicad API reference + examples embedded so Claude reliably emits valid code.
 - [ ] replicad/`opencascade.js` integration: code → solid (in a **Web Worker** so the UI stays
       responsive).
-- [ ] **Self-healing compile loop:** on build error, auto-send the error to Claude for a fix
-      (1 retry), plus a "Fix it for me" button in the error state.
+- [ ] **Self-healing loop:** compile-error retry (feed spec + previous code + error back, cap ~3)
+      → render + **visual VLM check** (cap ~2) → **manifold/watertight gate before export**
+      (preview ≠ printable mesh), plus a "Fix it for me" button in the error state. (RESEARCH.md §1.2.)
 - [ ] 3D viewer (react-three-fiber) rendering the model.
-- [ ] **Export menu: STL · STEP · OBJ.** Verify a STEP file opens as an editable solid in Shapr3D
-      (this is the Phase 1 acceptance test).
+- [ ] **Export menu: STL · 3MF · STEP · OBJ** (3MF preferred for printing). Verify a STEP file
+      opens as an editable solid in Shapr3D (this is the Phase 1 acceptance test).
+- [ ] **Parameters panel:** expose the design's key dimensions as sliders / number inputs that
+      re-render instantly **with no AI call** (deterministic + cheap; RESEARCH.md §1.2).
+- [ ] **In-browser printability checks:** bed-fit (`Box3`), watertight/manifold (`manifold-3d`),
+      overhang (configurable angle), wall-thickness heuristic (`three-mesh-bvh`) → printability report.
 - [ ] Conversational refinement (keeps prior code as context).
 - [ ] **Design version history:** every model-changing turn snapshots the code; "revert to an
       earlier version" from the chat (iterations sometimes make things worse).
@@ -213,10 +227,19 @@ refine by chatting → export **STL (print) / STEP (Shapr3D) / OBJ**.
   wrapped with Tauri later without rewriting.
 - ~~OpenSCAD or replicad?~~ — **Resolved:** **replicad**, because Shapr3D-editability requires
   STEP and OpenSCAD can't produce it (see §3 Engine A).
-- **Which mesh provider** to integrate first in Phase 2 (Meshy vs Tripo vs Hunyuan3D…): decide
-  based on quality, price, and API friendliness at build time. *Data point: Krea AI's 3D tool
-  runs Hunyuan3D-2.1 in production (see `docs/inspiration/INSPIRATION.md`).*
-- **App name / branding** (working title: "3D Print AI Assistant").
+- ~~Which mesh provider~~ — **Resolved (2026-06-19): Meshy first** (free Analyze/Repair
+  Printability, STL/3MF, mature REST API), **Tripo** second, **Rodin** premium; see RESEARCH.md §2.
+  New open sub-item: mesh-provider **CORS** likely needs a proxy / Tauri shell — verify per provider.
+- **App name / branding** — *in active exploration; see [`NAMING.md`](./NAMING.md).* Working title
+  remains "3D Print AI Assistant." Finding: the 3D/AI/print namespace is heavily saturated — ~30+
+  candidates checked, nearly all taken in-space or with `.com`/`.ai` already registered. Cleanest
+  in-space shortlist: Billet · Moldable · Chamfer · Vorm · Maku (none with a clean domain). Direction
+  per discussion: a clever, "as-if-Apple-made-it," intuitive name spanning CAD-accurate ↔ artistic;
+  likely a coined/invented brandable chosen domain-first. Decision pending a naming brief.
+- **Architecture: standalone web app vs. plugin** — current lean is the **standalone local-first web
+  app** (per §4). Researched: a **Cura** plugin (Python) or **Fusion 360** add-in are feasible *later*
+  from the same portable core; **Shapr3D has no public SDK**, so its integration stays via **STEP
+  export** (already planned). Recommendation: web-app-first, optional plugins later. Decision pending.
 - **Units & defaults** for FDM: default wall thickness, etc.
 
 ---

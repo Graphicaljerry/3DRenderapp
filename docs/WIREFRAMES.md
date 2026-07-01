@@ -15,6 +15,10 @@ Figma, Excalidraw, or tldraw and sketch boxes for each item below. The goal is t
 > (`wireframe-sheet.html` is the editable source.) UI inspiration references live in
 > [`docs/inspiration/INSPIRATION.md`](inspiration/INSPIRATION.md).
 >
+> 🧩 **Built in Figma — Direction C set (2026-06-19):** all 20 screens/states below are wireframed
+> at mid-fidelity in the Figma file under **"WIREFRAMES — MOLDABLE · Direction C (Precision)"**
+> (this supersedes the first low-fi pass). Full list in *Figma frame inventory* below.
+>
 > **Desktop-first.** The split view assumes a laptop/desktop screen; mobile is out of scope for
 > now (3D modeling on a phone isn't the use case).
 
@@ -62,6 +66,27 @@ Open app ──► API key saved? ──► YES ──► Main Workspace (empty 
 
 The **main workspace is a two-pane split**: conversation on the left, live 3D model on the right.
 Everything else (settings, library, onboarding) is a secondary screen or modal.
+
+---
+
+## Figma frame inventory — Direction C set (2026-06-19)
+
+Mid-fidelity in **Direction C (Precision)** — tokens: ink `#15181E` · teal `#14B8A6` · orange
+`#FF6A2C` · Archivo/Inter (see `NAMING.md`). **Audit note:** an earlier batch error meant Library +
+Settings had silently *not* persisted — both are rebuilt here, and every state the app needs is now
+represented (20 frames). Several were added directly from `RESEARCH.md` (marked 🔬).
+
+**Onboarding & shell:** 1) Loading / CAD-kernel boot · 2) Key card (standalone) · 3) Key card
+(modal over dimmed workspace).
+**Workspace (P1 — the 80%):** 4) Empty state · 5) Main workspace (default) · 6) Generating
+(streaming + build spinner) · 7) Error + "Fix it for me" · 8) Code tab (replicad, read-only + Edit)
+· 9) Export menu (STL · 3MF · STEP · OBJ) · 10) Version history (restore) · 11) 🔬 Parameters panel
+(sliders, no-AI re-render) · 12) 🔬 Printability report (bed-fit / watertight / overhang / wall).
+**Library & settings (P1):** 13) Library grid · 14) Library empty · 15) Settings (Anthropic +
+Meshy/Tripo keys, model, printer defaults).
+**Feedback / modals:** 16) Confirm destructive · 17) Notifications (toasts & inline).
+**Phase 2 (generative):** 18) Image / sketch input (organic engine + 🔬 "add angle photos") ·
+19) 🔬 Mesh result + stats (validate & repair via Meshy) · 20) Engine routing toggle.
 
 ---
 

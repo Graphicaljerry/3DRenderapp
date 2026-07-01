@@ -1,9 +1,15 @@
-export type StoredEngineKind = "replicad" | "primitive";
+export type StoredEngineKind = "replicad" | "primitive" | "generative";
 
 export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   error?: boolean;
+}
+
+export interface GenSource {
+  provider: string;
+  model: string;
+  prompt?: string;
 }
 
 export interface Version {
@@ -14,6 +20,8 @@ export interface Version {
   code?: string; // replicad source at this snapshot
   spec?: unknown; // primitive spec at this snapshot
   dims?: { x: number; y: number; z: number };
+  glb?: Blob; // generative mesh at this snapshot (so it re-renders without re-calling the API)
+  genSource?: GenSource;
 }
 
 export interface Project {
@@ -24,6 +32,8 @@ export interface Project {
   engine: StoredEngineKind;
   code?: string; // HEAD replicad source
   spec?: unknown; // HEAD primitive spec
+  glb?: Blob; // HEAD generative mesh
+  genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest
 }

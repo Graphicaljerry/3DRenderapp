@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import type { ViewerHandle } from "./components/Viewer";
 import { selectEngine, type EngineSelection } from "./engine/selectEngine";
+import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { generate, MODELS, type ApiMsg } from "./llm/anthropic";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -11,38 +12,66 @@ import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD } from "./cad/example";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
+import { PROVIDERS, getProvider } from "./gen/registry";
+import { glbToGeometry } from "./gen/loadMesh";
 import { newProject, putProject } from "./store/projects";
 import { appendVersion, restoreVersion } from "./store/versions";
 import type { Project } from "./store/types";
 import { downloadBlob, safeFileName } from "./lib/download";
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean };
+export type Mode = "precise" | "generative";
 
 const KEY_LS = "moldable_key";
 const MODEL_LS = "moldable_model";
 const PRINTER_LS = "moldable_printer";
+const PKEYS_LS = "moldable_provider_keys";
+const PROXY_LS = "moldable_proxy";
+const GENENG_LS = "moldable_geneng";
 
 function loadPrinter(): PrinterDefaults {
   try {
     const raw = localStorage.getItem(PRINTER_LS);
     if (raw) return { ...DEFAULT_PRINTER, ...JSON.parse(raw) };
-  } catch {
-    /* ignore */
-  }
+  } catch {}
   return DEFAULT_PRINTER;
+}
+function loadProviderKeys(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(PKEYS_LS) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function loadGenEng(): { provider: string; model: string } {
+  try {
+    const raw = localStorage.getItem(GENENG_LS);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return { provider: "hf", model: PROVIDERS[0].models[0].id };
 }
 
 let msgSeq = 0;
 const mid = () => `m${++msgSeq}`;
+
+function sourceText(source: BuildInput): string {
+  if (source.kind === "code") return source.code;
+  if (source.kind === "spec") return JSON.stringify(source.spec, null, 2);
+  return JSON.stringify(source, null, 2);
+}
 
 export default function App() {
   const [key, setKey] = useState(() => localStorage.getItem(KEY_LS) ?? "");
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_LS) ?? MODELS[0].id);
   const [entered, setEntered] = useState(() => !!localStorage.getItem(KEY_LS));
   const [printer, setPrinter] = useState<PrinterDefaults>(loadPrinter);
+  const [providerKeys, setProviderKeys] = useState<Record<string, string>>(loadProviderKeys);
+  const [proxyBase, setProxyBase] = useState(() => localStorage.getItem(PROXY_LS) ?? "");
+  const [genEng, setGenEng] = useState(loadGenEng);
 
   const [sel, setSel] = useState<EngineSelection | null>(null);
   const [booting, setBooting] = useState(false);
+  const genEngine = useRef(new GenerativeEngine());
 
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -56,6 +85,9 @@ export default function App() {
   const [streamingText, setStreamingText] = useState("");
   const [codeBuffer, setCodeBuffer] = useState("");
 
+  const [mode, setMode] = useState<Mode>("precise");
+  const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
+
   const [tab, setTab] = useState<"3d" | "code" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
   const [input, setInput] = useState("");
@@ -63,18 +95,13 @@ export default function App() {
   const [showLibrary, setShowLibrary] = useState(false);
   const viewer = useRef<ViewerHandle>(null);
 
-  // ---- boot the CAD engine once we enter the workspace ----
   useEffect(() => {
     if (!entered || sel) return;
     let alive = true;
     setBooting(true);
     selectEngine()
-      .then((s) => {
-        if (alive) setSel(s);
-      })
-      .finally(() => {
-        if (alive) setBooting(false);
-      });
+      .then((s) => alive && setSel(s))
+      .finally(() => alive && setBooting(false));
     return () => {
       alive = false;
     };
@@ -84,7 +111,6 @@ export default function App() {
     setProject(next);
     void putProject(next);
   }
-
   function saveKey(k: string, m: string) {
     localStorage.setItem(KEY_LS, k.trim());
     localStorage.setItem(MODEL_LS, m);
@@ -93,26 +119,44 @@ export default function App() {
     setEntered(true);
     setShowSettings(false);
   }
-
   function savePrinter(p: PrinterDefaults) {
     localStorage.setItem(PRINTER_LS, JSON.stringify(p));
     setPrinter(p);
+  }
+  function saveGenSettings(keys: Record<string, string>, provider: string, gmodel: string, proxy: string) {
+    localStorage.setItem(PKEYS_LS, JSON.stringify(keys));
+    localStorage.setItem(GENENG_LS, JSON.stringify({ provider, model: gmodel }));
+    localStorage.setItem(PROXY_LS, proxy);
+    setProviderKeys(keys);
+    setGenEng({ provider, model: gmodel });
+    setProxyBase(proxy);
+  }
+
+  function pickImage(file: File) {
+    if (image) URL.revokeObjectURL(image.url);
+    setImage({ blob: file, url: URL.createObjectURL(file) });
+    setMode("generative");
+  }
+  function clearImage() {
+    if (image) URL.revokeObjectURL(image.url);
+    setImage(null);
+  }
+
+  function computeReport(geo: THREE.BufferGeometry): PrintabilityReport | null {
+    try {
+      return analyzePrintability(geo, { bed: printer.bed, overhangThresholdDeg: printer.overhangThresholdDeg });
+    } catch {
+      return null;
+    }
   }
 
   function applyResult(res: EngineResult, name: string, summary: string, promptText: string) {
     setResult(res);
     setGeometry(res.geometry);
     setDims(res.dims);
-    setCodeBuffer(res.source.kind === "code" ? res.source.code : JSON.stringify(res.source.spec, null, 2));
-    let rep: PrintabilityReport | null = null;
-    try {
-      rep = analyzePrintability(res.geometry, { bed: printer.bed, overhangThresholdDeg: printer.overhangThresholdDeg });
-    } catch {
-      rep = null;
-    }
-    setReport(rep);
+    setCodeBuffer(sourceText(res.source));
+    setReport(computeReport(res.geometry));
 
-    // snapshot + persist
     const base = project ?? newProject(name, res.kind);
     const named = base.versions.length === 0 && name ? { ...base, name } : base;
     const snap = appendVersion(named, {
@@ -121,20 +165,73 @@ export default function App() {
       code: res.source.kind === "code" ? res.source.code : undefined,
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
+      glb: res.glb,
+      genSource: res.source.kind === "gen" ? { provider: res.source.provider, model: res.source.model, prompt: res.source.prompt } : undefined,
     });
-    snap.chat = [...messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error })),
-      { role: "user", text: promptText }];
+    snap.chat = [
+      ...messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error })),
+      { role: "user", text: promptText },
+    ];
     persist(snap);
   }
 
+  function applyResultNoCommit(res: EngineResult) {
+    setResult(res);
+    setGeometry(res.geometry);
+    setDims(res.dims);
+    setCodeBuffer(sourceText(res.source));
+    setReport(computeReport(res.geometry));
+  }
+
+  async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>) {
+    const { geometry: g, dims: d } = await glbToGeometry(glb);
+    applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
+  }
+
+  // ---------------- generate ----------------
   async function send(promptText: string) {
     const p = promptText.trim();
-    if (!p || status === "generating") return;
+    if (status === "generating") return;
+    const useGen = mode === "generative" || !!image;
+
+    if (useGen) {
+      if (!p && !image) return;
+      const prov = getProvider(genEng.provider);
+      if (prov?.needsKey && !providerKeys[prov.id]) {
+        setShowSettings(true);
+        return;
+      }
+      setInput("");
+      setMessages((m) => [...m, { id: mid(), role: "user", text: p ? (image ? `🖼️ ${p}` : p) : "🖼️ (image)" }]);
+      const ph = mid();
+      setMessages((m) => [...m, { id: ph, role: "assistant", text: "Preparing…", streaming: true }]);
+      setStatus("generating");
+
+      genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase };
+      genEngine.current.onProgress = (pr) =>
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
+      try {
+        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, prompt: p || undefined, provider: genEng.provider, model: genEng.model });
+        const name = deriveName(p || "Photo model");
+        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? genEng.provider})`;
+        applyResult(res, name, summary, p || "(image upload)");
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary, streaming: false } : x)));
+        clearImage();
+      } catch (err: any) {
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: "⚠ " + String(err?.message ?? err), error: true, streaming: false } : x)));
+      } finally {
+        setStatus("idle");
+      }
+      return;
+    }
+
+    // ---- precise (Claude -> replicad/primitive) ----
+    if (!p) return;
     if (!key) {
       setShowSettings(true);
       return;
     }
-    if (!sel) return; // still booting
+    if (!sel) return;
 
     const kind = sel.kind;
     setInput("");
@@ -151,24 +248,21 @@ export default function App() {
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await generate(
-          { apiKey: key, model, system, messages: history },
-          { onToken: (_t, full) => setStreamingText(full) },
-        );
+        const raw = await generate({ apiKey: key, model, system, messages: history }, { onToken: (_t, full) => setStreamingText(full) });
         finalRaw = raw;
         try {
-          let input: BuildInput;
+          let bi: BuildInput;
           let name = "";
           let summary = "";
           if (kind === "replicad") {
-            input = { kind: "code", code: extractJsBlock(raw) };
+            bi = { kind: "code", code: extractJsBlock(raw) };
           } else {
             const spec = parseSpec(extractJsonObject(raw));
-            input = { kind: "spec", spec };
+            bi = { kind: "spec", spec };
             name = spec.name;
             summary = spec.summary ?? spec.name;
           }
-          const res = await sel.engine.build(input);
+          const res = await sel.engine.build(bi);
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           applyResult(res, name, summary, p);
@@ -180,20 +274,13 @@ export default function App() {
           history = [
             ...history,
             { role: "assistant", content: raw },
-            {
-              role: "user",
-              content: kind === "replicad" ? replicadRepairMessage(err) : jsonRepairMessage(String(err?.message ?? err)),
-            },
+            { role: "user", content: kind === "replicad" ? replicadRepairMessage(err) : jsonRepairMessage(String(err?.message ?? err)) },
           ];
-          setMessages((m) =>
-            m.map((x) => (x.id === placeholderId ? { ...x, text: `Attempt ${attempt} didn't build — retrying…`, streaming: true } : x)),
-          );
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `Attempt ${attempt} didn't build — retrying…`, streaming: true } : x)));
         }
       }
     } catch (err: any) {
-      setMessages((m) =>
-        m.map((x) => (x.id === placeholderId ? { ...x, text: "⚠ " + String(err?.message ?? err), error: true, streaming: false } : x)),
-      );
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "⚠ " + String(err?.message ?? err), error: true, streaming: false } : x)));
     } finally {
       if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }];
       setStatus("idle");
@@ -206,9 +293,9 @@ export default function App() {
     setStatus("generating");
     try {
       const kind = sel.kind;
-      const input: BuildInput = kind === "replicad" ? { kind: "code", code: edited } : { kind: "spec", spec: parseSpec(edited) };
-      const res = await sel.engine.build(input);
-      applyResult(res, project?.name ?? deriveName("Edited part"), `Manual edit — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, "(manual code edit)");
+      const bi: BuildInput = kind === "replicad" ? { kind: "code", code: edited } : { kind: "spec", spec: parseSpec(edited) };
+      const res = await sel.engine.build(bi);
+      applyResult(res, project?.name ?? deriveName("Edited part"), `Manual edit — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, "(manual edit)");
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Re-ran your edited " + (kind === "replicad" ? "code" : "spec") + "." }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ " + String(err?.message ?? err), error: true }]);
@@ -219,7 +306,6 @@ export default function App() {
 
   async function loadExample() {
     setEntered(true);
-    // wait for the engine if it's still booting
     let s = sel;
     if (!s) {
       setBooting(true);
@@ -228,8 +314,8 @@ export default function App() {
       setBooting(false);
     }
     try {
-      const input: BuildInput = s.kind === "replicad" ? { kind: "code", code: EXAMPLE_REPLICAD } : { kind: "spec", spec: EXAMPLE_SPEC };
-      const res = await s.engine.build(input);
+      const bi: BuildInput = s.kind === "replicad" ? { kind: "code", code: EXAMPLE_REPLICAD } : { kind: "spec", spec: EXAMPLE_SPEC };
+      const res = await s.engine.build(bi);
       applyResult(res, "Example L-bracket", EXAMPLE_SPEC.summary ?? "Example model.", "Show me the example");
       setMessages([{ id: mid(), role: "assistant", text: EXAMPLE_SPEC.summary ?? "Loaded the example L-bracket." }]);
     } catch (err: any) {
@@ -238,9 +324,11 @@ export default function App() {
   }
 
   async function exportAs(format: ExportFormat) {
-    if (!sel || !result) return;
+    if (!result) return;
+    const engine = result.kind === "generative" ? genEngine.current : sel?.engine;
+    if (!engine) return;
     try {
-      const blob = await sel.engine.export(result, format);
+      const blob = await engine.export(result, format);
       downloadBlob(blob, safeFileName(project?.name ?? "model", format));
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Export failed: " + String(err?.message ?? err), error: true }]);
@@ -248,29 +336,19 @@ export default function App() {
   }
 
   async function restoreTo(versionId: string) {
-    if (!project || !sel) return;
+    if (!project) return;
     const next = restoreVersion(project, versionId);
     persist(next);
     try {
-      const input: BuildInput =
-        next.engine === "replicad" ? { kind: "code", code: next.code ?? "" } : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
-      const res = await sel.engine.build(input);
-      applyResultNoCommit(res);
+      if (next.engine === "generative" && next.glb) {
+        await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
+      } else if (sel) {
+        const bi: BuildInput = next.engine === "replicad" ? { kind: "code", code: next.code ?? "" } : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
+        applyResultNoCommit(await sel.engine.build(bi));
+      }
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restored an earlier version." }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
-    }
-  }
-
-  function applyResultNoCommit(res: EngineResult) {
-    setResult(res);
-    setGeometry(res.geometry);
-    setDims(res.dims);
-    setCodeBuffer(res.source.kind === "code" ? res.source.code : JSON.stringify(res.source.spec, null, 2));
-    try {
-      setReport(analyzePrintability(res.geometry, { bed: printer.bed, overhangThresholdDeg: printer.overhangThresholdDeg }));
-    } catch {
-      setReport(null);
     }
   }
 
@@ -279,12 +357,13 @@ export default function App() {
     setProject(p);
     setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error })));
     apiHistory.current = [];
-    if (!sel) return;
     try {
-      const input: BuildInput =
-        p.engine === "replicad" ? { kind: "code", code: p.code ?? "" } : { kind: "spec", spec: parseSpec(JSON.stringify(p.spec)) };
-      const res = await sel.engine.build(input);
-      applyResultNoCommit(res);
+      if (p.engine === "generative" && p.glb) {
+        await showFromGlb(p.glb, { kind: "gen", provider: p.genSource?.provider ?? "", model: p.genSource?.model ?? "", prompt: p.genSource?.prompt });
+      } else if (sel) {
+        const bi: BuildInput = p.engine === "replicad" ? { kind: "code", code: p.code ?? "" } : { kind: "spec", spec: parseSpec(JSON.stringify(p.spec)) };
+        applyResultNoCommit(await sel.engine.build(bi));
+      }
     } catch {
       /* leave viewer empty if HEAD doesn't rebuild */
     }
@@ -299,10 +378,11 @@ export default function App() {
     setDims(null);
     setReport(null);
     setCodeBuffer("");
+    clearImage();
     setShowLibrary(false);
   }
 
-  const specJson = useMemo(() => codeBuffer, [codeBuffer]);
+  const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");
 
   if (!entered) {
     return <KeyCard model={model} onContinue={saveKey} onExample={loadExample} />;
@@ -312,11 +392,17 @@ export default function App() {
     <>
       <Workspace
         projectName={project?.name ?? "Untitled part"}
-        engineKind={sel?.kind ?? "primitive"}
+        activeKind={activeKind}
+        genLabel={getProvider(genEng.provider)?.label ?? genEng.provider}
         fellBack={sel?.fellBack ?? false}
         bootError={sel?.bootError}
-        booting={booting || !sel}
+        booting={booting || (!sel && mode === "precise")}
         keyPresent={!!key}
+        mode={mode}
+        setMode={setMode}
+        imageUrl={image?.url ?? null}
+        onPickImage={pickImage}
+        onClearImage={clearImage}
         messages={messages}
         status={status}
         input={input}
@@ -331,13 +417,13 @@ export default function App() {
         viewerRef={viewer}
         tab={tab}
         setTab={setTab}
-        codeText={specJson}
+        codeText={codeBuffer}
         streamingText={streamingText}
         onRerun={rerun}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         supportsStep={result?.supportsStep ?? false}
-        canExport={(f) => sel?.engine.canExport(f) ?? false}
+        canExport={(f) => (result?.kind === "generative" ? genEngine.current.canExport(f) : sel?.engine.canExport(f) ?? false)}
         onExport={exportAs}
         onOpenSettings={() => setShowSettings(true)}
         onOpenLibrary={() => setShowLibrary(true)}
@@ -348,8 +434,13 @@ export default function App() {
           initialKey={key}
           initialModel={model}
           printer={printer}
+          providerKeys={providerKeys}
+          genProvider={genEng.provider}
+          genModel={genEng.model}
+          proxyBase={proxyBase}
           onSaveKey={saveKey}
           onSavePrinter={savePrinter}
+          onSaveGen={saveGenSettings}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -362,8 +453,6 @@ function deriveName(prompt: string): string {
   const s = prompt.replace(/\s+/g, " ").trim();
   return s.length > 42 ? s.slice(0, 42) + "…" : s || "Untitled part";
 }
-
-// ---------------- gate + settings (small, inline) ----------------
 
 function CubeMark({ size = 22 }: { size?: number }) {
   return (
@@ -385,8 +474,8 @@ function KeyCard({ model, onContinue, onExample }: { model: string; onContinue: 
           <CubeMark />
           <span className="wordmark">Moldable</span>
         </div>
-        <h1>Turn a description into a 3D-printable model.</h1>
-        <label>Anthropic API key</label>
+        <h1>Turn a description — or a photo — into a 3D-printable model.</h1>
+        <label>Anthropic API key (for the Precise CAD engine)</label>
         <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
         <label>Model</label>
         <select value={m} onChange={(e) => setM(e.target.value)}>
@@ -395,7 +484,7 @@ function KeyCard({ model, onContinue, onExample }: { model: string; onContinue: 
           ))}
         </select>
         <button className="primary block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue</button>
-        <p className="fine">No account. Your key stays in this browser, sent only to Anthropic.</p>
+        <p className="fine">No account. Keys stay in this browser. Image→3D engines are set up later in Settings (free Hugging Face works with no key).</p>
         <button className="link" onClick={onExample}>Try the built-in example first — zero API spend →</button>
       </div>
     </div>
@@ -406,21 +495,37 @@ function SettingsModal({
   initialKey,
   initialModel,
   printer,
+  providerKeys,
+  genProvider,
+  genModel,
+  proxyBase,
   onSaveKey,
   onSavePrinter,
+  onSaveGen,
   onClose,
 }: {
   initialKey: string;
   initialModel: string;
   printer: PrinterDefaults;
+  providerKeys: Record<string, string>;
+  genProvider: string;
+  genModel: string;
+  proxyBase: string;
   onSaveKey: (k: string, m: string) => void;
   onSavePrinter: (p: PrinterDefaults) => void;
+  onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
   onClose: () => void;
 }) {
   const [k, setK] = useState(initialKey);
   const [m, setM] = useState(initialModel);
   const [bed, setBed] = useState(printer.bed);
   const [oh, setOh] = useState(printer.overhangThresholdDeg);
+  const [keys, setKeys] = useState<Record<string, string>>(providerKeys);
+  const [gp, setGp] = useState(genProvider);
+  const [gm, setGm] = useState(genModel);
+  const [proxy, setProxy] = useState(proxyBase);
+  const prov = getProvider(gp) ?? PROVIDERS[0];
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="card" onClick={(e) => e.stopPropagation()}>
@@ -428,6 +533,8 @@ function SettingsModal({
           <h2>Settings</h2>
           <button className="x" onClick={onClose}>✕</button>
         </div>
+
+        <div className="sect-label">Precise CAD engine (Claude → replicad)</div>
         <label>Anthropic API key</label>
         <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
         <label>Model</label>
@@ -437,6 +544,42 @@ function SettingsModal({
           ))}
         </select>
         <button className="primary block" onClick={() => onSaveKey(k, m)}>Save key & model</button>
+
+        <div className="sect-label">Generative 3D engine (photo / text → mesh)</div>
+        <label>Engine</label>
+        <select
+          value={gp}
+          onChange={(e) => {
+            const np = e.target.value;
+            setGp(np);
+            setGm(getProvider(np)?.models[0].id ?? "");
+          }}
+        >
+          {PROVIDERS.map((p) => (
+            <option key={p.id} value={p.id}>{p.label}{p.free ? " · free" : ""}</option>
+          ))}
+        </select>
+        <label>Model</label>
+        <select value={gm} onChange={(e) => setGm(e.target.value)}>
+          {prov.models.map((mm) => (
+            <option key={mm.id} value={mm.id}>{mm.label}</option>
+          ))}
+        </select>
+        <p className="fine">{prov.needsKey ? `Needs a key — ${prov.keyHint}` : `Free — ${prov.keyHint}`}</p>
+        {PROVIDERS.filter((p) => p.needsKey || p.id === "hf").map((p) => (
+          <div key={p.id}>
+            <label>{p.label} key{p.needsKey ? "" : " (optional)"}</label>
+            <input
+              type="password"
+              value={keys[p.id] ?? ""}
+              onChange={(e) => setKeys({ ...keys, [p.id]: e.target.value })}
+              placeholder={p.keyHint}
+            />
+          </div>
+        ))}
+        <label>Proxy base URL (advanced — leave blank to use the local dev relay)</label>
+        <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = http://localhost:5173 relay" />
+        <button className="primary block" onClick={() => onSaveGen(keys, gp, gm, proxy.trim())}>Save generative settings</button>
 
         <div className="sect-label">Printer defaults</div>
         <label>Bed size (mm): W × D × H</label>
@@ -448,7 +591,7 @@ function SettingsModal({
         <label>Overhang warning threshold (°)</label>
         <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
         <button className="ghost block" onClick={() => onSavePrinter({ bed, overhangThresholdDeg: oh })}>Save printer defaults</button>
-        <p className="fine">Stored only in this browser.</p>
+        <p className="fine">Everything is stored only in this browser.</p>
       </div>
     </div>
   );

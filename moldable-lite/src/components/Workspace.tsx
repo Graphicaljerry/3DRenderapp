@@ -1,6 +1,6 @@
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Viewer, type ViewerHandle } from "./Viewer";
-import type { ChatMessage } from "../App";
+import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat } from "../engine/types";
@@ -9,7 +9,7 @@ import type * as THREE from "three";
 const SUGGESTIONS = [
   "a 60×40 mm bracket, 4 mm thick, with two 4 mm holes",
   "a phone stand angled at 60 degrees",
-  "a 22 mm broom-handle wall mount",
+  "a low-poly fox figurine",
 ];
 
 const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
@@ -21,11 +21,17 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
 
 interface Props {
   projectName: string;
-  engineKind: EngineKind;
+  activeKind: EngineKind;
+  genLabel: string;
   fellBack: boolean;
   bootError?: string;
   booting: boolean;
   keyPresent: boolean;
+  mode: Mode;
+  setMode: (m: Mode) => void;
+  imageUrl: string | null;
+  onPickImage: (f: File) => void;
+  onClearImage: () => void;
   messages: ChatMessage[];
   status: "idle" | "generating";
   input: string;
@@ -54,20 +60,30 @@ interface Props {
 }
 
 export function Workspace(p: Props) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [dragOver, setDragOver] = useState(false);
+
+  const enginePill =
+    p.activeKind === "replicad" ? "Engine · replicad" : p.activeKind === "generative" ? `Engine · ${p.genLabel}` : "Engine · primitive";
+
+  function onDrop(e: React.DragEvent) {
+    e.preventDefault();
+    setDragOver(false);
+    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
+    if (f) p.onPickImage(f);
+  }
+
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
           <CubeMark />
           <span className="wordmark">Moldable</span>
-          <span className="lite">lite</span>
           <span className="sep">/</span>
           <span className="project">{p.projectName}</span>
         </div>
         <div className="topbar-right">
-          <span className={`pill ${p.engineKind === "replicad" ? "" : "pill-warn"}`}>
-            {p.engineKind === "replicad" ? "Engine · replicad" : "Engine · primitive"}
-          </span>
+          <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
           <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
           <button className="ghost" onClick={p.onOpenSettings}>{p.keyPresent ? "Settings" : "Add key"}</button>
           <button className="primary sm" onClick={p.onNew}>+ New</button>
@@ -76,28 +92,76 @@ export function Workspace(p: Props) {
 
       {p.fellBack && (
         <div className="banner">
-          3D kernel unavailable — running the simple <b>primitive</b> engine. STEP export is disabled.
+          3D CAD kernel unavailable — Precise mode is using the simple <b>primitive</b> engine (STEP export off).
           {p.bootError ? <span className="banner-detail"> ({p.bootError})</span> : null}
         </div>
       )}
 
       <main className="split">
-        <section className="chat">
-          <Messages messages={p.messages} status={p.status} onChip={p.onSend} onExample={p.onExample} />
-          <form
-            className="composer"
-            onSubmit={(e) => {
-              e.preventDefault();
-              p.onSend(p.input);
-            }}
-          >
-            <input
-              value={p.input}
-              onChange={(e) => p.setInput(e.target.value)}
-              placeholder={p.keyPresent ? "Describe a part, or a change…" : "Add your API key to start…"}
-            />
-            <button type="submit" className="send" disabled={p.status === "generating"}>↑</button>
-          </form>
+        <section
+          className={`chat ${dragOver ? "drop" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
+        >
+          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} />
+
+          <div className="composer-wrap">
+            <div className="modebar">
+              <div className="seg">
+                <button className={p.mode === "precise" ? "on" : ""} onClick={() => p.setMode("precise")}>Precise (CAD)</button>
+                <button className={p.mode === "generative" ? "on" : ""} onClick={() => p.setMode("generative")}>Generative (AI mesh)</button>
+              </div>
+              <span className="modehint">
+                {p.mode === "precise" ? "Exact parts from text · STEP export" : "Whole/organic objects from a photo or text"}
+              </span>
+            </div>
+
+            {p.imageUrl && (
+              <div className="imgchip">
+                <img src={p.imageUrl} alt="reference" />
+                <span>reference image</span>
+                <button onClick={p.onClearImage}>✕</button>
+              </div>
+            )}
+
+            <form
+              className="composer"
+              onSubmit={(e) => {
+                e.preventDefault();
+                p.onSend(p.input);
+              }}
+            >
+              <button
+                type="button"
+                className="attach"
+                title="Upload a photo → 3D"
+                onClick={() => fileRef.current?.click()}
+              >
+                📎
+              </button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) p.onPickImage(f);
+                  e.currentTarget.value = "";
+                }}
+              />
+              <input
+                value={p.input}
+                onChange={(e) => p.setInput(e.target.value)}
+                placeholder={p.mode === "generative" ? "Describe it, or just upload a photo…" : "Describe a part, or a change…"}
+              />
+              <button type="submit" className="send" disabled={p.status === "generating"}>↑</button>
+            </form>
+          </div>
         </section>
 
         <section className="viewer">
@@ -105,7 +169,7 @@ export function Workspace(p: Props) {
             <div className="tabs">
               {(["3d", "code", "print", "history"] as const).map((t) => (
                 <button key={t} className={p.tab === t ? "on" : ""} onClick={() => p.setTab(t)}>
-                  {t === "3d" ? "3D View" : t === "code" ? "Code" : t === "print" ? "Printability" : "History"}
+                  {t === "3d" ? "3D View" : t === "code" ? "Source" : t === "print" ? "Printability" : "History"}
                 </button>
               ))}
             </div>
@@ -120,10 +184,18 @@ export function Workspace(p: Props) {
           <div className="viewer-body">
             <div style={{ display: p.tab === "3d" ? "block" : "none", height: "100%" }}>
               <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} />
-              {p.booting && <div className="viewer-overlay"><Spinner /> Starting the CAD engine…<br /><small>loading OpenCascade (WASM)</small></div>}
-              {!p.booting && !p.geometry && <div className="viewer-overlay muted">Describe something to see it here.</div>}
+              {p.booting && (
+                <div className="viewer-overlay">
+                  <Spinner /> Starting the CAD engine…
+                  <br />
+                  <small>loading OpenCascade (WASM)</small>
+                </div>
+              )}
+              {!p.booting && !p.geometry && <div className="viewer-overlay muted">Describe something or drop a photo to see it here.</div>}
             </div>
-            {p.tab === "code" && <CodePanel engineKind={p.engineKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />}
+            {p.tab === "code" && (
+              <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
+            )}
             {p.tab === "print" && <PrintabilityPanel report={p.report} />}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -143,12 +215,13 @@ export function Workspace(p: Props) {
   );
 }
 
-function Messages({ messages, status, onChip, onExample }: { messages: ChatMessage[]; status: string; onChip: (s: string) => void; onExample: () => void }) {
+function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; onChip: (s: string) => void; onExample: () => void }) {
   return (
     <div className="messages">
       {messages.length === 0 && (
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
+          <p className="empty-sub">Type a description, or drop a photo (📎) to turn it into a 3D model.</p>
           <div className="chips">
             {SUGGESTIONS.map((s) => (
               <button key={s} className="chip" onClick={() => onChip(s)}>{s}</button>
@@ -167,25 +240,21 @@ function Messages({ messages, status, onChip, onExample }: { messages: ChatMessa
   );
 }
 
-function CodePanel({ engineKind, codeText, streamingText, generating, onRerun }: { engineKind: EngineKind; codeText: string; streamingText: string; generating: boolean; onRerun: (s: string) => void }) {
+function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }: { activeKind: EngineKind; codeText: string; streamingText: string; generating: boolean; onRerun: (s: string) => void }) {
   const [buf, setBuf] = useState(codeText);
-  useEffect(() => {
-    setBuf(codeText);
-  }, [codeText]);
+  useEffect(() => setBuf(codeText), [codeText]);
   const shown = generating && streamingText ? streamingText : buf;
+  const canRerun = activeKind === "replicad" || activeKind === "primitive";
+  const label = activeKind === "replicad" ? "replicad (JavaScript)" : activeKind === "generative" ? "generative source (read-only)" : "primitive spec (JSON)";
   return (
     <div className="code-panel">
       <div className="code-head">
-        <span>{engineKind === "replicad" ? "replicad (JavaScript)" : "primitive spec (JSON)"}</span>
-        <button className="primary sm" disabled={generating} onClick={() => onRerun(buf)}>Re-run</button>
+        <span>{label}</span>
+        {canRerun && (
+          <button className="primary sm" disabled={generating} onClick={() => onRerun(buf)}>Re-run</button>
+        )}
       </div>
-      <textarea
-        className="code"
-        spellCheck={false}
-        value={shown}
-        readOnly={generating}
-        onChange={(e) => setBuf(e.target.value)}
-      />
+      <textarea className="code" spellCheck={false} value={shown} readOnly={generating || !canRerun} onChange={(e) => setBuf(e.target.value)} />
     </div>
   );
 }
@@ -214,7 +283,7 @@ function PrintabilityPanel({ report }: { report: PrintabilityReport | null }) {
           ))}
         </ul>
       )}
-      <p className="fine">Wall/overhang are best-effort heuristics (FDM, ~0.4 mm nozzle). Bed-fit &amp; watertight are exact for this mesh.</p>
+      <p className="fine">Generated meshes are often not watertight — that's expected. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
     </div>
   );
 }
@@ -251,17 +320,9 @@ function ExportMenu({ supportsStep, canExport, onExport, disabled }: { supportsS
           {EXPORT_FORMATS.map(({ f, label, desc }) => {
             const enabled = canExport(f) && !(f === "step" && !supportsStep);
             return (
-              <button
-                key={f}
-                className="export-item"
-                disabled={!enabled}
-                onClick={() => {
-                  setOpen(false);
-                  onExport(f);
-                }}
-              >
+              <button key={f} className="export-item" disabled={!enabled} onClick={() => { setOpen(false); onExport(f); }}>
                 <span className="ef">{label}</span>
-                <span className="ed">{f === "step" && !supportsStep ? "needs replicad engine" : desc}</span>
+                <span className="ed">{f === "step" && !supportsStep ? "needs the Precise engine" : desc}</span>
               </button>
             );
           })}

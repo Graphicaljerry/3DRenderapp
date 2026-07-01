@@ -1,13 +1,15 @@
 import type * as THREE from "three";
 import type { ModelSpec } from "../cad/spec";
 
-export type EngineKind = "replicad" | "primitive";
+export type EngineKind = "replicad" | "primitive" | "generative";
 export type ExportFormat = "stl" | "3mf" | "step" | "obj";
 
-// What the LLM produced and we hand the engine to build.
+// What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
+// generative-mesh request (photo and/or text) routed to a 3D provider.
 export type BuildInput =
   | { kind: "code"; code: string }
-  | { kind: "spec"; spec: ModelSpec };
+  | { kind: "spec"; spec: ModelSpec }
+  | { kind: "gen"; image?: Blob; prompt?: string; provider: string; model: string };
 
 export interface EngineResult {
   kind: EngineKind;
@@ -15,6 +17,7 @@ export interface EngineResult {
   dims: { x: number; y: number; z: number };
   source: BuildInput;
   supportsStep: boolean;
+  glb?: Blob; // present for generative results (for persistence + re-render)
 }
 
 export interface Engine {

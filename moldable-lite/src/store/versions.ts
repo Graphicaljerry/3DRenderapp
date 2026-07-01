@@ -1,4 +1,4 @@
-import type { Project, Version, StoredEngineKind } from "./types";
+import type { Project, Version, StoredEngineKind, GenSource } from "./types";
 import { uid } from "../lib/id";
 
 export interface Snapshot {
@@ -7,6 +7,8 @@ export interface Snapshot {
   code?: string;
   spec?: unknown;
   dims?: { x: number; y: number; z: number };
+  glb?: Blob;
+  genSource?: GenSource;
 }
 
 /** Append a version capturing the new state AND advance HEAD to match. Pure. */
@@ -19,12 +21,16 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     code: snap.code,
     spec: snap.spec,
     dims: snap.dims,
+    glb: snap.glb,
+    genSource: snap.genSource,
   };
   return {
     ...project,
     engine: snap.engine,
     code: snap.code,
     spec: snap.spec,
+    glb: snap.glb,
+    genSource: snap.genSource,
     updatedAt: Date.now(),
     versions: [...project.versions, v],
   };
@@ -42,12 +48,16 @@ export function restoreVersion(project: Project, versionId: string): Project {
     code: t.code,
     spec: t.spec,
     dims: t.dims,
+    glb: t.glb,
+    genSource: t.genSource,
   };
   return {
     ...project,
     engine: t.engine,
     code: t.code,
     spec: t.spec,
+    glb: t.glb,
+    genSource: t.genSource,
     updatedAt: Date.now(),
     versions: [...project.versions, v],
   };

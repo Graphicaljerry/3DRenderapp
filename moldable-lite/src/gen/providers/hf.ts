@@ -1,10 +1,11 @@
-import { Client, handle_file } from "@gradio/client";
 import type { GenFn } from "../types";
 import { fetchAsBlob, findUrlDeep } from "../util";
 
 // model id = "<space>::<endpoint>", e.g. "tencent/Hunyuan3D-2::/generation_all"
 export const hfGenerate: GenFn = async (input, onProgress) => {
   if (!input.image && !input.prompt) throw new Error("Provide an image or a prompt.");
+  // Loaded on demand so the (large) gradio client never blocks app startup.
+  const { Client, handle_file } = await import("@gradio/client");
   const [space, endpoint] = input.model.split("::");
   onProgress({ status: "connecting to Hugging Face…" });
   const app = await Client.connect(space, input.apiKey ? ({ hf_token: input.apiKey } as any) : {});

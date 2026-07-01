@@ -45,6 +45,23 @@ export async function poll<T>(
   }
 }
 
+/** Reject with a clear message if `promise` doesn't settle within `ms`. */
+export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s.`)), ms);
+    promise.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
 export function authHeaders(scheme: "Bearer" | "Key" | "x-api-key", key: string): Record<string, string> {
   if (scheme === "x-api-key") return { "x-api-key": key, "content-type": "application/json" };
   return { authorization: `${scheme} ${key}`, "content-type": "application/json" };

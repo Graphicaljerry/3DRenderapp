@@ -21,6 +21,8 @@ const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
 
 // ---- Compile untrusted LLM code at global scope; shadow ambient globals. ----
 function runToShape(code: string): any {
+  // Do NOT pre-declare `main` — the user's code defines `function main(...)`, and a
+  // `let main` here collides ("Identifier 'main' has already been declared").
   const factory = new Function(
     "replicad",
     "self",
@@ -29,13 +31,13 @@ function runToShape(code: string): any {
     "fetch",
     "importScripts",
     "XMLHttpRequest",
-    `"use strict"; let main; ${code}; return main;`,
+    `"use strict";\n${code}\n;\nreturn (typeof main !== "undefined") ? main : undefined;`,
   );
-  const main = factory(Object.freeze({ ...replicad }), undefined, undefined, undefined, undefined, undefined, undefined);
-  if (typeof main !== "function") {
+  const mainFn = factory(Object.freeze({ ...replicad }), undefined, undefined, undefined, undefined, undefined, undefined);
+  if (typeof mainFn !== "function") {
     throw new Error("Your code must define `function main(replicad, params) { ... }` returning a Shape.");
   }
-  const out = main(Object.freeze({ ...replicad }), {});
+  const out = mainFn(Object.freeze({ ...replicad }), {});
   const shape = out?.shape ?? out;
   if (!shape || typeof shape.mesh !== "function") {
     throw new Error("main() must return a replicad Shape (a Solid).");

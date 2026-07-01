@@ -1,5 +1,5 @@
 import type { GenFn } from "../types";
-import { fetchAsBlob, findUrlDeep } from "../util";
+import { fetchAsBlob, findUrlDeep, withTimeout } from "../util";
 
 // model id = "<space>::<endpoint>", e.g. "tencent/Hunyuan3D-2::/generation_all"
 export const hfGenerate: GenFn = async (input, onProgress) => {
@@ -8,7 +8,11 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   const { Client, handle_file } = await import("@gradio/client");
   const [space, endpoint] = input.model.split("::");
   onProgress({ status: "connecting to Hugging Face…" });
-  const app = await Client.connect(space, input.apiKey ? ({ hf_token: input.apiKey } as any) : {});
+  const app = await withTimeout(
+    Client.connect(space, input.apiKey ? ({ hf_token: input.apiKey } as any) : {}),
+    45_000,
+    "Connecting to the Hugging Face Space (it may be asleep or blocked by CORS)",
+  );
   onProgress({ status: "generating (Hugging Face, ~30–120s)…" });
 
   const payload: any[] = [];
@@ -17,7 +21,7 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
 
   let result: any;
   try {
-    result = await app.predict(endpoint || "/generation_all", payload);
+    result = await withTimeout(app.predict(endpoint || "/generation_all", payload), 180_000, "Hugging Face generation");
   } catch (e) {
     throw new Error(
       "Hugging Face Space call failed — its API shape may differ from the default. " +

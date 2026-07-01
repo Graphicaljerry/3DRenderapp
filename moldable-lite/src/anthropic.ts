@@ -47,7 +47,7 @@ export async function generateSpecText(key: string, model: string, messages: Api
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     },
-    body: JSON.stringify({ model, max_tokens: 2000, temperature: 0, system: SYSTEM_PROMPT, messages }),
+    body: JSON.stringify({ model, max_tokens: 2000, system: SYSTEM_PROMPT, messages }),
   });
   if (!res.ok) {
     let detail = "";

@@ -18,18 +18,19 @@ export const EXAMPLE_SPEC: ModelSpec = {
 };
 
 // Canned replicad program for the PRIMARY engine's example (same L-bracket idea).
-export const EXAMPLE_REPLICAD = `function main(replicad, params) {
+// Declares defaultParams so the example also demonstrates the live sliders.
+export const EXAMPLE_REPLICAD = `const defaultParams = { width: 60, depth: 40, thickness: 4, wallHeight: 30, holeDiameter: 5 };
+function main(replicad, params) {
+  const p = { ...defaultParams, ...params };
   const { drawRoundedRectangle } = replicad;
-  // 60 x 40 base plate, 4mm thick, with two 5mm holes
-  let base = drawRoundedRectangle(60, 40, 3)
+  let base = drawRoundedRectangle(p.width, p.depth, 3)
     .sketchOnPlane("XY")
-    .extrude(4);
+    .extrude(p.thickness);
   const hole = (x) =>
-    replicad.makeCylinder(2.5, 12, [x, 6, -1], [0, 0, 1]);
-  base = base.cut(hole(-20)).cut(hole(20));
-  // 30mm upright wall along the back edge
-  const wall = drawRoundedRectangle(60, 30, 2)
-    .sketchOnPlane("XZ", -18)
-    .extrude(4);
-  return base.fuse(wall.translate(0, 0, 0));
+    replicad.makeCylinder(p.holeDiameter / 2, p.thickness + 8, [x, 6, -1], [0, 0, 1]);
+  base = base.cut(hole(-p.width / 3)).cut(hole(p.width / 3));
+  const wall = drawRoundedRectangle(p.width, p.wallHeight, 2)
+    .sketchOnPlane("XZ", -(p.depth / 2 - p.thickness / 2))
+    .extrude(p.thickness);
+  return base.fuse(wall);
 }`;

@@ -7,7 +7,7 @@ export type ExportFormat = "stl" | "3mf" | "step" | "obj";
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.
 export type BuildInput =
-  | { kind: "code"; code: string }
+  | { kind: "code"; code: string; params?: Record<string, number> }
   | { kind: "spec"; spec: ModelSpec }
   | { kind: "gen"; image?: Blob; prompt?: string; provider: string; model: string };
 

@@ -5,6 +5,7 @@ export interface Snapshot {
   engine: StoredEngineKind;
   summary: string;
   code?: string;
+  params?: Record<string, number>;
   spec?: unknown;
   dims?: { x: number; y: number; z: number };
   glb?: Blob;
@@ -19,6 +20,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     summary: snap.summary,
     engine: snap.engine,
     code: snap.code,
+    params: snap.params,
     spec: snap.spec,
     dims: snap.dims,
     glb: snap.glb,
@@ -28,6 +30,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     ...project,
     engine: snap.engine,
     code: snap.code,
+    params: snap.params,
     spec: snap.spec,
     glb: snap.glb,
     genSource: snap.genSource,
@@ -46,6 +49,7 @@ export function restoreVersion(project: Project, versionId: string): Project {
     summary: `Restored “${t.summary}”`,
     engine: t.engine,
     code: t.code,
+    params: t.params,
     spec: t.spec,
     dims: t.dims,
     glb: t.glb,
@@ -55,6 +59,7 @@ export function restoreVersion(project: Project, versionId: string): Project {
     ...project,
     engine: t.engine,
     code: t.code,
+    params: t.params,
     spec: t.spec,
     glb: t.glb,
     genSource: t.genSource,

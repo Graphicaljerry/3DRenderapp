@@ -49,7 +49,7 @@ export class ReplicadEngine implements Engine {
     if (input.kind !== "code") throw new Error("The replicad engine expects code input.");
     let res: WorkerBuildResult;
     try {
-      res = await this.withWatchdog<WorkerBuildResult>(this.api.build(input.code) as unknown as Promise<WorkerBuildResult>);
+      res = await this.withWatchdog<WorkerBuildResult>(this.api.build(input.code, input.params) as unknown as Promise<WorkerBuildResult>);
     } catch (timeoutErr) {
       this.respawn();
       throw timeoutErr;
@@ -75,8 +75,9 @@ export class ReplicadEngine implements Engine {
 
   async export(result: EngineResult, format: ExportFormat): Promise<Blob> {
     const code = result.source.kind === "code" ? result.source.code : "";
-    if (format === "stl") return this.withWatchdog(this.api.exportBlob(code, "stl"));
-    if (format === "step") return this.withWatchdog(this.api.exportBlob(code, "step"));
+    const params = result.source.kind === "code" ? result.source.params : undefined;
+    if (format === "stl") return this.withWatchdog(this.api.exportBlob(code, "stl", params));
+    if (format === "step") return this.withWatchdog(this.api.exportBlob(code, "step", params));
     if (format === "obj") return geometryToOBJ(result.geometry);
     return geometryTo3MF(result.geometry);
   }

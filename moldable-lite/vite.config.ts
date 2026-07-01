@@ -22,6 +22,9 @@ const UPSTREAM: Record<string, string> = {
 };
 
 function relayPlugin(): Plugin {
+  // Short-lived in-memory file park for "Open in slicer": the browser POSTs the
+  // 3MF here, and the desktop slicer fetches it back via the returned local URL.
+  const held = new Map<string, { body: Buffer; name: string }>();
   return {
     name: "moldable-relay",
     configureServer(server) {
@@ -30,6 +33,30 @@ function relayPlugin(): Plugin {
         if (!raw.startsWith("/prox/")) return next();
         try {
           const url = new URL(raw, "http://localhost");
+
+          if (url.pathname === "/prox/hold" && req.method === "POST") {
+            const name = (url.searchParams.get("name") || "model.3mf").replace(/[^\w.-]+/g, "_");
+            const chunks: Buffer[] = [];
+            for await (const c of req) chunks.push(c as Buffer);
+            const id = Math.random().toString(36).slice(2, 10);
+            held.set(id, { body: Buffer.concat(chunks), name });
+            setTimeout(() => held.delete(id), 15 * 60 * 1000).unref?.();
+            res.setHeader("content-type", "application/json");
+            res.end(JSON.stringify({ url: `/prox/hold/${id}/${encodeURIComponent(name)}` }));
+            return;
+          }
+          const hm = url.pathname.match(/^\/prox\/hold\/([a-z0-9]+)\//);
+          if (hm) {
+            const h = held.get(hm[1]);
+            if (!h) {
+              res.statusCode = 404;
+              return res.end("expired");
+            }
+            res.setHeader("content-type", "application/octet-stream");
+            res.setHeader("content-disposition", `attachment; filename="${h.name}"`);
+            res.end(h.body);
+            return;
+          }
 
           if (url.pathname === "/prox/dl") {
             const target = url.searchParams.get("url");

@@ -159,6 +159,16 @@ button { font-family: inherit; cursor: pointer; }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
 
+/* ---------- parameter sliders ---------- */
+.param-row { display: grid; grid-template-columns: 130px 1fr 84px 28px; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eef0f2; }
+.pname { font-size: 13px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
+.param-row input[type="range"] { accent-color: var(--accent); width: 100%; }
+.pnum { height: 32px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 8px; font-size: 13px; width: 100%; }
+.punit { font-size: 11px; color: var(--subt); }
+.param-actions { display: flex; gap: 8px; margin-top: 14px; }
+.fine-inline { font-size: 11px; font-weight: 400; color: var(--subt); margin-left: 8px; }
+.export-sep { height: 1px; background: var(--bord); margin: 6px 4px; }
+
 /* ---------- responsive: stack chat over viewer on small screens ---------- */
 @media (max-width: 900px) {
   .topbar { flex: 0 0 auto; height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 6px; }

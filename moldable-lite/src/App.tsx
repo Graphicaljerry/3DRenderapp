@@ -11,7 +11,9 @@ import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type L
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
+import { extractParams, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD } from "./cad/example";
+import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { PROVIDERS, getProvider } from "./gen/registry";
 import { glbToGeometry } from "./gen/loadMesh";
@@ -115,11 +117,13 @@ export default function App() {
   const [status, setStatus] = useState<"idle" | "generating">("idle");
   const [streamingText, setStreamingText] = useState("");
   const [codeBuffer, setCodeBuffer] = useState("");
+  const [cadDefaults, setCadDefaults] = useState<CadParams | null>(null);
+  const [paramValues, setParamValues] = useState<CadParams>({});
 
   const [mode, setMode] = useState<Mode>("precise");
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
 
-  const [tab, setTab] = useState<"3d" | "code" | "print" | "history">("3d");
+  const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
@@ -191,11 +195,7 @@ export default function App() {
   }
 
   function applyResult(res: EngineResult, name: string, summary: string, promptText: string) {
-    setResult(res);
-    setGeometry(res.geometry);
-    setDims(res.dims);
-    setCodeBuffer(sourceText(res.source));
-    setReport(computeReport(res.geometry));
+    applyResultNoCommit(res);
 
     const base = project ?? newProject(name, res.kind);
     const named = base.versions.length === 0 && name ? { ...base, name } : base;
@@ -203,6 +203,7 @@ export default function App() {
       engine: res.kind,
       summary,
       code: res.source.kind === "code" ? res.source.code : undefined,
+      params: res.source.kind === "code" ? res.source.params : undefined,
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
       glb: res.glb,
@@ -221,6 +222,67 @@ export default function App() {
     setDims(res.dims);
     setCodeBuffer(sourceText(res.source));
     setReport(computeReport(res.geometry));
+    if (res.source.kind === "code") {
+      const defs = extractParams(res.source.code);
+      setCadDefaults(defs);
+      setParamValues(defs ? { ...defs, ...(res.source.params ?? {}) } : {});
+    } else {
+      setCadDefaults(null);
+      setParamValues({});
+    }
+  }
+
+  /** Slider change: rebuild the SAME code with new dimensions — no AI call, no version spam. */
+  async function applyParams(values: CadParams) {
+    if (!sel || !result || result.source.kind !== "code" || status === "generating") return;
+    setParamValues(values);
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values });
+      applyResultNoCommit(res);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Those values don't build: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Persist the current slider-adjusted state as a version. */
+  function saveParamsVersion() {
+    if (!project || !result || result.source.kind !== "code") return;
+    const next = appendVersion(project, {
+      engine: result.kind === "replicad" ? "replicad" : "primitive",
+      summary: `Adjusted parameters — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm`,
+      code: result.source.code,
+      params: result.source.params,
+      dims: result.dims,
+    });
+    persist(next);
+    setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
+  }
+
+  /** Export a 3MF and hand it to a desktop slicer (deep link locally; download on hosted). */
+  async function openSlicer(target: SlicerTarget) {
+    if (!result) return;
+    const engine = result.kind === "generative" ? genEngine.current : sel?.engine;
+    if (!engine) return;
+    try {
+      const blob = await engine.export(result, "3mf");
+      const how = await openInSlicer(target, blob, safeFileName(project?.name ?? "model", "3mf"));
+      setMessages((m) => [
+        ...m,
+        {
+          id: mid(),
+          role: "assistant",
+          text:
+            how === "deeplink"
+              ? `Sent to ${target === "bambu" ? "Bambu Studio" : "OrcaSlicer"}. ${target === "bambu" ? "Bambu may ask “not from a trusted site — open anyway?” — that's expected for non-MakerWorld files; click yes." : ""} If nothing opened, the app may not be installed — a download works too.`
+              : "Downloaded the 3MF — double-click it and it opens in your default slicer. (One-click send works when running locally with npm run dev.)",
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Couldn't prepare the file: " + String(err?.message ?? err), error: true }]);
+    }
   }
 
   /**
@@ -460,7 +522,10 @@ export default function App() {
       if (next.engine === "generative" && next.glb) {
         await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
       } else if (sel) {
-        const bi: BuildInput = next.engine === "replicad" ? { kind: "code", code: next.code ?? "" } : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
+        const bi: BuildInput =
+          next.engine === "replicad"
+            ? { kind: "code", code: next.code ?? "", params: next.params }
+            : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
         applyResultNoCommit(await sel.engine.build(bi));
       }
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restored an earlier version." }]);
@@ -480,7 +545,8 @@ export default function App() {
       if (p.engine === "generative" && p.glb) {
         await showFromGlb(p.glb, { kind: "gen", provider: p.genSource?.provider ?? "", model: p.genSource?.model ?? "", prompt: p.genSource?.prompt });
       } else if (sel) {
-        const bi: BuildInput = p.engine === "replicad" ? { kind: "code", code: p.code ?? "" } : { kind: "spec", spec: parseSpec(JSON.stringify(p.spec)) };
+        const bi: BuildInput =
+          p.engine === "replicad" ? { kind: "code", code: p.code ?? "", params: p.params } : { kind: "spec", spec: parseSpec(JSON.stringify(p.spec)) };
         applyResultNoCommit(await sel.engine.build(bi));
       }
     } catch {
@@ -539,6 +605,11 @@ export default function App() {
         codeText={codeBuffer}
         streamingText={streamingText}
         onRerun={rerun}
+        cadDefaults={cadDefaults}
+        paramValues={paramValues}
+        onApplyParams={applyParams}
+        onSaveParams={saveParamsVersion}
+        onOpenSlicer={openSlicer}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         supportsStep={result?.supportsStep ?? false}

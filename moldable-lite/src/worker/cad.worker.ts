@@ -20,7 +20,7 @@ function ensureOC(): Promise<void> {
 const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
 
 // ---- Compile untrusted LLM code at global scope; shadow ambient globals. ----
-function runToShape(code: string): any {
+function runToShape(code: string, params?: Record<string, number>): any {
   // Do NOT pre-declare `main` — the user's code defines `function main(...)`, and a
   // `let main` here collides ("Identifier 'main' has already been declared").
   const factory = new Function(
@@ -37,7 +37,7 @@ function runToShape(code: string): any {
   if (typeof mainFn !== "function") {
     throw new Error("Your code must define `function main(replicad, params) { ... }` returning a Shape.");
   }
-  const out = mainFn(Object.freeze({ ...replicad }), {});
+  const out = mainFn(Object.freeze({ ...replicad }), Object.freeze({ ...(params ?? {}) }));
   const shape = out?.shape ?? out;
   if (!shape || typeof shape.mesh !== "function") {
     throw new Error("main() must return a replicad Shape (a Solid).");
@@ -59,10 +59,10 @@ const api: CadWorkerApi = {
     return true;
   },
 
-  async build(code: string): Promise<WorkerBuildResult> {
+  async build(code: string, params?: Record<string, number>): Promise<WorkerBuildResult> {
     try {
       await ensureOC();
-      const shape = runToShape(code);
+      const shape = runToShape(code, params);
       const faces = shape.mesh(MESH_OPTS) as FaceMesh;
       const edges = shape.meshEdges(MESH_OPTS) as EdgeMesh;
       const dims = dimsOf(shape);
@@ -79,9 +79,9 @@ const api: CadWorkerApi = {
     }
   },
 
-  async exportBlob(code: string, format: ReplicadExportFormat): Promise<Blob> {
+  async exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>): Promise<Blob> {
     await ensureOC();
-    const shape = runToShape(code);
+    const shape = runToShape(code, params);
     return format === "step"
       ? shape.blobSTEP()
       : shape.blobSTL({ tolerance: 0.01, angularTolerance: 0.1, binary: true });

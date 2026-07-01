@@ -4,6 +4,8 @@ import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat } from "../engine/types";
+import { paramRange, type CadParams } from "../cad/params";
+import type { SlicerTarget } from "../lib/slicer";
 import type * as THREE from "three";
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
@@ -45,11 +47,16 @@ interface Props {
   wireframe: boolean;
   setWireframe: (f: (w: boolean) => boolean) => void;
   viewerRef: RefObject<ViewerHandle>;
-  tab: "3d" | "code" | "print" | "history";
-  setTab: (t: "3d" | "code" | "print" | "history") => void;
+  tab: "3d" | "code" | "params" | "print" | "history";
+  setTab: (t: "3d" | "code" | "params" | "print" | "history") => void;
   codeText: string;
   streamingText: string;
   onRerun: (edited: string) => void;
+  cadDefaults: CadParams | null;
+  paramValues: CadParams;
+  onApplyParams: (values: CadParams) => void;
+  onSaveParams: () => void;
+  onOpenSlicer: (t: SlicerTarget) => void;
   versions: Version[];
   onRestore: (id: string) => void;
   supportsStep: boolean;
@@ -169,9 +176,9 @@ export function Workspace(p: Props) {
         <section className="viewer">
           <div className="viewer-head">
             <div className="tabs">
-              {(["3d", "code", "print", "history"] as const).map((t) => (
+              {(["3d", "code", "params", "print", "history"] as const).map((t) => (
                 <button key={t} className={p.tab === t ? "on" : ""} onClick={() => p.setTab(t)}>
-                  {t === "3d" ? "3D View" : t === "code" ? "Source" : t === "print" ? "Printability" : "History"}
+                  {t === "3d" ? "3D View" : t === "code" ? "Source" : t === "params" ? "Params" : t === "print" ? "Printability" : "History"}
                 </button>
               ))}
             </div>
@@ -198,6 +205,16 @@ export function Workspace(p: Props) {
             {p.tab === "code" && (
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
+            {p.tab === "params" && (
+              <ParamsPanel
+                defaults={p.cadDefaults}
+                values={p.paramValues}
+                busy={p.status === "generating"}
+                isCad={p.activeKind === "replicad"}
+                onApply={p.onApplyParams}
+                onSave={p.onSaveParams}
+              />
+            )}
             {p.tab === "print" && <PrintabilityPanel report={p.report} />}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -209,7 +226,7 @@ export function Workspace(p: Props) {
                 {p.report.bedFit.fitsAsIs ? "fits bed ✓" : p.report.bedFit.fitsWithRotation ? "fits (rotated) ✓" : "larger than bed"}
               </span>
             )}
-            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} disabled={!p.geometry} />
+            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} />
           </div>
         </section>
       </main>
@@ -319,7 +336,7 @@ function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestor
   );
 }
 
-function ExportMenu({ supportsStep, canExport, onExport, disabled }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; disabled: boolean }) {
+function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; onOpenSlicer: (t: SlicerTarget) => void; disabled: boolean }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="export-wrap">
@@ -334,9 +351,76 @@ function ExportMenu({ supportsStep, canExport, onExport, disabled }: { supportsS
               </button>
             );
           })}
+          <div className="export-sep" />
+          <button className="export-item" onClick={() => { setOpen(false); onOpenSlicer("bambu"); }}>
+            <span className="ef">Open in Bambu Studio</span>
+            <span className="ed">sends the 3MF to the desktop app</span>
+          </button>
+          <button className="export-item" onClick={() => { setOpen(false); onOpenSlicer("orca"); }}>
+            <span className="ef">Open in OrcaSlicer</span>
+            <span className="ed">sends the 3MF to the desktop app</span>
+          </button>
         </div>
       )}
       <button className="primary" disabled={disabled} onClick={() => setOpen((o) => !o)}>Export ▾</button>
+    </div>
+  );
+}
+
+function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onSave: () => void }) {
+  const [local, setLocal] = useState<CadParams>(values);
+  useEffect(() => setLocal(values), [values]);
+  if (!isCad || !defaults) {
+    return (
+      <div className="panel muted">
+        {isCad
+          ? "No adjustable parameters in this design yet — ask for a change and the AI will define them."
+          : "Parameter sliders work on Precise (CAD) models — generative meshes don't have editable dimensions."}
+      </div>
+    );
+  }
+  const commit = (next: CadParams) => {
+    if (!busy) onApply(next);
+  };
+  return (
+    <div className="panel">
+      <h3>Parameters <span className="fine-inline">re-builds instantly · no AI call</span></h3>
+      {Object.entries(defaults).map(([k, def]) => {
+        const { min, max, step } = paramRange(def);
+        const v = local[k] ?? def;
+        return (
+          <div className="param-row" key={k}>
+            <span className="pname">{k}</span>
+            <input
+              type="range"
+              min={min}
+              max={max}
+              step={step}
+              value={v}
+              disabled={busy}
+              onChange={(e) => setLocal({ ...local, [k]: +e.target.value })}
+              onPointerUp={() => commit(local)}
+              onKeyUp={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") commit(local); }}
+            />
+            <input
+              className="pnum"
+              type="number"
+              step={step}
+              value={v}
+              disabled={busy}
+              onChange={(e) => setLocal({ ...local, [k]: +e.target.value })}
+              onBlur={() => commit(local)}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(local); }}
+            />
+            <span className="punit">mm</span>
+          </div>
+        );
+      })}
+      <div className="param-actions">
+        <button className="ghost sm" disabled={busy} onClick={() => { setLocal(defaults); onApply(defaults); }}>↺ Reset to AI values</button>
+        <button className="primary sm" disabled={busy} onClick={onSave}>Save as version</button>
+      </div>
+      <p className="fine">Adjustments apply to exports immediately; “Save as version” keeps them in History.</p>
     </div>
   );
 }

@@ -18,6 +18,7 @@ export interface Version {
   summary: string;
   engine: StoredEngineKind;
   code?: string; // replicad source at this snapshot
+  params?: Record<string, number>; // slider overrides applied to the code
   spec?: unknown; // primitive spec at this snapshot
   dims?: { x: number; y: number; z: number };
   glb?: Blob; // generative mesh at this snapshot (so it re-renders without re-calling the API)
@@ -31,6 +32,7 @@ export interface Project {
   updatedAt: number;
   engine: StoredEngineKind;
   code?: string; // HEAD replicad source
+  params?: Record<string, number>; // HEAD slider overrides
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
   genSource?: GenSource;

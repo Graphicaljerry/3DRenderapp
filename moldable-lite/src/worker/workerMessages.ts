@@ -27,6 +27,6 @@ export type ReplicadExportFormat = "stl" | "step";
 
 export interface CadWorkerApi {
   init(): Promise<boolean>;
-  build(code: string): Promise<WorkerBuildResult>;
-  exportBlob(code: string, format: ReplicadExportFormat): Promise<Blob>;
+  build(code: string, params?: Record<string, number>): Promise<WorkerBuildResult>;
+  exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>): Promise<Blob>;
 }

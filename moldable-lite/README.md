@@ -30,8 +30,11 @@ are identical* — only the geometry engine differs. See `docs/RESEARCH.md` for 
 ```bash
 cd moldable-lite
 npm install
-npm run dev        # opens http://localhost:5173
+npm run dev
 ```
+
+Then open **http://localhost:5173** in your browser. (Run `npm run dev` on its own — don't add a
+trailing `# comment`, or the shell/npm may pass it to Vite as the project root.)
 
 1. Click **"Try the built-in example"** to confirm the viewer + STL export work (no key needed).
 2. Paste your **Anthropic API key** (and pick a model) to generate from your own prompts.

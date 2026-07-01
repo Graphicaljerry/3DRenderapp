@@ -1,4 +1,4 @@
-// The tiny CAD schema the model emits and the builder consumes.
+// The primitive CAD schema the FALLBACK engine emits and builds.
 // Millimetres. Z is up. `pos` is the CENTRE of each primitive.
 
 export type Shape =
@@ -16,7 +16,6 @@ export interface ModelSpec {
   cuts?: Shape[];
 }
 
-/** Best-effort parse: strips prose/fences, extracts the JSON object, validates minimally. */
 export function parseSpec(text: string): ModelSpec {
   let t = text.trim();
   const a = t.indexOf("{");
@@ -26,7 +25,7 @@ export function parseSpec(text: string): ModelSpec {
   let spec: ModelSpec;
   try {
     spec = JSON.parse(t);
-  } catch (e) {
+  } catch {
     throw new Error("The model's reply was not valid JSON.");
   }
   if (!spec || !Array.isArray(spec.solids) || spec.solids.length === 0) {

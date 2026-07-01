@@ -1,31 +1,35 @@
-# Moldable Lite
+# Moldable
 
-A **light, runnable prototype** of Moldable's core loop, for testing the functionality end to end:
+A local-first, BYO-Anthropic-key web app that turns a text description into a **3D-printable model**:
 
-> **describe a part → AI generates a parametric model → see it in 3D → export STL**
+> **describe → AI writes CAD → live 3D viewer → export STL · 3MF · STEP · OBJ**
 
-It intentionally trades the full Phase-1 engine for something dependency-light and reliable, so
-you can try the UX today.
+This is the full Phase-1 build (see `../docs/PLAN.md`, `../docs/RESEARCH.md`). The folder is still
+called `moldable-lite` for continuity with earlier runs.
 
-## What it does (and the one simplification)
+## Two engines, one chat
 
-- **Chat → model.** You describe an object; the AI returns a small **JSON spec** of primitives
-  (`box`, `cylinder`, `cone`, `sphere`, `torus`) that are **unioned**, with **cuts** subtracted for
-  holes/slots.
-- **Live 3D viewer.** Built with `three.js` + `three-bvh-csg` (real boolean CSG for the holes),
-  orbit/zoom, a print-bed grid, wireframe toggle, and a **W × D × H mm** readout + "fits bed" check.
-- **Export STL.** Binary STL, Z-up, millimetres — ready to drop into a slicer.
-- **BYO key, local-first.** Your Anthropic key lives in `localStorage` and is sent **only** to
-  Anthropic (browser-direct via the official CORS opt-in header). No backend, no accounts.
-- **Zero-spend example.** "Try the built-in example" renders an L-bracket with no API call, so the
-  viewer + STL export are testable without a key.
+- **replicad (primary).** The model writes **replicad** code; it runs on the **OpenCascade (OCCT)**
+  B-rep kernel in a **Web Worker** (WASM). Real solids → **STL, 3MF, STEP, OBJ** export. STEP opens
+  as an editable solid in Shapr3D/Fusion.
+- **primitive (automatic fallback).** If the OCCT kernel fails to boot, the app silently falls back
+  to a dependency-light primitive+CSG engine (the model emits a JSON spec). Everything still works
+  except STEP export (a banner tells you). The app never dies on a WASM hiccup.
 
-**The simplification vs. `docs/PLAN.md`:** the real Phase 1 has the AI emit **replicad** code run on
-the **OpenCascade (WASM)** kernel to get true B-rep + **STEP** export. That kernel is multi-MB and
-needs a Web Worker, so this "lite" build swaps it for the JSON-primitive+CSG path. The *loop and UX
-are identical* — only the geometry engine differs. See `docs/RESEARCH.md` for the full engine plan.
+## Features
 
-## Run it
+- **Streaming chat** with a **self-healing loop** — on a build/compile error the exact error is fed
+  back to the model and it retries (up to 3×) before surfacing anything.
+- **Live 3D viewer** — orbit/zoom, print-bed grid, wireframe toggle, Z-up mm.
+- **Code tab** — view/edit the replicad code (or the JSON spec) and **Re-run** with no AI call.
+- **Printability** — bed-fit, watertight/manifold (edge-adjacency), overhang %, triangles, volume.
+- **Version history** — every change is snapshotted; **restore** any earlier version (append-only).
+- **Project library** — saved locally (IndexedDB, localStorage fallback): open / duplicate / delete.
+- **Export menu** — STL · 3MF · STEP · OBJ (STEP gated to the replicad engine).
+- **Settings** — Anthropic key + model + printer defaults (bed size, overhang threshold).
+- **Zero-spend example** — "Try the built-in example" builds an L-bracket with no API call.
+
+## Run
 
 ```bash
 cd moldable-lite
@@ -33,19 +37,35 @@ npm install
 npm run dev
 ```
 
-Then open **http://localhost:5173** in your browser. (Run `npm run dev` on its own — don't add a
-trailing `# comment`, or the shell/npm may pass it to Vite as the project root.)
+Then open **http://localhost:5173** (run `npm run dev` on its own line — no trailing `# comment`).
 
-1. Click **"Try the built-in example"** to confirm the viewer + STL export work (no key needed).
-2. Paste your **Anthropic API key** (and pick a model) to generate from your own prompts.
-3. Try: *"a 60×40 mm bracket, 4 mm thick, with two 4 mm holes"*, then refine: *"make the holes 5 mm and add a 20 mm wall on one edge."*
+1. Click **"Try the built-in example"** to confirm the viewer + export work (no key needed).
+2. Paste your **Anthropic key**, pick a model, and describe a part, e.g.
+   *"a 60×40 mm bracket, 4 mm thick, with two 4 mm holes"* → refine: *"round the corners 3 mm and add a 20 mm wall on one edge."*
+3. Try **Export ▾ → STEP** and open it in Shapr3D.
 
-`npm run build` typechecks and produces a static bundle in `dist/`.
+`npm run build` typechecks (tsc) and bundles (vite). First load fetches the ~11 MB OCCT WASM once, then it's cached.
 
 ## Notes / limits
 
-- Geometry is **primitive union + subtract** only (no fillets/lofts/sweeps) — enough to test the
-  loop, not the full CAD vocabulary.
-- Includes a **one-shot self-heal**: if the model's reply isn't valid JSON, it asks once more.
-- STL is exported at the mesh tessellation of the primitives (cylinders are 64-sided).
-- This folder is a throwaway prototype; it's separate from the eventual Phase-1 app.
+- The replicad kernel is a multi-MB WASM in a worker; the **first** build in a session waits for it
+  to boot (a spinner shows). Complex models take a few seconds.
+- LLM fluency with replicad is thinner than with mainstream languages — the embedded API cheatsheet
+  + the self-heal loop cover most misses; occasionally a prompt needs a nudge.
+- Printability wall/overhang checks are best-effort heuristics; bed-fit and watertight are exact for
+  the displayed mesh.
+- Untrusted generated code runs in the worker sandbox (globals shadowed, watchdog timeout). It's your
+  own key and machine, but treat generated code as you would any code you run.
+
+## Architecture (where things live)
+
+```
+src/
+  worker/cad.worker.ts     OCCT boot + run untrusted replicad code + mesh/export blobs
+  engine/                  Engine interface, replicad + primitive engines, auto-fallback selector
+  llm/                     Anthropic streaming client, system prompts (+ replicad cheatsheet), extract
+  cad/                     primitive JSON schema + CSG builder (fallback engine)
+  print/                   printability analysis + STL/OBJ/3MF export
+  store/                   IndexedDB project + version persistence
+  components/              Workspace, Viewer, Library modal; App.tsx orchestrates
+```

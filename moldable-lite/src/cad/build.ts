@@ -11,7 +11,7 @@ function primGeometry(s: Shape): THREE.BufferGeometry {
       return new THREE.BoxGeometry(s.size[0], s.size[1], s.size[2]);
     case "cylinder": {
       const g = new THREE.CylinderGeometry(s.r, s.r, s.h, 64);
-      g.rotateX(Math.PI / 2); // height along Z (print-up)
+      g.rotateX(Math.PI / 2);
       return g;
     }
     case "cone": {
@@ -43,7 +43,7 @@ export interface BuildResult {
   dims: { x: number; y: number; z: number };
 }
 
-/** Union all `solids`, subtract all `cuts`, drop onto the bed (min z → 0), centre in X/Y. */
+/** Union all `solids`, subtract all `cuts`, drop onto the bed (min z -> 0), centre in X/Y. */
 export function buildGeometry(spec: ModelSpec): BuildResult {
   const solids = spec.solids.map(toBrush);
   if (solids.length === 0) throw new Error("No solids to build.");

@@ -1,17 +1,23 @@
 {
   "name": "moldable-lite",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Moldable Lite — a light, runnable prototype of the describe→3D-printable loop (BYO Anthropic key).",
+  "description": "Moldable — describe -> parametric 3D-printable model (replicad primary engine, primitive/CSG fallback). BYO Anthropic key.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview"
   },
   "dependencies": {
+    "comlink": "^4.4.1",
+    "fflate": "^0.8.2",
+    "idb": "^8.0.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "replicad": "^0.23.1",
+    "replicad-opencascadejs": "^0.23.0",
+    "replicad-threejs-helper": "^0.23.0",
     "three": "^0.169.0",
     "three-bvh-csg": "^0.0.17"
   },

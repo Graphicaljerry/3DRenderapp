@@ -1,10 +1,8 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
-import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
 
 export interface ViewerHandle {
-  exportSTL: (name: string) => void;
   resetView: () => void;
 }
 
@@ -21,7 +19,6 @@ interface Internals {
   content: THREE.Group;
   mesh: THREE.Mesh | null;
   material: THREE.MeshStandardMaterial;
-  raf: number;
   ro: ResizeObserver;
 }
 
@@ -40,7 +37,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     scene.background = new THREE.Color("#f6f7f9");
 
     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 5000);
-    camera.up.set(0, 0, 1); // Z-up (print orientation)
+    camera.up.set(0, 0, 1);
     camera.position.set(140, -180, 130);
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -52,7 +49,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     dir.position.set(80, -120, 200);
     scene.add(dir);
 
-    // print-bed grid in the XY plane
     const grid = new THREE.GridHelper(300, 30, 0xced2d8, 0xe3e6ea);
     grid.rotation.x = Math.PI / 2;
     scene.add(grid);
@@ -60,7 +56,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const content = new THREE.Group();
     scene.add(content);
 
-    const material = new THREE.MeshStandardMaterial({ color: "#c7ccd3", metalness: 0.05, roughness: 0.75, flatShading: false });
+    const material = new THREE.MeshStandardMaterial({ color: "#c7ccd3", metalness: 0.05, roughness: 0.75 });
 
     let raf = 0;
     const animate = () => {
@@ -79,7 +75,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, content, mesh: null, material, raf, ro };
+    st.current = { renderer, scene, camera, controls, content, mesh: null, material, ro };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -91,7 +87,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
   }, []);
 
-  // swap in new geometry
   useEffect(() => {
     const s = st.current;
     if (!s) return;
@@ -103,33 +98,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.content.add(mesh);
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geometry, 30),
-      new THREE.LineBasicMaterial({ color: "#2a2e35" })
+      new THREE.LineBasicMaterial({ color: "#2a2e35" }),
     );
     mesh.add(edges);
     s.mesh = mesh;
-
     frameToObject(s);
   }, [geometry]);
 
-  // wireframe toggle
   useEffect(() => {
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
 
   useImperativeHandle(ref, () => ({
-    exportSTL(name: string) {
-      const s = st.current;
-      if (!s?.mesh) return;
-      const exporter = new STLExporter();
-      const data = exporter.parse(s.mesh, { binary: true }) as unknown as DataView;
-      const blob = new Blob([data as unknown as BlobPart], { type: "model/stl" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${(name || "model").replace(/[^\w.-]+/g, "_")}.stl`;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
     resetView() {
       if (st.current) frameToObject(st.current);
     },

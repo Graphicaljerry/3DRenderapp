@@ -1,4 +1,5 @@
 name: Deploy Moldable to GitHub Pages
+# Publishes moldable-lite/ to GitHub Pages from the default branch (main).
 
 on:
   push:

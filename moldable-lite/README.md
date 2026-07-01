@@ -1,5 +1,7 @@
 # Moldable
 
+[![Deploy to GitHub Pages](https://github.com/Graphicaljerry/3DRenderapp/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/Graphicaljerry/3DRenderapp/actions/workflows/deploy-pages.yml)
+
 A local-first, BYO-Anthropic-key web app that turns a text description into a **3D-printable model**:
 
 > **describe → AI writes CAD → live 3D viewer → export STL · 3MF · STEP · OBJ**

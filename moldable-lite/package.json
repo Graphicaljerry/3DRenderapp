@@ -1,0 +1,26 @@
+{
+  "name": "moldable-lite",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Moldable Lite — a light, runnable prototype of the describe→3D-printable loop (BYO Anthropic key).",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "three": "^0.169.0",
+    "three-bvh-csg": "^0.0.17"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.5",
+    "@types/react-dom": "^18.3.0",
+    "@types/three": "^0.169.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.6"
+  }
+}

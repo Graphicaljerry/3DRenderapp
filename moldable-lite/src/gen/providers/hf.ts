@@ -163,8 +163,8 @@ async function call(
               const detail = quota && !empty ? ` (${s.slice(0, 120)})` : "";
               throw new Error(
                 hasToken
-                  ? `The free GPU rejected this job${detail} even though your token was sent. Two common causes: (1) your token is FINE-GRAINED without GPU access — the fix is a plain “Read” token (huggingface.co/settings/tokens → Create new token → type “Read”); (2) text → 3D uses Hunyuan3D-2, the heaviest free model — 📎 uploading a reference photo uses the lighter Stable Fast 3D and is far more reliable. You can also switch models in Settings or wait for your daily GPU minutes to reset.`
-                  : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or 📎 upload a photo (uses a lighter model), or try later.`,
+                  ? `The free GPU rejected this job${detail} even though your token was sent — so the token type is almost certainly the problem. A FINE-GRAINED token authenticates you but does NOT include free-GPU (ZeroGPU) access. Fix: huggingface.co/settings/tokens → Create new token → pick type “Read” → paste it in Settings → 3D engine. If you're already on a Read token, you've likely used up today's free GPU minutes (they reset every 24h) — or pick the lighter “Stable Fast 3D” model in Settings.`
+                  : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or try later.`,
               );
             }
             throw new Error(`The Space reported an error: ${s.slice(0, 200)}`);

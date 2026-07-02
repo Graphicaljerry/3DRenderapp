@@ -11,11 +11,12 @@ export const PROVIDERS: ProviderDef[] = [
     label: "Hugging Face (free)",
     free: true,
     needsKey: false,
+    recommended: true,
     keyHint: "free hf_… token from huggingface.co/settings/tokens — use a plain “Read” token (fine-grained tokens often lack free-GPU access). ~5× the anonymous quota + queue priority.",
     viaProxy: false,
     generate: hfGenerate,
     models: [
-      { id: "stabilityai/stable-fast-3d", label: "Stable Fast 3D — image (fast & reliable, default)", image: true, text: false },
+      { id: "stabilityai/stable-fast-3d", label: "Stable Fast 3D — image (fast & reliable)", image: true, text: false, recommended: true },
       { id: "tencent/Hunyuan3D-2", label: "Hunyuan3D-2 — image or text (higher quality, slower)", image: true, text: true },
       { id: "trellis-community/TRELLIS", label: "TRELLIS — image (best geometry, ~1 free call/day)", image: true, text: false },
     ],
@@ -29,7 +30,7 @@ export const PROVIDERS: ProviderDef[] = [
     viaProxy: true,
     generate: tripoGenerate,
     models: [
-      { id: "image_to_model", label: "Tripo — image", image: true, text: false },
+      { id: "image_to_model", label: "Tripo — image", image: true, text: false, recommended: true },
       { id: "text_to_model", label: "Tripo — text", image: false, text: true },
     ],
   },
@@ -41,7 +42,7 @@ export const PROVIDERS: ProviderDef[] = [
     keyHint: "msy_… (API needs a paid Meshy plan)",
     viaProxy: true,
     generate: meshyGenerate,
-    models: [{ id: "meshy", label: "Meshy 6 — image or text", image: true, text: true }],
+    models: [{ id: "meshy", label: "Meshy 6 — image or text", image: true, text: true, recommended: true }],
   },
   {
     id: "replicate",
@@ -52,7 +53,7 @@ export const PROVIDERS: ProviderDef[] = [
     viaProxy: true,
     generate: replicateGenerate,
     models: [
-      { id: "firtoz/trellis", label: "TRELLIS — image", image: true, text: false },
+      { id: "firtoz/trellis", label: "TRELLIS — image", image: true, text: false, recommended: true },
       { id: "tencent/hunyuan3d-2", label: "Hunyuan3D-2 — image", image: true, text: false },
     ],
   },
@@ -65,7 +66,7 @@ export const PROVIDERS: ProviderDef[] = [
     viaProxy: true,
     generate: falGenerate,
     models: [
-      { id: "fal-ai/hyper3d/rodin", label: "Rodin Gen-2 — image or text", image: true, text: true },
+      { id: "fal-ai/hyper3d/rodin", label: "Rodin Gen-2 — image or text", image: true, text: true, recommended: true },
       { id: "fal-ai/hunyuan3d-v21", label: "Hunyuan3D 2.1 — image", image: true, text: false },
     ],
   },

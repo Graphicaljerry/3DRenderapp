@@ -18,6 +18,7 @@ export interface LlmPreset {
   label: string;
   free?: boolean;
   needsKey: boolean;
+  recommended?: boolean; // best free default to start with
   baseUrl?: string;
   relayPrefix?: string; // relay route used if the browser can't call it directly
   defaultModel: string;
@@ -37,6 +38,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     label: "Google Gemini — free tier",
     free: true,
     needsKey: true,
+    recommended: true,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     relayPrefix: "gemini",
     defaultModel: "gemini-2.0-flash",

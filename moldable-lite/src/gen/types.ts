@@ -28,6 +28,7 @@ export interface ProviderModel {
   label: string;
   image: boolean; // supports image -> 3D
   text: boolean; // supports text -> 3D
+  recommended?: boolean; // the best default model for this provider
 }
 
 export interface ProviderDef {
@@ -39,4 +40,5 @@ export interface ProviderDef {
   viaProxy: boolean; // true = routed through /prox/<id> (needs the relay)
   models: ProviderModel[];
   generate: GenFn;
+  recommended?: boolean; // the best default engine to start with
 }

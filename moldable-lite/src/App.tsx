@@ -24,7 +24,7 @@ import { appendVersion, restoreVersion } from "./store/versions";
 import type { Project } from "./store/types";
 import { downloadBlob, safeFileName } from "./lib/download";
 
-export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean };
+export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string };
 export type Mode = "precise" | "generative";
 
 const KEY_LS = "moldable_key";
@@ -68,6 +68,9 @@ function loadProviderKeys(): Record<string, string> {
     return {};
   }
 }
+function defaultModelOf(prov: (typeof PROVIDERS)[number]): string {
+  return (prov.models.find((m) => m.recommended) ?? prov.models[0]).id;
+}
 function loadGenEng(): { provider: string; model: string } {
   try {
     const raw = localStorage.getItem(GENENG_LS);
@@ -75,13 +78,20 @@ function loadGenEng(): { provider: string; model: string } {
       const v = JSON.parse(raw);
       const prov = PROVIDERS.find((pp) => pp.id === v.provider);
       if (prov) {
-        // Migrate stale stored model ids (renamed/dead Spaces) to the provider's current default.
-        const model = prov.models.some((m) => m.id === v.model) ? v.model : prov.models[0].id;
+        // Migrate stale stored model ids (renamed/dead Spaces) to the provider's default.
+        let model = prov.models.some((m) => m.id === v.model) ? v.model : defaultModelOf(prov);
+        // One-time heal: an earlier bug persisted the heavy Hunyuan3D-2 as the HF
+        // default after any text prompt. Reset those users to the light recommended
+        // model so photo generation stops failing on the quota-hungry model.
+        if (!localStorage.getItem("moldable_geneng_healed")) {
+          localStorage.setItem("moldable_geneng_healed", "1");
+          if (prov.id === "hf" && model === "tencent/Hunyuan3D-2") model = defaultModelOf(prov);
+        }
         return { provider: prov.id, model };
       }
     }
   } catch {}
-  return { provider: "hf", model: PROVIDERS[0].models[0].id };
+  return { provider: "hf", model: defaultModelOf(PROVIDERS[0]) };
 }
 
 let msgSeq = 0;
@@ -128,6 +138,13 @@ export default function App() {
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
   const [showDims, setShowDims] = useState(true);
+  const [units, setUnitsState] = useState<"mm" | "in">(() => (localStorage.getItem("moldable_units") === "in" ? "in" : "mm"));
+  const setUnits = (f: (u: "mm" | "in") => "mm" | "in") =>
+    setUnitsState((u) => {
+      const next = f(u);
+      localStorage.setItem("moldable_units", next);
+      return next;
+    });
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -278,7 +295,7 @@ export default function App() {
         {
           id: mid(),
           role: "assistant",
-          text: `🔧 Repaired the mesh: ${out.holesFilled} hole(s) filled, ${out.degenerateRemoved} bad triangle(s) removed, open edges ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter}${out.flippedWinding ? ", surface flipped right-side-out" : ""}. Exports now use the repaired mesh.`,
+          text: `Repaired the mesh: ${out.holesFilled} hole(s) filled, ${out.degenerateRemoved} bad triangle(s) removed, open edges ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter}${out.flippedWinding ? ", surface flipped right-side-out" : ""}. Exports now use the repaired mesh.`,
         },
       ]);
     } catch (err: any) {
@@ -360,16 +377,18 @@ export default function App() {
         if (cur && !cur.text) {
           const textModel = prov.models.find((mm) => mm.text);
           if (textModel) {
+            // Transient escalation for THIS text prompt only — do NOT persist, or a
+            // photo later would be stuck on the heavy text model instead of the
+            // user's light image default.
             genModel = textModel.id;
             switchedTo = textModel.label;
-            saveGenSettings(providerKeys, prov.id, textModel.id, proxyBase); // keep Settings in sync
           } else {
             setMessages((m) => [
               ...m,
               {
                 id: mid(),
                 role: "assistant",
-                text: `${prov.label}'s models here are image-only. Upload a photo with 📎, or pick a text-capable engine in Settings → Mesh model — Hugging Face (Hunyuan3D-2), Meshy, Tripo and fal (Rodin) all do text → 3D.`,
+                text: `${prov.label}'s models here are image-only. Attach a photo, or pick a text-capable engine in Settings → Mesh model — Hugging Face (Hunyuan3D-2), Meshy, Tripo and fal (Rodin) all do text → 3D.`,
                 error: true,
               },
             ]);
@@ -379,7 +398,8 @@ export default function App() {
       }
 
       setInput("");
-      setMessages((m) => [...m, { id: mid(), role: "user", text: p ? (image ? `🖼️ ${p}` : p) : "🖼️ (image)" }]);
+      const genThumb = image ? await blobToDataURL(image.blob) : undefined;
+      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (image ? "Reference image" : ""), image: genThumb }]);
       const ph = mid();
       setMessages((m) => [
         ...m,
@@ -431,9 +451,10 @@ export default function App() {
 
     const kind = sel.kind;
     const visionImage = image; // capture before we clear it
+    const visionThumb = visionImage ? await blobToDataURL(visionImage.blob) : undefined;
     setInput("");
     setStreamingText("");
-    setMessages((m) => [...m, { id: mid(), role: "user", text: visionImage ? `🖼️ ${p || "(photo — recreate this part)"}` : p }]);
+    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? "Recreate this part" : ""), image: visionThumb }]);
     const placeholderId = mid();
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
@@ -443,11 +464,7 @@ export default function App() {
       ? {
           role: "user",
           content: [
-            {
-              type: "image",
-              mediaType: visionImage.blob.type || "image/png",
-              dataBase64: (await blobToDataURL(visionImage.blob)).split(",")[1],
-            },
+            { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
             { type: "text", text: p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo." },
           ],
         }
@@ -645,6 +662,8 @@ export default function App() {
         setWireframe={setWireframe}
         showDims={showDims}
         setShowDims={setShowDims}
+        units={units}
+        setUnits={setUnits}
         viewerRef={viewer}
         tab={tab}
         setTab={setTab}
@@ -730,7 +749,7 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
         <label>Model</label>
         <select value={m} onChange={(e) => setM(e.target.value)}>
           {MODELS.map((x) => (
-            <option key={x.id} value={x.id}>{x.label}</option>
+            <option key={x.id} value={x.id}>{x.label}{x.recommended ? " · recommended" : ""}</option>
           ))}
         </select>
         <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
@@ -820,7 +839,7 @@ function SettingsModal({
         <div className="seg stabs">
           {(["ai", "mesh", "printer"] as const).map((t) => (
             <button key={t} className={pane === t ? "on" : ""} onClick={() => setPane(t)}>
-              {t === "ai" ? "🧠 AI brain" : t === "mesh" ? "🧊 3D engine" : "🖨️ Printer"}
+              {t === "ai" ? "AI brain" : t === "mesh" ? "3D engine" : "Printer"}
             </button>
           ))}
         </div>
@@ -838,7 +857,7 @@ function SettingsModal({
               }}
             >
               {LLM_PRESETS.map((pr) => (
-                <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}</option>
+                <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}{pr.recommended ? " · recommended" : ""}</option>
               ))}
             </select>
             {lp === "anthropic" ? (
@@ -848,7 +867,7 @@ function SettingsModal({
                 <label>Claude model</label>
                 <select value={m} onChange={(e) => setM(e.target.value)}>
                   {MODELS.map((x) => (
-                    <option key={x.id} value={x.id}>{x.label}</option>
+                    <option key={x.id} value={x.id}>{x.label}{x.recommended ? " · recommended" : ""}</option>
                   ))}
                 </select>
               </>
@@ -892,13 +911,13 @@ function SettingsModal({
               }}
             >
               {PROVIDERS.map((pp) => (
-                <option key={pp.id} value={pp.id}>{pp.label}{pp.free ? " · free" : ""}</option>
+                <option key={pp.id} value={pp.id}>{pp.label}{pp.free ? " · free" : ""}{pp.recommended ? " · recommended" : ""}</option>
               ))}
             </select>
             <label>Model — “image or text” models can generate from a prompt alone</label>
             <select value={gm} onChange={(e) => setGm(e.target.value)}>
               {prov.models.map((mm) => (
-                <option key={mm.id} value={mm.id}>{mm.label}</option>
+                <option key={mm.id} value={mm.id}>{mm.label}{mm.recommended ? " · recommended" : ""}</option>
               ))}
             </select>
             <label>

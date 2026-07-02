@@ -22,6 +22,27 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
   { f: "obj", label: "OBJ", desc: "Mesh (reference)" },
 ];
 
+/** Format overall W×D×H in the chosen unit (unit shown once). */
+function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): string {
+  if (units === "in") {
+    const c = (n: number) => (n / 25.4).toFixed(2);
+    return `${c(d.x)} × ${c(d.y)} × ${c(d.z)} in`;
+  }
+  return `${d.x} × ${d.y} × ${d.z} mm`;
+}
+
+// Minimal line icons (no emoji in the UI chrome).
+const IconPaperclip = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+const IconArrowUp = () => (
+  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 19V5M5 12l7-7 7 7" />
+  </svg>
+);
+
 interface Props {
   projectName: string;
   activeKind: EngineKind;
@@ -48,6 +69,8 @@ interface Props {
   setWireframe: (f: (w: boolean) => boolean) => void;
   showDims: boolean;
   setShowDims: (f: (d: boolean) => boolean) => void;
+  units: "mm" | "in";
+  setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   viewerRef: RefObject<ViewerHandle>;
   tab: "3d" | "code" | "params" | "print" | "history";
   setTab: (t: "3d" | "code" | "params" | "print" | "history") => void;
@@ -157,7 +180,7 @@ export function Workspace(p: Props) {
                 aria-label="Upload a photo to turn into a 3D model"
                 onClick={() => fileRef.current?.click()}
               >
-                📎
+                <IconPaperclip />
               </button>
               <input
                 ref={fileRef}
@@ -181,7 +204,7 @@ export function Workspace(p: Props) {
                       : "Describe a part, or a change…"
                 }
               />
-              <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}>↑</button>
+              <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
             </form>
           </div>
         </section>
@@ -200,6 +223,9 @@ export function Workspace(p: Props) {
                 <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
                   {p.showDims ? "Hide dimensions" : "Dimensions"}
                 </button>
+                <button className="ghost sm" title="Toggle units" onClick={() => p.setUnits((u) => (u === "mm" ? "in" : "mm"))}>
+                  {p.units === "mm" ? "mm" : "inches"}
+                </button>
                 <button className="ghost sm" onClick={() => p.setWireframe((w) => !w)}>{p.wireframe ? "Solid" : "Wireframe"}</button>
                 <button className="ghost sm" onClick={() => p.viewerRef.current?.resetView()}>Reset view</button>
               </div>
@@ -208,7 +234,7 @@ export function Workspace(p: Props) {
 
           <div className="viewer-body">
             <div style={{ display: p.tab === "3d" ? "block" : "none", height: "100%" }}>
-              <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} showDims={p.showDims} />
+              <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} showDims={p.showDims} units={p.units} />
               {p.booting && (
                 <div className="viewer-overlay">
                   <Spinner /> Starting the CAD engine…
@@ -238,7 +264,7 @@ export function Workspace(p: Props) {
           </div>
 
           <div className="statusbar">
-            <span className="dims">{p.dims ? `${p.dims.x} × ${p.dims.y} × ${p.dims.z} mm` : "—"}</span>
+            <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
             {p.report && (
               <span className={`fits ${p.report.bedFit.fitsRotated ? "ok" : "no"}`}>
                 {p.report.bedFit.fitsAsIs ? "fits bed ✓" : p.report.bedFit.fitsWithRotation ? "fits (rotated) ✓" : "larger than bed"}
@@ -263,7 +289,7 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
       {messages.length === 0 && (
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
-          <p className="empty-sub">Type a description, or drop a photo (📎) to turn it into a 3D model.</p>
+          <p className="empty-sub">Type a description, or attach a photo to turn it into a 3D model.</p>
           <div className="chips">
             {SUGGESTIONS.map((s) => (
               <button key={s.text} className="chip" onClick={() => onChip(s.text, s.gen ? "generative" : undefined)}>{s.text}</button>
@@ -275,7 +301,10 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
       {messages.map((m) => (
         <div key={m.id} className={`msg ${m.role} ${m.error ? "err" : ""}`}>
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
-          <div className={`bubble ${m.streaming ? "muted" : ""}`}>{m.text}</div>
+          <div className={`bubble ${m.streaming ? "muted" : ""}`}>
+            {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
+            {m.text && <span>{m.text}</span>}
+          </div>
         </div>
       ))}
       <div ref={endRef} />
@@ -328,7 +357,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: Prin
       )}
       {canRepair && !report.manifold.isWatertight && (
         <button className="primary sm" disabled={busy} onClick={onRepair} style={{ marginTop: 10 }}>
-          🔧 Repair mesh — weld seams &amp; fill holes
+          Repair mesh — weld seams &amp; fill holes
         </button>
       )}
       <p className="fine">Generated meshes are often not watertight — that's expected. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>

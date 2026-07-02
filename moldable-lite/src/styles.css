@@ -73,12 +73,14 @@ button { font-family: inherit; cursor: pointer; }
 .msg.user { align-self: flex-end; align-items: flex-end; }
 .who { font-size: 10px; font-weight: 600; color: var(--subt); }
 .bubble { font-size: 13px; line-height: 1.45; color: var(--ink2); background: #eff1f4; border-radius: 12px; padding: 10px 12px; white-space: pre-wrap; }
+.bubble-img { display: block; max-width: 180px; max-height: 180px; width: auto; border-radius: 8px; margin-bottom: 6px; }
+.bubble-img:last-child { margin-bottom: 0; }
 .msg.assistant .bubble { background: var(--accent-w); }
 .msg.err .bubble { background: #fbeaea; color: #a23a3a; }
 .bubble.muted { color: var(--mut); }
 .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); }
 .composer input { flex: 1; height: 40px; padding: 0 12px; border: 1px solid var(--bord); border-radius: 10px; font-size: 13px; }
-.send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; font-size: 16px; }
+.send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
 .send:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- viewer ---------- */
@@ -155,7 +157,7 @@ button { font-family: inherit; cursor: pointer; }
 .imgchip span { flex: 1; font-size: 12px; color: var(--ink2); }
 .imgchip button { border: none; background: none; color: var(--subt); font-size: 14px; }
 .composer { border-top: none; }
-.attach { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); font-size: 16px; }
+.attach { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--ink2); display: inline-flex; align-items: center; justify-content: center; }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
 

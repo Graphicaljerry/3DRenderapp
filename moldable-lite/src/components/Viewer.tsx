@@ -10,7 +10,12 @@ interface Props {
   geometry: THREE.BufferGeometry | null;
   wireframe: boolean;
   showDims: boolean;
+  units: "mm" | "in";
 }
+
+// Dimension-label size band, in screen pixels (≈ 12–40 pt).
+const LABEL_MIN_PX = 16;
+const LABEL_MAX_PX = 53;
 
 interface Internals {
   renderer: THREE.WebGLRenderer;
@@ -24,7 +29,7 @@ interface Internals {
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
 
@@ -63,6 +68,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     let raf = 0;
     const animate = () => {
       controls.update();
+      // Keep dimension labels at a constant, readable on-screen size (clamped to
+      // a 12–40pt band) regardless of zoom, so they never balloon or vanish.
+      const s = st.current;
+      if (s?.dims) {
+        const vpH = el.clientHeight || 1;
+        const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
+        for (const o of s.dims.children) {
+          if (!(o as THREE.Sprite).isSprite || !o.userData.dimLabel) continue;
+          const d = camera.position.distanceTo(o.position);
+          const worldPerPx = (2 * d * tan) / vpH;
+          const px = Math.min(LABEL_MAX_PX, Math.max(LABEL_MIN_PX, o.userData.baseH / worldPerPx));
+          const h = px * worldPerPx;
+          o.scale.set(h * o.userData.aspect, h, 1);
+        }
+      }
       renderer.render(scene, camera);
       raf = requestAnimationFrame(animate);
     };
@@ -106,7 +126,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.content.clear();
     s.mesh = null;
     if (!geometry) {
-      updateDims(s, showDims);
+      updateDims(s, showDims, units);
       return;
     }
 
@@ -118,13 +138,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     );
     mesh.add(edges);
     s.mesh = mesh;
-    updateDims(s, showDims);
+    updateDims(s, showDims, units);
     frameToObject(s);
   }, [geometry]);
 
   useEffect(() => {
-    if (st.current) updateDims(st.current, showDims);
-  }, [showDims]);
+    if (st.current) updateDims(st.current, showDims, units);
+  }, [showDims, units]);
 
   useEffect(() => {
     if (st.current) st.current.material.wireframe = wireframe;
@@ -174,16 +194,20 @@ function disposeDims(s: Internals | null) {
   s.dims = null;
 }
 
-function updateDims(s: Internals, show: boolean) {
+function updateDims(s: Internals, show: boolean, units: "mm" | "in") {
   disposeDims(s);
   if (!show || !s.mesh) return;
-  s.dims = buildDimensions(s.mesh.geometry);
+  s.dims = buildDimensions(s.mesh.geometry, units);
   s.scene.add(s.dims);
 }
 
 const r1 = (n: number) => Math.round(n * 10) / 10;
+/** Format a millimetre length in the chosen unit for a label. */
+function fmtLen(mm: number, units: "mm" | "in"): string {
+  return units === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${r1(mm)} mm`;
+}
 
-function buildDimensions(geometry: THREE.BufferGeometry): THREE.Group {
+function buildDimensions(geometry: THREE.BufferGeometry, units: "mm" | "in"): THREE.Group {
   geometry.computeBoundingBox();
   const b = geometry.boundingBox!;
   const size = new THREE.Vector3();
@@ -216,7 +240,7 @@ function buildDimensions(geometry: THREE.BufferGeometry): THREE.Group {
     tick,
     line,
     label,
-    `${r1(size.x)} mm`,
+    fmtLen(size.x, units),
     maxD,
   );
   // Depth — along Y, drawn to the right (x = max + off), on the floor
@@ -228,7 +252,7 @@ function buildDimensions(geometry: THREE.BufferGeometry): THREE.Group {
     tick,
     line,
     label,
-    `${r1(size.y)} mm`,
+    fmtLen(size.y, units),
     maxD,
   );
   // Height — along Z, drawn at the front-left vertical corner
@@ -240,7 +264,7 @@ function buildDimensions(geometry: THREE.BufferGeometry): THREE.Group {
     tick,
     line,
     label,
-    `${r1(size.z)} mm`,
+    fmtLen(size.z, units),
     maxD,
   );
   return g;
@@ -271,7 +295,11 @@ function addDim(
 
   const mid = p1.clone().add(p2).multiplyScalar(0.5).add(out.clone().multiplyScalar(tick * 1.1));
   const sprite = makeLabel(text, labelColor);
-  const h = modelSize * 0.11; // label height ≈ 11% of the model's largest side
+  // baseH is the "natural" world height; the render loop rescales it each frame
+  // to hold a constant on-screen pixel size (clamped), so labels stay small.
+  sprite.userData.dimLabel = true;
+  sprite.userData.baseH = modelSize * 0.05;
+  const h = modelSize * 0.05;
   sprite.scale.set(h * sprite.userData.aspect, h, 1);
   sprite.position.copy(mid);
   g.add(sprite);

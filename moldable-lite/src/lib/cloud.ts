@@ -16,9 +16,51 @@ export const DEFAULT_RELAY = `${SUPA_URL}/functions/v1/relay`;
 let clientP: Promise<any> | null = null;
 function supa(): Promise<any> {
   if (!clientP) {
-    clientP = import("@supabase/supabase-js").then(({ createClient }) => createClient(SUPA_URL, SUPA_KEY));
+    clientP = import("@supabase/supabase-js").then(({ createClient }) =>
+      // PKCE: the safe OAuth/magic-link flow for a static site; the client
+      // auto-exchanges the ?code= in the URL when it initializes.
+      createClient(SUPA_URL, SUPA_KEY, { auth: { flowType: "pkce" } }),
+    );
   }
   return clientP;
+}
+
+/** The exact page URL OAuth/magic links must return to (works on Pages + localhost). */
+function appUrl(): string {
+  return window.location.origin + window.location.pathname;
+}
+
+/** True when the page URL carries an auth return (OAuth code / magic link). */
+export function hasAuthReturn(): boolean {
+  return /[?&#](code|access_token|error_description)=/.test(window.location.search + window.location.hash);
+}
+
+/** Initialize the client to complete an auth return, then clean the URL. */
+export async function completeAuthReturn(): Promise<{ email: string } | null> {
+  const u = await cloudUser(); // initializing the client performs the code exchange
+  window.history.replaceState(null, "", appUrl());
+  return u;
+}
+
+export async function cloudOAuth(provider: "github" | "google"): Promise<void> {
+  const c = await supa();
+  const { error } = await c.auth.signInWithOAuth({ provider, options: { redirectTo: appUrl() } });
+  if (error) throw new Error(error.message);
+  // on success the browser navigates away to the provider
+}
+
+export async function cloudMagicLink(email: string): Promise<string> {
+  const c = await supa();
+  const { error } = await c.auth.signInWithOtp({ email, options: { emailRedirectTo: appUrl() } });
+  if (error) throw new Error(error.message);
+  return `Login link sent to ${email} — open it in THIS browser (check spam; sender mail.app.supabase.io). No password needed.`;
+}
+
+/** Subscribe to sign-in/out; returns an unsubscribe function. */
+export async function onAuthChange(cb: (email: string | null) => void): Promise<() => void> {
+  const c = await supa();
+  const { data } = c.auth.onAuthStateChange((_e: string, session: any) => cb(session?.user?.email ?? null));
+  return () => data.subscription.unsubscribe();
 }
 
 export async function cloudUser(): Promise<{ email: string } | null> {

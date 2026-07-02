@@ -198,7 +198,7 @@ export function Workspace(p: Props) {
                 onChange={(e) => p.setInput(e.target.value)}
                 placeholder={
                   p.mode === "generative"
-                    ? "Describe it, or just upload a photo…"
+                    ? "Describe it, or upload / paste a photo…"
                     : p.imageUrl
                       ? "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
                       : "Describe a part, or a change…"

@@ -209,6 +209,29 @@ export default function App() {
     setImage(null);
   }
 
+  // Paste an image straight from the clipboard (screenshot, copied file) anywhere
+  // in the app — routes exactly like an upload.
+  useEffect(() => {
+    if (!entered) return;
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type.startsWith("image/")) {
+          const f = it.getAsFile();
+          if (f) {
+            e.preventDefault();
+            pickImage(f);
+          }
+          return;
+        }
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
+    // pickImage closes over current mode/llm/keys; re-bind when those change.
+  }, [entered, mode, llm, key, llmKeys, image]);
+
   function computeReport(geo: THREE.BufferGeometry): PrintabilityReport | null {
     try {
       return analyzePrintability(geo, { bed: printer.bed, overhangThresholdDeg: printer.overhangThresholdDeg });

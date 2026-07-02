@@ -1,9 +1,9 @@
-// Tolerant fenced-block extraction for replicad code.
+// Tolerant fenced-block extraction for replicad code. Models sometimes emit a
+// partial/wrong block first and a corrected one after — take the LAST complete
+// fenced block, which is the most-corrected version.
 export function extractJsBlock(text: string): string {
-  const tagged = text.match(/```(?:js|javascript|ts|typescript)\s*\n([\s\S]*?)```/i);
-  if (tagged) return tagged[1].trim();
-  const any = text.match(/```[^\n]*\n([\s\S]*?)```/);
-  if (any) return any[1].trim();
+  const all = [...text.matchAll(/```(?:js|javascript|ts|typescript)?[^\n]*\n([\s\S]*?)```/gi)];
+  if (all.length) return all[all.length - 1][1].trim();
   const open = text.match(/```(?:js|javascript)?\s*\n([\s\S]*)$/i);
   if (open) return open[1].trim();
   return text.trim();

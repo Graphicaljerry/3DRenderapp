@@ -19,8 +19,21 @@ function ensureOC(): Promise<void> {
 
 const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
 
+/**
+ * Some models emit a stray `let main;` / `var main;` alongside `function main(...)`
+ * — an instant "Identifier 'main' has already been declared". Strip the bare
+ * re-declaration when a function main exists.
+ */
+function sanitize(code: string): string {
+  if (/function\s+main\s*\(/.test(code)) {
+    code = code.replace(/^\s*(?:let|var|const)\s+main\s*;?\s*$/gm, "");
+  }
+  return code;
+}
+
 // ---- Compile untrusted LLM code at global scope; shadow ambient globals. ----
-function runToShape(code: string, params?: Record<string, number>): any {
+function runToShape(rawCode: string, params?: Record<string, number>): any {
+  const code = sanitize(rawCode);
   // Do NOT pre-declare `main` — the user's code defines `function main(...)`, and a
   // `let main` here collides ("Identifier 'main' has already been declared").
   const factory = new Function(

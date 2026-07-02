@@ -6,7 +6,7 @@ A local-first, BYO-Anthropic-key web app that turns a text description into a **
 
 > **describe → AI writes CAD → live 3D viewer → export STL · 3MF · STEP · OBJ**
 
-**🔗 Live demo:** https://graphicaljerry.github.io/3DRenderapp/
+**🔗 Live demo:** https://graphicaljerry.github.io/3DRenderapp/ · **💰 Business plan:** [`docs/COMMERCIALIZATION.md`](../docs/COMMERCIALIZATION.md)
 (Precise CAD + Hugging Face image→3D work on the hosted site; the paid engines need the Cloudflare Worker relay from `proxy/`.)
 
 This is the full Phase-1 build (see `../docs/PLAN.md`, `../docs/RESEARCH.md`). The folder is still

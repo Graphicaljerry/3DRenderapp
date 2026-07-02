@@ -455,6 +455,7 @@ export default function App() {
     let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
     let ok = false;
+    let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
@@ -481,13 +482,15 @@ export default function App() {
           ok = true;
           break;
         } catch (err: any) {
-          if (attempt === 3) throw err;
+          const msg = String(err?.message ?? err);
+          if (attempt === 3 || msg === lastErrMsg) throw err; // same failure twice → the model is stuck; stop wasting time
+          lastErrMsg = msg;
           history = [
             ...history,
             { role: "assistant", content: raw },
-            { role: "user", content: kind === "replicad" ? replicadRepairMessage(err) : jsonRepairMessage(String(err?.message ?? err)) },
+            { role: "user", content: kind === "replicad" ? replicadRepairMessage(err) : jsonRepairMessage(msg) },
           ];
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `Attempt ${attempt} didn't build — retrying…`, streaming: true } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `Attempt ${attempt} didn't build (${msg.slice(0, 80)}) — retrying…`, streaming: true } : x)));
         }
       }
     } catch (err: any) {

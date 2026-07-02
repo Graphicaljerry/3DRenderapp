@@ -102,8 +102,7 @@ async function parseSSE(res: Response, h: StreamHandlers): Promise<string> {
   return full;
 }
 
-/** Stream a completion; auto-fallback: direct→relay on network/CORS, stream→plain on parse trouble. */
-export async function generateCompat(r: CompatRequest, h: StreamHandlers = {}): Promise<string> {
+async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
   const canRelay = !!r.relayPrefix && relayAvailable(r.proxyBase || "");
   let res: Response | null = null;
   let viaRelay = false;
@@ -133,4 +132,69 @@ export async function generateCompat(r: CompatRequest, h: StreamHandlers = {}): 
   const text = data.choices?.[0]?.message?.content ?? "";
   if (!text) throw new Error("The model returned an empty reply.");
   return text;
+}
+
+// ---- self-healing model ids ------------------------------------------------
+// Provider model names churn (e.g. Google renaming Flash ids). When a model id
+// 404s, ask the provider's /models list and auto-pick the best match, then
+// remember it for the session.
+const resolvedModels = new Map<string, string>();
+
+export function pickGeminiModel(ids: string[]): string | undefined {
+  const clean = ids.map((id) => id.replace(/^models\//, ""));
+  const score = (s: string) => parseFloat(s.match(/gemini-([\d.]+)/)?.[1] ?? "0");
+  const best = (list: string[]) => list.sort((a, b) => score(b) - score(a) || a.length - b.length)[0];
+  const flash = clean.filter((id) => /^gemini-[\d.]+-flash/.test(id) && !/(lite|image|audio|tts|live|embed|thinking|exp)/i.test(id));
+  if (flash.length) return best(flash);
+  const anyFlash = clean.filter((id) => /gemini.*flash/i.test(id) && !/(image|audio|tts|live|embed)/i.test(id));
+  if (anyFlash.length) return best(anyFlash);
+  const anyGemini = clean.filter((id) => /^gemini-/.test(id));
+  return anyGemini.length ? best(anyGemini) : undefined;
+}
+
+async function listModels(r: CompatRequest): Promise<string[]> {
+  const headers: Record<string, string> = {};
+  if (r.apiKey) headers.authorization = `Bearer ${r.apiKey}`;
+  const url = (viaRelay: boolean) =>
+    viaRelay
+      ? `${r.proxyBase || ""}/prox/${r.relayPrefix}${new URL(r.baseUrl).pathname.replace(/\/$/, "")}/models`
+      : `${r.baseUrl.replace(/\/$/, "")}/models`;
+  let res: Response;
+  try {
+    res = await fetch(url(false), { headers });
+  } catch {
+    if (!r.relayPrefix || !relayAvailable(r.proxyBase || "")) throw new Error("models list unreachable");
+    res = await fetch(url(true), { headers });
+  }
+  if (!res.ok) throw new Error(`models list HTTP ${res.status}`);
+  const data: any = await res.json();
+  const arr = Array.isArray(data) ? data : (data.data ?? data.models ?? []);
+  return arr.map((m: any) => String(m.id ?? m.name ?? "")).filter(Boolean);
+}
+
+/** Stream a completion with model-id self-healing + direct→relay fallback. */
+export async function generateCompat(r: CompatRequest, h: StreamHandlers = {}): Promise<string> {
+  const cacheKey = `${r.baseUrl}|${r.model}`;
+  const cached = resolvedModels.get(cacheKey);
+  if (cached) r = { ...r, model: cached };
+
+  try {
+    return await attempt(r, h);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    const isGemini = /generativelanguage/.test(r.baseUrl);
+    const modelMissing = /404|not[_\s]?found/i.test(msg) && /model/i.test(msg);
+    if (isGemini && modelMissing) {
+      try {
+        const good = pickGeminiModel(await listModels(r));
+        if (good && good !== r.model) {
+          resolvedModels.set(cacheKey, good);
+          return await attempt({ ...r, model: good }, h);
+        }
+      } catch {
+        /* fall through to the original error */
+      }
+    }
+    throw e;
+  }
 }

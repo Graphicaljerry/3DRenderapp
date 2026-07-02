@@ -20,10 +20,11 @@ import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type Pri
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider } from "./gen/registry";
 import { glbToGeometry } from "./gen/loadMesh";
-import { newProject, putProject } from "./store/projects";
+import { newProject, putProject, getProject } from "./store/projects";
 import { appendVersion, restoreVersion } from "./store/versions";
 import type { Project } from "./store/types";
 import { downloadBlob, safeFileName } from "./lib/download";
+import { exportSettings, importSettings } from "./lib/backup";
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string };
 export type Mode = "precise" | "generative";
@@ -107,7 +108,12 @@ function sourceText(source: BuildInput): string {
 export default function App() {
   const [key, setKey] = useState(() => localStorage.getItem(KEY_LS) ?? "");
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_LS) ?? MODELS[0].id);
-  const [entered, setEntered] = useState(() => !!localStorage.getItem(KEY_LS));
+  // "entered" survives reloads for free-mode users too (not only key holders).
+  const [entered, setEnteredState] = useState(() => !!localStorage.getItem(KEY_LS) || localStorage.getItem("moldable_entered") === "1");
+  const setEntered = (v: boolean) => {
+    if (v) localStorage.setItem("moldable_entered", "1");
+    setEnteredState(v);
+  };
   const [printer, setPrinter] = useState<PrinterDefaults>(loadPrinter);
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>(loadProviderKeys);
   const [proxyBase, setProxyBase] = useState(() => localStorage.getItem(PROXY_LS) ?? "");
@@ -167,6 +173,49 @@ export default function App() {
     setProject(next);
     void putProject(next);
   }
+
+  // ---- chat memory: every message is saved into the project, continuously ----
+  const projectRef = useRef<Project | null>(null);
+  projectRef.current = project;
+  useEffect(() => {
+    if (messages.length === 0) return;
+    const t = setTimeout(() => {
+      const chat = messages
+        .filter((m) => !m.streaming)
+        .map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
+      const pr = projectRef.current;
+      if (pr) {
+        const next = { ...pr, chat, updatedAt: Date.now() };
+        projectRef.current = next;
+        setProject(next);
+        void putProject(next);
+      } else {
+        // No project yet (e.g. every attempt failed) — create a shell so the
+        // conversation itself survives reloads and appears in the Library.
+        const firstUser = messages.find((m) => m.role === "user");
+        const shell = { ...newProject(deriveName(firstUser?.text ?? "Chat"), "replicad"), chat };
+        projectRef.current = shell;
+        persist(shell);
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [messages]);
+
+  // ---- session memory: reopen the last project (chat + model) after a reload ----
+  useEffect(() => {
+    if (project?.id) localStorage.setItem("moldable_last_project", project.id);
+  }, [project?.id]);
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (!sel || restoredRef.current) return;
+    restoredRef.current = true;
+    if (projectRef.current) return; // already working on something
+    const id = localStorage.getItem("moldable_last_project");
+    if (!id) return;
+    void getProject(id).then((p) => {
+      if (p && !projectRef.current) void openProjectById(p);
+    });
+  }, [sel]);
   function saveKey(k: string, m: string) {
     localStorage.setItem(KEY_LS, k.trim());
     localStorage.setItem(MODEL_LS, m);
@@ -256,10 +305,8 @@ export default function App() {
       glb: res.glb,
       genSource: res.source.kind === "gen" ? { provider: res.source.provider, model: res.source.model, prompt: res.source.prompt } : undefined,
     });
-    snap.chat = [
-      ...messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error })),
-      { role: "user", text: promptText },
-    ];
+    // Chat is synced separately (continuous effect) — keep whatever is there.
+    snap.chat = projectRef.current?.chat ?? base.chat;
     persist(snap);
   }
 
@@ -622,7 +669,7 @@ export default function App() {
   async function openProjectById(p: Project) {
     setShowLibrary(false);
     setProject(p);
-    setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error })));
+    setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error, image: c.image })));
     seedHistory(p.engine, p.code, p.spec);
     clearImage();
     setMode(p.engine === "generative" ? "generative" : "precise");
@@ -640,6 +687,8 @@ export default function App() {
   }
 
   function startNew() {
+    localStorage.removeItem("moldable_last_project");
+    projectRef.current = null;
     setProject(null);
     setMessages([]);
     apiHistory.current = [];
@@ -815,7 +864,29 @@ function SettingsModal({
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
   onClose: () => void;
 }) {
-  const [pane, setPane] = useState<"ai" | "mesh" | "printer">("ai");
+  const [pane, setPane] = useState<"ai" | "mesh" | "printer" | "sync">("ai");
+  const [passphrase, setPassphrase] = useState("");
+  const [syncMsg, setSyncMsg] = useState("");
+  const importRef = useRef<HTMLInputElement>(null);
+
+  async function doExport() {
+    try {
+      const blob = await exportSettings(passphrase);
+      downloadBlob(blob, "moldable-settings.json");
+      setSyncMsg("Backup downloaded — keep it (and your passphrase) somewhere safe.");
+    } catch (e: any) {
+      setSyncMsg(String(e?.message ?? e));
+    }
+  }
+  async function doImport(file: File) {
+    try {
+      const n = await importSettings(file, passphrase);
+      setSyncMsg(`Restored ${n} settings — reloading…`);
+      setTimeout(() => window.location.reload(), 900);
+    } catch (e: any) {
+      setSyncMsg(String(e?.message ?? e));
+    }
+  }
 
   // AI brain (Precise mode)
   const [k, setK] = useState(initialKey);
@@ -862,9 +933,9 @@ function SettingsModal({
         </div>
 
         <div className="seg stabs">
-          {(["ai", "mesh", "printer"] as const).map((t) => (
+          {(["ai", "mesh", "printer", "sync"] as const).map((t) => (
             <button key={t} className={pane === t ? "on" : ""} onClick={() => setPane(t)}>
-              {t === "ai" ? "AI brain" : t === "mesh" ? "3D engine" : "Printer"}
+              {t === "ai" ? "AI brain" : t === "mesh" ? "3D engine" : t === "printer" ? "Printer" : "Sync"}
             </button>
           ))}
         </div>
@@ -1002,6 +1073,39 @@ function SettingsModal({
             <label>Overhang warning threshold (°)</label>
             <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
             <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
+          </>
+        )}
+
+        {pane === "sync" && (
+          <>
+            <p className="pane-desc">
+              Move your keys &amp; settings to another computer — no account needed. The file is <b>encrypted with a passphrase you choose</b>;
+              nothing is uploaded anywhere. (Projects &amp; chats live in each browser and stay on this device.)
+            </p>
+            <label>Passphrase (like a PIN, but longer is safer)</label>
+            <input
+              type="password"
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="choose a passphrase you'll remember"
+            />
+            <div className="param-actions">
+              <button className="primary sm" disabled={passphrase.length < 4} onClick={doExport}>Download encrypted backup</button>
+              <button className="ghost sm" disabled={passphrase.length < 4} onClick={() => importRef.current?.click()}>Restore from backup…</button>
+            </div>
+            <input
+              ref={importRef}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void doImport(f);
+                e.currentTarget.value = "";
+              }}
+            />
+            {syncMsg && <p className="fine">{syncMsg}</p>}
+            <p className="fine">On the other computer: open this same site → Settings → Sync → Restore, pick the file, enter the same passphrase.</p>
           </>
         )}
 

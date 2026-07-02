@@ -4,6 +4,7 @@ export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   error?: boolean;
+  image?: string; // reference-photo thumbnail (data URL)
 }
 
 export interface GenSource {

@@ -74,3 +74,5 @@ src/
   store/                   IndexedDB project + version persistence
   components/              Workspace, Viewer, Library modal; App.tsx orchestrates
 ```
+
+<!-- deploy retrigger: run 29 hit a transient GitHub Pages outage -->

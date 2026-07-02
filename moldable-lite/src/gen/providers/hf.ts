@@ -149,16 +149,19 @@ async function call(
             }
           }
           if (event === "error") {
-            let msg = payload;
+            let msg: unknown = payload;
             try {
               const j = JSON.parse(payload);
-              msg = typeof j === "string" ? j : (j?.message ?? payload);
+              msg = typeof j === "string" ? j : (j?.message ?? j);
             } catch {}
-            throw new Error(
-              /quota|exceeded/i.test(String(msg))
-                ? "Free GPU quota is used up for now — add a free hf_… token in Settings (huggingface.co/settings/tokens) for a bigger daily allowance, or try later."
-                : `The Space reported an error: ${String(msg).slice(0, 200)}`,
-            );
+            const s = msg == null ? "" : String(msg);
+            if (!s || s === "null" || s === "undefined" || /quota|exceeded/i.test(s)) {
+              // ZeroGPU kills anonymous/over-quota jobs with a bare error event.
+              throw new Error(
+                "The free GPU rejected the job (this is what running out of the small anonymous daily quota looks like). Fix: paste a FREE hf_… token from huggingface.co/settings/tokens into Settings → 3D engine — it's a 1-minute signup and gives ~5× the quota plus queue priority. Or try again tomorrow / another model.",
+              );
+            }
+            throw new Error(`The Space reported an error: ${s.slice(0, 200)}`);
           }
         }
       }

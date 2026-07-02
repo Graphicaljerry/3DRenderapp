@@ -769,24 +769,29 @@ function SettingsModal({
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
   onClose: () => void;
 }) {
+  const [pane, setPane] = useState<"ai" | "mesh" | "printer">("ai");
+
+  // AI brain (Precise mode)
   const [k, setK] = useState(initialKey);
   const [m, setM] = useState(initialModel);
-  const [bed, setBed] = useState(printer.bed);
-  const [oh, setOh] = useState(printer.overhangThresholdDeg);
-  const [keys, setKeys] = useState<Record<string, string>>(providerKeys);
-  const [gp, setGp] = useState(genProvider);
-  const [gm, setGm] = useState(genModel);
-  const [proxy, setProxy] = useState(proxyBase);
-  const prov = getProvider(gp) ?? PROVIDERS[0];
-
-  // Precise-engine (LLM) picker state
   const [lp, setLp] = useState<LlmProviderId>(llm.provider);
   const [lmodel, setLmodel] = useState(llm.provider === "anthropic" ? "" : llm.model);
   const [lbase, setLbase] = useState(llm.baseUrl ?? "");
   const [lkeys, setLkeys] = useState<Record<string, string>>(llmKeys);
   const lpre = llmPreset(lp);
 
-  function saveAi() {
+  // 3D engine (Generative mode)
+  const [keys, setKeys] = useState<Record<string, string>>(providerKeys);
+  const [gp, setGp] = useState(genProvider);
+  const [gm, setGm] = useState(genModel);
+  const [proxy, setProxy] = useState(proxyBase);
+  const prov = getProvider(gp) ?? PROVIDERS[0];
+
+  // Printer
+  const [bed, setBed] = useState(printer.bed);
+  const [oh, setOh] = useState(printer.overhangThresholdDeg);
+
+  function saveAll() {
     if (lp === "anthropic") {
       onSaveLlm({ provider: "anthropic", model: m }, lkeys);
       onSaveKey(k, m);
@@ -796,6 +801,9 @@ function SettingsModal({
         lkeys,
       );
     }
+    onSaveGen(keys, gp, gm, proxy.trim());
+    onSavePrinter({ bed, overhangThresholdDeg: oh });
+    onClose();
   }
 
   return (
@@ -803,107 +811,133 @@ function SettingsModal({
       <div className="card" onClick={(e) => e.stopPropagation()}>
         <div className="card-head">
           <h2>Settings</h2>
-          <button className="x" onClick={onClose}>✕</button>
+          <button className="x" aria-label="Close settings" onClick={onClose}>✕</button>
         </div>
 
-        <div className="sect-label">Precise CAD engine — the AI that writes the CAD code</div>
-        <label>AI provider</label>
-        <select
-          value={lp}
-          onChange={(e) => {
-            const np = e.target.value as LlmProviderId;
-            setLp(np);
-            setLmodel(np === "anthropic" ? "" : llmPreset(np).defaultModel);
-          }}
-        >
-          {LLM_PRESETS.map((pr) => (
-            <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}</option>
+        <div className="seg stabs">
+          {(["ai", "mesh", "printer"] as const).map((t) => (
+            <button key={t} className={pane === t ? "on" : ""} onClick={() => setPane(t)}>
+              {t === "ai" ? "🧠 AI brain" : t === "mesh" ? "🧊 3D engine" : "🖨️ Printer"}
+            </button>
           ))}
-        </select>
-        {lp === "anthropic" ? (
+        </div>
+
+        {pane === "ai" && (
           <>
-            <label>Anthropic API key</label>
-            <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
-            <label>Claude model</label>
-            <select value={m} onChange={(e) => setM(e.target.value)}>
-              {MODELS.map((x) => (
-                <option key={x.id} value={x.id}>{x.label}</option>
+            <p className="pane-desc">Writes the CAD code in <b>Precise</b> mode. Gemini and Groq have free tiers; Claude gives the best quality.</p>
+            <label>Provider</label>
+            <select
+              value={lp}
+              onChange={(e) => {
+                const np = e.target.value as LlmProviderId;
+                setLp(np);
+                setLmodel(np === "anthropic" ? "" : llmPreset(np).defaultModel);
+              }}
+            >
+              {LLM_PRESETS.map((pr) => (
+                <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}</option>
               ))}
             </select>
-          </>
-        ) : (
-          <>
-            {(lpre.needsKey || lp === "custom") && (
+            {lp === "anthropic" ? (
               <>
-                <label>{lpre.label.split(" — ")[0]} API key{lp === "custom" ? " (if required)" : ""}</label>
-                <input
-                  type="password"
-                  value={lkeys[lp] ?? ""}
-                  onChange={(e) => setLkeys({ ...lkeys, [lp]: e.target.value })}
-                  placeholder={lpre.keyHint}
-                />
+                <label>Anthropic API key</label>
+                <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
+                <label>Claude model</label>
+                <select value={m} onChange={(e) => setM(e.target.value)}>
+                  {MODELS.map((x) => (
+                    <option key={x.id} value={x.id}>{x.label}</option>
+                  ))}
+                </select>
+              </>
+            ) : (
+              <>
+                {(lpre.needsKey || lp === "custom") && (
+                  <>
+                    <label>{lpre.label.split(" — ")[0]} API key{lp === "custom" ? " (if required)" : ""}</label>
+                    <input
+                      type="password"
+                      value={lkeys[lp] ?? ""}
+                      onChange={(e) => setLkeys({ ...lkeys, [lp]: e.target.value })}
+                      placeholder="paste your key…"
+                    />
+                  </>
+                )}
+                {lp === "custom" && (
+                  <>
+                    <label>Base URL (ends in /v1)</label>
+                    <input value={lbase} onChange={(e) => setLbase(e.target.value)} placeholder="https://my-host/v1" />
+                  </>
+                )}
+                <label>Model id</label>
+                <input value={lmodel} onChange={(e) => setLmodel(e.target.value)} placeholder={lpre.defaultModel || "model-name"} />
+                <p className="fine">{lpre.keyHint}</p>
               </>
             )}
-            {lp === "custom" && (
-              <>
-                <label>Base URL (ends in /v1)</label>
-                <input value={lbase} onChange={(e) => setLbase(e.target.value)} placeholder="https://my-host/v1" />
-              </>
-            )}
-            <label>Model id</label>
-            <input value={lmodel} onChange={(e) => setLmodel(e.target.value)} placeholder={lpre.defaultModel || "model-name"} />
-            <p className="fine">{lpre.keyHint}</p>
           </>
         )}
-        <button className="primary block" onClick={saveAi}>Save AI settings</button>
 
-        <div className="sect-label">Generative 3D engine (photo / text → mesh)</div>
-        <label>Engine</label>
-        <select
-          value={gp}
-          onChange={(e) => {
-            const np = e.target.value;
-            setGp(np);
-            setGm(getProvider(np)?.models[0].id ?? "");
-          }}
-        >
-          {PROVIDERS.map((p) => (
-            <option key={p.id} value={p.id}>{p.label}{p.free ? " · free" : ""}</option>
-          ))}
-        </select>
-        <label>Mesh model — “image or text” models can generate from a text prompt alone</label>
-        <select value={gm} onChange={(e) => setGm(e.target.value)}>
-          {prov.models.map((mm) => (
-            <option key={mm.id} value={mm.id}>{mm.label}</option>
-          ))}
-        </select>
-        <p className="fine">{prov.needsKey ? `Needs a key — ${prov.keyHint}` : `Free — ${prov.keyHint}`}</p>
-        {PROVIDERS.filter((p) => p.needsKey || p.id === "hf").map((p) => (
-          <div key={p.id}>
-            <label>{p.label} key{p.needsKey ? "" : " (optional)"}</label>
+        {pane === "mesh" && (
+          <>
+            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode. Hugging Face is free.</p>
+            <label>Engine</label>
+            <select
+              value={gp}
+              onChange={(e) => {
+                const np = e.target.value;
+                setGp(np);
+                setGm(getProvider(np)?.models[0].id ?? "");
+              }}
+            >
+              {PROVIDERS.map((pp) => (
+                <option key={pp.id} value={pp.id}>{pp.label}{pp.free ? " · free" : ""}</option>
+              ))}
+            </select>
+            <label>Model — “image or text” models can generate from a prompt alone</label>
+            <select value={gm} onChange={(e) => setGm(e.target.value)}>
+              {prov.models.map((mm) => (
+                <option key={mm.id} value={mm.id}>{mm.label}</option>
+              ))}
+            </select>
+            <label>
+              {prov.label.split(" (")[0]} key
+              {prov.needsKey ? "" : " — optional but recommended (5× the free GPU quota)"}
+            </label>
             <input
               type="password"
-              value={keys[p.id] ?? ""}
-              onChange={(e) => setKeys({ ...keys, [p.id]: e.target.value })}
-              placeholder={p.keyHint}
+              value={keys[gp] ?? ""}
+              onChange={(e) => setKeys({ ...keys, [gp]: e.target.value })}
+              placeholder={prov.needsKey ? "paste your key…" : "hf_…"}
             />
-          </div>
-        ))}
-        <label>Proxy base URL (advanced — leave blank to use the local dev relay)</label>
-        <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = http://localhost:5173 relay" />
-        <button className="primary block" onClick={() => onSaveGen(keys, gp, gm, proxy.trim())}>Save generative settings</button>
+            <p className="fine">{prov.keyHint}</p>
+            <details className="adv">
+              <summary>Advanced — relay for paid engines on the hosted site</summary>
+              <label>Proxy base URL</label>
+              <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = local dev relay" />
+              <p className="fine">Paid engines can’t be called from a static site directly — deploy proxy/cloudflare-worker.js and paste its URL. Not needed for Hugging Face or when running npm run dev.</p>
+            </details>
+          </>
+        )}
 
-        <div className="sect-label">Printer defaults</div>
-        <label>Bed size (mm): W × D × H</label>
-        <div className="row3">
-          <input type="number" value={bed.x} onChange={(e) => setBed({ ...bed, x: +e.target.value })} />
-          <input type="number" value={bed.y} onChange={(e) => setBed({ ...bed, y: +e.target.value })} />
-          <input type="number" value={bed.z} onChange={(e) => setBed({ ...bed, z: +e.target.value })} />
+        {pane === "printer" && (
+          <>
+            <p className="pane-desc">Used by the bed-fit check and the Printability report.</p>
+            <label>Bed size (mm): width × depth × height</label>
+            <div className="row3">
+              <input type="number" value={bed.x} onChange={(e) => setBed({ ...bed, x: +e.target.value })} />
+              <input type="number" value={bed.y} onChange={(e) => setBed({ ...bed, y: +e.target.value })} />
+              <input type="number" value={bed.z} onChange={(e) => setBed({ ...bed, z: +e.target.value })} />
+            </div>
+            <label>Overhang warning threshold (°)</label>
+            <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
+            <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
+          </>
+        )}
+
+        <div className="modal-actions">
+          <button className="ghost" onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={saveAll}>Save all</button>
         </div>
-        <label>Overhang warning threshold (°)</label>
-        <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
-        <button className="ghost block" onClick={() => onSavePrinter({ bed, overhangThresholdDeg: oh })}>Save printer defaults</button>
-        <p className="fine">Everything is stored only in this browser.</p>
+        <p className="fine center">Everything is stored only in this browser — nothing is sent to us.</p>
       </div>
     </div>
   );

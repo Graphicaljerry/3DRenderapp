@@ -26,7 +26,7 @@ export const PROVIDERS: ProviderDef[] = [
     label: "Tripo",
     free: false,
     needsKey: true,
-    keyHint: "tsk_… from platform.tripo3d.ai (200 free credits/mo)",
+    keyHint: "tsk_… free key from platform.tripo3d.ai — free monthly credits, the most reliable engine. Needs the relay on the hosted site (10-min setup: proxy/DEPLOY.md).",
     viaProxy: true,
     generate: tripoGenerate,
     models: [

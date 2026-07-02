@@ -957,10 +957,14 @@ function SettingsModal({
             />
             <p className="fine">{prov.keyHint}</p>
             <details className="adv">
-              <summary>Advanced — relay for paid engines on the hosted site</summary>
+              <summary>Advanced — relay: unlocks Tripo/Meshy/fal on the hosted site</summary>
               <label>Proxy base URL</label>
-              <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = local dev relay" />
-              <p className="fine">Paid engines can’t be called from a static site directly — deploy proxy/cloudflare-worker.js and paste its URL. Not needed for Hugging Face or when running npm run dev.</p>
+              <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="https://moldable-relay.<you>.workers.dev" />
+              <p className="fine">
+                Quality engines require a tiny relay server (free, ~10 min): follow <b>proxy/DEPLOY.md</b> in the GitHub repo, then paste your
+                Worker URL here. Tripo then gives free monthly credits with far better reliability than the free Hugging Face GPUs. Not needed
+                for Hugging Face or when running locally (npm run dev).
+              </p>
             </details>
           </>
         )}

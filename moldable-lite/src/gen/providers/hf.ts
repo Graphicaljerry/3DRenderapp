@@ -152,13 +152,19 @@ async function call(
             let msg: unknown = payload;
             try {
               const j = JSON.parse(payload);
-              msg = typeof j === "string" ? j : (j?.message ?? j);
+              msg = typeof j === "string" ? j : (j?.message ?? j?.error ?? j);
             } catch {}
             const s = msg == null ? "" : String(msg);
-            if (!s || s === "null" || s === "undefined" || /quota|exceeded/i.test(s)) {
-              // ZeroGPU kills anonymous/over-quota jobs with a bare error event.
+            const hasToken = !!headers.authorization;
+            const empty = !s || s === "null" || s === "undefined";
+            const quota = /quota|exceeded|gpu task aborted/i.test(s);
+            if (empty || quota) {
+              // ZeroGPU kills over-quota/reclaimed jobs with a bare (often null) error event.
+              const detail = quota && !empty ? ` (${s.slice(0, 120)})` : "";
               throw new Error(
-                "The free GPU rejected the job (this is what running out of the small anonymous daily quota looks like). Fix: paste a FREE hf_… token from huggingface.co/settings/tokens into Settings → 3D engine — it's a 1-minute signup and gives ~5× the quota plus queue priority. Or try again tomorrow / another model.",
+                hasToken
+                  ? `The free GPU rejected this job${detail} even though your token was sent. Two common causes: (1) your token is FINE-GRAINED without GPU access — the fix is a plain “Read” token (huggingface.co/settings/tokens → Create new token → type “Read”); (2) text → 3D uses Hunyuan3D-2, the heaviest free model — 📎 uploading a reference photo uses the lighter Stable Fast 3D and is far more reliable. You can also switch models in Settings or wait for your daily GPU minutes to reset.`
+                  : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or 📎 upload a photo (uses a lighter model), or try later.`,
               );
             }
             throw new Error(`The Space reported an error: ${s.slice(0, 200)}`);
@@ -203,7 +209,8 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   }
 
   const base = spaceUrl(def.space);
-  const headers: Record<string, string> = input.apiKey ? { authorization: `Bearer ${input.apiKey}` } : {};
+  const token = (input.apiKey || "").trim();
+  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
 
   onProgress({ status: "connecting to the Space…" });
   const loc = await detectApi(base, headers);

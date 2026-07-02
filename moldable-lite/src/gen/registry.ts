@@ -11,7 +11,7 @@ export const PROVIDERS: ProviderDef[] = [
     label: "Hugging Face (free)",
     free: true,
     needsKey: false,
-    keyHint: "free hf_… token from huggingface.co/settings/tokens — strongly recommended (5× the anonymous daily GPU quota + queue priority)",
+    keyHint: "free hf_… token from huggingface.co/settings/tokens — use a plain “Read” token (fine-grained tokens often lack free-GPU access). ~5× the anonymous quota + queue priority.",
     viaProxy: false,
     generate: hfGenerate,
     models: [

@@ -55,7 +55,8 @@ async function post(r: CompatRequest, stream: boolean, viaRelay: boolean): Promi
 async function errorDetail(res: Response): Promise<string> {
   try {
     const j: any = await res.json();
-    return j?.error?.message ?? j?.message ?? JSON.stringify(j).slice(0, 300);
+    const e0 = Array.isArray(j) ? j[0] : j; // Google's compat layer array-wraps errors
+    return e0?.error?.message ?? e0?.message ?? JSON.stringify(j).slice(0, 300);
   } catch {
     return (await res.text().catch(() => "")).slice(0, 300) || res.statusText;
   }
@@ -134,67 +135,77 @@ async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
   return text;
 }
 
-// ---- self-healing model ids ------------------------------------------------
-// Provider model names churn (e.g. Google renaming Flash ids). When a model id
-// 404s, ask the provider's /models list and auto-pick the best match, then
-// remember it for the session.
-const resolvedModels = new Map<string, string>();
+// ---- Gemini model resolution -------------------------------------------------
+// Google's model ids churn and the OpenAI-compat layer has NO /models route
+// (verified: it 404s). So BEFORE the first Gemini call we ask the NATIVE
+// ListModels endpoint (/v1beta/models — verified live) which ids this key can
+// use with generateContent, prefer the configured id when valid, otherwise the
+// best Flash model — and cache the result.
 
-export function pickGeminiModel(ids: string[]): string | undefined {
-  const clean = ids.map((id) => id.replace(/^models\//, ""));
+interface GModel {
+  name: string;
+  methods: string[];
+}
+
+export function pickGeminiModel(models: GModel[], preferred: string): string | undefined {
+  const usable = models
+    .filter((m) => m.methods.includes("generateContent"))
+    .map((m) => m.name.replace(/^models\//, ""));
+  if (preferred && usable.includes(preferred)) return preferred;
   const score = (s: string) => parseFloat(s.match(/gemini-([\d.]+)/)?.[1] ?? "0");
-  const best = (list: string[]) => list.sort((a, b) => score(b) - score(a) || a.length - b.length)[0];
-  const flash = clean.filter((id) => /^gemini-[\d.]+-flash/.test(id) && !/(lite|image|audio|tts|live|embed|thinking|exp)/i.test(id));
+  const best = (list: string[]) => [...list].sort((a, b) => score(b) - score(a) || a.length - b.length)[0];
+  const flash = usable.filter((id) => /^gemini-[\d.]+-flash/.test(id) && !/(lite|image|audio|tts|live|embed|thinking|exp)/i.test(id));
   if (flash.length) return best(flash);
-  const anyFlash = clean.filter((id) => /gemini.*flash/i.test(id) && !/(image|audio|tts|live|embed)/i.test(id));
+  const anyFlash = usable.filter((id) => /flash/i.test(id) && !/(image|audio|tts|live|embed)/i.test(id));
   if (anyFlash.length) return best(anyFlash);
-  const anyGemini = clean.filter((id) => /^gemini-/.test(id));
+  const anyGemini = usable.filter((id) => /^gemini-/.test(id));
   return anyGemini.length ? best(anyGemini) : undefined;
 }
 
-async function listModels(r: CompatRequest): Promise<string[]> {
-  const headers: Record<string, string> = {};
-  if (r.apiKey) headers.authorization = `Bearer ${r.apiKey}`;
-  const url = (viaRelay: boolean) =>
-    viaRelay
-      ? `${r.proxyBase || ""}/prox/${r.relayPrefix}${new URL(r.baseUrl).pathname.replace(/\/$/, "")}/models`
-      : `${r.baseUrl.replace(/\/$/, "")}/models`;
-  let res: Response;
+const GEMINI_CACHE = "moldable_gemini_model";
+const geminiMemo = new Map<string, Promise<string>>();
+
+async function resolveGeminiModel(r: CompatRequest): Promise<string> {
+  const origin = new URL(r.baseUrl).origin;
+  const headers: Record<string, string> = r.apiKey ? { "x-goog-api-key": r.apiKey } : {};
+  let res: Response | null = null;
   try {
-    res = await fetch(url(false), { headers });
+    res = await fetch(`${origin}/v1beta/models?pageSize=1000`, { headers });
   } catch {
-    if (!r.relayPrefix || !relayAvailable(r.proxyBase || "")) throw new Error("models list unreachable");
-    res = await fetch(url(true), { headers });
+    /* network — fall through to cache */
   }
-  if (!res.ok) throw new Error(`models list HTTP ${res.status}`);
+  if (!res || !res.ok) {
+    try {
+      const cached = localStorage.getItem(GEMINI_CACHE);
+      if (cached) return cached;
+    } catch {}
+    throw new Error(
+      `Couldn't fetch your Gemini model list (${res ? `HTTP ${res.status}` : "network error"}) — double-check the Gemini API key in Settings (aistudio.google.com/apikey).`,
+    );
+  }
   const data: any = await res.json();
-  const arr = Array.isArray(data) ? data : (data.data ?? data.models ?? []);
-  return arr.map((m: any) => String(m.id ?? m.name ?? "")).filter(Boolean);
+  const models: GModel[] = (data.models ?? []).map((m: any) => ({
+    name: String(m.name ?? ""),
+    methods: (m.supportedGenerationMethods ?? []) as string[],
+  }));
+  const pick = pickGeminiModel(models, r.model);
+  if (!pick) throw new Error("Your Gemini key lists no models that support text generation — check the key/project at aistudio.google.com.");
+  try {
+    localStorage.setItem(GEMINI_CACHE, pick);
+  } catch {}
+  return pick;
 }
 
-/** Stream a completion with model-id self-healing + direct→relay fallback. */
+/** Stream a completion; Gemini ids are resolved against the live model list first. */
 export async function generateCompat(r: CompatRequest, h: StreamHandlers = {}): Promise<string> {
-  const cacheKey = `${r.baseUrl}|${r.model}`;
-  const cached = resolvedModels.get(cacheKey);
-  if (cached) r = { ...r, model: cached };
-
-  try {
-    return await attempt(r, h);
-  } catch (e: any) {
-    const msg = String(e?.message ?? e);
-    const isGemini = /generativelanguage/.test(r.baseUrl);
-    const modelMissing = /404|not[_\s]?found/i.test(msg) && /model/i.test(msg);
-    if (isGemini && modelMissing) {
-      try {
-        const good = pickGeminiModel(await listModels(r));
-        if (good && good !== r.model) {
-          resolvedModels.set(cacheKey, good);
-          return await attempt({ ...r, model: good }, h);
-        }
-      } catch {
-        /* fall through to the original error */
-      }
+  if (/generativelanguage/.test(r.baseUrl)) {
+    const key = `${r.apiKey ?? ""}|${r.model}`;
+    if (!geminiMemo.has(key)) {
+      const p = resolveGeminiModel(r);
+      p.catch(() => geminiMemo.delete(key)); // don't cache failures
+      geminiMemo.set(key, p);
     }
-    throw e;
+    r = { ...r, model: await geminiMemo.get(key)! };
   }
+  return attempt(r, h);
 }

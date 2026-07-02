@@ -127,6 +127,7 @@ export default function App() {
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
+  const [showDims, setShowDims] = useState(true);
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
@@ -642,6 +643,8 @@ export default function App() {
         report={report}
         wireframe={wireframe}
         setWireframe={setWireframe}
+        showDims={showDims}
+        setShowDims={setShowDims}
         viewerRef={viewer}
         tab={tab}
         setTab={setTab}

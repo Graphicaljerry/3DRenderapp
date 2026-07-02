@@ -9,6 +9,7 @@ export interface ViewerHandle {
 interface Props {
   geometry: THREE.BufferGeometry | null;
   wireframe: boolean;
+  showDims: boolean;
 }
 
 interface Internals {
@@ -18,11 +19,12 @@ interface Internals {
   controls: OrbitControls;
   content: THREE.Group;
   mesh: THREE.Mesh | null;
+  dims: THREE.Group | null;
   material: THREE.MeshStandardMaterial;
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
 
@@ -75,12 +77,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, content, mesh: null, material, ro };
+    st.current = { renderer, scene, camera, controls, content, mesh: null, dims: null, material, ro };
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();
+      disposeDims(st.current);
       renderer.dispose();
       el.removeChild(renderer.domElement);
       st.current = null;
@@ -102,7 +105,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
     s.content.clear();
     s.mesh = null;
-    if (!geometry) return;
+    if (!geometry) {
+      updateDims(s, showDims);
+      return;
+    }
 
     const mesh = new THREE.Mesh(geometry, s.material);
     s.content.add(mesh);
@@ -112,8 +118,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     );
     mesh.add(edges);
     s.mesh = mesh;
+    updateDims(s, showDims);
     frameToObject(s);
   }, [geometry]);
+
+  useEffect(() => {
+    if (st.current) updateDims(st.current, showDims);
+  }, [showDims]);
 
   useEffect(() => {
     if (st.current) st.current.material.wireframe = wireframe;
@@ -142,4 +153,173 @@ function frameToObject(s: Internals) {
   s.camera.updateProjectionMatrix();
   s.controls.target.copy(center);
   s.controls.update();
+}
+
+// ---- dimension annotations (W × D × H) -------------------------------------
+
+function disposeDims(s: Internals | null) {
+  if (!s?.dims) return;
+  s.dims.traverse((o) => {
+    const any = o as THREE.Mesh & THREE.Sprite;
+    (any.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
+    const mat = any.material as THREE.Material | THREE.Material[] | undefined;
+    const kill = (m: THREE.Material) => {
+      (m as THREE.SpriteMaterial).map?.dispose?.();
+      m.dispose();
+    };
+    if (Array.isArray(mat)) mat.forEach(kill);
+    else if (mat) kill(mat);
+  });
+  s.scene.remove(s.dims);
+  s.dims = null;
+}
+
+function updateDims(s: Internals, show: boolean) {
+  disposeDims(s);
+  if (!show || !s.mesh) return;
+  s.dims = buildDimensions(s.mesh.geometry);
+  s.scene.add(s.dims);
+}
+
+const r1 = (n: number) => Math.round(n * 10) / 10;
+
+function buildDimensions(geometry: THREE.BufferGeometry): THREE.Group {
+  geometry.computeBoundingBox();
+  const b = geometry.boundingBox!;
+  const size = new THREE.Vector3();
+  b.getSize(size);
+  const g = new THREE.Group();
+  g.renderOrder = 999;
+  const maxD = Math.max(size.x, size.y, size.z, 1);
+  const off = Math.max(maxD * 0.09, 4); // how far annotations sit outside the model
+  const tick = off * 0.45;
+  const line = 0x33566b; // slate-teal, reads on light bg and through the model
+  const label = 0x14181c;
+
+  // faint bounding box so the extents are legible even head-on
+  const boxEdges = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.BoxGeometry(size.x, size.y, size.z)),
+    new THREE.LineBasicMaterial({ color: 0x9aa2ac, transparent: true, opacity: 0.45, depthTest: false }),
+  );
+  const center = new THREE.Vector3();
+  b.getCenter(center);
+  boxEdges.position.copy(center);
+  boxEdges.renderOrder = 998;
+  g.add(boxEdges);
+
+  // Width — along X, drawn in front of the model (y = min − off), on the floor
+  addDim(
+    g,
+    new THREE.Vector3(b.min.x, b.min.y - off, b.min.z),
+    new THREE.Vector3(b.max.x, b.min.y - off, b.min.z),
+    new THREE.Vector3(0, -1, 0),
+    tick,
+    line,
+    label,
+    `${r1(size.x)} mm`,
+    maxD,
+  );
+  // Depth — along Y, drawn to the right (x = max + off), on the floor
+  addDim(
+    g,
+    new THREE.Vector3(b.max.x + off, b.min.y, b.min.z),
+    new THREE.Vector3(b.max.x + off, b.max.y, b.min.z),
+    new THREE.Vector3(1, 0, 0),
+    tick,
+    line,
+    label,
+    `${r1(size.y)} mm`,
+    maxD,
+  );
+  // Height — along Z, drawn at the front-left vertical corner
+  addDim(
+    g,
+    new THREE.Vector3(b.min.x - off, b.min.y - off, b.min.z),
+    new THREE.Vector3(b.min.x - off, b.min.y - off, b.max.z),
+    new THREE.Vector3(-1, -1, 0).normalize(),
+    tick,
+    line,
+    label,
+    `${r1(size.z)} mm`,
+    maxD,
+  );
+  return g;
+}
+
+/** One dimension: a main line p1→p2, perpendicular end ticks, and a label. */
+function addDim(
+  g: THREE.Group,
+  p1: THREE.Vector3,
+  p2: THREE.Vector3,
+  out: THREE.Vector3,
+  tick: number,
+  lineColor: number,
+  labelColor: number,
+  text: string,
+  modelSize: number,
+) {
+  const mat = new THREE.LineBasicMaterial({ color: lineColor, transparent: true, opacity: 0.95, depthTest: false });
+  const seg = (pts: THREE.Vector3[]) => {
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat);
+    l.renderOrder = 999;
+    g.add(l);
+  };
+  seg([p1, p2]);
+  const t = out.clone().multiplyScalar(tick / 2);
+  seg([p1.clone().sub(t), p1.clone().add(t)]);
+  seg([p2.clone().sub(t), p2.clone().add(t)]);
+
+  const mid = p1.clone().add(p2).multiplyScalar(0.5).add(out.clone().multiplyScalar(tick * 1.1));
+  const sprite = makeLabel(text, labelColor);
+  const h = modelSize * 0.11; // label height ≈ 11% of the model's largest side
+  sprite.scale.set(h * sprite.userData.aspect, h, 1);
+  sprite.position.copy(mid);
+  g.add(sprite);
+}
+
+function makeLabel(text: string, color: number): THREE.Sprite {
+  const fontSize = 52;
+  const padX = 20;
+  const padY = 12;
+  const canvas = document.createElement("canvas");
+  let ctx = canvas.getContext("2d")!;
+  ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
+  const w = Math.ceil(ctx.measureText(text).width);
+  canvas.width = w + padX * 2;
+  canvas.height = fontSize + padY * 2;
+  ctx = canvas.getContext("2d")!; // resizing resets the context
+  ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
+
+  // rounded pill background
+  const rad = canvas.height / 2;
+  ctx.fillStyle = "rgba(255,255,255,0.94)";
+  ctx.strokeStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.lineWidth = 3;
+  roundRect(ctx, 1.5, 1.5, canvas.width - 3, canvas.height - 3, rad);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 1);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
+  sprite.renderOrder = 1000;
+  sprite.userData.aspect = canvas.width / canvas.height;
+  return sprite;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + rr, y);
+  ctx.arcTo(x + w, y, x + w, y + h, rr);
+  ctx.arcTo(x + w, y + h, x, y + h, rr);
+  ctx.arcTo(x, y + h, x, y, rr);
+  ctx.arcTo(x, y, x + w, y, rr);
+  ctx.closePath();
 }

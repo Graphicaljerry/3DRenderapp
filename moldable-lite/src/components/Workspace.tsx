@@ -46,6 +46,8 @@ interface Props {
   report: PrintabilityReport | null;
   wireframe: boolean;
   setWireframe: (f: (w: boolean) => boolean) => void;
+  showDims: boolean;
+  setShowDims: (f: (d: boolean) => boolean) => void;
   viewerRef: RefObject<ViewerHandle>;
   tab: "3d" | "code" | "params" | "print" | "history";
   setTab: (t: "3d" | "code" | "params" | "print" | "history") => void;
@@ -195,6 +197,9 @@ export function Workspace(p: Props) {
             </div>
             {p.tab === "3d" && (
               <div className="viewer-tools">
+                <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
+                  {p.showDims ? "Hide dimensions" : "Dimensions"}
+                </button>
                 <button className="ghost sm" onClick={() => p.setWireframe((w) => !w)}>{p.wireframe ? "Solid" : "Wireframe"}</button>
                 <button className="ghost sm" onClick={() => p.viewerRef.current?.resetView()}>Reset view</button>
               </div>
@@ -203,7 +208,7 @@ export function Workspace(p: Props) {
 
           <div className="viewer-body">
             <div style={{ display: p.tab === "3d" ? "block" : "none", height: "100%" }}>
-              <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} />
+              <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} showDims={p.showDims} />
               {p.booting && (
                 <div className="viewer-overlay">
                   <Spinner /> Starting the CAD engine…

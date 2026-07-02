@@ -188,7 +188,7 @@ async function call(
               const detail = quota && !empty ? ` (${s.slice(0, 120)})` : "";
               throw new Error(
                 isSigned
-                  ? `The free GPU rejected this job${detail} even with your account authenticated to the Space. That means today's free GPU minutes on your account are used up (they reset 24h after first use) or the Space is overloaded. Try again later or use the lighter “Stable Fast 3D” model. For a genuinely reliable engine, set up Tripo (free monthly credits): 10-minute guide in proxy/DEPLOY.md on GitHub.`
+                  ? `The free GPU rejected this job${detail} even with your account authenticated to the Space. That means today's free GPU minutes on your account are used up (they reset 24h after first use) or the Space is overloaded. Try again later or use the lighter “Stable Fast 3D” model. For a genuinely reliable engine: grab a free key at platform.tripo3d.ai and switch Settings → 3D engine to Tripo — it works right here, no extra setup.`
                   : hasToken
                     ? `The free GPU rejected this job${detail}. Your token was sent but couldn't be exchanged for a Space pass, so the GPU treated you as anonymous. Make sure the token is a plain “Read” token, then retry.`
                     : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or try later.`,

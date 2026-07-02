@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@gradio/client": "^2.3.0",
+    "@supabase/supabase-js": "^2.110.0",
     "comlink": "^4.4.1",
     "fflate": "^0.8.2",
     "idb": "^8.0.3",

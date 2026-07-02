@@ -25,6 +25,7 @@ import { appendVersion, restoreVersion } from "./store/versions";
 import type { Project } from "./store/types";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
+import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudPush, cloudPull } from "./lib/cloud";
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string };
 export type Mode = "precise" | "generative";
@@ -117,6 +118,9 @@ export default function App() {
   const [printer, setPrinter] = useState<PrinterDefaults>(loadPrinter);
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>(loadProviderKeys);
   const [proxyBase, setProxyBase] = useState(() => localStorage.getItem(PROXY_LS) ?? "");
+  // Hosted site: fall back to the built-in Supabase relay so Tripo/Meshy/fal work
+  // out of the box. Locally the Vite dev relay is used; a user-set URL wins.
+  const effectiveProxy = proxyBase || (import.meta.env.DEV ? "" : DEFAULT_RELAY);
   const [genEng, setGenEng] = useState(loadGenEng);
   const [llm, setLlm] = useState<LlmSettings>(loadLlm);
   const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
@@ -478,7 +482,7 @@ export default function App() {
       ]);
       setStatus("generating");
 
-      genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase };
+      genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
       try {
@@ -548,7 +552,7 @@ export default function App() {
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full) }, proxyBase);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full) }, effectiveProxy);
         finalRaw = raw;
         try {
           let bi: BuildInput;
@@ -869,6 +873,42 @@ function SettingsModal({
   const [syncMsg, setSyncMsg] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
 
+  // Cloud account (email + password; sync payloads are client-side encrypted)
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [cloudEmail, setCloudEmail] = useState<string | null>(null);
+  const [cloudBusy, setCloudBusy] = useState(false);
+  useEffect(() => {
+    void cloudUser().then((u) => setCloudEmail(u?.email ?? null)).catch(() => {});
+  }, []);
+  async function doCloud(op: "signup" | "signin" | "signout" | "push" | "pull") {
+    setCloudBusy(true);
+    setSyncMsg("");
+    try {
+      if (op === "signup") setSyncMsg(await cloudSignUp(email.trim(), pw));
+      if (op === "signin") {
+        await cloudSignIn(email.trim(), pw);
+        setSyncMsg("Signed in.");
+      }
+      if (op === "signout") {
+        await cloudSignOut();
+        setSyncMsg("Signed out.");
+      }
+      if (op === "push") setSyncMsg(await cloudPush(passphrase));
+      if (op === "pull") {
+        const msg = await cloudPull(passphrase);
+        setSyncMsg(msg);
+        if (msg.startsWith("Restored")) setTimeout(() => window.location.reload(), 1200);
+      }
+      const u = await cloudUser();
+      setCloudEmail(u?.email ?? null);
+    } catch (e: any) {
+      setSyncMsg(String(e?.message ?? e));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
   async function doExport() {
     try {
       const blob = await exportSettings(passphrase);
@@ -1028,13 +1068,12 @@ function SettingsModal({
             />
             <p className="fine">{prov.keyHint}</p>
             <details className="adv">
-              <summary>Advanced — relay: unlocks Tripo/Meshy/fal on the hosted site</summary>
-              <label>Proxy base URL</label>
-              <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="https://moldable-relay.<you>.workers.dev" />
+              <summary>Advanced — relay (a built-in one is already configured)</summary>
+              <label>Proxy base URL — leave blank to use the built-in relay</label>
+              <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = built-in relay" />
               <p className="fine">
-                Quality engines require a tiny relay server (free, ~10 min): follow <b>proxy/DEPLOY.md</b> in the GitHub repo, then paste your
-                Worker URL here. Tripo then gives free monthly credits with far better reliability than the free Hugging Face GPUs. Not needed
-                for Hugging Face or when running locally (npm run dev).
+                Tripo/Meshy/fal/Replicate now work on the hosted site out of the box through a built-in relay. Paste your own relay URL here
+                only if you want to self-host one (guide: <b>proxy/DEPLOY.md</b> in the repo).
               </p>
             </details>
           </>
@@ -1079,16 +1118,41 @@ function SettingsModal({
         {pane === "sync" && (
           <>
             <p className="pane-desc">
-              Move your keys &amp; settings to another computer — no account needed. The file is <b>encrypted with a passphrase you choose</b>;
-              nothing is uploaded anywhere. (Projects &amp; chats live in each browser and stay on this device.)
+              Access your setup and chats from any computer. Everything synced is <b>encrypted in your browser with a passphrase you choose</b> —
+              the server only ever stores unreadable ciphertext. Meshes stay on each device (they're big); code, chats and settings sync.
             </p>
-            <label>Passphrase (like a PIN, but longer is safer)</label>
+            <label>Sync passphrase (needed on every device — like a PIN, longer is safer)</label>
             <input
               type="password"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               placeholder="choose a passphrase you'll remember"
             />
+
+            <div className="sect-label">Cloud account</div>
+            {cloudEmail ? (
+              <>
+                <p className="fine">Signed in as <b>{cloudEmail}</b></p>
+                <div className="param-actions">
+                  <button className="primary sm" disabled={cloudBusy || passphrase.length < 4} onClick={() => doCloud("push")}>Push to cloud</button>
+                  <button className="ghost sm" disabled={cloudBusy || passphrase.length < 4} onClick={() => doCloud("pull")}>Pull to this device</button>
+                  <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label>Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+                <label>Password</label>
+                <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="account password" />
+                <div className="param-actions">
+                  <button className="primary sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signin")}>Sign in</button>
+                  <button className="ghost sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signup")}>Create account</button>
+                </div>
+              </>
+            )}
+
+            <div className="sect-label">Offline backup (no account)</div>
             <div className="param-actions">
               <button className="primary sm" disabled={passphrase.length < 4} onClick={doExport}>Download encrypted backup</button>
               <button className="ghost sm" disabled={passphrase.length < 4} onClick={() => importRef.current?.click()}>Restore from backup…</button>
@@ -1113,7 +1177,7 @@ function SettingsModal({
           <button className="ghost" onClick={onClose}>Cancel</button>
           <button className="primary" onClick={saveAll}>Save all</button>
         </div>
-        <p className="fine center">Everything is stored only in this browser — nothing is sent to us.</p>
+        <p className="fine center">Everything stays in this browser unless you use Sync — and synced data is encrypted with your passphrase first.</p>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ import { extractParams, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD } from "./cad/example";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
+import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider } from "./gen/registry";
 import { glbToGeometry } from "./gen/loadMesh";
 import { newProject, putProject } from "./store/projects";
@@ -835,6 +836,7 @@ function SettingsModal({
   // Printer
   const [bed, setBed] = useState(printer.bed);
   const [oh, setOh] = useState(printer.overhangThresholdDeg);
+  const [preset, setPreset] = useState(printer.name ?? "custom");
 
   function saveAll() {
     if (lp === "anthropic") {
@@ -847,7 +849,7 @@ function SettingsModal({
       );
     }
     onSaveGen(keys, gp, gm, proxy.trim());
-    onSavePrinter({ bed, overhangThresholdDeg: oh });
+    onSavePrinter({ bed, overhangThresholdDeg: oh, name: preset === "custom" ? undefined : preset });
     onClose();
   }
 
@@ -966,11 +968,32 @@ function SettingsModal({
         {pane === "printer" && (
           <>
             <p className="pane-desc">Used by the bed-fit check and the Printability report.</p>
+            <label>Printer — picking one fills the bed size below</label>
+            <select
+              value={preset}
+              onChange={(e) => {
+                const v = e.target.value;
+                setPreset(v);
+                const pr = PRINTERS.find((x) => printerKey(x) === v);
+                if (pr) setBed({ x: pr.x, y: pr.y, z: pr.z });
+              }}
+            >
+              <option value="custom">Custom / other</option>
+              {PRINTER_BRANDS.map((b) => (
+                <optgroup key={b} label={b}>
+                  {PRINTERS.filter((x) => x.brand === b).map((x) => (
+                    <option key={printerKey(x)} value={printerKey(x)}>
+                      {x.model} — {x.x}×{x.y}×{x.z} mm{x.kind === "Resin" ? " · resin" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
             <label>Bed size (mm): width × depth × height</label>
             <div className="row3">
-              <input type="number" value={bed.x} onChange={(e) => setBed({ ...bed, x: +e.target.value })} />
-              <input type="number" value={bed.y} onChange={(e) => setBed({ ...bed, y: +e.target.value })} />
-              <input type="number" value={bed.z} onChange={(e) => setBed({ ...bed, z: +e.target.value })} />
+              <input type="number" value={bed.x} onChange={(e) => { setBed({ ...bed, x: +e.target.value }); setPreset("custom"); }} />
+              <input type="number" value={bed.y} onChange={(e) => { setBed({ ...bed, y: +e.target.value }); setPreset("custom"); }} />
+              <input type="number" value={bed.z} onChange={(e) => { setBed({ ...bed, z: +e.target.value }); setPreset("custom"); }} />
             </div>
             <label>Overhang warning threshold (°)</label>
             <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />

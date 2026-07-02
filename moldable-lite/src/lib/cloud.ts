@@ -32,7 +32,9 @@ export async function cloudSignUp(email: string, password: string): Promise<stri
   const c = await supa();
   const { data, error } = await c.auth.signUp({ email, password });
   if (error) throw new Error(error.message);
-  return data.session ? "Account created — you're signed in." : "Account created — check your email to confirm, then sign in.";
+  return data.session
+    ? "Account created — you're signed in."
+    : `Account created. We emailed a confirmation link to ${email} (check spam — sender is mail.app.supabase.io). Click it, then come back and press Sign in.`;
 }
 
 export async function cloudSignIn(email: string, password: string): Promise<void> {

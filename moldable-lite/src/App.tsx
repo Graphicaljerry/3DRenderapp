@@ -878,17 +878,27 @@ function SettingsModal({
   const [pw, setPw] = useState("");
   const [cloudEmail, setCloudEmail] = useState<string | null>(null);
   const [cloudBusy, setCloudBusy] = useState(false);
+  const [syncErr, setSyncErr] = useState(false);
   useEffect(() => {
     void cloudUser().then((u) => setCloudEmail(u?.email ?? null)).catch(() => {});
   }, []);
+  function friendlyAuthError(raw: string): string {
+    if (/email not confirmed/i.test(raw)) return "Almost there — open the confirmation email we sent (check spam) and click the link, then press Sign in again.";
+    if (/after \d+ seconds|rate limit/i.test(raw)) return "Too many attempts — wait a minute, then try once.";
+    if (/already registered/i.test(raw)) return "This email already has an account — press Sign in instead.";
+    if (/invalid login credentials/i.test(raw)) return "Wrong email or password.";
+    if (/failed to fetch|network/i.test(raw)) return "Couldn't reach the sync server — check your connection and any ad-blocker (allow supabase.co).";
+    return raw;
+  }
   async function doCloud(op: "signup" | "signin" | "signout" | "push" | "pull") {
     setCloudBusy(true);
-    setSyncMsg("");
+    setSyncErr(false);
+    setSyncMsg(op === "signup" ? "Creating your account…" : op === "signin" ? "Signing in…" : op === "push" ? "Encrypting & uploading…" : op === "pull" ? "Downloading & decrypting…" : "");
     try {
       if (op === "signup") setSyncMsg(await cloudSignUp(email.trim(), pw));
       if (op === "signin") {
         await cloudSignIn(email.trim(), pw);
-        setSyncMsg("Signed in.");
+        setSyncMsg("Signed in ✓ — now set your sync passphrase above and press Push to cloud.");
       }
       if (op === "signout") {
         await cloudSignOut();
@@ -903,7 +913,8 @@ function SettingsModal({
       const u = await cloudUser();
       setCloudEmail(u?.email ?? null);
     } catch (e: any) {
-      setSyncMsg(String(e?.message ?? e));
+      setSyncErr(true);
+      setSyncMsg(friendlyAuthError(String(e?.message ?? e)));
     } finally {
       setCloudBusy(false);
     }
@@ -913,17 +924,21 @@ function SettingsModal({
     try {
       const blob = await exportSettings(passphrase);
       downloadBlob(blob, "moldable-settings.json");
+      setSyncErr(false);
       setSyncMsg("Backup downloaded — keep it (and your passphrase) somewhere safe.");
     } catch (e: any) {
+      setSyncErr(true);
       setSyncMsg(String(e?.message ?? e));
     }
   }
   async function doImport(file: File) {
     try {
       const n = await importSettings(file, passphrase);
+      setSyncErr(false);
       setSyncMsg(`Restored ${n} settings — reloading…`);
       setTimeout(() => window.location.reload(), 900);
     } catch (e: any) {
+      setSyncErr(true);
       setSyncMsg(String(e?.message ?? e));
     }
   }
@@ -1130,6 +1145,7 @@ function SettingsModal({
             />
 
             <div className="sect-label">Cloud account</div>
+            {syncMsg && <div className={`sync-status${syncErr ? " err" : ""}`} role="status">{syncMsg}</div>}
             {cloudEmail ? (
               <>
                 <p className="fine">Signed in as <b>{cloudEmail}</b></p>
@@ -1168,7 +1184,6 @@ function SettingsModal({
                 e.currentTarget.value = "";
               }}
             />
-            {syncMsg && <p className="fine">{syncMsg}</p>}
             <p className="fine">On the other computer: open this same site → Settings → Sync → Restore, pick the file, enter the same passphrase.</p>
           </>
         )}

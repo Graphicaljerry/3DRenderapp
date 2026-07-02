@@ -8,7 +8,9 @@ import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { repairGeometry } from "./print/repair";
+import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
 import { extractParams, type CadParams } from "./cad/params";
@@ -179,7 +181,10 @@ export default function App() {
   function pickImage(file: File) {
     if (image) URL.revokeObjectURL(image.url);
     setImage({ blob: file, url: URL.createObjectURL(file) });
-    setMode("generative");
+    // In Precise mode with a working AI provider, a photo means "recreate this part
+    // as exact CAD" (vision). Otherwise route to the free generative mesh path.
+    const ready = llmReady(llm.provider === "anthropic" ? { ...llm, model } : llm, { anthropic: key, ...llmKeys });
+    if (mode !== "precise" || !ready) setMode("generative");
   }
   function clearImage() {
     if (image) URL.revokeObjectURL(image.url);
@@ -261,6 +266,25 @@ export default function App() {
     setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
   }
 
+  /** One-click mesh repair: weld seams, drop bad triangles, fill holes, fix winding. */
+  function repairMesh() {
+    if (!result || result.kind === "replicad" || status === "generating") return;
+    try {
+      const out = repairGeometry(result.geometry);
+      applyResultNoCommit({ ...result, geometry: out.geometry, dims: out.dims });
+      setMessages((m) => [
+        ...m,
+        {
+          id: mid(),
+          role: "assistant",
+          text: `🔧 Repaired the mesh: ${out.holesFilled} hole(s) filled, ${out.degenerateRemoved} bad triangle(s) removed, open edges ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter}${out.flippedWinding ? ", surface flipped right-side-out" : ""}. Exports now use the repaired mesh.`,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Repair failed: " + String(err?.message ?? err), error: true }]);
+    }
+  }
+
   /** Export a 3MF and hand it to a desktop slicer (deep link locally; download on hosted). */
   async function openSlicer(target: SlicerTarget) {
     if (!result) return;
@@ -315,7 +339,8 @@ export default function App() {
     const p = promptText.trim();
     if (status === "generating") return;
     if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
-    const useGen = (forceMode ?? mode) === "generative" || !!image;
+    // The mode switch decides: Generative -> mesh provider; Precise + photo -> vision CAD.
+    const useGen = (forceMode ?? mode) === "generative";
 
     if (useGen) {
       if (!p && !image) return;
@@ -372,15 +397,15 @@ export default function App() {
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary, streaming: false } : x)));
         clearImage();
       } catch (err: any) {
-        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: "⚠ " + String(err?.message ?? err), error: true, streaming: false } : x)));
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: "⚠ " + friendlyNet(String(err?.message ?? err)), error: true, streaming: false } : x)));
       } finally {
         setStatus("idle");
       }
       return;
     }
 
-    // ---- precise (LLM -> replicad/primitive) ----
-    if (!p) return;
+    // ---- precise (LLM -> replicad/primitive; photo = vision -> exact CAD) ----
+    if (!p && !image) return;
     const effLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
     if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
       // Never fail silently: say why, and point at the free paths.
@@ -404,16 +429,30 @@ export default function App() {
     }
 
     const kind = sel.kind;
+    const visionImage = image; // capture before we clear it
     setInput("");
     setStreamingText("");
-    setMessages((m) => [...m, { id: mid(), role: "user", text: p }]);
+    setMessages((m) => [...m, { id: mid(), role: "user", text: visionImage ? `🖼️ ${p || "(photo — recreate this part)"}` : p }]);
     const placeholderId = mid();
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
 
-    const system = kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT;
+    const system = (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) + (visionImage ? VISION_ADDENDUM : "");
+    const userMsg: ApiMsg = visionImage
+      ? {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              mediaType: visionImage.blob.type || "image/png",
+              dataBase64: (await blobToDataURL(visionImage.blob)).split(",")[1],
+            },
+            { type: "text", text: p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo." },
+          ],
+        }
+      : { role: "user", content: p };
     // Cap the rolling context so long sessions don't slow down / blow the window.
-    let history: ApiMsg[] = [...apiHistory.current.slice(-16), { role: "user", content: p }];
+    let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
     let ok = false;
 
@@ -438,6 +477,7 @@ export default function App() {
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           applyResult(res, name, summary, p);
           setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false } : x)));
+          if (visionImage) clearImage();
           ok = true;
           break;
         } catch (err: any) {
@@ -451,7 +491,7 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "⚠ " + String(err?.message ?? err), error: true, streaming: false } : x)));
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "⚠ " + friendlyNet(String(err?.message ?? err)), error: true, streaming: false } : x)));
     } finally {
       if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }];
       setStatus("idle");
@@ -610,6 +650,7 @@ export default function App() {
         onApplyParams={applyParams}
         onSaveParams={saveParamsVersion}
         onOpenSlicer={openSlicer}
+        onRepair={repairMesh}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         supportsStep={result?.supportsStep ?? false}
@@ -640,6 +681,13 @@ export default function App() {
       {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} />}
     </>
   );
+}
+
+/** Never show a bare "Failed to fetch" — but leave already-crafted messages alone. */
+function friendlyNet(msg: string): string {
+  return /^(typeerror:?\s*)?(failed to fetch|networkerror.*|load failed)\.?$/i.test(msg.trim())
+    ? "Couldn't reach the AI provider from this browser — check your internet/VPN and any ad-blocker (allow the provider's domain for this site), then try again."
+    : msg;
 }
 
 function deriveName(prompt: string): string {

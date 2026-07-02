@@ -75,10 +75,40 @@ function resolveSpace(modelId: string): SpaceDef {
   return SPACES["stabilityai/stable-fast-3d"];
 }
 
+/**
+ * Direct *.hf.space URL for a Space ("owner/Name" -> "owner-name.hf.space").
+ * Connecting here skips the huggingface.co metadata API — the hop that most
+ * often fails in browsers ("Failed to fetch": ad-blockers, shields, CORS moods).
+ */
+function spaceUrl(space: string): string {
+  return `https://${space.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.hf.space`;
+}
+
+/** After a failure, probe the Space host to say precisely WHAT is wrong. */
+async function diagnose(url: string, original: unknown): Promise<Error> {
+  const orig = String((original as Error)?.message ?? original);
+  try {
+    // Gradio 5 serves /gradio_api/info; Gradio 4 serves /info.
+    const r = await withTimeout(fetch(`${url}/gradio_api/info`).catch(() => fetch(`${url}/info`)), 12_000, "Probing the Space");
+    if (r.ok) return new Error(`The Space is reachable but the call failed: ${orig}. Its API may have changed, or the free GPU queue rejected the request — try again or switch models in Settings.`);
+    if (r.status === 404) return new Error(`The Space is up but didn't expose its API where expected (HTTP 404) — it may have been rebuilt with a different interface. Try another free model in Settings.`);
+    return new Error(`The Space responded HTTP ${r.status} — it may be paused, rebuilding, or out of free GPU quota. Try again in a minute or switch models in Settings.`);
+  } catch {
+    return new Error(
+      `Your browser couldn't reach ${url} at all ("failed to fetch"). Usual causes: an ad-blocker / privacy shield blocking hf.space, a VPN/firewall, or the Space being down. Try disabling shields for this site, a different network, or another free model in Settings.`,
+    );
+  }
+}
+
 function friendly(e: unknown, space: string): Error {
   const msg = String((e as Error)?.message ?? e);
   if (/abort/i.test(msg)) return e as Error;
-  if (/timed out/i.test(msg)) return new Error(msg);
+  if (/timed out|couldn't reach|responded HTTP|didn't expose/i.test(msg)) return new Error(msg);
+  if (/failed to fetch|networkerror|load failed/i.test(msg)) {
+    return new Error(
+      `Your browser couldn't reach Hugging Face ("failed to fetch") — often an ad-blocker/privacy shield, a VPN, or a flaky network. Allow hf.space + huggingface.co for this site and retry, or pick another free model in Settings.`,
+    );
+  }
   if (/metadata could not be loaded|not.?found|404|unavailable|paused/i.test(msg)) {
     return new Error(
       `Couldn't reach the Hugging Face Space "${space}" — it may be paused, moved, or blocked by your network. Try another free model in Settings → Generative engine.`,
@@ -105,10 +135,13 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   const { Client, handle_file } = await import("@gradio/client");
 
   onProgress({ status: "connecting to Hugging Face…" });
+  const url = spaceUrl(def.space);
   let app: any;
   try {
+    // Connect straight to the Space's own server — skips the fragile
+    // huggingface.co metadata hop that causes most "failed to fetch" errors.
     app = await withTimeout(
-      Client.connect(def.space, {
+      Client.connect(url, {
         ...(input.apiKey ? { token: input.apiKey as `hf_${string}` } : {}),
         events: ["data", "status"],
       } as any),
@@ -117,7 +150,7 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
     );
     if (def.needsSession) await app.predict("/start_session", []);
   } catch (e) {
-    throw friendly(e, def.space);
+    throw friendly(await diagnose(url, e), def.space);
   }
 
   onProgress({ status: "submitted — waiting for a free GPU…" });

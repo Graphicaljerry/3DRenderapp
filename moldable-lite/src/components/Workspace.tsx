@@ -57,6 +57,7 @@ interface Props {
   onApplyParams: (values: CadParams) => void;
   onSaveParams: () => void;
   onOpenSlicer: (t: SlicerTarget) => void;
+  onRepair: () => void;
   versions: Version[];
   onRestore: (id: string) => void;
   supportsStep: boolean;
@@ -124,7 +125,11 @@ export function Workspace(p: Props) {
                 <button className={p.mode === "generative" ? "on" : ""} onClick={() => p.setMode("generative")}>Generative (AI mesh)</button>
               </div>
               <span className="modehint">
-                {p.mode === "precise" ? "Exact parts from text · STEP export" : "Whole/organic objects from a photo or text"}
+                {p.mode === "precise"
+                  ? p.imageUrl
+                    ? "Photo → exact CAD replacement (vision)"
+                    : "Exact parts from text or a photo · STEP export"
+                  : "Whole/organic objects from a photo or text"}
               </span>
             </div>
 
@@ -166,7 +171,13 @@ export function Workspace(p: Props) {
               <input
                 value={p.input}
                 onChange={(e) => p.setInput(e.target.value)}
-                placeholder={p.mode === "generative" ? "Describe it, or just upload a photo…" : "Describe a part, or a change…"}
+                placeholder={
+                  p.mode === "generative"
+                    ? "Describe it, or just upload a photo…"
+                    : p.imageUrl
+                      ? "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
+                      : "Describe a part, or a change…"
+                }
               />
               <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}>↑</button>
             </form>
@@ -215,7 +226,9 @@ export function Workspace(p: Props) {
                 onSave={p.onSaveParams}
               />
             )}
-            {p.tab === "print" && <PrintabilityPanel report={p.report} />}
+            {p.tab === "print" && (
+              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} />
+            )}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
 
@@ -284,7 +297,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report }: { report: PrintabilityReport | null }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const row = (label: string, value: string, ok?: boolean) => (
     <div className="prow">
@@ -307,6 +320,11 @@ function PrintabilityPanel({ report }: { report: PrintabilityReport | null }) {
             <li key={i}>{w}</li>
           ))}
         </ul>
+      )}
+      {canRepair && !report.manifold.isWatertight && (
+        <button className="primary sm" disabled={busy} onClick={onRepair} style={{ marginTop: 10 }}>
+          🔧 Repair mesh — weld seams &amp; fill holes
+        </button>
       )}
       <p className="fine">Generated meshes are often not watertight — that's expected. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
     </div>

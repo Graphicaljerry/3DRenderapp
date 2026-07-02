@@ -17,13 +17,25 @@ export interface CompatRequest {
   proxyBase?: string;
 }
 
+function toCompatContent(c: import("./anthropic").ApiMsg["content"]): unknown {
+  if (typeof c === "string") return c;
+  return c.map((p) =>
+    p.type === "text"
+      ? { type: "text", text: p.text }
+      : { type: "image_url", image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` } },
+  );
+}
+
 function body(r: CompatRequest, stream: boolean): string {
   // No token/temperature caps: parameter names differ across providers and the
   // replicad programs are small; provider defaults are fine.
   return JSON.stringify({
     model: r.model,
     stream,
-    messages: [{ role: "system", content: r.system }, ...r.messages],
+    messages: [
+      { role: "system", content: r.system },
+      ...r.messages.map((m) => ({ role: m.role, content: toCompatContent(m.content) })),
+    ],
   });
 }
 

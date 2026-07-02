@@ -12,9 +12,22 @@ export const MODELS = [
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fastest)" },
 ];
 
+export type MsgPart =
+  | { type: "text"; text: string }
+  | { type: "image"; mediaType: string; dataBase64: string };
+
 export interface ApiMsg {
   role: "user" | "assistant";
-  content: string;
+  content: string | MsgPart[];
+}
+
+function toAnthropicContent(c: string | MsgPart[]): unknown {
+  if (typeof c === "string") return c;
+  return c.map((p) =>
+    p.type === "text"
+      ? { type: "text", text: p.text }
+      : { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.dataBase64 } },
+  );
 }
 
 export interface LlmRequest {
@@ -44,7 +57,7 @@ function body(r: LlmRequest, stream: boolean) {
     model: r.model,
     max_tokens: r.maxTokens ?? 8192,
     system: r.system,
-    messages: r.messages,
+    messages: r.messages.map((m) => ({ role: m.role, content: toAnthropicContent(m.content) })),
     stream,
   });
 }

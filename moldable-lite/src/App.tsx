@@ -28,7 +28,7 @@ import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
-import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudPush, cloudPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string };
 export type Mode = "precise" | "generative";
@@ -129,10 +129,49 @@ export default function App() {
   const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const [settingsPane, setSettingsPane] = useState<"ai" | "mesh" | "printer" | "sync">("ai");
+  const [syncState, setSyncState] = useState<"idle" | "syncing" | "synced">("idle");
+
+  // Debounced auto-push: any local change (project or settings) uploads shortly
+  // after, but only while signed in.
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleSync = () => {
+    if (!accountEmailRef.current) return;
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      setSyncState("syncing");
+      void cloudSyncPush()
+        .then(() => setSyncState("synced"))
+        .catch(() => setSyncState("idle"));
+    }, 2500);
+  };
+  const accountEmailRef = useRef<string | null>(null);
+  accountEmailRef.current = accountEmail;
+
+  // Sign-in → pull the account's data once; reload only if it changed something.
+  const pulledRef = useRef(false);
+  async function pullOnSignIn() {
+    if (pulledRef.current) return;
+    pulledRef.current = true;
+    try {
+      const r = await cloudSyncPull();
+      setSyncState("synced");
+      if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 400);
+    } catch {
+      setSyncState("idle");
+    }
+  }
+
   useEffect(() => {
-    void cloudUser().then((u) => setAccountEmail(u?.email ?? null)).catch(() => {});
+    void cloudUser().then((u) => {
+      setAccountEmail(u?.email ?? null);
+      if (u) void pullOnSignIn();
+    }).catch(() => {});
     let unsub: (() => void) | undefined;
-    void onAuthChange((em) => setAccountEmail(em)).then((u) => (unsub = u)).catch(() => {});
+    void onAuthChange((em) => {
+      setAccountEmail(em);
+      if (em) void pullOnSignIn();
+      else pulledRef.current = false;
+    }).then((u) => (unsub = u)).catch(() => {});
     return () => unsub?.();
   }, []);
 
@@ -172,12 +211,14 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     localStorage.setItem("moldable_theme", theme);
+    scheduleSync(); // no-op until signed in (accountEmailRef guards it)
   }, [theme]);
   const [units, setUnitsState] = useState<"mm" | "in">(() => (localStorage.getItem("moldable_units") === "in" ? "in" : "mm"));
   const setUnits = (f: (u: "mm" | "in") => "mm" | "in") =>
     setUnitsState((u) => {
       const next = f(u);
       localStorage.setItem("moldable_units", next);
+      scheduleSync();
       return next;
     });
   const [input, setInput] = useState("");
@@ -200,6 +241,7 @@ export default function App() {
   function persist(next: Project) {
     setProject(next);
     void putProject(next);
+    scheduleSync();
   }
 
   // ---- chat memory: every message is saved into the project, continuously ----
@@ -218,6 +260,7 @@ export default function App() {
         projectRef.current = next;
         setProject(next);
         void putProject(next);
+        scheduleSync();
       } else {
         // No project yet (e.g. every attempt failed) — create a shell so the
         // conversation itself survives reloads and appears in the Library.
@@ -268,10 +311,12 @@ export default function App() {
     setModel(m);
     setEntered(true);
     setShowSettings(false);
+    scheduleSync();
   }
   function savePrinter(p: PrinterDefaults) {
     localStorage.setItem(PRINTER_LS, JSON.stringify(p));
     setPrinter(p);
+    scheduleSync();
   }
   function saveLlmSettings(s: LlmSettings, keys2: Record<string, string>) {
     localStorage.setItem(LLM_LS, JSON.stringify(s));
@@ -280,6 +325,7 @@ export default function App() {
     setLlmKeys(keys2);
     setEntered(true);
     setShowSettings(false);
+    scheduleSync();
   }
 
   function saveGenSettings(keys: Record<string, string>, provider: string, gmodel: string, proxy: string) {
@@ -289,6 +335,7 @@ export default function App() {
     setProviderKeys(keys);
     setGenEng({ provider, model: gmodel });
     setProxyBase(proxy);
+    scheduleSync();
   }
 
   function pickImage(file: File) {
@@ -1012,23 +1059,36 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
   const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState(false);
 
-  async function auth(op: "github" | "google" | "magic") {
+  async function auth(op: "github" | "google" | "magic" | "signup" | "signin") {
     setBusy(true);
     setErr(false);
-    setMsg(op === "magic" ? "Sending your login link…" : `Taking you to ${op === "github" ? "GitHub" : "Google"}…`);
+    setMsg(
+      op === "magic" ? "Sending your login link…"
+      : op === "signup" ? "Creating your account…"
+      : op === "signin" ? "Signing in…"
+      : `Taking you to ${op === "github" ? "GitHub" : "Google"}…`,
+    );
     try {
       if (op === "magic") setMsg(await cloudMagicLink(email.trim()));
-      else await cloudOAuth(op); // navigates away on success
+      else if (op === "signup") setMsg(await cloudSignUp(email.trim(), pw));
+      else if (op === "signin") {
+        await cloudSignIn(email.trim(), pw);
+        setMsg("Signed in — loading your projects…");
+      } else await cloudOAuth(op); // navigates away on success
     } catch (e: any) {
       setErr(true);
       const raw = String(e?.message ?? e);
       setMsg(
         /provider is not enabled|unsupported provider|validation_failed/i.test(raw)
-          ? "This provider isn't switched on yet (one-time setup in docs/SOCIAL_LOGIN.md) — use the email login link instead."
+          ? "This provider isn't switched on yet (one-time setup in docs/SOCIAL_LOGIN.md) — use the email login link or a password instead."
+          : /email not confirmed/i.test(raw) ? "Almost there — open the confirmation email (check spam) and click the link, then Sign in."
+          : /already registered/i.test(raw) ? "This email already has an account — press Sign in."
+          : /invalid login credentials/i.test(raw) ? "Wrong email or password."
           : raw,
       );
     } finally {
@@ -1061,6 +1121,14 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
           <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
           <button className="ghost" disabled={busy || !email.includes("@")} onClick={() => auth("magic")}>Email me a login link</button>
         </div>
+        <details className="adv">
+          <summary>Or use a password</summary>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
+          <div className="param-actions">
+            <button className="primary sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signup")}>Create account</button>
+            <button className="ghost sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signin")}>Sign in</button>
+          </div>
+        </details>
 
         <details className="adv">
           <summary>Advanced — add an Anthropic key now (best CAD quality)</summary>
@@ -1141,7 +1209,7 @@ function SettingsModal({
     if (/failed to fetch|network/i.test(raw)) return "Couldn't reach the sync server — check your connection and any ad-blocker (allow supabase.co).";
     return raw;
   }
-  async function doCloud(op: "signup" | "signin" | "signout" | "push" | "pull" | "github" | "google" | "magic") {
+  async function doCloud(op: "signup" | "signin" | "signout" | "sync" | "github" | "google" | "magic") {
     setCloudBusy(true);
     setSyncErr(false);
     setSyncMsg(
@@ -1149,8 +1217,7 @@ function SettingsModal({
       : op === "signin" ? "Signing in…"
       : op === "github" || op === "google" ? `Taking you to ${op === "github" ? "GitHub" : "Google"}…`
       : op === "magic" ? "Sending your login link…"
-      : op === "push" ? "Encrypting & uploading…"
-      : op === "pull" ? "Downloading & decrypting…"
+      : op === "sync" ? "Syncing…"
       : "",
     );
     try {
@@ -1159,17 +1226,17 @@ function SettingsModal({
       if (op === "signup") setSyncMsg(await cloudSignUp(email.trim(), pw));
       if (op === "signin") {
         await cloudSignIn(email.trim(), pw);
-        setSyncMsg("Signed in — now set your sync passphrase above and press Push to cloud.");
+        setSyncMsg("Signed in — your projects, chats and settings now sync automatically.");
       }
       if (op === "signout") {
         await cloudSignOut();
-        setSyncMsg("Signed out.");
+        setSyncMsg("Signed out. This device keeps its own copy.");
       }
-      if (op === "push") setSyncMsg(await cloudPush(passphrase));
-      if (op === "pull") {
-        const msg = await cloudPull(passphrase);
-        setSyncMsg(msg);
-        if (msg.startsWith("Restored")) setTimeout(() => window.location.reload(), 1200);
+      if (op === "sync") {
+        await cloudSyncPush();
+        const r = await cloudSyncPull();
+        setSyncMsg("Synced.");
+        if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 600);
       }
       const u = await cloudUser();
       setCloudEmail(u?.email ?? null);
@@ -1397,24 +1464,16 @@ function SettingsModal({
               Access your setup and chats from any computer. Everything synced is <b>encrypted in your browser with a passphrase you choose</b> —
               the server only ever stores unreadable ciphertext. Meshes stay on each device (they're big); code, chats and settings sync.
             </p>
-            <label>Sync passphrase (needed on every device — like a PIN, longer is safer)</label>
-            <input
-              type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              placeholder="choose a passphrase you'll remember"
-            />
-
             <div className="sect-label">Cloud account</div>
             {syncMsg && <div className={`sync-status${syncErr ? " err" : ""}`} role="status">{syncMsg}</div>}
             {cloudEmail ? (
               <>
-                <p className="fine">Signed in as <b>{cloudEmail}</b></p>
+                <p className="fine">Signed in as <b>{cloudEmail}</b> — your projects, chats &amp; settings sync automatically across your devices.</p>
                 <div className="param-actions">
-                  <button className="primary sm" disabled={cloudBusy || passphrase.length < 4} onClick={() => doCloud("push")}>Push to cloud</button>
-                  <button className="ghost sm" disabled={cloudBusy || passphrase.length < 4} onClick={() => doCloud("pull")}>Pull to this device</button>
+                  <button className="primary sm" disabled={cloudBusy} onClick={() => doCloud("sync")}>Sync now</button>
                   <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>
                 </div>
+                <p className="fine">On another device, sign in the same way — everything appears automatically. (3D meshes stay per-device; CAD models rebuild from their code.)</p>
               </>
             ) : (
               <>
@@ -1426,7 +1485,7 @@ function SettingsModal({
                     <IconGoogle /> Continue with Google
                   </button>
                 </div>
-                <label>Or use your email — no password needed</label>
+                <label>Email</label>
                 <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
                 <div className="param-actions">
                   <button className="primary sm" disabled={cloudBusy || !email.includes("@")} onClick={() => doCloud("magic")}>Email me a login link</button>
@@ -1434,16 +1493,23 @@ function SettingsModal({
                 <details className="adv">
                   <summary>Use a password instead</summary>
                   <label>Password</label>
-                  <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="account password" />
+                  <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
                   <div className="param-actions">
-                    <button className="primary sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signin")}>Sign in</button>
-                    <button className="ghost sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signup")}>Create account</button>
+                    <button className="primary sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signup")}>Create account</button>
+                    <button className="ghost sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signin")}>Sign in</button>
                   </div>
                 </details>
               </>
             )}
 
-            <div className="sect-label">Offline backup (no account)</div>
+            <div className="sect-label">Offline backup (encrypted file, no account)</div>
+            <label>Backup passphrase</label>
+            <input
+              type="password"
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="choose a passphrase for the file"
+            />
             <div className="param-actions">
               <button className="primary sm" disabled={passphrase.length < 4} onClick={doExport}>Download encrypted backup</button>
               <button className="ghost sm" disabled={passphrase.length < 4} onClick={() => importRef.current?.click()}>Restore from backup…</button>
@@ -1459,7 +1525,7 @@ function SettingsModal({
                 e.currentTarget.value = "";
               }}
             />
-            <p className="fine">On the other computer: open this same site → Settings → Sync → Restore, pick the file, enter the same passphrase.</p>
+            <p className="fine">A zero-knowledge option: the file is encrypted with your passphrase and never uploaded. Restore it on another computer with the same passphrase.</p>
           </>
         )}
 
@@ -1467,7 +1533,7 @@ function SettingsModal({
           <button className="ghost" onClick={onClose}>Cancel</button>
           <button className="primary" onClick={saveAll}>Save all</button>
         </div>
-        <p className="fine center">Everything stays in this browser unless you use Sync — and synced data is encrypted with your passphrase first.</p>
+        <p className="fine center">Signed out, everything stays in this browser. Signed in, it syncs privately to your account (row-level security).</p>
       </div>
     </div>
   );

@@ -19,6 +19,7 @@ export const PRINTERS: PrinterPreset[] = [
   { brand: "Bambu Lab", model: "P1S", x: 256, y: 256, z: 256, kind: "FDM" },
   { brand: "Bambu Lab", model: "X1 Carbon", x: 256, y: 256, z: 256, kind: "FDM" },
   { brand: "Bambu Lab", model: "H2D", x: 350, y: 320, z: 325, kind: "FDM" },
+  { brand: "Bambu Lab", model: "H2S", x: 340, y: 320, z: 340, kind: "FDM" },
   // Prusa
   { brand: "Prusa", model: "MINI+", x: 180, y: 180, z: 180, kind: "FDM" },
   { brand: "Prusa", model: "MK3S+", x: 250, y: 210, z: 210, kind: "FDM" },
@@ -53,6 +54,8 @@ export const PRINTERS: PrinterPreset[] = [
   { brand: "Sovol", model: "SV06", x: 220, y: 220, z: 250, kind: "FDM" },
   { brand: "Sovol", model: "SV06 Plus", x: 300, y: 300, z: 340, kind: "FDM" },
   { brand: "Sovol", model: "SV08", x: 350, y: 350, z: 350, kind: "FDM" },
+  // Snapmaker
+  { brand: "Snapmaker", model: "U1", x: 270, y: 270, z: 270, kind: "FDM" },
   // Qidi
   { brand: "Qidi", model: "X-Plus 3", x: 280, y: 280, z: 270, kind: "FDM" },
   { brand: "Qidi", model: "X-Max 3", x: 325, y: 325, z: 315, kind: "FDM" },

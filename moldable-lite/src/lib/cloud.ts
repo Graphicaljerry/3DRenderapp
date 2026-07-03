@@ -1,9 +1,12 @@
-// Cloud account + zero-knowledge sync (Supabase).
-// - Auth: email + password (Supabase Auth).
-// - Sync: settings and projects are AES-GCM encrypted CLIENT-SIDE with the
-//   user's passphrase before upload — the server only ever stores ciphertext.
-// - The same Supabase project also hosts the public relay edge function that
-//   unlocks Tripo/Meshy/fal on the hosted site (DEFAULT_RELAY).
+// Cloud account + automatic sync (Supabase).
+// - Auth: email+password, GitHub/Google OAuth, or passwordless magic link.
+// - Sync: settings (incl. API keys) + projects auto-sync to the signed-in
+//   account — no passphrase, no manual push. Rows are private to the owner via
+//   row-level security; payloads are AES-GCM encrypted at rest with a key
+//   derived from the account id (defence-in-depth against a raw DB read).
+//   Meshes/STEP blobs stay on-device (too large for a text column).
+// - The same Supabase project hosts the relay edge function that unlocks
+//   Tripo/Meshy/fal on the hosted site (DEFAULT_RELAY).
 
 import { encryptPayload, decryptPayload, gatherSettings } from "./backup";
 import { listProjects, getProject, putProject } from "../store/projects";
@@ -106,47 +109,75 @@ async function pullBlob(kind: "settings" | "projects"): Promise<string | null> {
   return data?.payload ?? null;
 }
 
-/** Meshes (Blobs) stay on-device; everything else about a project syncs. */
+async function currentUid(): Promise<string | null> {
+  const c = await supa();
+  const { data } = await c.auth.getSession();
+  return data?.session?.user?.id ?? null;
+}
+
+/** Meshes/STEP blobs stay on-device; everything else about a project syncs. */
 function sanitizeProject(p: Project): Project {
-  return { ...p, glb: undefined, versions: p.versions.map((v) => ({ ...v, glb: undefined })) };
+  return {
+    ...p,
+    glb: undefined,
+    importFile: undefined,
+    versions: p.versions.map((v) => ({ ...v, glb: undefined, importFile: undefined })),
+  };
 }
 
-export async function cloudPush(passphrase: string): Promise<string> {
-  const settings = await encryptPayload(passphrase, JSON.stringify(gatherSettings()));
-  await pushBlob("settings", settings);
+/** Upload settings (incl. keys) + projects to the account. No-op when signed out. */
+export async function cloudSyncPush(): Promise<{ projects: number } | null> {
+  const uid = await currentUid();
+  if (!uid) return null;
+  await pushBlob("settings", await encryptPayload(uid, JSON.stringify(gatherSettings())));
   const projects = (await listProjects()).map(sanitizeProject);
-  await pushBlob("projects", await encryptPayload(passphrase, JSON.stringify(projects)));
-  return `Uploaded: settings + ${projects.length} project(s), encrypted.`;
+  await pushBlob("projects", await encryptPayload(uid, JSON.stringify(projects)));
+  return { projects: projects.length };
 }
 
-export async function cloudPull(passphrase: string): Promise<string> {
-  let nSettings = 0;
-  const sBlob = await pullBlob("settings");
-  if (sBlob) {
-    const data = JSON.parse(await decryptPayload(passphrase, sBlob)) as Record<string, string>;
+/** Pull the account's data into this device (idempotent — merges projects by
+ *  updatedAt, only adopts settings that differ). Returns counts of what changed;
+ *  null when signed out. */
+export async function cloudSyncPull(): Promise<{ settings: number; projects: number } | null> {
+  const uid = await currentUid();
+  if (!uid) return null;
+  let settings = 0;
+  let projects = 0;
+  const dec = async (blob: string | null) => {
+    if (!blob) return null;
+    try {
+      return await decryptPayload(uid, blob);
+    } catch {
+      return null; // wrong/legacy key — treat as no cloud data
+    }
+  };
+  const sJson = await dec(await pullBlob("settings"));
+  if (sJson) {
+    const data = JSON.parse(sJson) as Record<string, string>;
     for (const [k, v] of Object.entries(data)) {
-      if (k.startsWith("moldable_")) {
+      if (k.startsWith("moldable_") && localStorage.getItem(k) !== v) {
         localStorage.setItem(k, v);
-        nSettings++;
+        settings++;
       }
     }
   }
-  let nProjects = 0;
-  const pBlob = await pullBlob("projects");
-  if (pBlob) {
-    const remote = JSON.parse(await decryptPayload(passphrase, pBlob)) as Project[];
+  const pJson = await dec(await pullBlob("projects"));
+  if (pJson) {
+    const remote = JSON.parse(pJson) as Project[];
     for (const r of remote) {
       const local = await getProject(r.id);
-      if (local && local.updatedAt >= r.updatedAt) continue; // local is newer — keep it
-      // Preserve any locally-stored meshes when adopting the newer remote copy.
+      if (local && local.updatedAt >= r.updatedAt) continue; // local is newer/equal
       await putProject({
         ...r,
         glb: local?.glb,
-        versions: r.versions.map((v) => ({ ...v, glb: local?.versions.find((x) => x.id === v.id)?.glb })),
+        importFile: local?.importFile,
+        versions: r.versions.map((v) => {
+          const lv = local?.versions.find((x) => x.id === v.id);
+          return { ...v, glb: lv?.glb, importFile: lv?.importFile };
+        }),
       });
-      nProjects++;
+      projects++;
     }
   }
-  if (!sBlob && !pBlob) return "Nothing in the cloud yet — push from your other device first.";
-  return `Restored ${nSettings} settings + ${nProjects} project(s) — reloading…`;
+  return { settings, projects };
 }

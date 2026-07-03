@@ -952,6 +952,13 @@ export default function App() {
           setSettingsPane("sync");
           setShowSettings(true);
         }}
+        onSignOut={() => {
+          void cloudSignOut().finally(() => {
+            setAccountEmail(null);
+            pulledRef.current = false;
+            setMessages((mm) => [...mm, { id: mid(), role: "assistant", text: "Signed out. This device keeps its own copy; sign in anywhere to sync again." }]);
+          });
+        }}
         mode={mode}
         setMode={setMode}
         imageUrl={image?.url ?? null}

@@ -202,6 +202,19 @@ button { font-family: inherit; cursor: pointer; }
 .gen-pill { display: inline-flex; align-items: center; gap: 7px; }
 .spinner.sm { width: 12px; height: 12px; border-width: 2px; }
 
+/* ---------- profile dropdown menu ---------- */
+.profile-wrap { position: relative; }
+.profile-menu { position: absolute; right: 0; top: calc(100% + 6px); width: 232px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,0.18); padding: 6px; z-index: 40; display: flex; flex-direction: column; }
+.pm-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 12px; border-bottom: 1px solid var(--bord); margin-bottom: 4px; }
+.pm-avatar { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.pm-who { display: flex; flex-direction: column; min-width: 0; }
+.pm-label { font-size: 10px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--subt); }
+.pm-email { font-size: 12.5px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pm-item { text-align: left; background: none; border: none; border-radius: 8px; padding: 8px 10px; font-size: 13px; color: var(--ink2); }
+.pm-item:hover { background: var(--surf); }
+.pm-item.danger { color: var(--danger); }
+.pm-sep { height: 1px; background: var(--bord); margin: 4px 4px; }
+
 /* ---------- topbar: clickable brand + profile ---------- */
 .brandbtn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; cursor: pointer; }
 .brandbtn .wordmark { font-size: 17px; font-weight: 700; color: var(--ink); }

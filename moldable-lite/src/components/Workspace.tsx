@@ -43,6 +43,7 @@ interface Props {
   booting: boolean;
   accountEmail: string | null;
   onOpenProfile: () => void;
+  onSignOut: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
   mode: Mode;
@@ -106,6 +107,7 @@ interface Props {
 export function Workspace(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [profileMenu, setProfileMenu] = useState(false);
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -157,9 +159,35 @@ export function Workspace(p: Props) {
           <button className="ghost profile" onClick={p.onToggleTheme} title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle dark mode">
             {p.theme === "dark" ? <IconSun /> : <IconMoon />}
           </button>
-          <button className="ghost profile" onClick={p.onOpenProfile} title={p.accountEmail ? `${p.accountEmail} — account & settings` : "Account & settings"} aria-label="Account and settings">
-            {p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span> : <IconUser />}
-          </button>
+          <div className="profile-wrap">
+            <button
+              className="ghost profile"
+              onClick={() => (p.accountEmail ? setProfileMenu((v) => !v) : p.onOpenProfile())}
+              title={p.accountEmail ? `${p.accountEmail} — account menu` : "Sign in & settings"}
+              aria-label="Account menu"
+              aria-expanded={profileMenu}
+            >
+              {p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span> : <IconUser />}
+            </button>
+            {profileMenu && p.accountEmail && (
+              <div className="profile-menu" onMouseLeave={() => setProfileMenu(false)}>
+                <div className="pm-head">
+                  <span className="pm-avatar">{p.accountEmail[0].toUpperCase()}</span>
+                  <span className="pm-who">
+                    <span className="pm-label">Signed in</span>
+                    <span className="pm-email">{p.accountEmail}</span>
+                  </span>
+                </div>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onNew(); }}>New chat</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenLibrary(); }}>Library</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenSettings(); }}>Settings</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenProfile(); }}>Account &amp; sync</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onToggleTheme(); }}>{p.theme === "dark" ? "Light mode" : "Dark mode"}</button>
+                <div className="pm-sep" />
+                <button className="pm-item danger" onClick={() => { setProfileMenu(false); p.onSignOut(); }}>Sign out</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 

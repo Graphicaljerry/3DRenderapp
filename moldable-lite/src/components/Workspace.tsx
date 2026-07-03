@@ -7,6 +7,7 @@ import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import type { SlicerTarget } from "../lib/slicer";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, } from "./icons";
 import type * as THREE from "three";
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
@@ -32,35 +33,6 @@ function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): st
   return `${d.x} × ${d.y} × ${d.z} mm`;
 }
 
-// Minimal line icons (no emoji in the UI chrome).
-const IconPaperclip = () => (
-  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-  </svg>
-);
-const IconUser = () => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="10" />
-    <circle cx="12" cy="10" r="3" />
-    <path d="M6.2 19a6.5 6.5 0 0 1 11.6 0" />
-  </svg>
-);
-const IconMoon = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
-  </svg>
-);
-const IconSun = () => (
-  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <circle cx="12" cy="12" r="4" />
-    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
-  </svg>
-);
-const IconArrowUp = () => (
-  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M12 19V5M5 12l7-7 7 7" />
-  </svg>
-);
 
 interface Props {
   projectName: string;
@@ -229,7 +201,7 @@ export function Workspace(p: Props) {
               <div className="imgchip">
                 <img src={p.imageUrl} alt="reference" />
                 <span>reference image</span>
-                <button aria-label="Remove reference image" onClick={p.onClearImage}>✕</button>
+                <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
               </div>
             )}
 
@@ -328,7 +300,7 @@ export function Workspace(p: Props) {
                     <span>
                       Pin {p.pinCtl.active.index + 1} · {p.pinCtl.active.face} face · {p.pinCtl.active.pin.x}, {p.pinCtl.active.pin.y}, {p.pinCtl.active.pin.z} mm
                     </span>
-                    <button className="x" aria-label="Close pin" onClick={p.pinCtl.close}>✕</button>
+                    <button className="x" aria-label="Close pin" onClick={p.pinCtl.close}><IconX /></button>
                   </div>
                   <textarea
                     rows={2}
@@ -383,7 +355,7 @@ export function Workspace(p: Props) {
             {p.status === "generating" && <GenTimer />}
             {p.report && (
               <span className={`fits ${p.report.bedFit.fitsRotated ? "ok" : "no"}`}>
-                {p.report.bedFit.fitsAsIs ? "fits bed ✓" : p.report.bedFit.fitsWithRotation ? "fits (rotated) ✓" : "larger than bed"}
+                {p.report.bedFit.fitsAsIs ? "fits bed" : p.report.bedFit.fitsWithRotation ? "fits (rotated)" : "larger than bed"}
               </span>
             )}
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} />
@@ -480,12 +452,12 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: Prin
   return (
     <div className="panel">
       <h3>Printability</h3>
-      {row("Fits the bed", report.bedFit.fitsAsIs ? "yes ✓" : report.bedFit.fitsWithRotation ? "rotated ✓" : "no ✕", report.bedFit.fitsRotated)}
-      {row("Watertight / manifold", report.manifold.isWatertight ? "yes ✓" : `${report.manifold.boundaryEdges} open edge(s) ⚠`, report.manifold.isWatertight)}
+      {row("Fits the bed", report.bedFit.fitsAsIs ? "yes" : report.bedFit.fitsWithRotation ? "rotated" : "no", report.bedFit.fitsRotated)}
+      {row("Watertight / manifold", report.manifold.isWatertight ? "yes" : `${report.manifold.boundaryEdges} open edge(s)`, report.manifold.isWatertight)}
       {row("Bounding box", `${report.boundingBox.size.x} × ${report.boundingBox.size.y} × ${report.boundingBox.size.z} mm`)}
       {row("Triangles", report.triangleCount.toLocaleString())}
       {row("Approx. volume", `${(report.volume.approxVolume / 1000).toFixed(1)} cm³`)}
-      {row(`Overhangs > ${report.overhangs.thresholdDeg}°`, report.overhangs.overhangTriangleCount > 0 ? `${(report.overhangs.ratio * 100).toFixed(0)}% of faces ⚠` : "none ✓", report.overhangs.overhangTriangleCount === 0)}
+      {row(`Overhangs > ${report.overhangs.thresholdDeg}°`, report.overhangs.overhangTriangleCount > 0 ? `${(report.overhangs.ratio * 100).toFixed(0)}% of faces` : "none", report.overhangs.overhangTriangleCount === 0)}
       {report.warnings.length > 0 && (
         <ul className="warns">
           {report.warnings.map((w, i) => (
@@ -607,7 +579,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave }: { defau
         );
       })}
       <div className="param-actions">
-        <button className="ghost sm" disabled={busy} onClick={() => { setLocal(defaults); onApply(defaults); }}>↺ Reset to AI values</button>
+        <button className="ghost sm" disabled={busy} onClick={() => { setLocal(defaults); onApply(defaults); }}><IconReset /> Reset to AI values</button>
         <button className="primary sm" disabled={busy} onClick={onSave}>Save as version</button>
       </div>
       <p className="fine">Adjustments apply to exports immediately; “Save as version” keeps them in History.</p>

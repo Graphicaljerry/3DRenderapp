@@ -232,7 +232,7 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   if (!input.image && !input.prompt) throw new Error("Provide an image or a prompt.");
   const def = resolveSpace(input.model);
   if (!input.image && !def.supportsText) {
-    throw new Error("This model needs a photo — upload one with 📎, or switch to Hunyuan3D-2 (Settings → Mesh model) for text → 3D.");
+    throw new Error("This model needs a photo — attach a photo, or switch to Hunyuan3D-2 (Settings → Mesh model) for text → 3D.");
   }
 
   const base = spaceUrl(def.space);

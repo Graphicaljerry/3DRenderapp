@@ -22,7 +22,9 @@ import { PROVIDERS, getProvider } from "./gen/registry";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject } from "./store/projects";
 import { appendVersion, restoreVersion } from "./store/versions";
-import type { Project } from "./store/types";
+import type { Project, Pin } from "./store/types";
+import { uid } from "./lib/id";
+import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudPush, cloudPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
@@ -150,6 +152,10 @@ export default function App() {
   const [codeBuffer, setCodeBuffer] = useState("");
   const [cadDefaults, setCadDefaults] = useState<CadParams | null>(null);
   const [paramValues, setParamValues] = useState<CadParams>({});
+  const [pins, setPins] = useState<Pin[]>([]);
+  const [pinMode, setPinMode] = useState(false);
+  const [activePinId, setActivePinId] = useState<string | null>(null);
+  const [pinText, setPinText] = useState("");
 
   const [mode, setMode] = useState<Mode>("precise");
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
@@ -157,6 +163,15 @@ export default function App() {
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
   const [showDims, setShowDims] = useState(true);
+  const [theme, setThemeState] = useState<"light" | "dark">(() => {
+    const saved = localStorage.getItem("moldable_theme");
+    if (saved === "dark" || saved === "light") return saved;
+    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  });
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("moldable_theme", theme);
+  }, [theme]);
   const [units, setUnitsState] = useState<"mm" | "in">(() => (localStorage.getItem("moldable_units") === "in" ? "in" : "mm"));
   const setUnits = (f: (u: "mm" | "in") => "mm" | "in") =>
     setUnitsState((u) => {
@@ -191,14 +206,14 @@ export default function App() {
   const importFileRef = useRef<Blob | null>(null); // the live STEP behind the code's `imported` arg
   projectRef.current = project;
   useEffect(() => {
-    if (messages.length === 0) return;
+    if (messages.length === 0 && pins.length === 0) return;
     const t = setTimeout(() => {
       const chat = messages
         .filter((m) => !m.streaming)
         .map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
       const pr = projectRef.current;
       if (pr) {
-        const next = { ...pr, chat, updatedAt: Date.now() };
+        const next = { ...pr, chat, pins, updatedAt: Date.now() };
         projectRef.current = next;
         setProject(next);
         void putProject(next);
@@ -206,13 +221,13 @@ export default function App() {
         // No project yet (e.g. every attempt failed) — create a shell so the
         // conversation itself survives reloads and appears in the Library.
         const firstUser = messages.find((m) => m.role === "user");
-        const shell = { ...newProject(deriveName(firstUser?.text ?? "Chat"), "replicad"), chat };
+        const shell = { ...newProject(deriveName(firstUser?.text ?? "Chat"), "replicad"), chat, pins };
         projectRef.current = shell;
         persist(shell);
       }
     }, 600);
     return () => clearTimeout(t);
-  }, [messages]);
+  }, [messages, pins]);
 
   // ---- finish an OAuth / magic-link return (?code=...) and greet the user ----
   useEffect(() => {
@@ -529,6 +544,48 @@ export default function App() {
     }
   }
 
+  // ---------------- pins: spatial notes & targeted AI edits ----------------
+  function faceName(p: Pin): string {
+    const ax = Math.abs(p.nx), ay = Math.abs(p.ny), az = Math.abs(p.nz);
+    if (az >= ax && az >= ay) return p.nz >= 0 ? "top" : "bottom";
+    if (ay >= ax) return p.ny >= 0 ? "back" : "front";
+    return p.nx >= 0 ? "right" : "left";
+  }
+  const activePin = (() => {
+    const i = pins.findIndex((x) => x.id === activePinId);
+    return i >= 0 ? { pin: pins[i], index: i, face: faceName(pins[i]) } : null;
+  })();
+  function pickPin(pt: PickedPoint) {
+    const pin: Pin = { id: uid(), ...pt, text: "" };
+    setPins((ps) => [...ps, pin]);
+    setActivePinId(pin.id);
+    setPinText("");
+  }
+  function selectPin(id: string) {
+    setActivePinId(id);
+    setPinText(pins.find((x) => x.id === id)?.text ?? "");
+  }
+  function savePinNote() {
+    setPins((ps) => ps.map((x) => (x.id === activePinId ? { ...x, text: pinText.trim() } : x)));
+  }
+  function deletePin() {
+    setPins((ps) => ps.filter((x) => x.id !== activePinId));
+    setActivePinId(null);
+    setPinText("");
+  }
+  function askAiPin() {
+    if (!activePin || !pinText.trim()) return;
+    const { pin, index, face } = activePin;
+    savePinNote();
+    setActivePinId(null);
+    setPinMode(false);
+    void send(
+      `At the pinned spot #${index + 1} — x=${pin.x} mm, y=${pin.y} mm, z=${pin.z} mm, on the ${face}-facing surface of the current model: ${pinText.trim()}`,
+      "precise",
+    );
+    setPinText("");
+  }
+
   // ---------------- generate ----------------
   async function send(promptText: string, forceMode?: Mode) {
     const p = promptText.trim();
@@ -728,6 +785,7 @@ export default function App() {
       setSel(s);
       setBooting(false);
     }
+    setStatus("generating"); // drives the elapsed-time pill
     try {
       const bi: BuildInput = s.kind === "replicad" ? { kind: "code", code: EXAMPLE_REPLICAD } : { kind: "spec", spec: EXAMPLE_SPEC };
       const res = await s.engine.build(bi);
@@ -735,6 +793,8 @@ export default function App() {
       setMessages([{ id: mid(), role: "assistant", text: EXAMPLE_SPEC.summary ?? "Loaded the example L-bracket." }]);
     } catch (err: any) {
       setMessages([{ id: mid(), role: "assistant", text: "⚠ Couldn't build the example: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
     }
   }
 
@@ -780,6 +840,8 @@ export default function App() {
     setShowLibrary(false);
     setProject(p);
     setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error, image: c.image })));
+    setPins(p.pins ?? []);
+    setActivePinId(null);
     seedHistory(p.engine, p.code, p.spec);
     clearImage();
     setMode(p.engine === "generative" ? "generative" : "precise");
@@ -803,6 +865,9 @@ export default function App() {
   function startNew() {
     localStorage.removeItem("moldable_last_project");
     projectRef.current = null;
+    setPins([]);
+    setActivePinId(null);
+    setPinMode(false);
     importFileRef.current = null;
     void sel?.engine.setImport?.(null);
     setProject(null);
@@ -833,6 +898,8 @@ export default function App() {
         bootError={sel?.bootError}
         booting={booting || (!sel && mode === "precise")}
         accountEmail={accountEmail}
+        theme={theme}
+        onToggleTheme={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
         onOpenProfile={() => {
           setSettingsPane("sync");
           setShowSettings(true);
@@ -879,6 +946,20 @@ export default function App() {
         onOpenSettings={() => { setSettingsPane("ai"); setShowSettings(true); }}
         onOpenLibrary={() => setShowLibrary(true)}
         onNew={startNew}
+        pins={pins}
+        pinCtl={{
+          mode: pinMode,
+          toggleMode: () => setPinMode((m) => !m),
+          active: activePin,
+          text: pinText,
+          setText: setPinText,
+          askAi: askAiPin,
+          saveNote: savePinNote,
+          del: deletePin,
+          close: () => setActivePinId(null),
+          pick: pickPin,
+          select: selectPin,
+        }}
       />
       {showSettings && (
         <SettingsModal

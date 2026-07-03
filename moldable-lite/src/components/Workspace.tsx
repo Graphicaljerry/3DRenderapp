@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Viewer, type ViewerHandle } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint } from "./Viewer";
+import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
@@ -44,6 +45,17 @@ const IconUser = () => (
     <path d="M6.2 19a6.5 6.5 0 0 1 11.6 0" />
   </svg>
 );
+const IconMoon = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+  </svg>
+);
+const IconSun = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="4" />
+    <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+  </svg>
+);
 const IconArrowUp = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 19V5M5 12l7-7 7 7" />
@@ -59,6 +71,8 @@ interface Props {
   booting: boolean;
   accountEmail: string | null;
   onOpenProfile: () => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
   mode: Mode;
   setMode: (m: Mode) => void;
   imageUrl: string | null;
@@ -101,6 +115,20 @@ interface Props {
   onOpenSettings: () => void;
   onOpenLibrary: () => void;
   onNew: () => void;
+  pins: Pin[];
+  pinCtl: {
+    mode: boolean;
+    toggleMode: () => void;
+    active: { pin: Pin; index: number; face: string } | null;
+    text: string;
+    setText: (s: string) => void;
+    askAi: () => void;
+    saveNote: () => void;
+    del: () => void;
+    close: () => void;
+    pick: (pt: PickedPoint) => void;
+    select: (id: string) => void;
+  };
 }
 
 export function Workspace(p: Props) {
@@ -154,6 +182,9 @@ export function Workspace(p: Props) {
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
           <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
           <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
+          <button className="ghost profile" onClick={p.onToggleTheme} title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle dark mode">
+            {p.theme === "dark" ? <IconSun /> : <IconMoon />}
+          </button>
           <button className="ghost profile" onClick={p.onOpenProfile} title={p.accountEmail ? `${p.accountEmail} — account & settings` : "Account & settings"} aria-label="Account and settings">
             {p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span> : <IconUser />}
           </button>
@@ -256,6 +287,14 @@ export function Workspace(p: Props) {
             </div>
             {p.tab === "3d" && (
               <div className="viewer-tools">
+                <button
+                  className={`ghost sm${p.pinCtl.mode ? " on" : ""}`}
+                  aria-pressed={p.pinCtl.mode}
+                  title="Pin mode: click the model to mark a spot for a note or an AI edit (double-click works anytime)"
+                  onClick={p.pinCtl.toggleMode}
+                >
+                  Pin
+                </button>
                 <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
                   {p.showDims ? "Hide dimensions" : "Dimensions"}
                 </button>
@@ -270,7 +309,47 @@ export function Workspace(p: Props) {
 
           <div className="viewer-body">
             <div style={{ display: p.tab === "3d" ? "block" : "none", height: "100%" }}>
-              <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} showDims={p.showDims} units={p.units} />
+              <Viewer
+                ref={p.viewerRef}
+                geometry={p.geometry}
+                wireframe={p.wireframe}
+                showDims={p.showDims}
+                units={p.units}
+                theme={p.theme}
+                pins={p.pins}
+                selectedPin={p.pinCtl.active?.pin.id ?? null}
+                pinMode={p.pinCtl.mode}
+                onPickPoint={p.pinCtl.pick}
+                onSelectPin={p.pinCtl.select}
+              />
+              {p.pinCtl.active && (
+                <div className="pin-panel">
+                  <div className="pin-head">
+                    <span>
+                      Pin {p.pinCtl.active.index + 1} · {p.pinCtl.active.face} face · {p.pinCtl.active.pin.x}, {p.pinCtl.active.pin.y}, {p.pinCtl.active.pin.z} mm
+                    </span>
+                    <button className="x" aria-label="Close pin" onClick={p.pinCtl.close}>✕</button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={p.pinCtl.text}
+                    onChange={(e) => p.pinCtl.setText(e.target.value)}
+                    placeholder="e.g. add a 5 mm hole here · this wall feels thin"
+                  />
+                  <div className="param-actions">
+                    <button
+                      className="primary sm"
+                      disabled={!p.pinCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
+                      onClick={p.pinCtl.askAi}
+                    >
+                      Ask AI to change this
+                    </button>
+                    <button className="ghost sm" disabled={!p.pinCtl.text.trim()} onClick={p.pinCtl.saveNote}>Save note</button>
+                    <button className="ghost sm danger" onClick={p.pinCtl.del}>Delete</button>
+                  </div>
+                  {p.activeKind !== "replicad" && <p className="fine">AI edits need a Precise (CAD) model — notes work everywhere.</p>}
+                </div>
+              )}
               {p.booting && (
                 <div className="viewer-overlay">
                   <Spinner /> Starting the CAD engine…
@@ -301,6 +380,7 @@ export function Workspace(p: Props) {
 
           <div className="statusbar">
             <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
+            {p.status === "generating" && <GenTimer />}
             {p.report && (
               <span className={`fits ${p.report.bedFit.fitsRotated ? "ok" : "no"}`}>
                 {p.report.bedFit.fitsAsIs ? "fits bed ✓" : p.report.bedFit.fitsWithRotation ? "fits (rotated) ✓" : "larger than bed"}
@@ -350,6 +430,23 @@ function Messages({ messages, onChip, onExample, resume, onResume }: { messages:
       ))}
       <div ref={endRef} />
     </div>
+  );
+}
+
+/** Live elapsed-time pill while the AI/kernel is working. */
+function GenTimer() {
+  const [t0] = useState(() => Date.now());
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const secs = Math.floor((Date.now() - t0) / 1000);
+  const label = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  return (
+    <span className="pill gen-pill" role="timer">
+      <span className="spinner sm" /> generating · {label}
+    </span>
   );
 }
 

@@ -6,12 +6,27 @@ export interface ViewerHandle {
   resetView: () => void;
 }
 
+export interface PickedPoint {
+  x: number; y: number; z: number;
+  nx: number; ny: number; nz: number;
+}
+export interface ViewerPin { id: string; x: number; y: number; z: number; }
+
 interface Props {
   geometry: THREE.BufferGeometry | null;
   wireframe: boolean;
   showDims: boolean;
   units: "mm" | "in";
+  theme: "light" | "dark";
+  pins: ViewerPin[];
+  selectedPin: string | null;
+  pinMode: boolean;
+  onPickPoint: (p: PickedPoint) => void;
+  onSelectPin: (id: string) => void;
 }
+
+const THEME_SCENE = { light: "#f6f7f9", dark: "#101418" } as const;
+const THEME_GRID: Record<string, [number, number]> = { light: [0xced2d8, 0xe3e6ea], dark: [0x39414b, 0x232a31] };
 
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
 const LABEL_MIN_PX = 16;
@@ -22,16 +37,20 @@ interface Internals {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
+  grid: THREE.GridHelper;
   content: THREE.Group;
   mesh: THREE.Mesh | null;
   dims: THREE.Group | null;
+  pins: THREE.Group | null;
   material: THREE.MeshStandardMaterial;
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, pinMode, onPickPoint, onSelectPin }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
+  const cb = useRef({ pinMode, onPickPoint, onSelectPin });
+  cb.current = { pinMode, onPickPoint, onSelectPin };
 
   useEffect(() => {
     const el = mount.current!;
@@ -56,7 +75,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     dir.position.set(80, -120, 200);
     scene.add(dir);
 
-    const grid = new THREE.GridHelper(300, 30, 0xced2d8, 0xe3e6ea);
+    const grid = new THREE.GridHelper(300, 30, ...THEME_GRID.light);
     grid.rotation.x = Math.PI / 2;
     scene.add(grid);
 
@@ -71,14 +90,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // Keep dimension labels at a constant, readable on-screen size (clamped to
       // a 12–40pt band) regardless of zoom, so they never balloon or vanish.
       const s = st.current;
-      if (s?.dims) {
-        const vpH = el.clientHeight || 1;
-        const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
-        for (const o of s.dims.children) {
+      const vpH = el.clientHeight || 1;
+      const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
+      for (const grp of [s?.dims, s?.pins]) {
+        if (!grp) continue;
+        for (const o of grp.children) {
           if (!(o as THREE.Sprite).isSprite || !o.userData.dimLabel) continue;
           const d = camera.position.distanceTo(o.position);
           const worldPerPx = (2 * d * tan) / vpH;
-          const px = Math.min(LABEL_MAX_PX, Math.max(LABEL_MIN_PX, o.userData.baseH / worldPerPx));
+          const px = Math.min(o.userData.maxPx ?? LABEL_MAX_PX, Math.max(o.userData.minPx ?? LABEL_MIN_PX, o.userData.baseH / worldPerPx));
           const h = px * worldPerPx;
           o.scale.set(h * o.userData.aspect, h, 1);
         }
@@ -87,6 +107,47 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       raf = requestAnimationFrame(animate);
     };
     raf = requestAnimationFrame(animate);
+
+    // ---- tap-to-pin: raycast picks on click (pin mode) / double-click (always) ----
+    const rc = new THREE.Raycaster();
+    const handleTap = (e: { clientX: number; clientY: number }, viaDblClick: boolean) => {
+      const s2 = st.current;
+      if (!s2) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      rc.setFromCamera(ndc, camera);
+      if (s2.pins) {
+        const hp = rc.intersectObjects(s2.pins.children, false)[0];
+        if (hp) {
+          cb.current.onSelectPin(String(hp.object.userData.pinId));
+          return;
+        }
+      }
+      if (viaDblClick ? cb.current.pinMode : !cb.current.pinMode) return; // dblclick covers non-pin-mode
+      if (!s2.mesh) return;
+      const hit = rc.intersectObject(s2.mesh, false)[0];
+      if (!hit || !hit.face) return;
+      const r1p = (n: number) => Math.round(n * 10) / 10;
+      cb.current.onPickPoint({
+        x: r1p(hit.point.x), y: r1p(hit.point.y), z: r1p(hit.point.z),
+        nx: hit.face.normal.x, ny: hit.face.normal.y, nz: hit.face.normal.z,
+      });
+    };
+    let downAt: { x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => { downAt = { x: e.clientX, y: e.clientY }; };
+    const onUp = (e: PointerEvent) => {
+      const d = downAt;
+      downAt = null;
+      if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) return; // it was an orbit drag
+      handleTap(e, false);
+    };
+    const onDbl = (e: MouseEvent) => handleTap(e, true);
+    renderer.domElement.addEventListener("pointerdown", onDown);
+    renderer.domElement.addEventListener("pointerup", onUp);
+    renderer.domElement.addEventListener("dblclick", onDbl);
 
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth, h = el.clientHeight;
@@ -97,11 +158,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, content, mesh: null, dims: null, material, ro };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, ro };
 
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", onDown);
+      renderer.domElement.removeEventListener("pointerup", onUp);
+      renderer.domElement.removeEventListener("dblclick", onDbl);
       controls.dispose();
       disposeDims(st.current);
       renderer.dispose();
@@ -150,6 +214,44 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
 
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    s.scene.background = new THREE.Color(THEME_SCENE[theme]);
+    s.scene.remove(s.grid);
+    s.grid.geometry.dispose();
+    (Array.isArray(s.grid.material) ? s.grid.material : [s.grid.material]).forEach((m) => m.dispose());
+    s.grid = new THREE.GridHelper(300, 30, ...THEME_GRID[theme]);
+    s.grid.rotation.x = Math.PI / 2;
+    s.scene.add(s.grid);
+  }, [theme]);
+
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (s.pins) {
+      disposeGroup(s.pins);
+      s.scene.remove(s.pins);
+      s.pins = null;
+    }
+    if (!pins.length) return;
+    const g = new THREE.Group();
+    g.renderOrder = 1001;
+    pins.forEach((pin, i) => {
+      const sel = pin.id === selectedPin;
+      const spr = makeLabel(String(i + 1), sel ? { fg: "#ffffff", bg: "#2f7a70", border: "#ffffff" } : { fg: "#2f7a70", bg: "rgba(255,255,255,0.95)", border: "#2f7a70" });
+      spr.userData.dimLabel = true;
+      spr.userData.pinId = pin.id;
+      spr.userData.baseH = 8;
+      spr.userData.minPx = 22;
+      spr.userData.maxPx = 28;
+      spr.position.set(pin.x, pin.y, pin.z);
+      g.add(spr);
+    });
+    s.pins = g;
+    s.scene.add(g);
+  }, [pins, selectedPin]);
+
   useImperativeHandle(ref, () => ({
     resetView() {
       if (st.current) frameToObject(st.current);
@@ -177,9 +279,8 @@ function frameToObject(s: Internals) {
 
 // ---- dimension annotations (W × D × H) -------------------------------------
 
-function disposeDims(s: Internals | null) {
-  if (!s?.dims) return;
-  s.dims.traverse((o) => {
+function disposeGroup(g: THREE.Group) {
+  g.traverse((o) => {
     const any = o as THREE.Mesh & THREE.Sprite;
     (any.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
     const mat = any.material as THREE.Material | THREE.Material[] | undefined;
@@ -190,6 +291,11 @@ function disposeDims(s: Internals | null) {
     if (Array.isArray(mat)) mat.forEach(kill);
     else if (mat) kill(mat);
   });
+}
+
+function disposeDims(s: Internals | null) {
+  if (!s?.dims) return;
+  disposeGroup(s.dims);
   s.scene.remove(s.dims);
   s.dims = null;
 }
@@ -294,7 +400,8 @@ function addDim(
   seg([p2.clone().sub(t), p2.clone().add(t)]);
 
   const mid = p1.clone().add(p2).multiplyScalar(0.5).add(out.clone().multiplyScalar(tick * 1.1));
-  const sprite = makeLabel(text, labelColor);
+  const hex = `#${labelColor.toString(16).padStart(6, "0")}`;
+  const sprite = makeLabel(text, { fg: hex, bg: "rgba(255,255,255,0.94)", border: hex });
   // baseH is the "natural" world height; the render loop rescales it each frame
   // to hold a constant on-screen pixel size (clamped), so labels stay small.
   sprite.userData.dimLabel = true;
@@ -305,14 +412,14 @@ function addDim(
   g.add(sprite);
 }
 
-function makeLabel(text: string, color: number): THREE.Sprite {
+function makeLabel(text: string, colors: { fg: string; bg: string; border: string }): THREE.Sprite {
   const fontSize = 52;
   const padX = 20;
   const padY = 12;
   const canvas = document.createElement("canvas");
   let ctx = canvas.getContext("2d")!;
   ctx.font = `600 ${fontSize}px system-ui, -apple-system, sans-serif`;
-  const w = Math.ceil(ctx.measureText(text).width);
+  const w = Math.max(Math.ceil(ctx.measureText(text).width), fontSize * 0.7);
   canvas.width = w + padX * 2;
   canvas.height = fontSize + padY * 2;
   ctx = canvas.getContext("2d")!; // resizing resets the context
@@ -320,14 +427,14 @@ function makeLabel(text: string, color: number): THREE.Sprite {
 
   // rounded pill background
   const rad = canvas.height / 2;
-  ctx.fillStyle = "rgba(255,255,255,0.94)";
-  ctx.strokeStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.fillStyle = colors.bg;
+  ctx.strokeStyle = colors.border;
   ctx.lineWidth = 3;
   roundRect(ctx, 1.5, 1.5, canvas.width - 3, canvas.height - 3, rad);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = `#${color.toString(16).padStart(6, "0")}`;
+  ctx.fillStyle = colors.fg;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, canvas.width / 2, canvas.height / 2 + 1);

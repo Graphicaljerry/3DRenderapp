@@ -15,6 +15,38 @@
   color: var(--ink);
 }
 
+
+/* ---------- dark mode ---------- */
+:root[data-theme="dark"] {
+  --ink: #f0f2f5;
+  --ink2: #cfd4da;
+  --mut: #98a1ab;
+  --subt: #6f7883;
+  --bord: #2b3037;
+  --surf: #14171b;
+  --bg: #1c2025;
+  --accent: #46a08f;
+  --accent-d: #6fbdae;
+  --accent-w: #1e2b28;
+  --warn: #d9a441;
+  --danger: #ff7076;
+}
+[data-theme="dark"] .bubble { background: #262b31; }
+[data-theme="dark"] .msg.assistant .bubble { background: #20302c; }
+[data-theme="dark"] .msg.err .bubble { background: #392629; color: #ff9ba0; }
+[data-theme="dark"] .banner { background: #33290f; color: #e3b568; border-bottom-color: #443a22; }
+[data-theme="dark"] .code { background: #16191d; color: #cfd4da; }
+[data-theme="dark"] .prow, [data-theme="dark"] .param-row { border-bottom-color: #262b31; }
+[data-theme="dark"] .tabs button.on { background: var(--ink); color: #14171b; border-color: var(--ink); }
+[data-theme="dark"] .sync-status { border-color: #2f4a44; }
+[data-theme="dark"] .sync-status.err { background: #392629; color: #ff9ba0; border-color: #553338; }
+[data-theme="dark"] .pill-warn { background: #33290f; }
+[data-theme="dark"] .chip { background: #22262c; }
+[data-theme="dark"] .composer input { background: var(--bg); color: var(--ink); }
+[data-theme="dark"] .pnum { background: var(--bg); color: var(--ink); }
+[data-theme="dark"] .card { box-shadow: 0 12px 40px rgba(0,0,0,0.55); }
+[data-theme="dark"] .imgchip { background: #22262c; }
+
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--surf); }
@@ -160,6 +192,15 @@ button { font-family: inherit; cursor: pointer; }
 .attach { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--ink2); display: inline-flex; align-items: center; justify-content: center; }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
+
+/* ---------- pins & generation timer ---------- */
+.pin-panel { position: absolute; top: 12px; left: 12px; z-index: 6; width: 290px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.18); }
+.pin-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ink2); margin-bottom: 8px; }
+.pin-head .x { background: none; border: none; color: var(--subt); font-size: 14px; padding: 0; }
+.pin-panel textarea { width: 100%; border: 1px solid var(--bord); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; background: var(--bg); color: var(--ink); }
+.pin-panel .param-actions { margin-top: 10px; flex-wrap: wrap; }
+.gen-pill { display: inline-flex; align-items: center; gap: 7px; }
+.spinner.sm { width: 12px; height: 12px; border-width: 2px; }
 
 /* ---------- topbar: clickable brand + profile ---------- */
 .brandbtn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; cursor: pointer; }

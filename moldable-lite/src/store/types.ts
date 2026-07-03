@@ -7,6 +7,17 @@ export interface ChatTurn {
   image?: string; // reference-photo thumbnail (data URL)
 }
 
+export interface Pin {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  text: string;
+}
+
 export interface GenSource {
   provider: string;
   model: string;
@@ -38,6 +49,7 @@ export interface Project {
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
   importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
+  pins?: Pin[]; // spatial notes / AI-edit markers on the model
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest

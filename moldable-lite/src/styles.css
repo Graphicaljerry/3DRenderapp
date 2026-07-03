@@ -161,6 +161,12 @@ button { font-family: inherit; cursor: pointer; }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
 
+/* ---------- topbar: clickable brand + profile ---------- */
+.brandbtn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; cursor: pointer; }
+.brandbtn .wordmark { font-size: 17px; font-weight: 700; color: var(--ink); }
+.profile { width: 40px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+
 /* ---------- viewer tool toggle (Dimensions) ---------- */
 .viewer-tools .ghost.on { background: var(--accent); color: #fff; border-color: var(--accent); }
 

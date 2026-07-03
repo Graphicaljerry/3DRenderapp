@@ -37,6 +37,13 @@ const IconPaperclip = () => (
     <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
   </svg>
 );
+const IconUser = () => (
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" />
+    <circle cx="12" cy="10" r="3" />
+    <path d="M6.2 19a6.5 6.5 0 0 1 11.6 0" />
+  </svg>
+);
 const IconArrowUp = () => (
   <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M12 19V5M5 12l7-7 7 7" />
@@ -50,7 +57,8 @@ interface Props {
   fellBack: boolean;
   bootError?: string;
   booting: boolean;
-  keyPresent: boolean;
+  accountEmail: string | null;
+  onOpenProfile: () => void;
   mode: Mode;
   setMode: (m: Mode) => void;
   imageUrl: string | null;
@@ -135,16 +143,20 @@ export function Workspace(p: Props) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <CubeMark />
-          <span className="wordmark">Moldable</span>
+          <button className="brandbtn" onClick={p.onNew} title="Start fresh (your current work stays in the Library)" aria-label="Moldable — start fresh">
+            <CubeMark />
+            <span className="wordmark">Moldable</span>
+          </button>
           <span className="sep">/</span>
           <span className="project">{p.projectName}</span>
         </div>
         <div className="topbar-right">
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
           <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
-          <button className="ghost" onClick={p.onOpenSettings}>{p.keyPresent ? "Settings" : "Add key"}</button>
           <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
+          <button className="ghost profile" onClick={p.onOpenProfile} title={p.accountEmail ? `${p.accountEmail} — account & settings` : "Account & settings"} aria-label="Account and settings">
+            {p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span> : <IconUser />}
+          </button>
         </div>
       </header>
 

@@ -124,6 +124,14 @@ export default function App() {
   const [genEng, setGenEng] = useState(loadGenEng);
   const [llm, setLlm] = useState<LlmSettings>(loadLlm);
   const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
+  const [accountEmail, setAccountEmail] = useState<string | null>(null);
+  const [settingsPane, setSettingsPane] = useState<"ai" | "mesh" | "printer" | "sync">("ai");
+  useEffect(() => {
+    void cloudUser().then((u) => setAccountEmail(u?.email ?? null)).catch(() => {});
+    let unsub: (() => void) | undefined;
+    void onAuthChange((em) => setAccountEmail(em)).then((u) => (unsub = u)).catch(() => {});
+    return () => unsub?.();
+  }, []);
 
   const [sel, setSel] = useState<EngineSelection | null>(null);
   const [booting, setBooting] = useState(false);
@@ -824,7 +832,11 @@ export default function App() {
         fellBack={sel?.fellBack ?? false}
         bootError={sel?.bootError}
         booting={booting || (!sel && mode === "precise")}
-        keyPresent={!!key}
+        accountEmail={accountEmail}
+        onOpenProfile={() => {
+          setSettingsPane("sync");
+          setShowSettings(true);
+        }}
         mode={mode}
         setMode={setMode}
         imageUrl={image?.url ?? null}
@@ -864,7 +876,7 @@ export default function App() {
         supportsStep={result?.supportsStep ?? false}
         canExport={(f) => (result?.kind === "generative" ? genEngine.current.canExport(f) : sel?.engine.canExport(f) ?? false)}
         onExport={exportAs}
-        onOpenSettings={() => setShowSettings(true)}
+        onOpenSettings={() => { setSettingsPane("ai"); setShowSettings(true); }}
         onOpenLibrary={() => setShowLibrary(true)}
         onNew={startNew}
       />
@@ -883,6 +895,7 @@ export default function App() {
           onSaveLlm={saveLlmSettings}
           onSavePrinter={savePrinter}
           onSaveGen={saveGenSettings}
+          initialPane={settingsPane}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -1018,6 +1031,7 @@ function SettingsModal({
   onSaveLlm,
   onSavePrinter,
   onSaveGen,
+  initialPane,
   onClose,
 }: {
   initialKey: string;
@@ -1033,9 +1047,10 @@ function SettingsModal({
   onSaveLlm: (s: LlmSettings, keys: Record<string, string>) => void;
   onSavePrinter: (p: PrinterDefaults) => void;
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
+  initialPane?: "ai" | "mesh" | "printer" | "sync";
   onClose: () => void;
 }) {
-  const [pane, setPane] = useState<"ai" | "mesh" | "printer" | "sync">("ai");
+  const [pane, setPane] = useState<"ai" | "mesh" | "printer" | "sync">(initialPane ?? "ai");
   const [passphrase, setPassphrase] = useState("");
   const [syncMsg, setSyncMsg] = useState("");
   const importRef = useRef<HTMLInputElement>(null);

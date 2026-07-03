@@ -125,7 +125,7 @@ export function Workspace(p: Props) {
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
+    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/") || /\.(glb|gltf|stl)$/i.test(x.name));
     if (f) p.onPickImage(f);
   }
 
@@ -207,7 +207,7 @@ export function Workspace(p: Props) {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.glb,.gltf,.stl"
                 hidden
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -311,7 +311,7 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
       {messages.length === 0 && (
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
-          <p className="empty-sub">Type a description, or attach a photo to turn it into a 3D model.</p>
+          <p className="empty-sub">Type a description, attach a photo to turn into a 3D model — or drop a .glb/.stl file to import it.</p>
           <div className="chips">
             {SUGGESTIONS.map((s) => (
               <button key={s.text} className="chip" onClick={() => onChip(s.text, s.gen ? "generative" : undefined)}>{s.text}</button>

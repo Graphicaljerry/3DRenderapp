@@ -26,7 +26,7 @@ export const PROVIDERS: ProviderDef[] = [
     label: "Tripo",
     free: false,
     needsKey: true,
-    keyHint: "tsk_… free key from platform.tripo3d.ai — free monthly credits, the most reliable engine. Works here out of the box (built-in relay).",
+    keyHint: "tsk_… key from platform.tripo3d.ai. Works here out of the box (built-in relay) — but note the API wallet is prepaid; Tripo's free monthly credits are Studio-only. Free route: generate in their Studio, download the .glb, drag it into Moldable.",
     viaProxy: true,
     generate: tripoGenerate,
     models: [

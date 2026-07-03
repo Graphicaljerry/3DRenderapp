@@ -19,7 +19,7 @@ import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider } from "./gen/registry";
-import { glbToGeometry } from "./gen/loadMesh";
+import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject } from "./store/projects";
 import { appendVersion, restoreVersion } from "./store/versions";
 import type { Project } from "./store/types";
@@ -262,6 +262,11 @@ export default function App() {
   }
 
   function pickImage(file: File) {
+    // 3D files import directly instead of becoming a reference photo.
+    if (/\.(glb|gltf|stl)$/i.test(file.name)) {
+      void importModelFile(file);
+      return;
+    }
     if (image) URL.revokeObjectURL(image.url);
     setImage({ blob: file, url: URL.createObjectURL(file) });
     // In Precise mode with a working AI provider, a photo means "recreate this part
@@ -434,8 +439,36 @@ export default function App() {
   }
 
   async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>) {
-    const { geometry: g, dims: d } = await glbToGeometry(glb);
+    const { geometry: g, dims: d } = await loadAnyMesh(glb);
     applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
+  }
+
+  /** Import a 3D file directly (.glb/.stl) — e.g. generated FREE in Tripo Studio
+   *  or downloaded anywhere — into the full measure/repair/export pipeline. */
+  async function importModelFile(f: File) {
+    if (status === "generating") return;
+    setStatus("generating");
+    try {
+      const { geometry: g, dims: d } = await loadAnyMesh(f);
+      const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
+      const res: EngineResult = {
+        kind: "generative",
+        geometry: g,
+        dims: d,
+        source: { kind: "gen", provider: "import", model: f.name },
+        supportsStep: false,
+        glb: f,
+      };
+      applyResult(res, cleanName, `Imported ${f.name} — ${d.x} × ${d.y} × ${d.z} mm`, `import ${f.name}`);
+      setMessages((m) => [
+        ...m,
+        { id: mid(), role: "assistant", text: `Imported ${f.name} (${d.x} × ${d.y} × ${d.z} mm). Measure it, run Printability/repair, resize, and export or send to your slicer — like any generated model.` },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Couldn't read that 3D file: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
   }
 
   // ---------------- generate ----------------
@@ -839,6 +872,31 @@ function CubeMark({ size = 22 }: { size?: number }) {
 function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onContinue: (k: string, m: string) => void; onExample: () => void; onFree: () => void }) {
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState(false);
+
+  async function auth(op: "github" | "google" | "magic") {
+    setBusy(true);
+    setErr(false);
+    setMsg(op === "magic" ? "Sending your login link…" : `Taking you to ${op === "github" ? "GitHub" : "Google"}…`);
+    try {
+      if (op === "magic") setMsg(await cloudMagicLink(email.trim()));
+      else await cloudOAuth(op); // navigates away on success
+    } catch (e: any) {
+      setErr(true);
+      const raw = String(e?.message ?? e);
+      setMsg(
+        /provider is not enabled|unsupported provider|validation_failed/i.test(raw)
+          ? "This provider isn't switched on yet (one-time setup in docs/SOCIAL_LOGIN.md) — use the email login link instead."
+          : raw,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="gate">
       <div className="card">
@@ -847,19 +905,37 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
           <span className="wordmark">Moldable</span>
         </div>
         <h1>Turn a description — or a photo — into a 3D-printable model.</h1>
-        <button className="primary block" onClick={onFree}>Start free — no key needed</button>
-        <p className="fine">Uses the free Hugging Face engine for photo/text → 3D mesh. No account; nothing leaves this browser except the generation request.</p>
-        <div className="sect-label">Optional: precise CAD mode (Claude)</div>
-        <label>Anthropic API key — exact parts, editable STEP export</label>
-        <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
-        <label>Model</label>
-        <select value={m} onChange={(e) => setM(e.target.value)}>
-          {MODELS.map((x) => (
-            <option key={x.id} value={x.id}>{x.label}{x.recommended ? " · recommended" : ""}</option>
-          ))}
-        </select>
-        <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
-        <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
+        <button className="primary block" onClick={onFree}>Start free — no account needed</button>
+        <p className="fine">Free photo/text → 3D via Hugging Face, free CAD via Gemini. Everything stays in this browser.</p>
+
+        <div className="sect-label">Sign in — sync your projects &amp; keys across devices</div>
+        {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
+        <div className="social-col">
+          <button className="ghost block social" disabled={busy} onClick={() => auth("github")}>
+            <IconGitHub /> Continue with GitHub
+          </button>
+          <button className="ghost block social" disabled={busy} onClick={() => auth("google")}>
+            <IconGoogle /> Continue with Google
+          </button>
+        </div>
+        <div className="magicrow">
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+          <button className="ghost" disabled={busy || !email.includes("@")} onClick={() => auth("magic")}>Email me a login link</button>
+        </div>
+
+        <details className="adv">
+          <summary>Advanced — add an Anthropic key now (best CAD quality)</summary>
+          <label>Anthropic API key — exact parts, editable STEP export</label>
+          <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
+          <label>Model</label>
+          <select value={m} onChange={(e) => setM(e.target.value)}>
+            {MODELS.map((x) => (
+              <option key={x.id} value={x.id}>{x.label}{x.recommended ? " · recommended" : ""}</option>
+            ))}
+          </select>
+          <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
+          <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
+        </details>
         <button className="link" onClick={onExample}>Or view the built-in example model →</button>
       </div>
     </div>

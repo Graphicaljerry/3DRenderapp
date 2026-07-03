@@ -23,6 +23,7 @@ export interface Version {
   spec?: unknown; // primitive spec at this snapshot
   dims?: { x: number; y: number; z: number };
   glb?: Blob; // generative mesh at this snapshot (so it re-renders without re-calling the API)
+  importFile?: Blob; // imported STEP the code's `imported` argument refers to
   genSource?: GenSource;
 }
 
@@ -36,6 +37,7 @@ export interface Project {
   params?: Record<string, number>; // HEAD slider overrides
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
+  importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest

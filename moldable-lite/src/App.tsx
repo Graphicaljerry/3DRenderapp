@@ -8,13 +8,13 @@ import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
 import { extractParams, type CadParams } from "./cad/params";
-import { EXAMPLE_SPEC, EXAMPLE_REPLICAD } from "./cad/example";
+import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
@@ -180,6 +180,7 @@ export default function App() {
 
   // ---- chat memory: every message is saved into the project, continuously ----
   const projectRef = useRef<Project | null>(null);
+  const importFileRef = useRef<Blob | null>(null); // the live STEP behind the code's `imported` arg
   projectRef.current = project;
   useEffect(() => {
     if (messages.length === 0) return;
@@ -263,7 +264,7 @@ export default function App() {
 
   function pickImage(file: File) {
     // 3D files import directly instead of becoming a reference photo.
-    if (/\.(glb|gltf|stl)$/i.test(file.name)) {
+    if (/\.(glb|gltf|stl|step|stp|shapr)$/i.test(file.name)) {
       void importModelFile(file);
       return;
     }
@@ -320,6 +321,7 @@ export default function App() {
       summary,
       code: res.source.kind === "code" ? res.source.code : undefined,
       params: res.source.kind === "code" ? res.source.params : undefined,
+      importFile: res.source.kind === "code" ? importFileRef.current ?? undefined : undefined,
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
       glb: res.glb,
@@ -443,10 +445,53 @@ export default function App() {
     applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
   }
 
-  /** Import a 3D file directly (.glb/.stl) — e.g. generated FREE in Tripo Studio
-   *  or downloaded anywhere — into the full measure/repair/export pipeline. */
+  /** Import a 3D file directly. STEP/STP → a live, AI-editable CAD solid;
+   *  GLB/STL → the mesh pipeline (measure/repair/export). */
   async function importModelFile(f: File) {
     if (status === "generating") return;
+
+    if (/\.shapr$/i.test(f.name)) {
+      setMessages((m) => [
+        ...m,
+        { id: mid(), role: "assistant", text: "Shapr3D's native .shapr format is proprietary and can't be read here. In Shapr3D: Export → STEP, then drop that file in — it imports as a fully editable CAD solid.", error: true },
+      ]);
+      return;
+    }
+
+    if (/\.(step|stp)$/i.test(f.name)) {
+      if (!sel) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The CAD engine is still starting — try the import again in a few seconds." }]);
+        return;
+      }
+      if (sel.kind !== "replicad" || !sel.engine.setImport) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "STEP import needs the OpenCascade engine, which failed to boot on this device (the app fell back to the primitive engine).", error: true }]);
+        return;
+      }
+      setStatus("generating");
+      try {
+        await sel.engine.setImport(f);
+        importFileRef.current = f;
+        const res = await sel.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
+        const cleanName = f.name.replace(/\.(step|stp)$/i, "");
+        applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
+        seedHistory("replicad", IMPORT_PASSTHROUGH, undefined);
+        setMode("precise");
+        setMessages((m) => [
+          ...m,
+          {
+            id: mid(),
+            role: "assistant",
+            text: `Imported ${f.name} as an editable CAD solid (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “fillet all edges 2 mm”, “cut a 20 mm slot through the middle” — or edit the code in Source. Exports (including STEP) stay editable.`,
+          },
+        ]);
+      } catch (err: any) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "⚠ Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
+      } finally {
+        setStatus("idle");
+      }
+      return;
+    }
+
     setStatus("generating");
     try {
       const { geometry: g, dims: d } = await loadAnyMesh(f);
@@ -578,7 +623,7 @@ export default function App() {
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
 
-    const system = (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) + (visionImage ? VISION_ADDENDUM : "");
+    const system = (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) + (visionImage ? VISION_ADDENDUM : "") + (importFileRef.current ? IMPORT_ADDENDUM : "");
     const userMsg: ApiMsg = visionImage
       ? {
           role: "user",
@@ -702,6 +747,10 @@ export default function App() {
       if (next.engine === "generative" && next.glb) {
         await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
       } else if (sel) {
+        if (sel.engine.setImport) {
+          await sel.engine.setImport(next.importFile ?? null);
+          importFileRef.current = next.importFile ?? null;
+        }
         const bi: BuildInput =
           next.engine === "replicad"
             ? { kind: "code", code: next.code ?? "", params: next.params }
@@ -725,6 +774,10 @@ export default function App() {
       if (p.engine === "generative" && p.glb) {
         await showFromGlb(p.glb, { kind: "gen", provider: p.genSource?.provider ?? "", model: p.genSource?.model ?? "", prompt: p.genSource?.prompt });
       } else if (sel) {
+        if (sel.engine.setImport) {
+          await sel.engine.setImport(p.importFile ?? null);
+          importFileRef.current = p.importFile ?? null;
+        }
         const bi: BuildInput =
           p.engine === "replicad" ? { kind: "code", code: p.code ?? "", params: p.params } : { kind: "spec", spec: parseSpec(JSON.stringify(p.spec)) };
         applyResultNoCommit(await sel.engine.build(bi));
@@ -737,6 +790,8 @@ export default function App() {
   function startNew() {
     localStorage.removeItem("moldable_last_project");
     projectRef.current = null;
+    importFileRef.current = null;
+    void sel?.engine.setImport?.(null);
     setProject(null);
     setMessages([]);
     apiHistory.current = [];

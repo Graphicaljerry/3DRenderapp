@@ -17,6 +17,16 @@ export const EXAMPLE_SPEC: ModelSpec = {
   ],
 };
 
+// Shown in the Source tab after a STEP import: renders the imported solid as-is
+// and doubles as documentation for hand-editing it.
+export const IMPORT_PASSTHROUGH = `const defaultParams = {};
+function main(replicad, params, imported) {
+  // \`imported\` is your STEP file, loaded as an editable solid.
+  // Ask the AI to change it — or edit here, e.g.:
+  //   return imported.cut(replicad.makeCylinder(2.1, 100, [10, 0, -1], [0, 0, 1]));
+  return imported;
+}`;
+
 // Canned replicad program for the PRIMARY engine's example (same L-bracket idea).
 // Declares defaultParams so the example also demonstrates the live sliders.
 export const EXAMPLE_REPLICAD = `const defaultParams = { width: 60, depth: 40, thickness: 4, wallHeight: 30, holeDiameter: 5 };

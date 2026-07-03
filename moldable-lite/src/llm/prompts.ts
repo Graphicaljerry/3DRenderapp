@@ -109,6 +109,15 @@ THE USER ATTACHED A PHOTO of a physical part to recreate or replace. Work like a
 5) Rebuild the part as clean, simple, printable geometry — capture function (holes, slots, mounting faces), not cosmetic detail. Add FDM tolerance (0.2–0.3 mm) at mating surfaces.
 6) If a critical dimension is unknowable from the photo, choose the nearest standard size and say so in the summary.`;
 
+// Appended when the project contains an imported STEP solid.
+export const IMPORT_ADDENDUM = `
+
+THE USER IMPORTED A CAD FILE (STEP). main() receives a THIRD argument \`imported\` — that file as a live replicad Solid, already centred on the bed. MODIFY IT DIRECTLY and return the result:
+- boolean edits: imported.cut(shape) / .fuse(shape) / .intersect(shape)
+- edges: .fillet(r, finder) / .chamfer(d, finder)
+- placement: .translate([x,y,z]) / .rotate(deg, [0,0,0], [0,0,1])
+Do NOT rebuild the part from scratch unless the user asks. Still declare defaultParams for every NEW dimension you introduce (hole sizes, offsets, …). Signature: function main(replicad, params, imported) { ... }`;
+
 export function replicadRepairMessage(err: { name: string; message: string; stack?: string }): string {
   return `Your replicad code failed to build.
 Error: ${err.name}: ${err.message}

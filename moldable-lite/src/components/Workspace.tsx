@@ -62,6 +62,8 @@ interface Props {
   setInput: (v: string) => void;
   onSend: (p: string, forceMode?: Mode) => void;
   onExample: () => void;
+  resume: string | null;
+  onResume: () => void;
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
   report: PrintabilityReport | null;
@@ -142,7 +144,7 @@ export function Workspace(p: Props) {
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
           <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
           <button className="ghost" onClick={p.onOpenSettings}>{p.keyPresent ? "Settings" : "Add key"}</button>
-          <button className="primary sm" onClick={p.onNew}>+ New</button>
+          <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
         </div>
       </header>
 
@@ -163,7 +165,7 @@ export function Workspace(p: Props) {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
         >
-          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} />
+          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} resume={p.resume} onResume={p.onResume} />
 
           <div className="composer-wrap">
             <div className="modebar">
@@ -300,7 +302,7 @@ export function Workspace(p: Props) {
   );
 }
 
-function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void }) {
+function Messages({ messages, onChip, onExample, resume, onResume }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; resume: string | null; onResume: () => void }) {
   const endRef = useRef<HTMLDivElement>(null);
   const lastText = messages[messages.length - 1]?.text;
   useEffect(() => {
@@ -313,6 +315,11 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
           <p className="empty-q">What do you want to make?</p>
           <p className="empty-sub">Type a description, attach a photo — or drop a 3D file: .step imports as editable CAD, .glb/.stl as a mesh.</p>
           <div className="chips">
+            {resume && (
+              <button className="chip resume" onClick={onResume}>
+                Continue where you left off — {resume}
+              </button>
+            )}
             {SUGGESTIONS.map((s) => (
               <button key={s.text} className="chip" onClick={() => onChip(s.text, s.gen ? "generative" : undefined)}>{s.text}</button>
             ))}

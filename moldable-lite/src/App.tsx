@@ -221,17 +221,22 @@ export default function App() {
   useEffect(() => {
     if (project?.id) localStorage.setItem("moldable_last_project", project.id);
   }, [project?.id]);
-  const restoredRef = useRef(false);
+  // Land on a FRESH start screen; offer the last session as a one-tap resume
+  // chip instead of auto-opening it (auto-open replayed stale errors on load).
+  const [resume, setResume] = useState<{ id: string; name: string } | null>(null);
   useEffect(() => {
-    if (!sel || restoredRef.current) return;
-    restoredRef.current = true;
-    if (projectRef.current) return; // already working on something
     const id = localStorage.getItem("moldable_last_project");
     if (!id) return;
     void getProject(id).then((p) => {
-      if (p && !projectRef.current) void openProjectById(p);
+      if (p) setResume({ id: p.id, name: p.name });
     });
-  }, [sel]);
+  }, []);
+  async function resumeLast() {
+    if (!resume) return;
+    const p = await getProject(resume.id);
+    setResume(null);
+    if (p) await openProjectById(p);
+  }
   function saveKey(k: string, m: string) {
     localStorage.setItem(KEY_LS, k.trim());
     localStorage.setItem(MODEL_LS, m);
@@ -831,6 +836,8 @@ export default function App() {
         setInput={setInput}
         onSend={send}
         onExample={loadExample}
+        resume={project ? null : resume?.name ?? null}
+        onResume={() => void resumeLast()}
         geometry={geometry}
         dims={dims}
         report={report}

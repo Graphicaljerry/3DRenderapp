@@ -170,6 +170,7 @@ button { font-family: inherit; cursor: pointer; }
 .sync-status.err { background: #fbeaea; color: #a23a3a; border-color: #ecc8c8; }
 .social-col { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
 .social { display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-weight: 600; padding: 10px 12px; margin-top: 0; }
+.chip.resume { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .magicrow { display: flex; gap: 8px; margin-top: 10px; }
 .magicrow input { flex: 1; min-width: 0; }
 .magicrow .ghost { white-space: nowrap; }

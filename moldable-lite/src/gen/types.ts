@@ -29,6 +29,7 @@ export interface ProviderModel {
   image: boolean; // supports image -> 3D
   text: boolean; // supports text -> 3D
   recommended?: boolean; // the best default model for this provider
+  hint?: string; // one-line "pick this when…" guidance shown in Settings
 }
 
 export interface ProviderDef {
@@ -41,4 +42,5 @@ export interface ProviderDef {
   models: ProviderModel[];
   generate: GenFn;
   recommended?: boolean; // the best default engine to start with
+  hint?: string; // one-line "pick this when…" guidance shown in Settings
 }

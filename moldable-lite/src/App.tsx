@@ -1346,6 +1346,17 @@ function SettingsModal({
                 <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}{pr.recommended ? " · recommended" : ""}</option>
               ))}
             </select>
+            {lpre.hint && <p className="fine choice-hint">{lpre.hint}</p>}
+            <details className="adv guide">
+              <summary>Which one should I pick?</summary>
+              <ul className="guide-list">
+                <li><b>Most accurate</b> — Anthropic Claude (Fable 5). Dimensions, fits and threads come out right most often.</li>
+                <li><b>Best free</b> — Google Gemini. Free key in one minute, solid on everyday objects.</li>
+                <li><b>Also excellent</b> — OpenAI GPT-5.1, just behind Claude.</li>
+                <li><b>Fastest</b> — Groq. Instant, but keep the shapes simple.</li>
+                <li><b>Most private</b> — Ollama. Everything stays on your machine.</li>
+              </ul>
+            </details>
             {lp === "anthropic" ? (
               <>
                 <label>Anthropic API key</label>
@@ -1386,7 +1397,7 @@ function SettingsModal({
 
         {pane === "mesh" && (
           <>
-            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode. Hugging Face is free.</p>
+            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode. Hugging Face is free; fal's Hunyuan 3D v3.1 Pro is the most accurate.</p>
             <label>Engine</label>
             <select
               value={gp}
@@ -1400,12 +1411,26 @@ function SettingsModal({
                 <option key={pp.id} value={pp.id}>{pp.label}{pp.free ? " · free" : ""}{pp.recommended ? " · recommended" : ""}</option>
               ))}
             </select>
+            {prov.hint && <p className="fine choice-hint">{prov.hint}</p>}
+            <details className="adv guide">
+              <summary>Which one should I pick?</summary>
+              <ul className="guide-list">
+                <li><b>Most accurate</b> — fal · Hunyuan 3D v3.1 Pro. About $0.10 per model; finest detail and cleanest surfaces.</li>
+                <li><b>Best free</b> — Hugging Face · Stable Fast 3D (the default). Quick shape previews in seconds.</li>
+                <li><b>Best free detail</b> — Hugging Face · TRELLIS, roughly one free run per day.</li>
+                <li><b>From text alone</b> — Hunyuan3D-2 (free) or fal · Rodin (paid).</li>
+                <li><b>Sharp printable meshes</b> — Tripo (prepaid credits, fast turnaround).</li>
+              </ul>
+            </details>
             <label>Model — “image or text” models can generate from a prompt alone</label>
             <select value={gm} onChange={(e) => setGm(e.target.value)}>
               {prov.models.map((mm) => (
                 <option key={mm.id} value={mm.id}>{mm.label}{mm.recommended ? " · recommended" : ""}</option>
               ))}
             </select>
+            {prov.models.find((mm) => mm.id === gm)?.hint && (
+              <p className="fine choice-hint">{prov.models.find((mm) => mm.id === gm)!.hint}</p>
+            )}
             <label>
               {prov.label.split(" (")[0]} key
               {prov.needsKey ? "" : " — optional but recommended (5× the free GPU quota)"}

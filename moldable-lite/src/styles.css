@@ -240,6 +240,11 @@ button { font-family: inherit; cursor: pointer; }
 .modal-actions .primary { min-width: 110px; }
 details.adv { margin-top: 16px; border: 1px solid var(--bord); border-radius: 10px; padding: 10px 14px; }
 details.adv summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--mut); }
+details.guide { margin-top: 10px; }
+.guide-list { margin: 8px 0 2px; padding-left: 18px; display: grid; gap: 6px; }
+.guide-list li { font-size: 12px; color: var(--mut); line-height: 1.5; }
+.guide-list b { color: var(--ink2); font-weight: 600; }
+.fine.choice-hint { margin: 6px 0 0; }
 .fine.center { text-align: center; }
 
 /* ---------- parameter sliders ---------- */

@@ -23,6 +23,7 @@ export interface LlmPreset {
   relayPrefix?: string; // relay route used if the browser can't call it directly
   defaultModel: string;
   keyHint: string;
+  hint?: string; // one-line "pick this when…" guidance shown in Settings
 }
 
 export const LLM_PRESETS: LlmPreset[] = [
@@ -32,6 +33,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     needsKey: true,
     defaultModel: MODELS[0].id,
     keyHint: "sk-ant-… from console.anthropic.com",
+    hint: "The most accurate CAD coder — dimensions, fits and tricky geometry come out right most often. Paid key.",
   },
   {
     id: "gemini",
@@ -43,6 +45,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "gemini",
     defaultModel: "gemini-2.0-flash",
     keyHint: "free key from aistudio.google.com/apikey (~1,500 req/day). The app checks your account's live model list and auto-picks the best Flash model.",
+    hint: "Best free pick — handles most everyday objects well, and reads photos.",
   },
   {
     id: "openai",
@@ -52,6 +55,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openai",
     defaultModel: "gpt-5.1",
     keyHint: "sk-… from platform.openai.com/api-keys",
+    hint: "Close behind Claude on accuracy. Paid key.",
   },
   {
     id: "groq",
@@ -62,6 +66,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "groq",
     defaultModel: "llama-3.3-70b-versatile",
     keyHint: "free key from console.groq.com/keys",
+    hint: "Near-instant replies — fine for simple shapes, weaker on complex parts.",
   },
   {
     id: "openrouter",
@@ -71,6 +76,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openrouter",
     defaultModel: "google/gemini-3-flash",
     keyHint: "sk-or-… from openrouter.ai/keys",
+    hint: "One key that reaches many different models — handy for experimenting.",
   },
   {
     id: "ollama",
@@ -80,6 +86,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "http://localhost:11434/v1",
     defaultModel: "qwen2.5-coder:14b",
     keyHint: "install ollama.com, `ollama pull <model>`; if blocked set OLLAMA_ORIGINS=*",
+    hint: "Fully private and offline — quality depends on the model you install.",
   },
   {
     id: "custom",
@@ -87,6 +94,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     needsKey: false,
     defaultModel: "",
     keyHint: "any endpoint that serves …/v1/chat/completions",
+    hint: "For self-hosted or niche providers with an OpenAI-style API.",
   },
 ];
 

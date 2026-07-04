@@ -8,6 +8,7 @@ import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
+import { detectProductQuery, researchDimensions } from "./llm/research";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { blobToDataURL } from "./gen/util";
@@ -741,6 +742,31 @@ export default function App() {
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
 
+    // Product research: when the request names a real-world product ("a case
+    // for my iPhone 17 Pro"), look up its exact measurements on the web first
+    // so the CAD code is built from real numbers instead of guesses. Runs via
+    // Gemini's free search grounding or Claude's web-search tool; best-effort —
+    // if neither key is set or the lookup fails, generation continues as before.
+    let researched: string | null = null;
+    if (!visionImage && p && detectProductQuery(p)) {
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
+      researched = await researchDimensions(p, {
+        geminiKey: llmKeys["gemini"],
+        geminiModel: llm.provider === "gemini" ? llm.model : "",
+        anthropicKey: key,
+      });
+      if (researched) {
+        // Show the found measurements as their own note, above the working placeholder.
+        setMessages((m) => {
+          const idx = m.findIndex((x) => x.id === placeholderId);
+          const note = { id: mid(), role: "assistant" as const, text: `Measurements found online:\n${researched}` };
+          return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
+        });
+      }
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
+    }
+    const pWithFacts = researched ? `${p}\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : p;
+
     const system = (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) + (visionImage ? VISION_ADDENDUM : "") + (importFileRef.current ? IMPORT_ADDENDUM : "");
     const userMsg: ApiMsg = visionImage
       ? {
@@ -750,7 +776,7 @@ export default function App() {
             { type: "text", text: p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo." },
           ],
         }
-      : { role: "user", content: p };
+      : { role: "user", content: pWithFacts };
     // Cap the rolling context so long sessions don't slow down / blow the window.
     let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
@@ -1350,12 +1376,13 @@ function SettingsModal({
             <details className="adv guide">
               <summary>Which one should I pick?</summary>
               <ul className="guide-list">
-                <li><b>Most accurate</b> — Anthropic Claude (Fable 5). Dimensions, fits and threads come out right most often.</li>
-                <li><b>Best free</b> — Google Gemini. Free key in one minute, solid on everyday objects.</li>
-                <li><b>Also excellent</b> — OpenAI GPT-5.1, just behind Claude.</li>
-                <li><b>Fastest</b> — Groq. Instant, but keep the shapes simple.</li>
-                <li><b>Most private</b> — Ollama. Everything stays on your machine.</li>
+                <li><b>Most accurate</b> — Anthropic Claude Fable 5, about 10¢ per part. Dimensions, fits and threads come out right most often.</li>
+                <li><b>Best free</b> — Google Gemini, about 1,500 requests a day at no cost.</li>
+                <li><b>Also excellent</b> — OpenAI GPT-5.1 (~1-2¢ per part) and Claude Sonnet 5 (~3¢), just behind.</li>
+                <li><b>Cheapest paid</b> — Claude Haiku 4.5, about 1¢ per part.</li>
+                <li><b>Fastest / most private</b> — Groq (free tier) / Ollama (free, runs on your machine).</li>
               </ul>
+              <p className="fine">Tip: name a real product — "a case for my iPhone 17 Pro" — and Moldable first looks up its exact dimensions online (via Gemini's free search grounding, or Claude's web search at ~1¢ a lookup).</p>
             </details>
             {lp === "anthropic" ? (
               <>
@@ -1397,7 +1424,7 @@ function SettingsModal({
 
         {pane === "mesh" && (
           <>
-            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode. Hugging Face is free; fal's Hunyuan 3D v3.1 Pro is the most accurate.</p>
+            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode. Hugging Face is free; fal's Hunyuan 3D v3.1 Pro ($0.375 per model) is the most accurate.</p>
             <label>Engine</label>
             <select
               value={gp}
@@ -1415,11 +1442,11 @@ function SettingsModal({
             <details className="adv guide">
               <summary>Which one should I pick?</summary>
               <ul className="guide-list">
-                <li><b>Most accurate</b> — fal · Hunyuan 3D v3.1 Pro. About $0.10 per model; finest detail and cleanest surfaces.</li>
+                <li><b>Most accurate</b> — fal · Hunyuan 3D v3.1 Pro, $0.375 per model. Finest detail, cleanest surfaces.</li>
                 <li><b>Best free</b> — Hugging Face · Stable Fast 3D (the default). Quick shape previews in seconds.</li>
-                <li><b>Best free detail</b> — Hugging Face · TRELLIS, roughly one free run per day.</li>
-                <li><b>From text alone</b> — Hunyuan3D-2 (free) or fal · Rodin (paid).</li>
-                <li><b>Sharp printable meshes</b> — Tripo (prepaid credits, fast turnaround).</li>
+                <li><b>Cheapest paid</b> — Replicate · TRELLIS, about 4¢ per model, no daily limit.</li>
+                <li><b>From text alone</b> — Hunyuan3D-2 (free, ~1 heavy run a day) or fal · Rodin ($0.40).</li>
+                <li><b>Sharp printable meshes</b> — Tripo, about 20-30 prepaid credits per model.</li>
               </ul>
             </details>
             <label>Model — “image or text” models can generate from a prompt alone</label>

@@ -5,11 +5,12 @@
 export const ANTHROPIC_VERSION = "2023-06-01";
 export const API_URL = "https://api.anthropic.com/v1/messages";
 
+// "per part" ≈ one CAD generation (roughly 5k tokens in / 1.5k out at list prices).
 export const MODELS = [
-  { id: "claude-fable-5", label: "Claude Fable 5 (newest, most capable)", recommended: true },
-  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)" },
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
-  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fastest)" },
+  { id: "claude-fable-5", label: "Claude Fable 5 (most capable · ~10¢ per part)", recommended: true },
+  { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced · ~3¢ per part)" },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (~5¢ per part)" },
+  { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fastest · ~1¢ per part)" },
 ];
 
 export type MsgPart =

@@ -33,7 +33,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     needsKey: true,
     defaultModel: MODELS[0].id,
     keyHint: "sk-ant-… from console.anthropic.com",
-    hint: "The most accurate CAD coder — dimensions, fits and tricky geometry come out right most often. Paid key.",
+    hint: "The most accurate CAD coder — dimensions, fits and tricky geometry come out right most often. Pay-as-you-go: about 1-10¢ per part depending on the model.",
   },
   {
     id: "gemini",
@@ -45,7 +45,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "gemini",
     defaultModel: "gemini-2.0-flash",
     keyHint: "free key from aistudio.google.com/apikey (~1,500 req/day). The app checks your account's live model list and auto-picks the best Flash model.",
-    hint: "Best free pick — handles most everyday objects well, and reads photos.",
+    hint: "Best free pick — about 1,500 requests a day at no cost. Handles everyday objects well, and reads photos.",
   },
   {
     id: "openai",
@@ -55,7 +55,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openai",
     defaultModel: "gpt-5.1",
     keyHint: "sk-… from platform.openai.com/api-keys",
-    hint: "Close behind Claude on accuracy. Paid key.",
+    hint: "Close behind Claude on accuracy. Pay-as-you-go, roughly 1-2¢ per part.",
   },
   {
     id: "groq",
@@ -66,7 +66,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "groq",
     defaultModel: "llama-3.3-70b-versatile",
     keyHint: "free key from console.groq.com/keys",
-    hint: "Near-instant replies — fine for simple shapes, weaker on complex parts.",
+    hint: "Near-instant and free (daily limits) — fine for simple shapes, weaker on complex parts.",
   },
   {
     id: "openrouter",
@@ -76,7 +76,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openrouter",
     defaultModel: "google/gemini-3-flash",
     keyHint: "sk-or-… from openrouter.ai/keys",
-    hint: "One key that reaches many different models — handy for experimenting.",
+    hint: "One key that reaches many different models — prices vary per model; some are free.",
   },
   {
     id: "ollama",
@@ -86,7 +86,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "http://localhost:11434/v1",
     defaultModel: "qwen2.5-coder:14b",
     keyHint: "install ollama.com, `ollama pull <model>`; if blocked set OLLAMA_ORIGINS=*",
-    hint: "Fully private and offline — quality depends on the model you install.",
+    hint: "Free, fully private and offline — quality depends on the model you install.",
   },
   {
     id: "custom",

@@ -179,11 +179,21 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---------- composer: mode switch + image upload ---------- */
 .composer-wrap { border-top: 1px solid var(--bord); }
-.modebar { display: flex; align-items: center; gap: 10px; padding: 8px 12px 0; flex-wrap: wrap; }
+.modebar { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 0; }
+.modebar-row { display: flex; align-items: center; gap: 8px; }
 .seg { display: inline-flex; background: var(--surf); border: 1px solid var(--bord); border-radius: 9px; padding: 2px; }
-.seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); }
+.seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); white-space: nowrap; }
 .seg button.on { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .modehint { font-size: 11px; color: var(--subt); }
+.modelpick { margin-left: auto; max-width: 52%; height: 30px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 8px; background: var(--bg); color: var(--ink2); font-size: 12px; cursor: pointer; }
+.msg-actions { display: flex; gap: 4px; margin-top: 2px; opacity: 0; transition: opacity .12s; }
+.msg:hover .msg-actions, .msg:focus-within .msg-actions { opacity: 1; }
+.msg-act { border: none; background: none; color: var(--subt); font-size: 11px; font-weight: 500; padding: 2px 6px; border-radius: 6px; cursor: pointer; }
+.msg-act:hover:not(:disabled) { background: var(--surf); color: var(--ink2); }
+.msg-act:disabled { opacity: .4; cursor: default; }
+.bubble-edit { display: flex; flex-direction: column; gap: 6px; align-self: stretch; }
+.bubble-edit textarea { width: 100%; min-height: 56px; resize: vertical; padding: 8px 10px; border: 1px solid var(--accent); border-radius: 12px; font: inherit; font-size: 13px; line-height: 1.45; background: var(--bg); color: var(--ink); }
+.edit-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .imgchip { display: flex; align-items: center; gap: 8px; margin: 8px 12px 0; padding: 6px; border: 1px solid var(--bord); border-radius: 10px; background: var(--surf); }
 .imgchip img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
 .imgchip span { flex: 1; font-size: 12px; color: var(--ink2); }
@@ -192,6 +202,21 @@ button { font-family: inherit; cursor: pointer; }
 .attach { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--ink2); display: inline-flex; align-items: center; justify-content: center; }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
+
+/* ---------- collapsible chat ---------- */
+.chat-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--bord); flex: 0 0 auto; }
+.chat-title { font-size: 12px; font-weight: 600; color: var(--mut); }
+.split.chat-collapsed { grid-template-columns: 40px 1fr; }
+.chat-rail { border: 1px solid var(--bord); border-radius: 12px; background: var(--bg); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
+.chat-rail:hover { background: var(--surf); }
+.chat-rail-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 600; color: var(--mut); letter-spacing: .04em; }
+
+/* ---------- docked side panel (Parameters over the 3D view) ---------- */
+.side-panel { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 6; width: 300px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.18); overflow: hidden; }
+.side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--bord); font-size: 13px; font-weight: 600; color: var(--ink); }
+.side-head .x { background: none; border: none; color: var(--subt); font-size: 14px; padding: 0; cursor: pointer; }
+.side-body { flex: 1; min-height: 0; overflow: auto; }
+.side-body .panel { height: auto; overflow: visible; padding: 14px; }
 
 /* ---------- pins & generation timer ---------- */
 .pin-panel { position: absolute; top: 12px; left: 12px; z-index: 6; width: 290px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: 0 8px 28px rgba(0,0,0,0.18); }
@@ -262,6 +287,10 @@ details.guide { margin-top: 10px; }
   .topbar { flex: 0 0 auto; height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 6px; }
   .project { max-width: 34vw; }
   .split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 42vh) minmax(320px, 1fr); gap: 8px; padding: 8px; }
+  .split.chat-collapsed { grid-template-columns: 1fr; grid-template-rows: 40px 1fr; }
+  .chat-rail-label { writing-mode: horizontal-tb; transform: none; }
+  .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
+  .modelpick { max-width: 60%; }
   .modehint { display: none; }
   .messages { padding: 12px; }
   .statusbar { flex-wrap: wrap; row-gap: 6px; }

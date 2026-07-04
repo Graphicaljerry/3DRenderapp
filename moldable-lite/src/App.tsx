@@ -31,7 +31,7 @@ import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
-export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string };
+export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode };
 export type Mode = "precise" | "generative";
 
 const KEY_LS = "moldable_key";
@@ -339,6 +339,31 @@ export default function App() {
     scheduleSync();
   }
 
+  // Quick model/engine switches from the in-chat picker (no keys touched — that
+  // stays in Settings). Persist so the choice survives a reload, same as Settings.
+  function pickBrain(provider: LlmProviderId, pickedModel: string) {
+    if (provider === "anthropic") {
+      const s: LlmSettings = { provider, model: pickedModel };
+      localStorage.setItem(LLM_LS, JSON.stringify(s));
+      localStorage.setItem(MODEL_LS, pickedModel);
+      setLlm(s);
+      setModel(pickedModel);
+    } else {
+      // Keep the user's configured model when they re-pick the same provider;
+      // otherwise fall back to that provider's sensible default.
+      const keepModel = llm.provider === provider ? llm.model : llmPreset(provider).defaultModel;
+      const s: LlmSettings = { provider, model: keepModel, baseUrl: provider === "custom" ? llm.baseUrl : undefined };
+      localStorage.setItem(LLM_LS, JSON.stringify(s));
+      setLlm(s);
+    }
+    scheduleSync();
+  }
+  function pickEngine(provider: string, gmodel: string) {
+    localStorage.setItem(GENENG_LS, JSON.stringify({ provider, model: gmodel }));
+    setGenEng({ provider, model: gmodel });
+    scheduleSync();
+  }
+
   function pickImage(file: File) {
     // 3D files import directly instead of becoming a reference photo.
     if (/\.(glb|gltf|stl|step|stp|shapr)$/i.test(file.name)) {
@@ -624,12 +649,19 @@ export default function App() {
   }
   function askAiPin() {
     if (!activePin || !pinText.trim()) return;
-    const { pin, index, face } = activePin;
+    const { pin, face } = activePin;
+    const note = pinText.trim();
     savePinNote();
     setActivePinId(null);
     setPinMode(false);
+    // Give the model a directive, localized instruction (not just coordinates):
+    // what to change, where, and to keep the rest of the part intact.
+    const size = dims ? `The current part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
     void send(
-      `At the pinned spot #${index + 1} — x=${pin.x} mm, y=${pin.y} mm, z=${pin.z} mm, on the ${face}-facing surface of the current model: ${pinText.trim()}`,
+      `Modify the current CAD model: ${note}. ${size}` +
+        `Apply this change at the marked spot — approximately x=${pin.x} mm, y=${pin.y} mm, z=${pin.z} mm, ` +
+        `on the ${face}-facing surface (coordinates are Z-up, in millimetres). ` +
+        `Leave the rest of the part unchanged and return the full updated code.`,
       "precise",
     );
     setPinText("");
@@ -682,7 +714,7 @@ export default function App() {
 
       setInput("");
       const genThumb = image ? await blobToDataURL(image.blob) : undefined;
-      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (image ? "Reference image" : ""), image: genThumb }]);
+      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (image ? "Reference image" : ""), image: genThumb, mode: "generative" }]);
       const ph = mid();
       setMessages((m) => [
         ...m,
@@ -737,7 +769,7 @@ export default function App() {
     const visionThumb = visionImage ? await blobToDataURL(visionImage.blob) : undefined;
     setInput("");
     setStreamingText("");
-    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? "Recreate this part" : ""), image: visionThumb }]);
+    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? "Recreate this part" : ""), image: visionThumb, mode: "precise" }]);
     const placeholderId = mid();
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
@@ -987,6 +1019,13 @@ export default function App() {
         }}
         mode={mode}
         setMode={setMode}
+        brain={{ provider: llm.provider, model: llm.provider === "anthropic" ? model : llm.model }}
+        hasBrainKey={(prov) => (prov === "anthropic" ? !!key : !llmPreset(prov).needsKey || !!llmKeys[prov])}
+        onPickBrain={pickBrain}
+        genProvider={genEng.provider}
+        genModel={genEng.model}
+        hasGenKey={(prov) => { const pr = getProvider(prov); return !pr?.needsKey || !!providerKeys[prov]; }}
+        onPickEngine={pickEngine}
         imageUrl={image?.url ?? null}
         onPickImage={pickImage}
         onClearImage={clearImage}

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
@@ -51,6 +51,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   const st = useRef<Internals | null>(null);
   const cb = useRef({ pinMode, onPickPoint, onSelectPin });
   cb.current = { pinMode, onPickPoint, onSelectPin };
+  const [hovered, setHovered] = useState<string | null>(null);
+  const hoveredRef = useRef<string | null>(null);
 
   useEffect(() => {
     const el = mount.current!;
@@ -145,8 +147,31 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       handleTap(e, false);
     };
     const onDbl = (e: MouseEvent) => handleTap(e, true);
+    // Hover feedback: highlight a pin the cursor is over (and show a pointer cursor).
+    const setHover = (id: string | null) => {
+      if (hoveredRef.current === id) return;
+      hoveredRef.current = id;
+      setHovered(id);
+      renderer.domElement.style.cursor = id ? "pointer" : "";
+    };
+    const onMove = (e: PointerEvent) => {
+      const s2 = st.current;
+      if (!s2 || downAt) return; // don't fight an orbit drag
+      if (!s2.pins || !s2.pins.children.length) { setHover(null); return; }
+      const rect = renderer.domElement.getBoundingClientRect();
+      const ndc = new THREE.Vector2(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1,
+      );
+      rc.setFromCamera(ndc, camera);
+      const hp = rc.intersectObjects(s2.pins.children, false)[0];
+      setHover(hp ? String(hp.object.userData.pinId) : null);
+    };
+    const onLeave = () => setHover(null);
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointerup", onUp);
+    renderer.domElement.addEventListener("pointermove", onMove);
+    renderer.domElement.addEventListener("pointerleave", onLeave);
     renderer.domElement.addEventListener("dblclick", onDbl);
 
     const ro = new ResizeObserver(() => {
@@ -165,6 +190,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       ro.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);
+      renderer.domElement.removeEventListener("pointermove", onMove);
+      renderer.domElement.removeEventListener("pointerleave", onLeave);
       renderer.domElement.removeEventListener("dblclick", onDbl);
       controls.dispose();
       disposeDims(st.current);
@@ -239,18 +266,26 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     g.renderOrder = 1001;
     pins.forEach((pin, i) => {
       const sel = pin.id === selectedPin;
-      const spr = makeLabel(String(i + 1), sel ? { fg: "#ffffff", bg: "#2f7a70", border: "#ffffff" } : { fg: "#2f7a70", bg: "rgba(255,255,255,0.95)", border: "#2f7a70" });
+      const hov = pin.id === hovered;
+      // Selected = solid blue; hovered = light blue ring; otherwise the teal default.
+      const colors = sel
+        ? { fg: "#ffffff", bg: "#2563eb", border: "#ffffff" }
+        : hov
+          ? { fg: "#1d4ed8", bg: "#dbeafe", border: "#2563eb" }
+          : { fg: "#2f7a70", bg: "rgba(255,255,255,0.95)", border: "#2f7a70" };
+      const spr = makeLabel(String(i + 1), colors);
       spr.userData.dimLabel = true;
       spr.userData.pinId = pin.id;
       spr.userData.baseH = 8;
-      spr.userData.minPx = 22;
-      spr.userData.maxPx = 28;
+      // Grow the active/hovered marker so the highlight is unmistakable.
+      spr.userData.minPx = sel || hov ? 27 : 22;
+      spr.userData.maxPx = sel || hov ? 34 : 28;
       spr.position.set(pin.x, pin.y, pin.z);
       g.add(spr);
     });
     s.pins = g;
     s.scene.add(g);
-  }, [pins, selectedPin]);
+  }, [pins, selectedPin, hovered]);
 
   useImperativeHandle(ref, () => ({
     resetView() {

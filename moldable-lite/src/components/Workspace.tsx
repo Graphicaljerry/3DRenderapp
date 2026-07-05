@@ -8,7 +8,7 @@ import type { EngineKind, ExportFormat } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -440,63 +440,101 @@ function splitVal(v: string): [string, string] {
   return i < 0 ? [v, ""] : [v.slice(0, i), v.slice(i + 1)];
 }
 
+// Split a model label like "Claude Fable 5 (most capable · ~10¢ per part)" into
+// a short name + a muted sub-label. Native <select> could only show the whole
+// long string; the custom menu shows the name big and the cost quiet.
+function splitLabel(label: string): [string, string | undefined] {
+  const i = label.indexOf(" (");
+  if (i === -1) return [label, undefined];
+  return [label.slice(0, i), label.slice(i + 2).replace(/\)\s*$/, "")];
+}
+
+type PickItem = { value: string; name: string; sub?: string; disabled?: boolean };
+type PickGroup = { label: string; items: PickItem[] };
+
+/** Compact, quiet model picker — a short-name trigger that opens a styled
+ *  popover (bold name + muted sub-label), matching the export menu so the two
+ *  read as one system. Replaces the native <select>, whose long label looked
+ *  orphaned wrapping onto its own row. */
+function ModelMenu({ value, groups, title, onPick }: { value: string; groups: PickGroup[]; title: string; onPick: (value: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const current = groups.flatMap((g) => g.items).find((i) => i.value === value);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return (
+    <div className="modelpick2" ref={wrap}>
+      <button type="button" className="mp-trigger" title={title} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span className="mp-cur">{current?.name ?? "Choose model"}</span>
+        <IconChevron size={13} />
+      </button>
+      {open && (
+        <div className="mp-menu" role="listbox">
+          {groups.map((g) => (
+            <div className="mp-group" key={g.label}>
+              <div className="mp-glabel">{g.label}</div>
+              {g.items.map((it) => (
+                <button
+                  type="button"
+                  key={it.value}
+                  role="option"
+                  aria-selected={it.value === value}
+                  className={`mp-item${it.value === value ? " on" : ""}`}
+                  disabled={it.disabled}
+                  onClick={() => { setOpen(false); onPick(it.value); }}
+                >
+                  <span className="mp-text">
+                    <span className="mp-name">{it.name}</span>
+                    {it.sub && <span className="mp-sub">{it.sub}</span>}
+                  </span>
+                  <span className="mp-ck">{it.value === value && <IconCheck size={12} />}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** In-chat quick switch for the Precise (CAD) AI brain. */
 function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProviderId; model: string }; hasKey: (p: LlmProviderId) => boolean; onPick: (p: LlmProviderId, m: string) => void }) {
   const value = brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;
   const claudeKey = hasKey("anthropic");
-  return (
-    <select
-      className="modelpick"
-      value={value}
-      title="Which AI writes the CAD — switch models on the fly"
-      onChange={(e) => {
-        const [prov, m] = splitVal(e.target.value);
-        onPick(prov as LlmProviderId, m);
-      }}
-    >
-      <optgroup label={`Claude — most accurate${claudeKey ? "" : " · add key"}`}>
-        {MODELS.map((mm) => (
-          <option key={mm.id} value={`anthropic|${mm.id}`}>{mm.label}</option>
-        ))}
-      </optgroup>
-      <optgroup label="Other providers">
-        {LLM_PRESETS.filter((pr) => pr.id !== "anthropic").map((pr) => {
-          const needs = pr.needsKey && !hasKey(pr.id);
-          return (
-            <option key={pr.id} value={`${pr.id}|`}>
-              {pr.label.split(" — ")[0]}{pr.free ? " (free)" : ""}{needs ? " · add key" : ""}
-            </option>
-          );
-        })}
-      </optgroup>
-    </select>
-  );
+  const groups: PickGroup[] = [
+    {
+      label: `Claude — most accurate${claudeKey ? "" : " · add key"}`,
+      items: MODELS.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `anthropic|${mm.id}`, name, sub }; }),
+    },
+    {
+      label: "Other providers",
+      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic").map((pr) => {
+        const needs = pr.needsKey && !hasKey(pr.id);
+        const sub = [pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
+        return { value: `${pr.id}|`, name: pr.label.split(" — ")[0], sub };
+      }),
+    },
+  ];
+  return <ModelMenu value={value} groups={groups} title="Which AI writes the CAD — switch models on the fly" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov as LlmProviderId, m); }} />;
 }
 
 /** In-chat quick switch for the Generative (AI mesh) engine + model. */
 function EnginePicker({ provider, model, hasKey, onPick }: { provider: string; model: string; hasKey: (p: string) => boolean; onPick: (p: string, m: string) => void }) {
-  return (
-    <select
-      className="modelpick"
-      value={`${provider}|${model}`}
-      title="Which engine turns a photo or text into a mesh"
-      onChange={(e) => {
-        const [prov, m] = splitVal(e.target.value);
-        onPick(prov, m);
-      }}
-    >
-      {PROVIDERS.map((pv) => {
-        const needs = pv.needsKey && !hasKey(pv.id);
-        return (
-          <optgroup key={pv.id} label={`${pv.label}${pv.free ? " · free" : ""}${needs ? " · add key" : ""}`}>
-            {pv.models.map((mm) => (
-              <option key={mm.id} value={`${pv.id}|${mm.id}`}>{mm.label}</option>
-            ))}
-          </optgroup>
-        );
-      })}
-    </select>
-  );
+  const groups: PickGroup[] = PROVIDERS.map((pv) => {
+    const needs = pv.needsKey && !hasKey(pv.id);
+    return {
+      label: `${pv.label}${pv.free ? " · free" : ""}${needs ? " · add key" : ""}`,
+      items: pv.models.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `${pv.id}|${mm.id}`, name, sub }; }),
+    };
+  });
+  return <ModelMenu value={`${provider}|${model}`} groups={groups} title="Which engine turns a photo or text into a mesh" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov, m); }} />;
 }
 
 function Messages({ messages, onChip, onExample, resume, onResume, status }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating" }) {

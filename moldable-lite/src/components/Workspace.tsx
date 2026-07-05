@@ -12,6 +12,7 @@ import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconChe
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
+import type { FitId } from "../llm/prompts";
 import { PROVIDERS } from "../gen/registry";
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
@@ -53,6 +54,10 @@ interface Props {
   onToggleTheme: () => void;
   mode: Mode;
   setMode: (m: Mode) => void;
+  guided: boolean;
+  onStartGuided: () => void;
+  fit: FitId;
+  onFit: (f: FitId) => void;
   brain: { provider: LlmProviderId; model: string };
   hasBrainKey: (provider: LlmProviderId) => boolean;
   onPickBrain: (provider: LlmProviderId, model: string) => void;
@@ -232,7 +237,7 @@ export function Workspace(p: Props) {
             <span className="chat-title">Chat</span>
             <button className="ghost sm" title="Hide chat" onClick={() => setChatOpen(false)}>Hide ‹</button>
           </div>
-          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} resume={p.resume} onResume={p.onResume} status={p.status} />
+          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status} />
 
           <div className="composer-wrap">
             <div className="modebar">
@@ -249,11 +254,14 @@ export function Workspace(p: Props) {
               </div>
               <span className="modehint">
                 {p.mode === "precise"
-                  ? p.imageUrl
-                    ? "Photo → exact CAD replacement (vision)"
-                    : "Exact parts from text or a photo · STEP export"
+                  ? p.guided
+                    ? "Replacement part — clearance is added to fitted features"
+                    : p.imageUrl
+                      ? "Photo → exact CAD replacement (vision)"
+                      : "Exact parts from text or a photo · STEP export"
                   : "Whole/organic objects from a photo or text"}
               </span>
+              {p.mode === "precise" && p.guided && <FitControl fit={p.fit} onFit={p.onFit} />}
             </div>
 
             {p.imageUrl && (
@@ -299,7 +307,9 @@ export function Workspace(p: Props) {
                     ? "Describe it, or upload / paste a photo…"
                     : p.imageUrl
                       ? "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
-                      : "Describe a part, or a change…"
+                      : p.guided
+                        ? "Upload a photo of the part, or describe it with any measurements…"
+                        : "Describe a part, or a change…"
                 }
               />
               <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
@@ -504,6 +514,26 @@ function ModelMenu({ value, groups, title, onPick }: { value: string; groups: Pi
   );
 }
 
+/** First-class FDM fit control — how loose the fitted features should be.
+ *  Snug is the sensible default; re-fitting is one click, not a reprint. */
+const FIT_OPTS: { id: FitId; label: string; hint: string }[] = [
+  { id: "loose", label: "Loose", hint: "sliding fit · ~0.4 mm" },
+  { id: "snug", label: "Snug", hint: "everyday fit · ~0.2 mm" },
+  { id: "press", label: "Press", hint: "tight / press fit · ~0.1 mm" },
+];
+function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
+  return (
+    <div className="fitbar" role="group" aria-label="Fit tolerance">
+      <span className="fit-label">Fit</span>
+      <div className="fit-seg">
+        {FIT_OPTS.map((o) => (
+          <button key={o.id} type="button" className={fit === o.id ? "on" : ""} title={o.hint} onClick={() => onFit(o.id)}>{o.label}</button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 /** In-chat quick switch for the Precise (CAD) AI brain. */
 function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProviderId; model: string }; hasKey: (p: LlmProviderId) => boolean; onPick: (p: LlmProviderId, m: string) => void }) {
   const value = brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;
@@ -537,7 +567,7 @@ function EnginePicker({ provider, model, hasKey, onPick }: { provider: string; m
   return <ModelMenu value={`${provider}|${model}`} groups={groups} title="Which engine turns a photo or text into a mesh" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov, m); }} />;
 }
 
-function Messages({ messages, onChip, onExample, resume, onResume, status }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating" }) {
+function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume, status }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating" }) {
   const endRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -563,6 +593,10 @@ function Messages({ messages, onChip, onExample, resume, onResume, status }: { m
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
           <p className="empty-sub">Type a description, attach a photo — or drop a 3D file: .step imports as editable CAD, .glb/.stl as a mesh.</p>
+          <button className="guided-cta" onClick={onStartGuided}>
+            <span className="gc-title">Fix a broken part</span>
+            <span className="gc-sub">Photo → a dimension-accurate replacement that fits</span>
+          </button>
           <div className="chips">
             {resume && (
               <button className="chip resume" onClick={onResume}>

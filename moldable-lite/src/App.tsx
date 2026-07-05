@@ -9,7 +9,7 @@ import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
 import { detectProductQuery, researchDimensions } from "./llm/research";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
 import { simplifyGeometry } from "./print/simplify";
@@ -201,6 +201,9 @@ export default function App() {
   const [pinText, setPinText] = useState("");
 
   const [mode, setMode] = useState<Mode>("precise");
+  // Guided "fix a broken part" flow + FDM fit tolerance (applies to mating features).
+  const [guided, setGuided] = useState(false);
+  const [fit, setFit] = useState<FitId>("snug");
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
@@ -696,6 +699,31 @@ export default function App() {
   }
 
   // ---------------- generate ----------------
+  /** Enter the guided "fix a broken part" flow: precise mode, a photo-first nudge,
+   *  and a helper message with the coin/card-for-scale trick. */
+  function startGuided() {
+    setGuided(true);
+    setMode("precise");
+    setInput("");
+    setMessages((m) => [
+      ...m,
+      {
+        id: mid(),
+        role: "assistant",
+        text: "Let's recreate a part that fits. Upload a photo of the broken or original piece (the paperclip below), and tell me any measurements you know. No calipers? Put a coin or a credit card in the shot for scale and I'll work the sizes out. Then pick a Fit — snug is a good default.",
+      },
+    ]);
+  }
+
+  /** Change the FDM fit. If the current model already exposes a `clearance`
+   *  parameter, re-fit live with no AI call; otherwise it applies to the next build. */
+  function applyFit(next: FitId) {
+    setFit(next);
+    if (!result || result.source.kind !== "code") return;
+    const key = Object.keys(cadDefaults ?? {}).find((k) => k.toLowerCase() === "clearance");
+    if (key) void applyParams({ ...paramValues, [key]: FIT_CLEARANCE[next] });
+  }
+
   async function send(promptText: string, forceMode?: Mode) {
     const p = promptText.trim();
     if (status === "generating") return;
@@ -825,15 +853,22 @@ export default function App() {
       }
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
     }
-    const pWithFacts = researched ? `${p}\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : p;
+    // In the guided replacement flow, dial the requested FDM fit into the prompt so
+    // mating features get real clearance (and a `clearance` param to tune live).
+    const fitLine = guided ? fitDirective(fit) : "";
+    const pWithFacts = (researched ? `${p}\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : p) + fitLine;
 
-    const system = (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) + (visionImage ? VISION_ADDENDUM : "") + (importFileRef.current ? IMPORT_ADDENDUM : "");
+    const system =
+      (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) +
+      (visionImage ? VISION_ADDENDUM : "") +
+      (guided ? REPLACEMENT_ADDENDUM : "") +
+      (importFileRef.current ? IMPORT_ADDENDUM : "");
     const userMsg: ApiMsg = visionImage
       ? {
           role: "user",
           content: [
             { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
-            { type: "text", text: p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo." },
+            { type: "text", text: (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + fitLine },
           ],
         }
       : { role: "user", content: pWithFacts };
@@ -1019,6 +1054,7 @@ export default function App() {
     setDims(null);
     setReport(null);
     setCodeBuffer("");
+    setGuided(false);
     clearImage();
     setShowLibrary(false);
   }
@@ -1054,6 +1090,10 @@ export default function App() {
         }}
         mode={mode}
         setMode={setMode}
+        guided={guided}
+        onStartGuided={startGuided}
+        fit={fit}
+        onFit={applyFit}
         brain={{ provider: llm.provider, model: llm.provider === "anthropic" ? model : llm.model }}
         hasBrainKey={(prov) => (prov === "anthropic" ? !!key : !llmPreset(prov).needsKey || !!llmKeys[prov])}
         onPickBrain={pickBrain}

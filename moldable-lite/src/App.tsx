@@ -947,6 +947,7 @@ export default function App() {
 
   async function loadExample() {
     setEntered(true);
+    setGuided(false); // the example is an ordinary part, not a guided replacement
     let s = sel;
     if (!s) {
       setBooting(true);
@@ -1020,6 +1021,7 @@ export default function App() {
     setActivePinId(null);
     seedHistory(p.engine, p.code, p.spec);
     clearImage();
+    setGuided(false); // guided is a per-session intent — don't leak it into another project
     setMode(p.engine === "generative" ? "generative" : "precise");
     try {
       if (p.engine === "generative" && p.glb) {

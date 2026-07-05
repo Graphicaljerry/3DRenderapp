@@ -199,7 +199,27 @@ button { font-family: inherit; cursor: pointer; }
 .seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); white-space: nowrap; }
 .seg button.on { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 .modehint { font-size: 11px; color: var(--subt); }
-.modelpick { margin-left: auto; min-width: 0; max-width: 100%; height: 30px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 8px; background: var(--bg); color: var(--ink2); font-size: 12px; cursor: pointer; text-overflow: ellipsis; }
+/* ---------- model picker (compact custom dropdown; replaces native select) ---------- */
+.modelpick2 { position: relative; margin-left: auto; }
+.mp-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 200px; padding: 0 8px 0 11px; border: 1px solid var(--bord); border-radius: 8px; background: var(--bg); color: var(--ink2); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease, transform .16s ease-out; }
+.mp-trigger:hover { background: var(--surf); }
+.mp-trigger:active { transform: scale(.97); }
+.mp-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mp-cur { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mp-trigger svg { flex: none; color: var(--subt); }
+.mp-menu { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 9; width: 264px; max-width: 78vw; max-height: min(54vh, 380px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: 0 12px 34px rgba(0,0,0,.16); padding: 6px; transform-origin: bottom right; animation: mp-pop .18s cubic-bezier(0.23,1,0.32,1); }
+@keyframes mp-pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
+@media (prefers-reduced-motion: reduce) { .mp-menu { animation: none; } }
+.mp-group + .mp-group { margin-top: 4px; border-top: 1px solid var(--bord); padding-top: 4px; }
+.mp-glabel { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--subt); padding: 6px 10px 4px; }
+.mp-item { display: grid; grid-template-columns: 1fr 14px; align-items: center; gap: 8px; width: 100%; background: none; border: none; border-radius: 8px; padding: 7px 10px; text-align: left; cursor: pointer; }
+.mp-item:hover:not(:disabled) { background: var(--surf); }
+.mp-item:disabled { opacity: .45; cursor: default; }
+.mp-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--ink); }
+.mp-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--mut); }
+.mp-ck { display: grid; place-items: center; color: var(--accent-d); }
+.mp-item.on .mp-name { color: var(--accent-d); font-weight: 600; }
 .msg-actions { display: flex; gap: 4px; margin-top: 2px; opacity: 0; transition: opacity .12s; }
 .msg:hover .msg-actions, .msg:focus-within .msg-actions { opacity: 1; }
 .msg-act { border: none; background: none; color: var(--subt); font-size: 11px; font-weight: 500; padding: 2px 6px; border-radius: 6px; cursor: pointer; }

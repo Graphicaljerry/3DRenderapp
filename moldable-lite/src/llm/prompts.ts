@@ -118,6 +118,27 @@ THE USER IMPORTED A CAD FILE (STEP). main() receives a THIRD argument \`imported
 - placement: .translate([x,y,z]) / .rotate(deg, [0,0,0], [0,0,1])
 Do NOT rebuild the part from scratch unless the user asks. Still declare defaultParams for every NEW dimension you introduce (hole sizes, offsets, …). Signature: function main(replicad, params, imported) { ... }`;
 
+// Guided "fix a broken part" flow: the part must FIT something real, so accuracy
+// and printable tolerances matter more than looks.
+export const REPLACEMENT_ADDENDUM = `
+
+REPLACEMENT-PART MODE. The user is recreating a broken or missing part that has to FIT an existing object, so dimensional accuracy is the whole job:
+1) Establish real dimensions first. Prefer, in order: measurements the user typed; a scale reference in the photo (a coin, a credit card = 85.6 x 54 mm, a ruler); then proportion estimates. State the source of each key number.
+2) Declare a numeric \`clearance\` parameter in defaultParams (mm) and ADD it to every mating/insert dimension — a hole that slips over a shaft/peg, a slot that receives a tab, a socket a part plugs into. Do NOT inflate cosmetic holes or standard screw clearance holes.
+3) Capture function (mounting faces, holes, slots, hooks), not cosmetic detail. Keep it one printable solid with a flat base.
+4) If a critical dimension is unknowable, pick the nearest standard size, apply it, and say so in the summary so the user can correct it.`;
+
+// A one-line fit directive appended to the user's request; maps a friendly
+// setting to an FDM clearance the model applies to mating features.
+export type FitId = "loose" | "snug" | "press";
+export const FIT_CLEARANCE: Record<FitId, number> = { loose: 0.4, snug: 0.2, press: 0.1 };
+export function fitDirective(fit: FitId): string {
+  const mm = FIT_CLEARANCE[fit];
+  if (mm === undefined) return "";
+  const how = fit === "loose" ? "loose / sliding" : fit === "press" ? "press / interference" : "snug";
+  return `\n\n[Fit: ${how} — target about ${mm} mm clearance on any mating/insert dimension (a hole over a shaft, a slot over a tab, a socket for a part). Expose it as a numeric \`clearance\` parameter = ${mm} and apply it only to those fitted features, not to cosmetic or screw-clearance holes.]`;
+}
+
 export function replicadRepairMessage(err: { name: string; message: string; stack?: string }): string {
   return `Your replicad code failed to build.
 Error: ${err.name}: ${err.message}

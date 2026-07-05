@@ -20,9 +20,10 @@ const SUGGESTIONS: { text: string; gen?: boolean }[] = [
   { text: "a low-poly fox figurine", gen: true },
 ];
 
+// 3MF leads: it carries real units, so slicers can never import at the wrong scale.
 const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
+  { f: "3mf", label: "3MF", desc: "Print mesh + real units — recommended" },
   { f: "stl", label: "STL", desc: "Universal print mesh" },
-  { f: "3mf", label: "3MF", desc: "Print mesh + units (recommended)" },
   { f: "step", label: "STEP", desc: "Editable solid · Shapr3D/Fusion" },
   { f: "obj", label: "OBJ", desc: "Mesh (reference)" },
 ];
@@ -423,7 +424,7 @@ export function Workspace(p: Props) {
                 {p.report.bedFit.fitsAsIs ? "fits bed" : p.report.bedFit.fitsWithRotation ? "fits (rotated)" : "larger than bed"}
               </span>
             )}
-            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} />
+            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} />
           </div>
         </section>
       </main>
@@ -669,12 +670,33 @@ function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestor
   );
 }
 
-function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; onOpenSlicer: (t: SlicerTarget) => void; disabled: boolean }) {
+/** Compact print-readiness line at the top of the export menu. */
+function ExportReadiness({ report, activeKind }: { report: PrintabilityReport | null; activeKind: EngineKind }) {
+  if (!report) return null;
+  const fits = report.bedFit.fitsRotated;
+  const tight = report.manifold.isWatertight;
+  if (tight && fits) {
+    return (
+      <div className="export-ready ok">
+        <IconCheck /> Print-ready — watertight · {report.bedFit.fitsAsIs ? "fits the bed" : "fits rotated"}
+      </div>
+    );
+  }
+  // Meshes get welded & hole-filled automatically at export time; replicad
+  // output is kernel-exact, so a leak there is worth a look instead.
+  if (!tight && activeKind !== "replicad") {
+    return <div className="export-ready fix">Auto-repair on export — {report.manifold.boundaryEdges} open edge(s) will be welded &amp; filled</div>;
+  }
+  return <div className="export-ready no">{!fits ? "Larger than the bed — see Printability" : "Not watertight — see Printability"}</div>;
+}
+
+function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled, report, activeKind }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; onOpenSlicer: (t: SlicerTarget) => void; disabled: boolean; report: PrintabilityReport | null; activeKind: EngineKind }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="export-wrap">
       {open && (
         <div className="export-menu" onMouseLeave={() => setOpen(false)}>
+          <ExportReadiness report={report} activeKind={activeKind} />
           {EXPORT_FORMATS.map(({ f, label, desc }) => {
             const enabled = canExport(f) && !(f === "step" && !supportsStep);
             return (

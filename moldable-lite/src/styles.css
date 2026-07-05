@@ -153,12 +153,17 @@ button { font-family: inherit; cursor: pointer; }
 .fits.ok { color: var(--accent-d); }
 .fits.no { color: var(--danger); }
 .export-wrap { margin-left: auto; position: relative; }
-.export-menu { position: absolute; right: 0; bottom: 46px; width: 280px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.12); padding: 6px; }
+/* z-index above the docked side panel (6): the transient menu always wins. */
+.export-menu { position: absolute; right: 0; bottom: 46px; z-index: 8; width: 280px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.12); padding: 6px; }
 .export-item { display: flex; flex-direction: column; align-items: flex-start; width: 100%; background: none; border: none; border-radius: 8px; padding: 8px 10px; text-align: left; }
 .export-item:hover:not(:disabled) { background: var(--surf); }
 .export-item:disabled { opacity: 0.4; cursor: default; }
 .export-item .ef { font-size: 13px; font-weight: 600; color: var(--ink); }
 .export-item .ed { font-size: 11px; color: var(--mut); }
+.export-ready { display: flex; align-items: center; gap: 6px; padding: 7px 10px 9px; margin-bottom: 6px; border-bottom: 1px solid var(--bord); font-size: 11.5px; font-weight: 600; }
+.export-ready.ok { color: var(--accent-d); }
+.export-ready.fix { color: var(--warn); }
+.export-ready.no { color: var(--danger); }
 
 /* ---------- buttons ---------- */
 .primary { background: var(--accent); color: #fff; border: none; border-radius: 9px; padding: 9px 16px; font-size: 13px; font-weight: 600; }
@@ -273,11 +278,13 @@ details.guide { margin-top: 10px; }
 .fine.center { text-align: center; }
 
 /* ---------- parameter sliders ---------- */
-.param-row { display: grid; grid-template-columns: 130px 1fr 84px 28px; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid #eef0f2; }
-.pname { font-size: 13px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
-.param-row input[type="range"] { accent-color: var(--accent); width: 100%; }
-.pnum { height: 32px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 8px; font-size: 13px; width: 100%; }
-.punit { font-size: 11px; color: var(--subt); }
+/* Two-line row: name + value up top, full-width slider underneath — the
+   slider never collapses, even in the 300px docked panel. */
+.param-row { display: grid; grid-template-columns: 1fr 84px 28px; grid-template-areas: "name num unit" "slider slider slider"; align-items: center; column-gap: 10px; row-gap: 7px; padding: 10px 0; border-bottom: 1px solid #eef0f2; }
+.pname { grid-area: name; font-size: 13px; color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
+.param-row input[type="range"] { grid-area: slider; accent-color: var(--accent); width: 100%; margin: 0; }
+.pnum { grid-area: num; height: 32px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 8px; font-size: 13px; width: 100%; }
+.punit { grid-area: unit; font-size: 11px; color: var(--subt); }
 .param-actions { display: flex; gap: 8px; margin-top: 14px; }
 .fine-inline { font-size: 11px; font-weight: 400; color: var(--subt); margin-left: 8px; }
 .export-sep { height: 1px; background: var(--bord); margin: 6px 4px; }

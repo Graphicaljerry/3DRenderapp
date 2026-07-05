@@ -411,8 +411,8 @@ export default function App() {
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-    // pickImage closes over current mode/llm/keys; re-bind when those change.
-  }, [entered, mode, llm, key, llmKeys, image]);
+    // pickImage closes over current mode/llm/keys/guided; re-bind when those change.
+  }, [entered, mode, guided, llm, key, llmKeys, image]);
 
   function computeReport(geo: THREE.BufferGeometry): PrintabilityReport | null {
     try {
@@ -1192,6 +1192,7 @@ export default function App() {
       {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} />}
       {showMeasure && image && (
         <MeasureModal
+          key={image.url} /* remount (reset scale/measures) if the reference image changes */
           imageUrl={image.url}
           onClose={() => setShowMeasure(false)}
           onApply={(text) => setInput((v) => (v.trim() ? `${v.trim()} ${text}` : text))}

@@ -24,6 +24,15 @@ const len = (l: Line) => Math.hypot(l.b.x - l.a.x, l.b.y - l.a.y);
 const mid = (l: Line) => ({ x: (l.a.x + l.b.x) / 2, y: (l.a.y + l.b.y) / 2 });
 const r1 = (n: number) => Math.round(n * 10) / 10;
 
+// First unused label A, B, … Z, then A2, A3, … — so deleting a middle row and
+// redrawing never reuses a letter, and >26 measurements stay unambiguous.
+function nextLabel(used: Set<string>): string {
+  for (let i = 0; ; i++) {
+    const label = i < 26 ? String.fromCharCode(65 + i) : `A${i - 24}`;
+    if (!used.has(label)) return label;
+  }
+}
+
 export function MeasureModal({ imageUrl, onApply, onClose }: { imageUrl: string; onApply: (text: string) => void; onClose: () => void }) {
   const [step, setStep] = useState<"scale" | "measure">("scale");
   const [refId, setRefId] = useState("card-long");
@@ -44,7 +53,7 @@ export function MeasureModal({ imageUrl, onApply, onClose }: { imageUrl: string;
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   };
   const onDown = (e: ReactPointerEvent) => {
-    (e.target as Element).setPointerCapture?.(e.pointerId);
+    e.currentTarget.setPointerCapture?.(e.pointerId); // capture on the svg, not a child line/text
     draft.current = ptOf(e);
     setPreview({ a: draft.current, b: draft.current });
   };
@@ -59,8 +68,11 @@ export function MeasureModal({ imageUrl, onApply, onClose }: { imageUrl: string;
     setPreview(null);
     if (len(line) < 6) return; // ignore a stray tap
     if (step === "scale") setScaleLine(line);
-    else setMeasures((m) => [...m, { id: nextId.current++, line, label: String.fromCharCode(65 + m.length) }]);
+    else setMeasures((m) => [...m, { id: nextId.current++, line, label: nextLabel(new Set(m.map((x) => x.label))) }]);
   };
+  // A cancelled pointer (touch gesture, system interrupt) never fires onUp —
+  // clear the in-progress draft so no preview line gets stuck.
+  const onCancel = () => { draft.current = null; setPreview(null); };
 
   const canInsert = pxPerMm > 0 && measures.length > 0;
   function insert() {
@@ -85,7 +97,7 @@ export function MeasureModal({ imageUrl, onApply, onClose }: { imageUrl: string;
 
         <div className="measure-stage">
           <img src={imageUrl} alt="reference" draggable={false} />
-          <svg ref={svgRef} className="measure-svg" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp}>
+          <svg ref={svgRef} className="measure-svg" onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerCancel={onCancel}>
             {scaleLine && (
               <g className="ln scale">
                 <line x1={scaleLine.a.x} y1={scaleLine.a.y} x2={scaleLine.b.x} y2={scaleLine.b.y} />

@@ -6,6 +6,7 @@ import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
+import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, } from "./icons";
 import type * as THREE from "three";
@@ -91,6 +92,7 @@ interface Props {
   onSaveParams: () => void;
   onOpenSlicer: (t: SlicerTarget) => void;
   onRepair: () => void;
+  onSimplify: () => void;
   versions: Version[];
   onRestore: (id: string) => void;
   supportsStep: boolean;
@@ -411,7 +413,7 @@ export function Workspace(p: Props) {
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
             {p.tab === "print" && (
-              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} />
+              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} />
             )}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -424,7 +426,7 @@ export function Workspace(p: Props) {
                 {p.report.bedFit.fitsAsIs ? "fits bed" : p.report.bedFit.fitsWithRotation ? "fits (rotated)" : "larger than bed"}
               </span>
             )}
-            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} />
+            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />
           </div>
         </section>
       </main>
@@ -613,7 +615,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const row = (label: string, value: string, ok?: boolean) => (
     <div className="prow">
@@ -637,12 +639,19 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: Prin
           ))}
         </ul>
       )}
-      {canRepair && !report.manifold.isWatertight && (
-        <button className="primary sm" disabled={busy} onClick={onRepair} style={{ marginTop: 10 }}>
-          Repair mesh — weld seams &amp; fill holes
-        </button>
+      {canRepair && (
+        <div className="param-actions" style={{ flexWrap: "wrap" }}>
+          {!report.manifold.isWatertight && (
+            <button className="primary sm" disabled={busy} onClick={onRepair}>
+              Fix model — make it watertight
+            </button>
+          )}
+          <button className="ghost sm" disabled={busy} onClick={onSimplify}>
+            Simplify model — halve triangles
+          </button>
+        </div>
       )}
-      <p className="fine">Generated meshes are often not watertight — that's expected. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
+      <p className="fine">Generated meshes are often not watertight — that's expected. Simplify when a slicer (e.g. Bambu Studio) chokes on the triangle count. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
     </div>
   );
 }
@@ -670,33 +679,49 @@ function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestor
   );
 }
 
-/** Compact print-readiness line at the top of the export menu. */
-function ExportReadiness({ report, activeKind }: { report: PrintabilityReport | null; activeKind: EngineKind }) {
+/** Compact print-readiness line at the top of the export menu, with one-click
+ *  fixes for the two classic slicer blockers: open meshes and heavy meshes. */
+function ExportReadiness({ report, activeKind, busy, onFix, onSimplify }: { report: PrintabilityReport | null; activeKind: EngineKind; busy: boolean; onFix: () => void; onSimplify: () => void }) {
   if (!report) return null;
   const fits = report.bedFit.fitsRotated;
   const tight = report.manifold.isWatertight;
-  if (tight && fits) {
+  const heavy = report.triangleCount > HEAVY_TRIANGLES;
+  const isMesh = activeKind !== "replicad";
+  if (tight && fits && !heavy) {
     return (
       <div className="export-ready ok">
         <IconCheck /> Print-ready — watertight · {report.bedFit.fitsAsIs ? "fits the bed" : "fits rotated"}
       </div>
     );
   }
-  // Meshes get welded & hole-filled automatically at export time; replicad
-  // output is kernel-exact, so a leak there is worth a look instead.
-  if (!tight && activeKind !== "replicad") {
-    return <div className="export-ready fix">Auto-repair on export — {report.manifold.boundaryEdges} open edge(s) will be welded &amp; filled</div>;
+  // Meshes can be closed & thinned right here; replicad output is
+  // kernel-exact, so a leak there is worth a look in Printability instead.
+  if (!tight && isMesh) {
+    return (
+      <div className="export-ready fix">
+        <span>{report.manifold.boundaryEdges} open edge(s)</span>
+        <button className="ghost sm mini" disabled={busy} onClick={onFix}>Fix model</button>
+      </div>
+    );
+  }
+  if (heavy && isMesh) {
+    return (
+      <div className="export-ready fix">
+        <span>{Math.round(report.triangleCount / 1e5) / 10}M triangles — heavy for slicers</span>
+        <button className="ghost sm mini" disabled={busy} onClick={onSimplify}>Simplify</button>
+      </div>
+    );
   }
   return <div className="export-ready no">{!fits ? "Larger than the bed — see Printability" : "Not watertight — see Printability"}</div>;
 }
 
-function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled, report, activeKind }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; onOpenSlicer: (t: SlicerTarget) => void; disabled: boolean; report: PrintabilityReport | null; activeKind: EngineKind }) {
+function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled, report, activeKind, busy, onFix, onSimplify }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; onOpenSlicer: (t: SlicerTarget) => void; disabled: boolean; report: PrintabilityReport | null; activeKind: EngineKind; busy: boolean; onFix: () => void; onSimplify: () => void }) {
   const [open, setOpen] = useState(false);
   return (
     <div className="export-wrap">
       {open && (
         <div className="export-menu" onMouseLeave={() => setOpen(false)}>
-          <ExportReadiness report={report} activeKind={activeKind} />
+          <ExportReadiness report={report} activeKind={activeKind} busy={busy} onFix={onFix} onSimplify={onSimplify} />
           {EXPORT_FORMATS.map(({ f, label, desc }) => {
             const enabled = canExport(f) && !(f === "step" && !supportsStep);
             return (

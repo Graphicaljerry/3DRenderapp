@@ -7,6 +7,7 @@
 import type { EngineResult } from "../engine/types";
 import { analyzePrintability, type PrintabilityReport, type PrinterDefaults } from "./printability";
 import { repairGeometry, type RepairOutcome } from "./repair";
+import { HEAVY_TRIANGLES } from "./simplify";
 
 export interface PreflightOutcome {
   /** The result to export — geometry swapped for the repaired one when repair ran. */
@@ -54,6 +55,11 @@ export function preflightExport(result: EngineResult, printer: PrinterDefaults):
   const maxDim = Math.max(s.x, s.y, s.z);
   if (maxDim > 0 && maxDim < TINY_MM) {
     issues.push(`only ${maxDim} mm at its largest — that usually means a wrong-scale import; check the units`);
+  }
+  if (report.triangleCount > HEAVY_TRIANGLES) {
+    issues.push(
+      `very heavy (${Math.round(report.triangleCount / 1e6 * 10) / 10}M triangles) — Bambu Studio/Orca may stall or error; use “Simplify model” in the Printability tab`,
+    );
   }
 
   return { result: out, report, repaired, issues, ready: issues.length === 0 };

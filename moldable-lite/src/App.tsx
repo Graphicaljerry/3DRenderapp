@@ -12,6 +12,7 @@ import { detectProductQuery, researchDimensions } from "./llm/research";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
+import { simplifyGeometry } from "./print/simplify";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
@@ -496,6 +497,29 @@ export default function App() {
       ]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Repair failed: " + String(err?.message ?? err), error: true }]);
+    }
+  }
+
+  /** Halve the triangle count — for slicers that stall on very heavy meshes.
+   *  Click again to reduce further; the shape stays within ~1% of its extents. */
+  async function simplifyMesh() {
+    if (!result || result.kind === "replicad" || status === "generating") return;
+    setStatus("generating");
+    try {
+      const out = await simplifyGeometry(result.geometry);
+      applyResultNoCommit({ ...result, geometry: out.geometry, dims: out.dims });
+      setMessages((m) => [
+        ...m,
+        {
+          id: mid(),
+          role: "assistant",
+          text: `Simplified the model: ${out.trianglesBefore.toLocaleString()} → ${out.trianglesAfter.toLocaleString()} triangles (shape kept within ~1%). Exports use the simplified mesh — click again to halve it further.`,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Simplify failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
     }
   }
 
@@ -1069,6 +1093,7 @@ export default function App() {
         onSaveParams={saveParamsVersion}
         onOpenSlicer={openSlicer}
         onRepair={repairMesh}
+        onSimplify={simplifyMesh}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         supportsStep={result?.supportsStep ?? false}

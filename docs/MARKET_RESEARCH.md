@@ -2,6 +2,12 @@
 
 _Last updated: 2026-07-05 · Deep-research run across 5 angles → 27 sources → 100 extracted claims._
 
+> ⚠️ **2026-07-05 follow-up:** a live verification pass on Zoo, AdamCAD, and Tripo found
+> material changes (Zoo shipped image-to-CAD + STEP reconstruction; AdamCAD is pivoting to
+> enterprise; Tripo raised ~$200M and shipped its print pipeline). See
+> [`COMPETITOR_UPDATE_2026-07.md`](./COMPETITOR_UPDATE_2026-07.md) for the deltas and the
+> re-ranked gap list before acting on §6/§8 of this document.
+
 > **How to read this.** Every non-obvious claim below is tagged with a source `[S#]` listed in
 > [References](#references). This study was produced by a fan-out research agent that searched,
 > fetched, and extracted claims from primary sources (competitor pricing pages, hands-on review

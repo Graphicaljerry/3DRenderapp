@@ -11,6 +11,8 @@ import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type L
 import { detectProductQuery, researchDimensions } from "./llm/research";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
+import { preflightExport, preflightSummary } from "./print/preflight";
+import { simplifyGeometry } from "./print/simplify";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
@@ -498,13 +500,38 @@ export default function App() {
     }
   }
 
+  /** Halve the triangle count — for slicers that stall on very heavy meshes.
+   *  Click again to reduce further; the shape stays within ~1% of its extents. */
+  async function simplifyMesh() {
+    if (!result || result.kind === "replicad" || status === "generating") return;
+    setStatus("generating");
+    try {
+      const out = await simplifyGeometry(result.geometry);
+      applyResultNoCommit({ ...result, geometry: out.geometry, dims: out.dims });
+      setMessages((m) => [
+        ...m,
+        {
+          id: mid(),
+          role: "assistant",
+          text: `Simplified the model: ${out.trianglesBefore.toLocaleString()} → ${out.trianglesAfter.toLocaleString()} triangles (shape kept within ~1%). Exports use the simplified mesh — click again to halve it further.`,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Simplify failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   /** Export a 3MF and hand it to a desktop slicer (deep link locally; download on hosted). */
   async function openSlicer(target: SlicerTarget) {
     if (!result) return;
     const engine = result.kind === "generative" ? genEngine.current : sel?.engine;
     if (!engine) return;
     try {
-      const blob = await engine.export(result, "3mf");
+      const pf = preflightExport(result, printer);
+      if (pf.repaired) applyResultNoCommit(pf.result);
+      const blob = await engine.export(pf.result, "3mf");
       const how = await openInSlicer(target, blob, safeFileName(project?.name ?? "model", "3mf"));
       setMessages((m) => [
         ...m,
@@ -512,9 +539,10 @@ export default function App() {
           id: mid(),
           role: "assistant",
           text:
-            how === "deeplink"
+            (how === "deeplink"
               ? `Sent to ${target === "bambu" ? "Bambu Studio" : "OrcaSlicer"}. ${target === "bambu" ? "Bambu may ask “not from a trusted site — open anyway?” — that's expected for non-MakerWorld files; click yes." : ""} If nothing opened, the app may not be installed — a download works too.`
-              : "Downloaded the 3MF — double-click it and it opens in your default slicer. (One-click send works when running locally with npm run dev.)",
+              : "Downloaded the 3MF — double-click it and it opens in your default slicer. (One-click send works when running locally with npm run dev.)") +
+            " " + preflightSummary(pf),
         },
       ]);
     } catch (err: any) {
@@ -909,8 +937,15 @@ export default function App() {
     const engine = result.kind === "generative" ? genEngine.current : sel?.engine;
     if (!engine) return;
     try {
-      const blob = await engine.export(result, format);
+      // Print-ready by default: analyse, auto-repair meshes, sanity-check scale/bed.
+      const pf = preflightExport(result, printer);
+      if (pf.repaired) applyResultNoCommit(pf.result); // viewer + report show exactly what was exported
+      const blob = await engine.export(pf.result, format);
       downloadBlob(blob, safeFileName(project?.name ?? "model", format));
+      // STEP is a CAD hand-off, not a print file — skip the print-readiness line.
+      if (format !== "step") {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported ${format.toUpperCase()}. ${preflightSummary(pf)}` }]);
+      }
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
     }
@@ -1058,6 +1093,7 @@ export default function App() {
         onSaveParams={saveParamsVersion}
         onOpenSlicer={openSlicer}
         onRepair={repairMesh}
+        onSimplify={simplifyMesh}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         supportsStep={result?.supportsStep ?? false}

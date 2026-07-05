@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
+import { MeasureModal } from "./components/MeasureModal";
 import type { ViewerHandle } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
@@ -230,6 +231,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showMeasure, setShowMeasure] = useState(false);
   const viewer = useRef<ViewerHandle>(null);
 
   useEffect(() => {
@@ -378,9 +380,11 @@ export default function App() {
     if (image) URL.revokeObjectURL(image.url);
     setImage({ blob: file, url: URL.createObjectURL(file) });
     // In Precise mode with a working AI provider, a photo means "recreate this part
-    // as exact CAD" (vision). Otherwise route to the free generative mesh path.
+    // as exact CAD" (vision). Otherwise route to the free generative mesh path —
+    // but never override the guided replacement flow, which is explicitly precise
+    // (the user gets prompted for a key on send if one's missing).
     const ready = llmReady(llm.provider === "anthropic" ? { ...llm, model } : llm, { anthropic: key, ...llmKeys });
-    if (mode !== "precise" || !ready) setMode("generative");
+    if (!guided && (mode !== "precise" || !ready)) setMode("generative");
   }
   function clearImage() {
     if (image) URL.revokeObjectURL(image.url);
@@ -836,7 +840,10 @@ export default function App() {
     // Gemini's free search grounding or Claude's web-search tool; best-effort —
     // if neither key is set or the lookup fails, generation continues as before.
     let researched: string | null = null;
-    if (!visionImage && p && detectProductQuery(p)) {
+    // Look up real product dimensions for text requests, and — in the guided
+    // replacement flow — even when a photo is attached, so a named product ("case
+    // for an iPhone 17 Pro") gets web-accurate numbers alongside the picture.
+    if (p && detectProductQuery(p) && (!visionImage || guided)) {
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
       researched = await researchDimensions(p, {
         geminiKey: llmKeys["gemini"],
@@ -855,8 +862,11 @@ export default function App() {
     }
     // In the guided replacement flow, dial the requested FDM fit into the prompt so
     // mating features get real clearance (and a `clearance` param to tune live).
+    // Researched dims + fit apply to BOTH the text and the vision message.
     const fitLine = guided ? fitDirective(fit) : "";
-    const pWithFacts = (researched ? `${p}\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : p) + fitLine;
+    const factsBlock = researched ? `\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : "";
+    const extras = factsBlock + fitLine;
+    const pWithFacts = p + extras;
 
     const system =
       (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) +
@@ -868,7 +878,7 @@ export default function App() {
           role: "user",
           content: [
             { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
-            { type: "text", text: (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + fitLine },
+            { type: "text", text: (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + extras },
           ],
         }
       : { role: "user", content: pWithFacts };
@@ -1106,6 +1116,7 @@ export default function App() {
         imageUrl={image?.url ?? null}
         onPickImage={pickImage}
         onClearImage={clearImage}
+        onMeasure={() => setShowMeasure(true)}
         messages={messages}
         status={status}
         input={input}
@@ -1179,6 +1190,13 @@ export default function App() {
         />
       )}
       {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} />}
+      {showMeasure && image && (
+        <MeasureModal
+          imageUrl={image.url}
+          onClose={() => setShowMeasure(false)}
+          onApply={(text) => setInput((v) => (v.trim() ? `${v.trim()} ${text}` : text))}
+        />
+      )}
     </>
   );
 }

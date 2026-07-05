@@ -68,6 +68,7 @@ interface Props {
   imageUrl: string | null;
   onPickImage: (f: File) => void;
   onClearImage: () => void;
+  onMeasure: () => void;
   messages: ChatMessage[];
   status: "idle" | "generating";
   input: string;
@@ -268,6 +269,9 @@ export function Workspace(p: Props) {
               <div className="imgchip">
                 <img src={p.imageUrl} alt="reference" />
                 <span>reference image</span>
+                {p.mode === "precise" && (
+                  <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
+                )}
                 <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
               </div>
             )}

@@ -213,7 +213,7 @@ button { font-family: inherit; cursor: pointer; }
 .fit-seg button { border: none; background: none; border-radius: 7px; padding: 4px 12px; font-size: 12px; font-weight: 500; color: var(--mut); }
 .fit-seg button.on { background: var(--bg); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
 /* ---------- model picker (compact custom dropdown; replaces native select) ---------- */
-.modelpick2 { position: relative; margin-left: auto; }
+.modelpick2 { position: relative; }
 .mp-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 200px; padding: 0 8px 0 11px; border: 1px solid var(--bord); border-radius: 8px; background: var(--bg); color: var(--ink2); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease, transform .16s ease-out; }
 .mp-trigger:hover { background: var(--surf); }
 .mp-trigger:active { transform: scale(.97); }

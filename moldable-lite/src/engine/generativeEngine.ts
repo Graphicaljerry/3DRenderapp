@@ -26,7 +26,7 @@ export class GenerativeEngine implements Engine {
     // host (e.g. GitHub Pages) does not — fail fast with the fix, not a 404 soup.
     if (prov.viaProxy && !relayAvailable(this.config.proxyBase || "")) {
       throw new Error(
-        `${prov.label} needs a relay server, which this hosted site doesn't have. Either run the app locally (npm run dev has one built in), deploy the tiny Cloudflare Worker in proxy/ and paste its URL in Settings → Proxy base URL, or use the free Hugging Face engine (no relay needed).`,
+        `${prov.label} needs a small relay server, which this hosted site doesn't have yet. The 10-minute, free fix: deploy the included Cloudflare Worker — step-by-step guide in proxy/DEPLOY.md on GitHub — then paste its URL in Settings → 3D engine → Advanced. (Running locally with npm run dev needs no setup.)`,
       );
     }
     const { glb } = await prov.generate(

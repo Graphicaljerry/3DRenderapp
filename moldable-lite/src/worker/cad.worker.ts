@@ -31,6 +31,10 @@ function sanitize(code: string): string {
   return code;
 }
 
+// The user's imported CAD solid (STEP), held for the worker's lifetime and
+// passed to main() as its third argument so code can modify it directly.
+let importedShape: any = null;
+
 // ---- Compile untrusted LLM code at global scope; shadow ambient globals. ----
 function runToShape(rawCode: string, params?: Record<string, number>): any {
   const code = sanitize(rawCode);
@@ -50,7 +54,8 @@ function runToShape(rawCode: string, params?: Record<string, number>): any {
   if (typeof mainFn !== "function") {
     throw new Error("Your code must define `function main(replicad, params) { ... }` returning a Shape.");
   }
-  const out = mainFn(Object.freeze({ ...replicad }), Object.freeze({ ...(params ?? {}) }));
+  // NOTE: the imported shape is passed unfrozen — replicad shapes carry internal caches.
+  const out = mainFn(Object.freeze({ ...replicad }), Object.freeze({ ...(params ?? {}) }), importedShape ?? undefined);
   const shape = out?.shape ?? out;
   if (!shape || typeof shape.mesh !== "function") {
     throw new Error("main() must return a replicad Shape (a Solid).");
@@ -70,6 +75,30 @@ const api: CadWorkerApi = {
   async init() {
     await ensureOC();
     return true;
+  },
+
+  /** Load a STEP file as a live solid; it becomes main()'s third argument. */
+  async importShape(file: Blob): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await ensureOC();
+      const shape = await (replicad as any).importSTEP(file);
+      // Normalize to our convention: centred on XY, sitting on the bed (z=0).
+      try {
+        const bb = shape.boundingBox;
+        const [min, max] = bb.bounds as [number[], number[]];
+        importedShape = shape.translate([-(min[0] + max[0]) / 2, -(min[1] + max[1]) / 2, -min[2]]);
+      } catch {
+        importedShape = shape; // unusual bbox API? keep as-authored coordinates
+      }
+      return { ok: true };
+    } catch (e: any) {
+      importedShape = null;
+      return { ok: false, error: String(e?.message ?? e) };
+    }
+  },
+
+  async clearImport(): Promise<void> {
+    importedShape = null;
   },
 
   async build(code: string, params?: Record<string, number>): Promise<WorkerBuildResult> {

@@ -4,6 +4,18 @@ export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   error?: boolean;
+  image?: string; // reference-photo thumbnail (data URL)
+}
+
+export interface Pin {
+  id: string;
+  x: number;
+  y: number;
+  z: number;
+  nx: number;
+  ny: number;
+  nz: number;
+  text: string;
 }
 
 export interface GenSource {
@@ -22,6 +34,7 @@ export interface Version {
   spec?: unknown; // primitive spec at this snapshot
   dims?: { x: number; y: number; z: number };
   glb?: Blob; // generative mesh at this snapshot (so it re-renders without re-calling the API)
+  importFile?: Blob; // imported STEP the code's `imported` argument refers to
   genSource?: GenSource;
 }
 
@@ -35,6 +48,8 @@ export interface Project {
   params?: Record<string, number>; // HEAD slider overrides
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
+  importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
+  pins?: Pin[]; // spatial notes / AI-edit markers on the model
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest

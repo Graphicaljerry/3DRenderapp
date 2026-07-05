@@ -18,10 +18,12 @@ export interface LlmPreset {
   label: string;
   free?: boolean;
   needsKey: boolean;
+  recommended?: boolean; // best free default to start with
   baseUrl?: string;
   relayPrefix?: string; // relay route used if the browser can't call it directly
   defaultModel: string;
   keyHint: string;
+  hint?: string; // one-line "pick this when…" guidance shown in Settings
 }
 
 export const LLM_PRESETS: LlmPreset[] = [
@@ -31,16 +33,19 @@ export const LLM_PRESETS: LlmPreset[] = [
     needsKey: true,
     defaultModel: MODELS[0].id,
     keyHint: "sk-ant-… from console.anthropic.com",
+    hint: "The most accurate CAD coder — dimensions, fits and tricky geometry come out right most often. Pay-as-you-go: about 1-10¢ per part depending on the model.",
   },
   {
     id: "gemini",
     label: "Google Gemini — free tier",
     free: true,
     needsKey: true,
+    recommended: true,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     relayPrefix: "gemini",
     defaultModel: "gemini-2.0-flash",
     keyHint: "free key from aistudio.google.com/apikey (~1,500 req/day). The app checks your account's live model list and auto-picks the best Flash model.",
+    hint: "Best free pick — about 1,500 requests a day at no cost. Handles everyday objects well, and reads photos.",
   },
   {
     id: "openai",
@@ -50,6 +55,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openai",
     defaultModel: "gpt-5.1",
     keyHint: "sk-… from platform.openai.com/api-keys",
+    hint: "Close behind Claude on accuracy. Pay-as-you-go, roughly 1-2¢ per part.",
   },
   {
     id: "groq",
@@ -60,6 +66,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "groq",
     defaultModel: "llama-3.3-70b-versatile",
     keyHint: "free key from console.groq.com/keys",
+    hint: "Near-instant and free (daily limits) — fine for simple shapes, weaker on complex parts.",
   },
   {
     id: "openrouter",
@@ -69,6 +76,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openrouter",
     defaultModel: "google/gemini-3-flash",
     keyHint: "sk-or-… from openrouter.ai/keys",
+    hint: "One key that reaches many different models — prices vary per model; some are free.",
   },
   {
     id: "ollama",
@@ -78,6 +86,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     baseUrl: "http://localhost:11434/v1",
     defaultModel: "qwen2.5-coder:14b",
     keyHint: "install ollama.com, `ollama pull <model>`; if blocked set OLLAMA_ORIGINS=*",
+    hint: "Free, fully private and offline — quality depends on the model you install.",
   },
   {
     id: "custom",
@@ -85,6 +94,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     needsKey: false,
     defaultModel: "",
     keyHint: "any endpoint that serves …/v1/chat/completions",
+    hint: "For self-hosted or niche providers with an OpenAI-style API.",
   },
 ];
 

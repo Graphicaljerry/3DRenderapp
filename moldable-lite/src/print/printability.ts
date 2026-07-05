@@ -33,6 +33,7 @@ export interface PrintabilityReport {
 export interface PrinterDefaults {
   bed: { x: number; y: number; z: number };
   overhangThresholdDeg: number;
+  name?: string; // selected printer preset ("Brand Model"), if any
 }
 
 export const DEFAULT_PRINTER: PrinterDefaults = {

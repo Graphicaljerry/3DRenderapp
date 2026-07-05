@@ -1,10 +1,46 @@
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 export interface MeshLoad {
   geometry: THREE.BufferGeometry;
   dims: { x: number; y: number; z: number };
+}
+
+/**
+ * Load a mesh file of either supported kind (GLB/GLTF or STL) — used for
+ * user-imported models (e.g. generated for free in Tripo Studio, downloaded
+ * from Printables, …) and for re-opening stored generative results.
+ */
+export async function loadAnyMesh(file: Blob): Promise<MeshLoad> {
+  const name = ((file as File).name ?? "").toLowerCase();
+  if (name.endsWith(".stl")) return stlToGeometry(file);
+  try {
+    return await glbToGeometry(file);
+  } catch (e) {
+    try {
+      return await stlToGeometry(file); // stored blobs have no name — sniff STL as fallback
+    } catch {
+      throw e;
+    }
+  }
+}
+
+/** STL files from printing workflows are Z-up mm already — centre, floor, measure. */
+export async function stlToGeometry(blob: Blob): Promise<MeshLoad> {
+  const parsed = new STLLoader().parse(await blob.arrayBuffer());
+  let g: THREE.BufferGeometry = parsed.index ? parsed.toNonIndexed() : parsed;
+  for (const n of Object.keys(g.attributes)) if (n !== "position") g.deleteAttribute(n);
+  g.computeBoundingBox();
+  const bb = g.boundingBox!;
+  g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);
+  g.computeVertexNormals();
+  g.computeBoundingBox();
+  const size = new THREE.Vector3();
+  g.boundingBox!.getSize(size);
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return { geometry: g, dims: { x: r(size.x), y: r(size.y), z: r(size.z) } };
 }
 
 /**

@@ -11,10 +11,22 @@ export class ReplicadEngine implements Engine {
   ready = false;
   private worker!: Worker;
   private api!: Remote<CadWorkerApi>;
+  private importBlob: Blob | null = null;
 
   private spawn() {
     this.worker = new Worker(new URL("../worker/cad.worker.ts", import.meta.url), { type: "module" });
     this.api = wrap<CadWorkerApi>(this.worker);
+  }
+
+  /** Load (or clear) a STEP file as the live `imported` solid main() receives. */
+  async setImport(file: Blob | null): Promise<void> {
+    this.importBlob = file;
+    if (!file) {
+      await this.api.clearImport();
+      return;
+    }
+    const r = await this.withWatchdog(this.api.importShape(file), 45_000);
+    if (!r.ok) throw new Error(r.error || "Couldn't read that STEP file.");
   }
 
   /** Boots OCCT; REJECTS if init fails so the selector can fall back. */
@@ -43,6 +55,8 @@ export class ReplicadEngine implements Engine {
       /* ignore */
     }
     this.spawn();
+    // the fresh worker lost the imported solid — restore it in the background
+    if (this.importBlob) void this.api.importShape(this.importBlob);
   }
 
   async build(input: BuildInput): Promise<EngineResult> {

@@ -59,10 +59,34 @@ function spaceUrl(space: string): string {
 interface ApiLoc {
   apiBase: string; // <base> or <base>/gradio_api
   filePrefix: string; // /file= or /gradio_api/file=
+  sign: string; // "__sign=<jwt>" — ZeroGPU quota attribution; "" when anonymous
 }
 
+/**
+ * ZeroGPU attributes free-GPU quota via a Hub-issued JWT passed as a __sign
+ * query param — NOT via the raw hf_ token (which only authenticates). This is
+ * what the official client exchanges behind the scenes; without it, even a
+ * valid Read token runs on the anonymous quota.
+ */
+async function getSpaceJwt(space: string, token: string): Promise<string | null> {
+  try {
+    const r = await withTimeout(
+      fetch(`https://huggingface.co/api/spaces/${space}/jwt`, { headers: { authorization: `Bearer ${token}` } }),
+      12_000,
+      "Fetching a Space access pass",
+    );
+    if (!r.ok) return null;
+    const j: any = await r.json();
+    return typeof j?.token === "string" ? j.token : null;
+  } catch {
+    return null;
+  }
+}
+
+const signed = (url: string, sign: string) => (sign ? `${url}${url.includes("?") ? "&" : "?"}${sign}` : url);
+
 /** Detect Gradio version by probing both info routes; doubles as the health check. */
-async function detectApi(base: string, headers: Record<string, string>): Promise<ApiLoc> {
+async function detectApi(base: string, headers: Record<string, string>, sign: string): Promise<ApiLoc> {
   let r5: Response | null = null;
   try {
     r5 = await withTimeout(fetch(`${base}/gradio_api/info`, { headers }), 15_000, "Reaching the Space");
@@ -71,9 +95,9 @@ async function detectApi(base: string, headers: Record<string, string>): Promise
       `Your browser couldn't reach ${base} ("failed to fetch"). Usual causes: an ad-blocker / privacy shield blocking hf.space, a VPN/firewall, or the Space being down. Allow hf.space for this site or try another free model in Settings.`,
     );
   }
-  if (r5.ok) return { apiBase: `${base}/gradio_api`, filePrefix: "/gradio_api/file=" };
+  if (r5.ok) return { apiBase: `${base}/gradio_api`, filePrefix: "/gradio_api/file=", sign };
   const r4 = await fetch(`${base}/info`, { headers }).catch(() => null);
-  if (r4?.ok) return { apiBase: base, filePrefix: "/file=" };
+  if (r4?.ok) return { apiBase: base, filePrefix: "/file=", sign };
   throw new Error(
     `The Space at ${base} responded but its API isn't answering (HTTP ${r5.status}${r4 ? `/${r4.status}` : ""}) — it's likely paused, rebuilding, or out of free GPU time. Try again in a minute or switch models in Settings.`,
   );
@@ -82,7 +106,7 @@ async function detectApi(base: string, headers: Record<string, string>): Promise
 async function upload(loc: ApiLoc, blob: Blob, headers: Record<string, string>): Promise<string> {
   const form = new FormData();
   form.append("files", blob, "image.png");
-  const r = await fetch(`${loc.apiBase}/upload`, { method: "POST", body: form, headers });
+  const r = await fetch(signed(`${loc.apiBase}/upload`, loc.sign), { method: "POST", body: form, headers });
   if (!r.ok) throw new Error(`Image upload to the Space failed (HTTP ${r.status}).`);
   const arr = (await r.json()) as string[];
   if (!arr?.[0]) throw new Error("The Space's upload endpoint returned no file path.");
@@ -98,7 +122,7 @@ async function call(
   onProgress: (p: GenProgress) => void,
   ms: number,
 ): Promise<any[]> {
-  const post = await fetch(`${loc.apiBase}/call/${api}`, {
+  const post = await fetch(signed(`${loc.apiBase}/call/${api}`, loc.sign), {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ data }),
@@ -110,7 +134,7 @@ async function call(
   const { event_id } = (await post.json()) as { event_id?: string };
   if (!event_id) throw new Error("The Space didn't return a job id — its API may have changed.");
 
-  const stream = await fetch(`${loc.apiBase}/call/${api}/${event_id}`, { headers });
+  const stream = await fetch(signed(`${loc.apiBase}/call/${api}/${event_id}`, loc.sign), { headers });
   if (!stream.ok || !stream.body) throw new Error(`Couldn't read the job stream (HTTP ${stream.status}).`);
   const reader = stream.body.getReader();
 
@@ -152,13 +176,22 @@ async function call(
             let msg: unknown = payload;
             try {
               const j = JSON.parse(payload);
-              msg = typeof j === "string" ? j : (j?.message ?? j);
+              msg = typeof j === "string" ? j : (j?.message ?? j?.error ?? j);
             } catch {}
             const s = msg == null ? "" : String(msg);
-            if (!s || s === "null" || s === "undefined" || /quota|exceeded/i.test(s)) {
-              // ZeroGPU kills anonymous/over-quota jobs with a bare error event.
+            const hasToken = !!headers.authorization;
+            const isSigned = !!loc.sign;
+            const empty = !s || s === "null" || s === "undefined";
+            const quota = /quota|exceeded|gpu task aborted/i.test(s);
+            if (empty || quota) {
+              // ZeroGPU kills over-quota/reclaimed jobs with a bare (often null) error event.
+              const detail = quota && !empty ? ` (${s.slice(0, 120)})` : "";
               throw new Error(
-                "The free GPU rejected the job (this is what running out of the small anonymous daily quota looks like). Fix: paste a FREE hf_… token from huggingface.co/settings/tokens into Settings → 3D engine — it's a 1-minute signup and gives ~5× the quota plus queue priority. Or try again tomorrow / another model.",
+                isSigned
+                  ? `The free GPU rejected this job${detail} even with your account authenticated to the Space. That means today's free GPU minutes on your account are used up (they reset 24h after first use) or the Space is overloaded. Try again later or use the lighter “Stable Fast 3D” model. For a genuinely reliable engine: grab a free key at platform.tripo3d.ai and switch Settings → 3D engine to Tripo — it works right here, no extra setup.`
+                  : hasToken
+                    ? `The free GPU rejected this job${detail}. Your token was sent but couldn't be exchanged for a Space pass, so the GPU treated you as anonymous. Make sure the token is a plain “Read” token, then retry.`
+                    : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or try later.`,
               );
             }
             throw new Error(`The Space reported an error: ${s.slice(0, 200)}`);
@@ -199,14 +232,23 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   if (!input.image && !input.prompt) throw new Error("Provide an image or a prompt.");
   const def = resolveSpace(input.model);
   if (!input.image && !def.supportsText) {
-    throw new Error("This model needs a photo — upload one with 📎, or switch to Hunyuan3D-2 (Settings → Mesh model) for text → 3D.");
+    throw new Error("This model needs a photo — attach a photo, or switch to Hunyuan3D-2 (Settings → Mesh model) for text → 3D.");
   }
 
   const base = spaceUrl(def.space);
-  const headers: Record<string, string> = input.apiKey ? { authorization: `Bearer ${input.apiKey}` } : {};
+  const token = (input.apiKey || "").trim();
+  const headers: Record<string, string> = token ? { authorization: `Bearer ${token}` } : {};
+
+  // Exchange the hf_ token for the Space JWT that ZeroGPU actually meters by.
+  let sign = "";
+  if (token) {
+    onProgress({ status: "authenticating your Hugging Face account…" });
+    const jwt = await getSpaceJwt(def.space, token);
+    if (jwt) sign = `__sign=${encodeURIComponent(jwt)}`;
+  }
 
   onProgress({ status: "connecting to the Space…" });
-  const loc = await detectApi(base, headers);
+  const loc = await detectApi(base, headers, sign);
 
   let imagePath: string | null = null;
   if (input.image) {
@@ -223,7 +265,8 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   onProgress({ status: "queued on a free GPU (can take 30–120s)…" });
   const result = await call(loc, def.endpoint, def.data(imagePath, input.prompt), headers, onProgress, 300_000);
 
-  const glbUrl = findGlb(result, base, loc.filePrefix);
+  let glbUrl = findGlb(result, base, loc.filePrefix);
   if (!glbUrl) throw new Error(`${def.space} finished but returned no .glb — its interface may have changed. Try another free model in Settings.`);
+  if (glbUrl.startsWith(base)) glbUrl = signed(glbUrl, loc.sign);
   return { glb: await fetchAsBlob(glbUrl, input.proxyBase) };
 };

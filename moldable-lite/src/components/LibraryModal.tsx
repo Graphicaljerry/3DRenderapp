@@ -1,3 +1,4 @@
+import { IconX } from "./icons";
 import { useEffect, useState } from "react";
 import { listProjects, deleteProject, duplicateProject } from "../store/projects";
 import type { Project } from "../store/types";
@@ -23,7 +24,7 @@ export function LibraryModal({ onOpen, onClose, currentId }: { onOpen: (p: Proje
       <div className="card wide" onClick={(e) => e.stopPropagation()}>
         <div className="card-head">
           <h2>Project library</h2>
-          <button className="x" onClick={onClose}>✕</button>
+          <button className="x" onClick={onClose}><IconX size={16} /></button>
         </div>
         {loading ? (
           <p className="fine">Loading…</p>

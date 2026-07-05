@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
-import { Viewer, type ViewerHandle } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint } from "./Viewer";
+import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import type { SlicerTarget } from "../lib/slicer";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, } from "./icons";
 import type * as THREE from "three";
+import { MODELS } from "../llm/anthropic";
+import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
+import { PROVIDERS } from "../gen/registry";
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
 const SUGGESTIONS: { text: string; gen?: boolean }[] = [
@@ -22,6 +27,16 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
   { f: "obj", label: "OBJ", desc: "Mesh (reference)" },
 ];
 
+/** Format overall W×D×H in the chosen unit (unit shown once). */
+function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): string {
+  if (units === "in") {
+    const c = (n: number) => (n / 25.4).toFixed(2);
+    return `${c(d.x)} × ${c(d.y)} × ${c(d.z)} in`;
+  }
+  return `${d.x} × ${d.y} × ${d.z} mm`;
+}
+
+
 interface Props {
   projectName: string;
   activeKind: EngineKind;
@@ -29,9 +44,20 @@ interface Props {
   fellBack: boolean;
   bootError?: string;
   booting: boolean;
-  keyPresent: boolean;
+  accountEmail: string | null;
+  onOpenProfile: () => void;
+  onSignOut: () => void;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
   mode: Mode;
   setMode: (m: Mode) => void;
+  brain: { provider: LlmProviderId; model: string };
+  hasBrainKey: (provider: LlmProviderId) => boolean;
+  onPickBrain: (provider: LlmProviderId, model: string) => void;
+  genProvider: string;
+  genModel: string;
+  hasGenKey: (provider: string) => boolean;
+  onPickEngine: (provider: string, model: string) => void;
   imageUrl: string | null;
   onPickImage: (f: File) => void;
   onClearImage: () => void;
@@ -41,11 +67,17 @@ interface Props {
   setInput: (v: string) => void;
   onSend: (p: string, forceMode?: Mode) => void;
   onExample: () => void;
+  resume: string | null;
+  onResume: () => void;
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
   report: PrintabilityReport | null;
   wireframe: boolean;
   setWireframe: (f: (w: boolean) => boolean) => void;
+  showDims: boolean;
+  setShowDims: (f: (d: boolean) => boolean) => void;
+  units: "mm" | "in";
+  setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   viewerRef: RefObject<ViewerHandle>;
   tab: "3d" | "code" | "params" | "print" | "history";
   setTab: (t: "3d" | "code" | "params" | "print" | "history") => void;
@@ -66,11 +98,49 @@ interface Props {
   onOpenSettings: () => void;
   onOpenLibrary: () => void;
   onNew: () => void;
+  pins: Pin[];
+  pinCtl: {
+    mode: boolean;
+    toggleMode: () => void;
+    active: { pin: Pin; index: number; face: string } | null;
+    text: string;
+    setText: (s: string) => void;
+    askAi: () => void;
+    saveNote: () => void;
+    del: () => void;
+    close: () => void;
+    pick: (pt: PickedPoint) => void;
+    select: (id: string) => void;
+  };
 }
 
 export function Workspace(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [profileMenu, setProfileMenu] = useState(false);
+  const [chatOpen, setChatOpen] = useState(true);
+
+  // Paste a reference image from the clipboard anywhere in the app.
+  const pickRef = useRef(p.onPickImage);
+  pickRef.current = p.onPickImage;
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of Array.from(items)) {
+        if (it.type.startsWith("image/")) {
+          const f = it.getAsFile();
+          if (f) {
+            e.preventDefault();
+            pickRef.current(f);
+          }
+          return;
+        }
+      }
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, []);
 
   const enginePill =
     p.activeKind === "replicad" ? "Engine · replicad" : p.activeKind === "generative" ? `Engine · ${p.genLabel}` : "Engine · primitive";
@@ -78,7 +148,7 @@ export function Workspace(p: Props) {
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/"));
+    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/") || /\.(glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
     if (f) p.onPickImage(f);
   }
 
@@ -86,16 +156,49 @@ export function Workspace(p: Props) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <CubeMark />
-          <span className="wordmark">Moldable</span>
+          <button className="brandbtn" onClick={p.onNew} title="Start fresh (your current work stays in the Library)" aria-label="Moldable — start fresh">
+            <CubeMark />
+            <span className="wordmark">Moldable</span>
+          </button>
           <span className="sep">/</span>
           <span className="project">{p.projectName}</span>
         </div>
         <div className="topbar-right">
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
           <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
-          <button className="ghost" onClick={p.onOpenSettings}>{p.keyPresent ? "Settings" : "Add key"}</button>
-          <button className="primary sm" onClick={p.onNew}>+ New</button>
+          <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
+          <button className="ghost profile" onClick={p.onToggleTheme} title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle dark mode">
+            {p.theme === "dark" ? <IconSun /> : <IconMoon />}
+          </button>
+          <div className="profile-wrap">
+            <button
+              className="ghost profile"
+              onClick={() => (p.accountEmail ? setProfileMenu((v) => !v) : p.onOpenProfile())}
+              title={p.accountEmail ? `${p.accountEmail} — account menu` : "Sign in & settings"}
+              aria-label="Account menu"
+              aria-expanded={profileMenu}
+            >
+              {p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span> : <IconUser />}
+            </button>
+            {profileMenu && p.accountEmail && (
+              <div className="profile-menu" onMouseLeave={() => setProfileMenu(false)}>
+                <div className="pm-head">
+                  <span className="pm-avatar">{p.accountEmail[0].toUpperCase()}</span>
+                  <span className="pm-who">
+                    <span className="pm-label">Signed in</span>
+                    <span className="pm-email">{p.accountEmail}</span>
+                  </span>
+                </div>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onNew(); }}>New chat</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenLibrary(); }}>Library</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenSettings(); }}>Settings</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenProfile(); }}>Account &amp; sync</button>
+                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onToggleTheme(); }}>{p.theme === "dark" ? "Light mode" : "Dark mode"}</button>
+                <div className="pm-sep" />
+                <button className="pm-item danger" onClick={() => { setProfileMenu(false); p.onSignOut(); }}>Sign out</button>
+              </div>
+            )}
+          </div>
         </div>
       </header>
 
@@ -106,9 +209,15 @@ export function Workspace(p: Props) {
         </div>
       )}
 
-      <main className="split">
+      <main className={`split${chatOpen ? "" : " chat-collapsed"}`}>
+        {!chatOpen && (
+          <button className="chat-rail" title="Show chat" aria-label="Show chat" onClick={() => setChatOpen(true)}>
+            <span className="chat-rail-label">Chat ›</span>
+          </button>
+        )}
         <section
           className={`chat ${dragOver ? "drop" : ""}`}
+          style={chatOpen ? undefined : { display: "none" }}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -116,13 +225,24 @@ export function Workspace(p: Props) {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
         >
-          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} />
+          <div className="chat-bar">
+            <span className="chat-title">Chat</span>
+            <button className="ghost sm" title="Hide chat" onClick={() => setChatOpen(false)}>Hide ‹</button>
+          </div>
+          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} resume={p.resume} onResume={p.onResume} status={p.status} />
 
           <div className="composer-wrap">
             <div className="modebar">
-              <div className="seg">
-                <button className={p.mode === "precise" ? "on" : ""} onClick={() => p.setMode("precise")}>Precise (CAD)</button>
-                <button className={p.mode === "generative" ? "on" : ""} onClick={() => p.setMode("generative")}>Generative (AI mesh)</button>
+              <div className="modebar-row">
+                <div className="seg">
+                  <button className={p.mode === "precise" ? "on" : ""} onClick={() => p.setMode("precise")}>Precise (CAD)</button>
+                  <button className={p.mode === "generative" ? "on" : ""} onClick={() => p.setMode("generative")}>Generative (AI mesh)</button>
+                </div>
+                {p.mode === "precise" ? (
+                  <BrainPicker brain={p.brain} hasKey={p.hasBrainKey} onPick={p.onPickBrain} />
+                ) : (
+                  <EnginePicker provider={p.genProvider} model={p.genModel} hasKey={p.hasGenKey} onPick={p.onPickEngine} />
+                )}
               </div>
               <span className="modehint">
                 {p.mode === "precise"
@@ -137,7 +257,7 @@ export function Workspace(p: Props) {
               <div className="imgchip">
                 <img src={p.imageUrl} alt="reference" />
                 <span>reference image</span>
-                <button aria-label="Remove reference image" onClick={p.onClearImage}>✕</button>
+                <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
               </div>
             )}
 
@@ -155,12 +275,12 @@ export function Workspace(p: Props) {
                 aria-label="Upload a photo to turn into a 3D model"
                 onClick={() => fileRef.current?.click()}
               >
-                📎
+                <IconPaperclip />
               </button>
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*"
+                accept="image/*,.glb,.gltf,.stl,.step,.stp,.shapr"
                 hidden
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -173,13 +293,13 @@ export function Workspace(p: Props) {
                 onChange={(e) => p.setInput(e.target.value)}
                 placeholder={
                   p.mode === "generative"
-                    ? "Describe it, or just upload a photo…"
+                    ? "Describe it, or upload / paste a photo…"
                     : p.imageUrl
                       ? "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
                       : "Describe a part, or a change…"
                 }
               />
-              <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}>↑</button>
+              <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
             </form>
           </div>
         </section>
@@ -193,8 +313,22 @@ export function Workspace(p: Props) {
                 </button>
               ))}
             </div>
-            {p.tab === "3d" && (
+            {(p.tab === "3d" || p.tab === "params") && (
               <div className="viewer-tools">
+                <button
+                  className={`ghost sm${p.pinCtl.mode ? " on" : ""}`}
+                  aria-pressed={p.pinCtl.mode}
+                  title="Pin mode: click the model to mark a spot for a note or an AI edit (double-click works anytime)"
+                  onClick={p.pinCtl.toggleMode}
+                >
+                  Pin
+                </button>
+                <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
+                  {p.showDims ? "Hide dimensions" : "Dimensions"}
+                </button>
+                <button className="ghost sm" title="Toggle units" onClick={() => p.setUnits((u) => (u === "mm" ? "in" : "mm"))}>
+                  {p.units === "mm" ? "mm" : "inches"}
+                </button>
                 <button className="ghost sm" onClick={() => p.setWireframe((w) => !w)}>{p.wireframe ? "Solid" : "Wireframe"}</button>
                 <button className="ghost sm" onClick={() => p.viewerRef.current?.resetView()}>Reset view</button>
               </div>
@@ -202,8 +336,67 @@ export function Workspace(p: Props) {
           </div>
 
           <div className="viewer-body">
-            <div style={{ display: p.tab === "3d" ? "block" : "none", height: "100%" }}>
-              <Viewer ref={p.viewerRef} geometry={p.geometry} wireframe={p.wireframe} />
+            <div style={{ display: p.tab === "3d" || p.tab === "params" ? "block" : "none", height: "100%" }}>
+              <Viewer
+                ref={p.viewerRef}
+                geometry={p.geometry}
+                wireframe={p.wireframe}
+                showDims={p.showDims}
+                units={p.units}
+                theme={p.theme}
+                pins={p.pins}
+                selectedPin={p.pinCtl.active?.pin.id ?? null}
+                pinMode={p.pinCtl.mode}
+                onPickPoint={p.pinCtl.pick}
+                onSelectPin={p.pinCtl.select}
+              />
+              {p.pinCtl.active && (
+                <div className="pin-panel">
+                  <div className="pin-head">
+                    <span>
+                      Pin {p.pinCtl.active.index + 1} · {p.pinCtl.active.face} face · {p.pinCtl.active.pin.x}, {p.pinCtl.active.pin.y}, {p.pinCtl.active.pin.z} mm
+                    </span>
+                    <button className="x" aria-label="Close pin" onClick={p.pinCtl.close}><IconX /></button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={p.pinCtl.text}
+                    onChange={(e) => p.pinCtl.setText(e.target.value)}
+                    placeholder="e.g. add a 5 mm hole here · this wall feels thin"
+                  />
+                  <div className="param-actions">
+                    <button
+                      className="primary sm"
+                      disabled={!p.pinCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
+                      onClick={p.pinCtl.askAi}
+                    >
+                      Ask AI to change this
+                    </button>
+                    <button className="ghost sm" disabled={!p.pinCtl.text.trim()} onClick={p.pinCtl.saveNote}>Save note</button>
+                    <button className="ghost sm danger" onClick={p.pinCtl.del}>Delete</button>
+                  </div>
+                  {p.activeKind !== "replicad" && <p className="fine">AI edits need a Precise (CAD) model — notes work everywhere.</p>}
+                </div>
+              )}
+              {/* Parameters dock over the 3D view so you can watch the model update live — close returns to the plain 3D view. */}
+              {p.tab === "params" && (
+                <div className="side-panel">
+                  <div className="side-head">
+                    <span>Parameters</span>
+                    <button className="x" aria-label="Close parameters" onClick={() => p.setTab("3d")}><IconX /></button>
+                  </div>
+                  <div className="side-body">
+                    <ParamsPanel
+                      defaults={p.cadDefaults}
+                      values={p.paramValues}
+                      busy={p.status === "generating"}
+                      isCad={p.activeKind === "replicad"}
+                      onApply={p.onApplyParams}
+                      onSave={p.onSaveParams}
+                    />
+                  </div>
+                </div>
+              )}
               {p.booting && (
                 <div className="viewer-overlay">
                   <Spinner /> Starting the CAD engine…
@@ -216,16 +409,6 @@ export function Workspace(p: Props) {
             {p.tab === "code" && (
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
-            {p.tab === "params" && (
-              <ParamsPanel
-                defaults={p.cadDefaults}
-                values={p.paramValues}
-                busy={p.status === "generating"}
-                isCad={p.activeKind === "replicad"}
-                onApply={p.onApplyParams}
-                onSave={p.onSaveParams}
-              />
-            )}
             {p.tab === "print" && (
               <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} />
             )}
@@ -233,10 +416,11 @@ export function Workspace(p: Props) {
           </div>
 
           <div className="statusbar">
-            <span className="dims">{p.dims ? `${p.dims.x} × ${p.dims.y} × ${p.dims.z} mm` : "—"}</span>
+            <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
+            {p.status === "generating" && <GenTimer />}
             {p.report && (
               <span className={`fits ${p.report.bedFit.fitsRotated ? "ok" : "no"}`}>
-                {p.report.bedFit.fitsAsIs ? "fits bed ✓" : p.report.bedFit.fitsWithRotation ? "fits (rotated) ✓" : "larger than bed"}
+                {p.report.bedFit.fitsAsIs ? "fits bed" : p.report.bedFit.fitsWithRotation ? "fits (rotated)" : "larger than bed"}
               </span>
             )}
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} />
@@ -247,19 +431,103 @@ export function Workspace(p: Props) {
   );
 }
 
-function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void }) {
+// Split a "provider|model" select value.
+function splitVal(v: string): [string, string] {
+  const i = v.indexOf("|");
+  return i < 0 ? [v, ""] : [v.slice(0, i), v.slice(i + 1)];
+}
+
+/** In-chat quick switch for the Precise (CAD) AI brain. */
+function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProviderId; model: string }; hasKey: (p: LlmProviderId) => boolean; onPick: (p: LlmProviderId, m: string) => void }) {
+  const value = brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;
+  const claudeKey = hasKey("anthropic");
+  return (
+    <select
+      className="modelpick"
+      value={value}
+      title="Which AI writes the CAD — switch models on the fly"
+      onChange={(e) => {
+        const [prov, m] = splitVal(e.target.value);
+        onPick(prov as LlmProviderId, m);
+      }}
+    >
+      <optgroup label={`Claude — most accurate${claudeKey ? "" : " · add key"}`}>
+        {MODELS.map((mm) => (
+          <option key={mm.id} value={`anthropic|${mm.id}`}>{mm.label}</option>
+        ))}
+      </optgroup>
+      <optgroup label="Other providers">
+        {LLM_PRESETS.filter((pr) => pr.id !== "anthropic").map((pr) => {
+          const needs = pr.needsKey && !hasKey(pr.id);
+          return (
+            <option key={pr.id} value={`${pr.id}|`}>
+              {pr.label.split(" — ")[0]}{pr.free ? " (free)" : ""}{needs ? " · add key" : ""}
+            </option>
+          );
+        })}
+      </optgroup>
+    </select>
+  );
+}
+
+/** In-chat quick switch for the Generative (AI mesh) engine + model. */
+function EnginePicker({ provider, model, hasKey, onPick }: { provider: string; model: string; hasKey: (p: string) => boolean; onPick: (p: string, m: string) => void }) {
+  return (
+    <select
+      className="modelpick"
+      value={`${provider}|${model}`}
+      title="Which engine turns a photo or text into a mesh"
+      onChange={(e) => {
+        const [prov, m] = splitVal(e.target.value);
+        onPick(prov, m);
+      }}
+    >
+      {PROVIDERS.map((pv) => {
+        const needs = pv.needsKey && !hasKey(pv.id);
+        return (
+          <optgroup key={pv.id} label={`${pv.label}${pv.free ? " · free" : ""}${needs ? " · add key" : ""}`}>
+            {pv.models.map((mm) => (
+              <option key={mm.id} value={`${pv.id}|${mm.id}`}>{mm.label}</option>
+            ))}
+          </optgroup>
+        );
+      })}
+    </select>
+  );
+}
+
+function Messages({ messages, onChip, onExample, resume, onResume, status }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating" }) {
   const endRef = useRef<HTMLDivElement>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState("");
   const lastText = messages[messages.length - 1]?.text;
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, lastText]);
+
+  const busy = status === "generating";
+  function startEdit(m: ChatMessage) {
+    setEditingId(m.id);
+    setEditText(m.text);
+  }
+  function submitEdit(m: ChatMessage) {
+    const t = editText.trim();
+    setEditingId(null);
+    if (t) onChip(t, m.mode);
+  }
+
   return (
     <div className="messages">
       {messages.length === 0 && (
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
-          <p className="empty-sub">Type a description, or drop a photo (📎) to turn it into a 3D model.</p>
+          <p className="empty-sub">Type a description, attach a photo — or drop a 3D file: .step imports as editable CAD, .glb/.stl as a mesh.</p>
           <div className="chips">
+            {resume && (
+              <button className="chip resume" onClick={onResume}>
+                Continue where you left off — {resume}
+              </button>
+            )}
             {SUGGESTIONS.map((s) => (
               <button key={s.text} className="chip" onClick={() => onChip(s.text, s.gen ? "generative" : undefined)}>{s.text}</button>
             ))}
@@ -270,11 +538,58 @@ function Messages({ messages, onChip, onExample }: { messages: ChatMessage[]; on
       {messages.map((m) => (
         <div key={m.id} className={`msg ${m.role} ${m.error ? "err" : ""}`}>
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
-          <div className={`bubble ${m.streaming ? "muted" : ""}`}>{m.text}</div>
+          {editingId === m.id ? (
+            <div className="bubble-edit">
+              <textarea
+                autoFocus
+                value={editText}
+                onChange={(e) => setEditText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitEdit(m); }
+                  if (e.key === "Escape") setEditingId(null);
+                }}
+              />
+              <div className="edit-actions">
+                <button className="ghost sm" onClick={() => setEditingId(null)}>Cancel</button>
+                <button className="primary sm" disabled={!editText.trim() || busy} onClick={() => submitEdit(m)}>Send</button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className={`bubble ${m.streaming ? "muted" : ""}`}>
+                {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
+                {m.text && <span>{m.text}</span>}
+              </div>
+              {/* Retry / edit are offered on typed prompts (an uploaded photo can't be re-attached). */}
+              {m.role === "user" && !m.image && m.text && (
+                <div className="msg-actions">
+                  <button className="msg-act" disabled={busy} title="Send this again" onClick={() => onChip(m.text, m.mode)}>Retry</button>
+                  <button className="msg-act" disabled={busy} title="Edit this message and resend" onClick={() => startEdit(m)}>Edit</button>
+                </div>
+              )}
+            </>
+          )}
         </div>
       ))}
       <div ref={endRef} />
     </div>
+  );
+}
+
+/** Live elapsed-time pill while the AI/kernel is working. */
+function GenTimer() {
+  const [t0] = useState(() => Date.now());
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const iv = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(iv);
+  }, []);
+  const secs = Math.floor((Date.now() - t0) / 1000);
+  const label = secs >= 60 ? `${Math.floor(secs / 60)}m ${secs % 60}s` : `${secs}s`;
+  return (
+    <span className="pill gen-pill" role="timer">
+      <span className="spinner sm" /> generating · {label}
+    </span>
   );
 }
 
@@ -308,12 +623,12 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: Prin
   return (
     <div className="panel">
       <h3>Printability</h3>
-      {row("Fits the bed", report.bedFit.fitsAsIs ? "yes ✓" : report.bedFit.fitsWithRotation ? "rotated ✓" : "no ✕", report.bedFit.fitsRotated)}
-      {row("Watertight / manifold", report.manifold.isWatertight ? "yes ✓" : `${report.manifold.boundaryEdges} open edge(s) ⚠`, report.manifold.isWatertight)}
+      {row("Fits the bed", report.bedFit.fitsAsIs ? "yes" : report.bedFit.fitsWithRotation ? "rotated" : "no", report.bedFit.fitsRotated)}
+      {row("Watertight / manifold", report.manifold.isWatertight ? "yes" : `${report.manifold.boundaryEdges} open edge(s)`, report.manifold.isWatertight)}
       {row("Bounding box", `${report.boundingBox.size.x} × ${report.boundingBox.size.y} × ${report.boundingBox.size.z} mm`)}
       {row("Triangles", report.triangleCount.toLocaleString())}
       {row("Approx. volume", `${(report.volume.approxVolume / 1000).toFixed(1)} cm³`)}
-      {row(`Overhangs > ${report.overhangs.thresholdDeg}°`, report.overhangs.overhangTriangleCount > 0 ? `${(report.overhangs.ratio * 100).toFixed(0)}% of faces ⚠` : "none ✓", report.overhangs.overhangTriangleCount === 0)}
+      {row(`Overhangs > ${report.overhangs.thresholdDeg}°`, report.overhangs.overhangTriangleCount > 0 ? `${(report.overhangs.ratio * 100).toFixed(0)}% of faces` : "none", report.overhangs.overhangTriangleCount === 0)}
       {report.warnings.length > 0 && (
         <ul className="warns">
           {report.warnings.map((w, i) => (
@@ -323,7 +638,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair }: { report: Prin
       )}
       {canRepair && !report.manifold.isWatertight && (
         <button className="primary sm" disabled={busy} onClick={onRepair} style={{ marginTop: 10 }}>
-          🔧 Repair mesh — weld seams &amp; fill holes
+          Repair mesh — weld seams &amp; fill holes
         </button>
       )}
       <p className="fine">Generated meshes are often not watertight — that's expected. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
@@ -402,7 +717,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave }: { defau
   };
   return (
     <div className="panel">
-      <h3>Parameters <span className="fine-inline">re-builds instantly · no AI call</span></h3>
+      <p className="fine" style={{ margin: "0 0 10px" }}>Drag a slider — the model re-builds instantly, no AI call.</p>
       {Object.entries(defaults).map(([k, def]) => {
         const { min, max, step } = paramRange(def);
         const v = local[k] ?? def;
@@ -435,7 +750,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave }: { defau
         );
       })}
       <div className="param-actions">
-        <button className="ghost sm" disabled={busy} onClick={() => { setLocal(defaults); onApply(defaults); }}>↺ Reset to AI values</button>
+        <button className="ghost sm" disabled={busy} onClick={() => { setLocal(defaults); onApply(defaults); }}><IconReset /> Reset to AI values</button>
         <button className="primary sm" disabled={busy} onClick={onSave}>Save as version</button>
       </div>
       <p className="fine">Adjustments apply to exports immediately; “Save as version” keeps them in History.</p>

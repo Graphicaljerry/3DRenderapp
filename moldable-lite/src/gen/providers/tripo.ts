@@ -2,6 +2,20 @@ import type { GenFn } from "../types";
 import { fetchAsBlob, jsonOrThrow, poll } from "../util";
 
 export const tripoGenerate: GenFn = async (input, onProgress, signal) => {
+  try {
+    return await run(input, onProgress, signal);
+  } catch (e: any) {
+    const msg = String(e?.message ?? e);
+    if (/2010|enough credit/i.test(msg)) {
+      throw new Error(
+        "Your Tripo API wallet is empty. Heads-up: Tripo's free monthly credits apply to their web Studio only — the API uses a separate PREPAID wallet (platform.tripo3d.ai → Billing; a generation costs ~10–25 credits, so a small top-up goes far). Free alternative: generate in Tripo Studio (free credits), download the .glb, and drag it straight into Moldable — the whole measure/repair/export pipeline works on imported files.",
+      );
+    }
+    throw e;
+  }
+};
+
+const run: GenFn = async (input, onProgress, signal) => {
   const base = `${input.proxyBase || ""}/prox/tripo/v2/openapi`;
   const bearer = { authorization: `Bearer ${input.apiKey || ""}` };
 

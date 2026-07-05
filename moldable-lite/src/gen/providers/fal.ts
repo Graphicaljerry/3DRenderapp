@@ -18,7 +18,7 @@ export const falGenerate: GenFn = async (input, onProgress, signal) => {
   onProgress({ status: "generating (fal)…" });
   const r = await fetch(`${base}/${input.model}`, { method: "POST", headers: h, signal, body: JSON.stringify(body) });
   const j = await jsonOrThrow(r, "fal");
-  // v21 returns model_glb.url (model_mesh is a zip there); older v2 returns model_mesh.url (a GLB).
+  // Hunyuan v3.1 + v21 return model_glb.url (model_mesh is a zip there); older v2 returns model_mesh.url (a GLB).
   const glbUrl = findUrlDeep(j, ".glb") || j.model_glb?.url || j.model_mesh?.url;
   if (!glbUrl) throw new Error("fal returned no GLB.");
   return { glb: await fetchAsBlob(glbUrl, input.proxyBase) };

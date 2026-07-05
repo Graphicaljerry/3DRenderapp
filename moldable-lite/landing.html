@@ -1,0 +1,84 @@
+<!doctype html>
+<!--
+  PLACEHOLDER LANDING PAGE — scaffold only, meant to be redesigned.
+
+  Structure: this is a separate multi-page entry (see vite.config.ts →
+  build.rollupOptions.input). Right now the APP is the default at "/" (index.html)
+  and this landing lives at "/landing.html", so nothing about the live app changes.
+
+  WHEN YOU GO LIVE with marketing, flip the two:
+    1. rename this file to index.html (landing becomes the default at "/")
+    2. rename the app's index.html to app.html
+    3. update this page's "Launch the app" link from "./" to "app.html"
+    4. (add a custom domain / CNAME when ready)
+
+  Design the real page here with the uploaded skills: brandkit (logo/brand board),
+  design-taste-frontend / imagegen-frontend-web / gpt-taste (the page itself).
+-->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f7a70' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 21 7 21 17 12 22 3 17 3 7Z'/%3E%3Cpath d='M3 7 12 12 21 7'/%3E%3Cpath d='M12 12V22'/%3E%3C/svg%3E" />
+    <title>Moldable — describe a part, print it</title>
+    <meta name="description" content="An AI assistant for designing 3D-printable parts. Describe it in plain language or snap a photo, watch it appear in 3D, and export STL, 3MF, or editable STEP." />
+    <style>
+      :root {
+        --bg: #ffffff; --ink: #14171a; --ink2: #3a4046; --mut: #6b7178;
+        --accent: #2f7a70; --accent-d: #276358; --bord: #e6e8ea; --surf: #f6f7f9;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root { --bg: #14171a; --ink: #f2f4f6; --ink2: #c9ced3; --mut: #8b9299;
+                --accent: #4fb3a4; --accent-d: #6fc7ba; --bord: #262b31; --surf: #1b1f24; }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        background: var(--bg); color: var(--ink);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+        display: flex; flex-direction: column; min-height: 100dvh;
+      }
+      .wrap { flex: 1; display: grid; place-items: center; padding: 32px 24px; }
+      .hero { width: 100%; max-width: 640px; text-align: center; }
+      .mark { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+      .mark svg { display: block; }
+      .mark span { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
+      h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 16px; }
+      h1 .accent { color: var(--accent); }
+      .sub { font-size: clamp(15px, 2.4vw, 18px); line-height: 1.55; color: var(--ink2); margin: 0 auto 32px; max-width: 30ch; }
+      .cta { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #fff; text-decoration: none;
+             font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 11px; transition: background .15s ease, transform .16s ease; }
+      .cta:hover { background: var(--accent-d); }
+      .cta:active { transform: scale(.98); }
+      .feats { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 34px; color: var(--mut); font-size: 13px; }
+      .feats span::before { content: "•"; color: var(--accent); margin-right: 7px; }
+      footer { text-align: center; padding: 18px; color: var(--mut); font-size: 12px; border-top: 1px solid var(--bord); }
+      .badge { display: inline-block; margin-bottom: 22px; padding: 4px 11px; border: 1px solid var(--bord); border-radius: 999px;
+               background: var(--surf); color: var(--mut); font-size: 11.5px; font-weight: 600; letter-spacing: .02em; }
+    </style>
+  </head>
+  <body>
+    <main class="wrap">
+      <div class="hero">
+        <div class="mark">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2f7a70" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" /><path d="M3 7 12 12 21 7" /><path d="M12 12V22" />
+          </svg>
+          <span>Moldable</span>
+        </div>
+        <div class="badge">Placeholder landing — design me</div>
+        <h1>Describe a part.<br />Watch it appear in <span class="accent">3D</span>. Print it.</h1>
+        <p class="sub">An AI assistant for designing 3D-printable parts — from plain language or a photo, with real dimensions and print-ready export.</p>
+        <!-- App is the default at "/" for now, so the CTA points there. On launch-flip, change to "app.html". -->
+        <a class="cta" href="./">Launch the app →</a>
+        <div class="feats">
+          <span>Free, bring your own key</span>
+          <span>STL · 3MF · editable STEP</span>
+          <span>Runs in your browser</span>
+        </div>
+      </div>
+    </main>
+    <footer>© Moldable · placeholder page — replace with the real marketing site.</footer>
+  </body>
+</html>

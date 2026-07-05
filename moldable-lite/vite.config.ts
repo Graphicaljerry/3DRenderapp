@@ -113,6 +113,12 @@ export default defineConfig({
   plugins: [react(), relayPlugin()],
   worker: { format: "es" },
   optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },
-  build: { target: "esnext" },
+  build: {
+    target: "esnext",
+    // Multi-page: the app is the default entry (index.html); landing.html is a
+    // separate lightweight marketing entry (no app bundle). See landing.html for
+    // the launch-day flip. Adding entries here never touches the app bundle.
+    rollupOptions: { input: { main: "index.html", landing: "landing.html" } },
+  },
   server: { port: 5173, open: true },
 });

@@ -340,6 +340,17 @@ button { font-family: inherit; cursor: pointer; }
 .measure-item .x { background: none; border: none; color: var(--subt); padding: 4px; }
 .measure-note { margin-right: auto; }
 .muted-line { color: var(--subt); }
+.no-line { color: var(--subt); margin: 12px 0; }
+
+/* ---------- SVG → extrude ---------- */
+.extrude { width: min(520px, 94vw); }
+.extrude-preview { display: grid; place-items: center; padding: 20px; border-radius: 12px; border: 1px solid var(--bord); background: var(--surf); margin-bottom: 12px; }
+.extrude-preview img { max-width: 100%; max-height: 240px; object-fit: contain; }
+[data-theme="dark"] .extrude-preview { background: #ffffff; } /* dark SVG art often assumes a light page */
+.extrude-row { display: flex; gap: 14px; margin-top: 4px; }
+.extrude-row label { flex: 1; display: flex; flex-direction: column; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--ink2); }
+.ex-field { display: flex; align-items: center; gap: 6px; font-weight: 400; color: var(--subt); font-size: 12px; }
+.ex-field input { width: 100%; height: 34px; border: 1px solid var(--bord); border-radius: 8px; padding: 0 8px; font-size: 13px; }
 details.adv { margin-top: 16px; border: 1px solid var(--bord); border-radius: 10px; padding: 10px 14px; }
 details.adv summary { cursor: pointer; font-size: 12px; font-weight: 600; color: var(--mut); }
 details.guide { margin-top: 10px; }

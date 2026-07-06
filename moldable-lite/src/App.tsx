@@ -3,6 +3,9 @@ import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
+import { ExtrudeModal } from "./components/ExtrudeModal";
+import { extrudeSvg } from "./svg/extrude";
+import { geometryToSTL } from "./print/exportClient";
 import type { ViewerHandle } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
@@ -232,6 +235,7 @@ export default function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showMeasure, setShowMeasure] = useState(false);
+  const [svgDraft, setSvgDraft] = useState<{ text: string; url: string; name: string } | null>(null);
   const viewer = useRef<ViewerHandle>(null);
 
   useEffect(() => {
@@ -372,6 +376,14 @@ export default function App() {
   }
 
   function pickImage(file: File) {
+    // A flat SVG (a designer's native output) → extrude it into a solid.
+    if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") {
+      void file.text().then((text) => {
+        if (svgDraft) URL.revokeObjectURL(svgDraft.url);
+        setSvgDraft({ text, url: URL.createObjectURL(file), name: file.name.replace(/\.svg$/i, "") });
+      });
+      return;
+    }
     // 3D files import directly instead of becoming a reference photo.
     if (/\.(glb|gltf|stl|step|stp|shapr)$/i.test(file.name)) {
       void importModelFile(file);
@@ -580,6 +592,35 @@ export default function App() {
   async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>) {
     const { geometry: g, dims: d } = await loadAnyMesh(glb);
     applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
+  }
+
+  /** Turn the dropped SVG into an extruded solid at the chosen size/thickness.
+   *  Persisted as an STL blob (Z-up mm), so it re-opens through the same path. */
+  function createFromSvg(sizeMm: number, heightMm: number) {
+    if (!svgDraft) return;
+    try {
+      const { geometry, dims } = extrudeSvg(svgDraft.text, { sizeMm, heightMm });
+      const stl = geometryToSTL(geometry);
+      const res: EngineResult = {
+        kind: "generative",
+        geometry,
+        dims,
+        source: { kind: "gen", provider: "svg", model: svgDraft.name },
+        supportsStep: false,
+        glb: stl, // STL bytes; loadAnyMesh sniffs STL when re-opening
+      };
+      applyResult(res, svgDraft.name, `Extruded ${svgDraft.name}.svg — ${dims.x} × ${dims.y} × ${dims.z} mm`, `svg ${svgDraft.name}`);
+      setMode("generative");
+      setMessages((m) => [
+        ...m,
+        { id: mid(), role: "assistant", text: `Extruded ${svgDraft.name}.svg to a solid (${dims.x} × ${dims.y} × ${dims.z} mm). Check Printability, then export — or drop the SVG again to re-extrude at a different size.` },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't extrude that SVG: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      if (svgDraft) URL.revokeObjectURL(svgDraft.url);
+      setSvgDraft(null);
+    }
   }
 
   /** Import a 3D file directly. STEP/STP → a live, AI-editable CAD solid;
@@ -1067,6 +1108,7 @@ export default function App() {
     setReport(null);
     setCodeBuffer("");
     setGuided(false);
+    if (svgDraft) { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }
     clearImage();
     setShowLibrary(false);
   }
@@ -1196,6 +1238,15 @@ export default function App() {
           imageUrl={image.url}
           onClose={() => setShowMeasure(false)}
           onApply={(text) => setInput((v) => (v.trim() ? `${v.trim()} ${text}` : text))}
+        />
+      )}
+      {svgDraft && (
+        <ExtrudeModal
+          svgText={svgDraft.text}
+          svgUrl={svgDraft.url}
+          name={svgDraft.name}
+          onCreate={createFromSvg}
+          onClose={() => { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }}
         />
       )}
     </>

@@ -43,7 +43,7 @@ Aimed at one person — the designer who can't CAD — the *focused workflow* is
 |---|---|---|
 | **Describe it** (text) | ✅ shipped | Precise CAD or generative mesh. |
 | **Photo / sketch photo** (vision) | ✅ shipped | A snapshot of a hand sketch already works; measure-from-photo gives real mm. |
-| **Flat SVG / vector** | 🎯 **flagship next build** | A designer's native output. 2D vector profile → extrude / revolve / emboss → printable solid. This is the feature that makes the one-line true end to end. |
+| **Flat SVG / vector** | ✅ shipped (extrude) | A designer's native output. Drop an SVG → set size + thickness → a watertight, dimensioned printable solid (holes kept). Revolve / emboss are the natural follow-ups. |
 
 ---
 
@@ -76,6 +76,7 @@ Skip the 90-day community grind and the Product Hunt / HN launch for now. Only h
 
 ## Immediate next steps
 
-1. **Build SVG-input** (the flagship feature above) — makes the one-line literally true and is the sharpest hook for the designer persona.
-2. **Refresh the landing hero** to this positioning (done as a placeholder; redesign for real when the name is settled).
-3. (Optional, when time allows) Seed 3–5 MakerWorld models made with Moldable.
+1. ✅ **SVG-input shipped** — drop a flat SVG, get a printable extruded solid. The one-liner is now literally true end to end.
+2. **Naming pass** — "Moldable" reads as molding/casting (wrong process) and slightly undercuts the accuracy promise; `moldable.ai` is taken. Run a name + domain + trademark pass (via `brandkit`) before any public launch or brand spend.
+3. **SVG follow-ups** (when it comes up in your own use): revolve (lathe a profile) and emboss (raise/deboss art onto a base) — the two natural extensions of vector → 3D.
+4. (Optional, when time allows) Seed 3–5 MakerWorld models made with the app.

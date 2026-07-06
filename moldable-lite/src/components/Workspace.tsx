@@ -295,7 +295,7 @@ export function Workspace(p: Props) {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*,.glb,.gltf,.stl,.step,.stp,.shapr"
+                accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
                 hidden
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -596,7 +596,7 @@ function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume
       {messages.length === 0 && (
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
-          <p className="empty-sub">Type a description, attach a photo — or drop a 3D file: .step imports as editable CAD, .glb/.stl as a mesh.</p>
+          <p className="empty-sub">Type a description, attach a photo, or drop an SVG to extrude — plus 3D files: .step imports as editable CAD, .glb/.stl as a mesh.</p>
           <button className="guided-cta" onClick={onStartGuided}>
             <span className="gc-title">Fix a broken part</span>
             <span className="gc-sub">Photo → a dimension-accurate replacement that fits</span>

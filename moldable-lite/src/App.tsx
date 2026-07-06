@@ -3,8 +3,8 @@ import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
-import { ExtrudeModal } from "./components/ExtrudeModal";
-import { extrudeSvg } from "./svg/extrude";
+import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
+import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
 import { geometryToSTL } from "./print/exportClient";
 import type { ViewerHandle } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
@@ -594,29 +594,33 @@ export default function App() {
     applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
   }
 
-  /** Turn the dropped SVG into an extruded solid at the chosen size/thickness.
-   *  Persisted as an STL blob (Z-up mm), so it re-opens through the same path. */
-  function createFromSvg(sizeMm: number, heightMm: number) {
+  /** Turn the dropped SVG into a solid — extrude, revolve, or emboss. Persisted
+   *  as an STL blob (Z-up mm), so it re-opens through the same path. */
+  function createFromSvg(mode: SvgMode, prm: SvgParams) {
     if (!svgDraft) return;
     try {
-      const { geometry, dims } = extrudeSvg(svgDraft.text, { sizeMm, heightMm });
-      const stl = geometryToSTL(geometry);
+      const out =
+        mode === "revolve" ? revolveSvg(svgDraft.text, { sizeMm: prm.sizeMm })
+        : mode === "emboss" ? embossSvg(svgDraft.text, { sizeMm: prm.sizeMm, baseMm: prm.baseMm, reliefMm: prm.reliefMm, recessed: prm.recessed })
+        : extrudeSvg(svgDraft.text, { sizeMm: prm.sizeMm, heightMm: prm.heightMm });
+      const { geometry, dims } = out;
+      const verb = mode === "revolve" ? "Revolved" : mode === "emboss" ? "Embossed" : "Extruded";
       const res: EngineResult = {
         kind: "generative",
         geometry,
         dims,
         source: { kind: "gen", provider: "svg", model: svgDraft.name },
         supportsStep: false,
-        glb: stl, // STL bytes; loadAnyMesh sniffs STL when re-opening
+        glb: geometryToSTL(geometry), // STL bytes; loadAnyMesh sniffs STL when re-opening
       };
-      applyResult(res, svgDraft.name, `Extruded ${svgDraft.name}.svg — ${dims.x} × ${dims.y} × ${dims.z} mm`, `svg ${svgDraft.name}`);
+      applyResult(res, svgDraft.name, `${verb} ${svgDraft.name}.svg — ${dims.x} × ${dims.y} × ${dims.z} mm`, `svg ${svgDraft.name}`);
       setMode("generative");
       setMessages((m) => [
         ...m,
-        { id: mid(), role: "assistant", text: `Extruded ${svgDraft.name}.svg to a solid (${dims.x} × ${dims.y} × ${dims.z} mm). Check Printability, then export — or drop the SVG again to re-extrude at a different size.` },
+        { id: mid(), role: "assistant", text: `${verb} ${svgDraft.name}.svg to a solid (${dims.x} × ${dims.y} × ${dims.z} mm). Check Printability, then export — or drop the SVG again for a different result.` },
       ]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't extrude that SVG: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't build from that SVG: " + String(err?.message ?? err), error: true }]);
     } finally {
       if (svgDraft) URL.revokeObjectURL(svgDraft.url);
       setSvgDraft(null);

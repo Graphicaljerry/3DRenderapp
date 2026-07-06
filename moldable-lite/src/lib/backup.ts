@@ -2,7 +2,16 @@
 // any server or account. AES-GCM, key derived from the user's passphrase via
 // PBKDF2 (310k iterations, SHA-256). The file is useless without the passphrase.
 
-const b64 = (u: Uint8Array) => btoa(String.fromCharCode(...u));
+// Chunk the char-code spread: `String.fromCharCode(...bigArray)` passes every
+// byte as an argument and blows the call stack on large payloads (a real
+// project/chat sync hit "Maximum call stack size exceeded"). 32 KB chunks stay
+// well under the argument-count limit.
+const b64 = (u: Uint8Array) => {
+  let s = "";
+  const CH = 0x8000;
+  for (let i = 0; i < u.length; i += CH) s += String.fromCharCode(...u.subarray(i, i + CH));
+  return btoa(s);
+};
 const unb64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 
 async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKey> {

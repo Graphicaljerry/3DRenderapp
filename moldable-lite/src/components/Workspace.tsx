@@ -664,8 +664,10 @@ function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume
                 {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
                 {m.text && <span>{m.text}</span>}
               </div>
-              {/* Retry / edit are offered on typed prompts (an uploaded photo can't be re-attached). */}
-              {m.role === "user" && !m.image && m.text && (
+              {/* Retry / edit any typed prompt — including one sent with a photo, so
+                  a failed generation can be re-run (the attached photo, if still in
+                  the composer, rides along). */}
+              {m.role === "user" && m.text && (
                 <div className="msg-actions">
                   <button className="msg-act" disabled={busy} title="Send this again" onClick={() => onChip(m.text, m.mode)}>Retry</button>
                   <button className="msg-act" disabled={busy} title="Edit this message and resend" onClick={() => startEdit(m)}>Edit</button>

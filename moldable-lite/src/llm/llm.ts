@@ -43,7 +43,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     recommended: true,
     baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     relayPrefix: "gemini",
-    defaultModel: "gemini-2.0-flash",
+    defaultModel: "gemini-2.5-flash",
     keyHint: "free key from aistudio.google.com/apikey (~1,500 req/day). The app checks your account's live model list and auto-picks the best Flash model.",
     hint: "Best free pick — about 1,500 requests a day at no cost. Handles everyday objects well, and reads photos.",
   },

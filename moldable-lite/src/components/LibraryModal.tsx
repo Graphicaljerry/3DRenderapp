@@ -37,6 +37,17 @@ export function LibraryModal({ onOpen, onClose, currentId }: { onOpen: (p: Proje
               return (
                 <div key={p.id} className={`lib-card ${p.id === currentId ? "current" : ""}`}>
                   <button className="lib-open" onClick={() => onOpen(p)}>
+                    <div className="lib-thumb">
+                      {p.thumb ? (
+                        <img src={p.thumb} alt="" loading="lazy" />
+                      ) : (
+                        <span className="lib-thumb-empty" aria-hidden="true">
+                          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" /><path d="M3 7 12 12 21 7" /><path d="M12 12V22" />
+                          </svg>
+                        </span>
+                      )}
+                    </div>
                     <div className="lib-name">{p.name}</div>
                     <div className="lib-meta">
                       {new Date(p.updatedAt).toLocaleString()} · {p.engine}

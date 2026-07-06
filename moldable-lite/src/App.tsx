@@ -285,6 +285,25 @@ export default function App() {
     return () => clearTimeout(t);
   }, [messages, pins]);
 
+  // ---- library thumbnail: refresh the saved preview whenever the model settles ----
+  // Debounced so a slider drag (many rebuilds/sec) writes at most one thumb, and
+  // late enough that the Viewer has rendered + framed the new geometry.
+  useEffect(() => {
+    if (!geometry) return;
+    const t = setTimeout(() => {
+      const pr = projectRef.current;
+      if (!pr) return;
+      const thumb = viewer.current?.captureThumbnail();
+      if (!thumb) return;
+      const next = { ...pr, thumb, updatedAt: Date.now() };
+      projectRef.current = next;
+      setProject(next);
+      void putProject(next);
+      scheduleSync();
+    }, 500);
+    return () => clearTimeout(t);
+  }, [geometry]);
+
   // ---- finish an OAuth / magic-link return (?code=...) and greet the user ----
   useEffect(() => {
     if (!hasAuthReturn()) return;

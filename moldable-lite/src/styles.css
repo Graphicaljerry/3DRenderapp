@@ -380,8 +380,14 @@ details.guide { margin-top: 10px; }
 @media (max-width: 900px) {
   .topbar { flex: 0 0 auto; height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 6px; }
   .project { max-width: 34vw; }
-  .split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 42vh) minmax(320px, 1fr); gap: 8px; padding: 8px; }
-  .split.chat-collapsed { grid-template-columns: 1fr; grid-template-rows: 40px 1fr; }
+  /* Stacked: 3D viewer on top (glanceable), chat + composer on the bottom so the
+     input sits in the thumb zone. Explicit grid-row overrides DOM order. */
+  .split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(300px, 46vh); gap: 8px; padding: 8px; }
+  .split .viewer { grid-row: 1; }
+  .split .chat { grid-row: 2; }
+  .split.chat-collapsed { grid-template-columns: 1fr; grid-template-rows: 1fr 40px; }
+  .split.chat-collapsed .viewer { grid-row: 1; }
+  .split.chat-collapsed .chat-rail { grid-row: 2; }
   .chat-rail-label { writing-mode: horizontal-tb; transform: none; }
   .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
   .modehint { display: none; }

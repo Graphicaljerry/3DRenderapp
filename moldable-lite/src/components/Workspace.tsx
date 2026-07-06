@@ -74,6 +74,7 @@ interface Props {
   input: string;
   setInput: (v: string) => void;
   onSend: (p: string, forceMode?: Mode) => void;
+  onRetryModel: (text: string, mode: Mode, value: string) => void;
   onExample: () => void;
   resume: string | null;
   onResume: () => void;
@@ -238,7 +239,8 @@ export function Workspace(p: Props) {
             <span className="chat-title">Chat</span>
             <button className="ghost sm" title="Hide chat" onClick={() => setChatOpen(false)}>Hide ‹</button>
           </div>
-          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status} />
+          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} />
 
           <div className="composer-wrap">
             <div className="modebar">
@@ -470,7 +472,7 @@ type PickGroup = { label: string; items: PickItem[] };
  *  popover (bold name + muted sub-label), matching the export menu so the two
  *  read as one system. Replaces the native <select>, whose long label looked
  *  orphaned wrapping onto its own row. */
-function ModelMenu({ value, groups, title, onPick }: { value: string; groups: PickGroup[]; title: string; onPick: (value: string) => void }) {
+function ModelMenu({ value, groups, title, onPick, label }: { value: string; groups: PickGroup[]; title: string; onPick: (value: string) => void; label?: string }) {
   const [open, setOpen] = useState(false);
   const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const wrap = useRef<HTMLDivElement>(null);
@@ -508,11 +510,17 @@ function ModelMenu({ value, groups, title, onPick }: { value: string; groups: Pi
     return () => window.removeEventListener("resize", place);
   }, [open]);
   return (
-    <div className="modelpick2" ref={wrap}>
-      <button type="button" className="mp-trigger" title={title} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-        <span className="mp-cur">{current?.name ?? "Choose model"}</span>
-        <IconChevron size={13} />
-      </button>
+    <div className={label ? "modelpick2 mp-inline" : "modelpick2"} ref={wrap}>
+      {label ? (
+        <button type="button" className="msg-act mp-linktrigger" title={title} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          {label} <IconChevron size={11} />
+        </button>
+      ) : (
+        <button type="button" className="mp-trigger" title={title} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+          <span className="mp-cur">{current?.name ?? "Choose model"}</span>
+          <IconChevron size={13} />
+        </button>
+      )}
       {open && (
         <div className="mp-menu" role="listbox" style={menuStyle}>
           {groups.map((g) => (
@@ -563,11 +571,13 @@ function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
   );
 }
 
-/** In-chat quick switch for the Precise (CAD) AI brain. */
-function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProviderId; model: string }; hasKey: (p: LlmProviderId) => boolean; onPick: (p: LlmProviderId, m: string) => void }) {
-  const value = brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;
+// Group builders shared by the composer pickers AND the per-message retry menu.
+function brainValue(brain: { provider: LlmProviderId; model: string }): string {
+  return brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;
+}
+function brainGroups(hasKey: (p: LlmProviderId) => boolean): PickGroup[] {
   const claudeKey = hasKey("anthropic");
-  const groups: PickGroup[] = [
+  return [
     {
       label: `Claude — most accurate${claudeKey ? "" : " · add key"}`,
       items: MODELS.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `anthropic|${mm.id}`, name, sub }; }),
@@ -581,22 +591,42 @@ function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProvider
       }),
     },
   ];
-  return <ModelMenu value={value} groups={groups} title="Which AI writes the CAD — switch models on the fly" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov as LlmProviderId, m); }} />;
 }
-
-/** In-chat quick switch for the Generative (AI mesh) engine + model. */
-function EnginePicker({ provider, model, hasKey, onPick }: { provider: string; model: string; hasKey: (p: string) => boolean; onPick: (p: string, m: string) => void }) {
-  const groups: PickGroup[] = PROVIDERS.map((pv) => {
+function engineGroups(hasKey: (p: string) => boolean): PickGroup[] {
+  return PROVIDERS.map((pv) => {
     const needs = pv.needsKey && !hasKey(pv.id);
     return {
       label: `${pv.label}${pv.free ? " · free" : ""}${needs ? " · add key" : ""}`,
       items: pv.models.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `${pv.id}|${mm.id}`, name, sub }; }),
     };
   });
-  return <ModelMenu value={`${provider}|${model}`} groups={groups} title="Which engine turns a photo or text into a mesh" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov, m); }} />;
 }
 
-function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume, status }: { messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating" }) {
+/** In-chat quick switch for the Precise (CAD) AI brain. */
+function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProviderId; model: string }; hasKey: (p: LlmProviderId) => boolean; onPick: (p: LlmProviderId, m: string) => void }) {
+  return <ModelMenu value={brainValue(brain)} groups={brainGroups(hasKey)} title="Which AI writes the CAD — switch models on the fly" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov as LlmProviderId, m); }} />;
+}
+
+/** In-chat quick switch for the Generative (AI mesh) engine + model. */
+function EnginePicker({ provider, model, hasKey, onPick }: { provider: string; model: string; hasKey: (p: string) => boolean; onPick: (p: string, m: string) => void }) {
+  return <ModelMenu value={`${provider}|${model}`} groups={engineGroups(hasKey)} title="Which engine turns a photo or text into a mesh" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov, m); }} />;
+}
+
+/** Per-message "retry with a different model" — Perplexity-style. */
+function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey, onPick }: {
+  mode: Mode; brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean;
+  genProvider: string; genModel: string; hasGenKey: (p: string) => boolean; onPick: (value: string) => void;
+}) {
+  const value = mode === "generative" ? `${genProvider}|${genModel}` : brainValue(brain);
+  const groups = mode === "generative" ? engineGroups(hasGenKey) : brainGroups(hasBrainKey);
+  return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
+}
+
+function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel }: {
+  messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
+  brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
+  onRetryModel: (text: string, mode: Mode, value: string) => void;
+}) {
   const endRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
@@ -669,7 +699,12 @@ function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume
                   the composer, rides along). */}
               {m.role === "user" && m.text && (
                 <div className="msg-actions">
-                  <button className="msg-act" disabled={busy} title="Send this again" onClick={() => onChip(m.text, m.mode)}>Retry</button>
+                  {busy ? (
+                    <span className="msg-act" style={{ opacity: 0.4 }}>Retry</span>
+                  ) : (
+                    <RetryMenu mode={m.mode ?? "precise"} brain={brain} hasBrainKey={hasBrainKey} genProvider={genProvider} genModel={genModel} hasGenKey={hasGenKey}
+                      onPick={(value) => onRetryModel(m.text, m.mode ?? "precise", value)} />
+                  )}
                   <button className="msg-act" disabled={busy} title="Edit this message and resend" onClick={() => startEdit(m)}>Edit</button>
                 </div>
               )}

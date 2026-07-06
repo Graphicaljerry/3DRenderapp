@@ -369,6 +369,24 @@ export default function App() {
     }
     scheduleSync();
   }
+  /** Re-run a chat message with a specific model (Perplexity-style). Persists the
+   *  choice and passes it straight to send() so it takes effect immediately. */
+  function retryWithModel(text: string, msgMode: Mode, value: string) {
+    const i = value.indexOf("|");
+    const prov = i < 0 ? value : value.slice(0, i);
+    const mdl = i < 0 ? "" : value.slice(i + 1);
+    if (msgMode === "generative") {
+      pickEngine(prov, mdl);
+      void send(text, "generative", { genEng: { provider: prov, model: mdl } });
+    } else {
+      pickBrain(prov as LlmProviderId, mdl);
+      const overLlm: LlmSettings =
+        prov === "anthropic"
+          ? { provider: "anthropic", model: mdl }
+          : { provider: prov as LlmProviderId, model: llm.provider === prov ? llm.model : llmPreset(prov as LlmProviderId).defaultModel, baseUrl: prov === "custom" ? llm.baseUrl : undefined };
+      void send(text, "precise", { llm: overLlm });
+    }
+  }
   function pickEngine(provider: string, gmodel: string) {
     localStorage.setItem(GENENG_LS, JSON.stringify({ provider, model: gmodel }));
     setGenEng({ provider, model: gmodel });
@@ -773,7 +791,7 @@ export default function App() {
     if (key) void applyParams({ ...paramValues, [key]: FIT_CLEARANCE[next] });
   }
 
-  async function send(promptText: string, forceMode?: Mode) {
+  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
     const p = promptText.trim();
     if (status === "generating") return;
     if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
@@ -782,7 +800,8 @@ export default function App() {
 
     if (useGen) {
       if (!p && !image) return;
-      const prov = getProvider(genEng.provider);
+      const ge = override?.genEng ?? genEng; // retry-with-model can override the engine
+      const prov = getProvider(ge.provider);
       if (prov?.needsKey && !providerKeys[prov.id]) {
         setShowSettings(true);
         return;
@@ -790,7 +809,7 @@ export default function App() {
 
       // Text-only request on an image-only model? Auto-switch to a text-capable
       // model from the same provider instead of dead-ending the user in Settings.
-      let genModel = genEng.model;
+      let genModel = ge.model;
       let switchedTo: string | null = null;
       if (!image && p && prov) {
         const cur = prov.models.find((mm) => mm.id === genModel);
@@ -831,9 +850,9 @@ export default function App() {
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
       try {
-        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, prompt: p || undefined, provider: genEng.provider, model: genModel });
+        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, prompt: p || undefined, provider: ge.provider, model: genModel });
         const name = deriveName(p || "Photo model");
-        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? genEng.provider})`;
+        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? ge.provider})`;
         applyResult(res, name, summary, p || "(image upload)");
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary, streaming: false } : x)));
         clearImage();
@@ -847,7 +866,7 @@ export default function App() {
 
     // ---- precise (LLM -> replicad/primitive; photo = vision -> exact CAD) ----
     if (!p && !image) return;
-    const effLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
+    const effLlm: LlmSettings = override?.llm ?? (llm.provider === "anthropic" ? { ...llm, model } : llm); // retry-with-model override
     if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
       // Never fail silently: say why, and point at the free paths.
       setMessages((m) => [
@@ -1168,6 +1187,7 @@ export default function App() {
         input={input}
         setInput={setInput}
         onSend={send}
+        onRetryModel={retryWithModel}
         onExample={loadExample}
         resume={project ? null : resume?.name ?? null}
         onResume={() => void resumeLast()}

@@ -161,6 +161,12 @@ export default function App() {
     pulledRef.current = true;
     try {
       const r = await cloudSyncPull();
+      // Then contribute whatever this device already had before it signed in —
+      // e.g. an API key entered while signed out. Sign-in used to only download,
+      // so a key set before creating the account never reached the cloud and
+      // never appeared on other devices. Pull-first means the cloud still wins on
+      // conflicts; this push only adds the local-only settings/projects on top.
+      await cloudSyncPush();
       setSyncState("synced");
       if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 400);
     } catch {

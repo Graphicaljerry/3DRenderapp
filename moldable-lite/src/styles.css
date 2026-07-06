@@ -393,3 +393,8 @@ details.guide { margin-top: 10px; }
   .lib-grid { grid-template-columns: 1fr; }
   .row3 { grid-template-columns: 1fr; }
 }
+/* Desktop: when the Parameters panel is docked (right, ~312px), open the export
+   menu clear of it instead of stacking the two floating cards. */
+@media (min-width: 901px) {
+  .viewer.params-docked .export-menu { right: 324px; }
+}

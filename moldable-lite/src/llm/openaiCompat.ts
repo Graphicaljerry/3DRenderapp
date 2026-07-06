@@ -168,11 +168,20 @@ const geminiMemo = new Map<string, Promise<string>>();
 async function resolveGeminiModel(r: CompatRequest): Promise<string> {
   const origin = new URL(r.baseUrl).origin;
   const headers: Record<string, string> = r.apiKey ? { "x-goog-api-key": r.apiKey } : {};
+  const path = "/v1beta/models?pageSize=1000";
   let res: Response | null = null;
   try {
-    res = await fetch(`${origin}/v1beta/models?pageSize=1000`, { headers });
+    res = await fetch(`${origin}${path}`, { headers });
   } catch {
-    /* network — fall through to cache */
+    /* network / CORS — try the relay below */
+  }
+  // If the direct call is blocked (CORS) or fails, retry the model list through
+  // the relay just like generation does — otherwise a CORS block silently pins
+  // us to a stale cached model that may have been retired.
+  if ((!res || !res.ok) && r.relayPrefix && relayAvailable(r.proxyBase || "")) {
+    try {
+      res = await fetch(`${r.proxyBase || ""}/prox/${r.relayPrefix}${path}`, { headers });
+    } catch { /* fall through to cache */ }
   }
   if (!res || !res.ok) {
     try {
@@ -198,14 +207,28 @@ async function resolveGeminiModel(r: CompatRequest): Promise<string> {
 
 /** Stream a completion; Gemini ids are resolved against the live model list first. */
 export async function generateCompat(r: CompatRequest, h: StreamHandlers = {}): Promise<string> {
-  if (/generativelanguage/.test(r.baseUrl)) {
-    const key = `${r.apiKey ?? ""}|${r.model}`;
+  if (!/generativelanguage/.test(r.baseUrl)) return attempt(r, h);
+
+  const key = `${r.apiKey ?? ""}|${r.model}`;
+  const resolve = () => {
     if (!geminiMemo.has(key)) {
       const p = resolveGeminiModel(r);
       p.catch(() => geminiMemo.delete(key)); // don't cache failures
       geminiMemo.set(key, p);
     }
-    r = { ...r, model: await geminiMemo.get(key)! };
+    return geminiMemo.get(key)!;
+  };
+  try {
+    return await attempt({ ...r, model: await resolve() }, h);
+  } catch (e: any) {
+    // A resolved id can still be retired between the list fetch and the call.
+    // Drop the poisoned memo + cache, re-pick the best live model, and retry once.
+    if (/no longer available|not found|is not supported|404/i.test(String(e?.message ?? e))) {
+      geminiMemo.delete(key);
+      try { localStorage.removeItem(GEMINI_CACHE); } catch {}
+      const fresh = await resolveGeminiModel({ ...r, model: "" }); // "" → ignore preferred, take best live
+      return await attempt({ ...r, model: fresh }, h);
+    }
+    throw e;
   }
-  return attempt(r, h);
 }

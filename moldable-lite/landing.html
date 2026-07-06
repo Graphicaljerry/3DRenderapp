@@ -19,50 +19,61 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f7a70' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 21 7 21 17 12 22 3 17 3 7Z'/%3E%3Cpath d='M3 7 12 12 21 7'/%3E%3Cpath d='M12 12V22'/%3E%3C/svg%3E" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2314b8a6' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 21 7 21 17 12 22 3 17 3 7Z'/%3E%3Cpath d='M3 7 12 12 21 7'/%3E%3Cpath d='M12 12V22'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
     <title>Moldable — describe a part, print it</title>
     <meta name="description" content="An AI assistant for designing 3D-printable parts. Describe it in plain language or snap a photo, watch it appear in 3D, and export STL, 3MF, or editable STEP." />
     <style>
+      /* Brand tokens mirror the app (src/styles.css): teal-tinted neutrals, brand teal. */
       :root {
-        --bg: #ffffff; --ink: #14171a; --ink2: #3a4046; --mut: #6b7178;
-        --accent: #2f7a70; --accent-d: #276358; --bord: #e6e8ea; --surf: #f6f7f9;
+        --bg: #ffffff; --ink: #18201e; --ink2: #333d39; --mut: #5f6b66;
+        --accent: #14b8a6; --accent-d: #0e9488; --accent-w: #e7f5f2;
+        --bord: #e4eae8; --surf: #f3f6f5;
+        --font-display: Archivo, Inter, -apple-system, "Segoe UI", Roboto, sans-serif;
+        --shadow-lg: 0 6px 14px rgba(18,40,36,.07), 0 18px 40px rgba(18,40,36,.10);
       }
       @media (prefers-color-scheme: dark) {
-        :root { --bg: #14171a; --ink: #f2f4f6; --ink2: #c9ced3; --mut: #8b9299;
-                --accent: #4fb3a4; --accent-d: #6fc7ba; --bord: #262b31; --surf: #1b1f24; }
+        :root { --bg: #171e1c; --ink: #edf2f0; --ink2: #c4cec9; --mut: #8c968f;
+                --accent: #2dd4bf; --accent-d: #5eead4; --accent-w: #14302b;
+                --bord: #273230; --surf: #0f1413;
+                --shadow-lg: 0 16px 44px rgba(0,0,0,.55); }
       }
       * { box-sizing: border-box; }
       html, body { margin: 0; height: 100%; }
       body {
-        background: var(--bg); color: var(--ink);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: var(--surf); color: var(--ink);
+        font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
         display: flex; flex-direction: column; min-height: 100dvh;
       }
+      ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
       .wrap { flex: 1; display: grid; place-items: center; padding: 32px 24px; }
       .hero { width: 100%; max-width: 640px; text-align: center; }
       .mark { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; }
       .mark svg { display: block; }
-      .mark span { font-size: 19px; font-weight: 700; letter-spacing: -0.01em; }
-      h1 { font-size: clamp(30px, 6vw, 46px); line-height: 1.08; letter-spacing: -0.02em; margin: 0 0 16px; }
+      .mark span { font-family: var(--font-display); font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+      h1 { font-family: var(--font-display); font-weight: 800; font-size: clamp(31px, 6vw, 48px); line-height: 1.06; letter-spacing: -0.025em; margin: 0 0 16px; }
       h1 .accent { color: var(--accent); }
-      .sub { font-size: clamp(15px, 2.4vw, 18px); line-height: 1.55; color: var(--ink2); margin: 0 auto 32px; max-width: 30ch; }
-      .cta { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #fff; text-decoration: none;
-             font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 11px; transition: background .15s ease, transform .16s ease; }
+      .sub { font-size: clamp(15px, 2.4vw, 18px); line-height: 1.55; color: var(--ink2); margin: 0 auto 32px; max-width: 32ch; }
+      .cta { display: inline-flex; align-items: center; gap: 8px; background: var(--accent); color: #06201c; text-decoration: none;
+             font-size: 15px; font-weight: 600; padding: 13px 26px; border-radius: 11px; box-shadow: var(--shadow-lg);
+             transition: background .15s ease, transform .16s cubic-bezier(.23,1,.32,1); }
       .cta:hover { background: var(--accent-d); }
-      .cta:active { transform: scale(.98); }
+      .cta:active { transform: scale(.97); }
       .feats { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 18px; margin-top: 34px; color: var(--mut); font-size: 13px; }
       .feats span::before { content: "•"; color: var(--accent); margin-right: 7px; }
       footer { text-align: center; padding: 18px; color: var(--mut); font-size: 12px; border-top: 1px solid var(--bord); }
-      .badge { display: inline-block; margin-bottom: 22px; padding: 4px 11px; border: 1px solid var(--bord); border-radius: 999px;
-               background: var(--surf); color: var(--mut); font-size: 11.5px; font-weight: 600; letter-spacing: .02em; }
+      .badge { display: inline-block; margin-bottom: 22px; padding: 4px 11px; border-radius: 999px;
+               background: var(--accent-w); color: var(--accent-d); font-size: 11.5px; font-weight: 600; letter-spacing: .02em; }
     </style>
   </head>
   <body>
     <main class="wrap">
       <div class="hero">
         <div class="mark">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#2f7a70" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#14b8a6" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" /><path d="M3 7 12 12 21 7" /><path d="M12 12V22" />
           </svg>
           <span>Moldable</span>

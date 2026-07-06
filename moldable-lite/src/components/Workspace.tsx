@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Viewer, type ViewerHandle, type PickedPoint } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
@@ -321,7 +321,7 @@ export function Workspace(p: Props) {
           </div>
         </section>
 
-        <section className="viewer">
+        <section className={`viewer${p.tab === "params" ? " params-docked" : ""}`}>
           <div className="viewer-head">
             <div className="tabs">
               {(["3d", "code", "params", "print", "history"] as const).map((t) => (
@@ -472,6 +472,7 @@ type PickGroup = { label: string; items: PickItem[] };
  *  orphaned wrapping onto its own row. */
 function ModelMenu({ value, groups, title, onPick }: { value: string; groups: PickGroup[]; title: string; onPick: (value: string) => void }) {
   const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<CSSProperties>({});
   const wrap = useRef<HTMLDivElement>(null);
   const current = groups.flatMap((g) => g.items).find((i) => i.value === value);
   useEffect(() => {
@@ -482,6 +483,30 @@ function ModelMenu({ value, groups, title, onPick }: { value: string; groups: Pi
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, [open]);
+  // Position as a viewport-anchored popover: flip up/down to whichever side has
+  // more room, clamp the height to that room, and clamp horizontally — so the
+  // menu never runs off any edge, at any viewport size.
+  useLayoutEffect(() => {
+    if (!open || !wrap.current) return;
+    const place = () => {
+      const t = wrap.current!.getBoundingClientRect();
+      const vw = window.innerWidth, vh = window.innerHeight;
+      const width = Math.min(264, vw - 16);
+      const above = t.top - 12, below = vh - t.bottom - 12;
+      const up = above >= below;
+      const maxHeight = Math.max(140, Math.min(380, up ? above : below));
+      const left = Math.max(8, Math.min(t.left, vw - width - 8));
+      setMenuStyle({
+        position: "fixed", left, right: "auto", width, maxHeight,
+        top: up ? "auto" : t.bottom + 6,
+        bottom: up ? vh - t.top + 6 : "auto",
+        transformOrigin: up ? "bottom left" : "top left",
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [open]);
   return (
     <div className="modelpick2" ref={wrap}>
       <button type="button" className="mp-trigger" title={title} aria-haspopup="listbox" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
@@ -489,7 +514,7 @@ function ModelMenu({ value, groups, title, onPick }: { value: string; groups: Pi
         <IconChevron size={13} />
       </button>
       {open && (
-        <div className="mp-menu" role="listbox">
+        <div className="mp-menu" role="listbox" style={menuStyle}>
           {groups.map((g) => (
             <div className="mp-group" key={g.label}>
               <div className="mp-glabel">{g.label}</div>

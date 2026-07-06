@@ -73,8 +73,16 @@ button { font-family: inherit; cursor: pointer; }
 ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :where(button, a, input, select, textarea):focus { outline: none; } /* rely on :focus-visible */
-.primary, .ghost, .chip, .send, .cta, .seg button, .fit-seg button { transition: background-color .15s ease, border-color .15s ease, color .15s ease, transform .14s cubic-bezier(.23,1,.32,1); }
-.primary:active, .ghost:active, .chip:active, .send:active, .cta:active { transform: scale(.97); }
+.primary, .ghost, .chip, .send, .cta, .seg button, .fit-seg button, .x, .link, .mp-trigger, .lib-open { transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1); }
+.primary:active, .ghost:active, .chip:active, .send:active, .cta:active, .x:active, .seg button:active, .fit-seg button:active { transform: scale(.97); }
+/* Hover affordance on every interactive control, so nothing feels inert. */
+.ghost:hover { border-color: var(--bord-strong); background: var(--surf); color: var(--ink); }
+.ghost.danger:hover { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.send:hover:not(:disabled) { background: var(--accent-d); }
+.seg button:hover:not(.on), .fit-seg button:hover:not(.on) { color: var(--ink2); }
+.x:hover { color: var(--ink); }
+.link:hover { color: var(--accent); text-decoration: underline; }
+.avatar-wrap:hover .avatar, .profile:hover .avatar { filter: brightness(1.06); }
 /* Display face for the brand + section headings — gives hierarchy a voice. */
 .wordmark, .empty-q, .card h1, .card h2, .panel h3, .side-head, .measure-head, .gc-title { font-family: var(--font-display); letter-spacing: -0.01em; }
 /* Numeric readouts align in columns. */
@@ -220,10 +228,16 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---------- library ---------- */
 .lib-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 16px; }
-.lib-card { border: 1px solid var(--bord); border-radius: 12px; padding: 12px; }
+.lib-card { border: 1px solid var(--bord); border-radius: 12px; padding: 12px; transition: border-color .15s ease, box-shadow .16s ease, transform .16s cubic-bezier(.23,1,.32,1); }
+.lib-card:hover { border-color: var(--bord-strong); box-shadow: var(--shadow-md); transform: translateY(-2px); }
 .lib-card.current { border-color: var(--accent); }
 .lib-open { display: block; width: 100%; text-align: left; background: none; border: none; padding: 0 0 8px; }
-.lib-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.lib-thumb { aspect-ratio: 4 / 3; border-radius: 9px; overflow: hidden; background: var(--surf); border: 1px solid var(--bord-subtle); margin-bottom: 9px; display: grid; place-items: center; }
+.lib-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s cubic-bezier(.23,1,.32,1); }
+.lib-card:hover .lib-thumb img { transform: scale(1.03); }
+.lib-thumb-empty { color: var(--subt); opacity: .6; }
+.lib-open:hover .lib-name { color: var(--accent-d); }
+.lib-name { font-size: 14px; font-weight: 600; color: var(--ink); transition: color .15s ease; }
 .lib-meta { font-size: 11px; color: var(--subt); margin-top: 3px; }
 .lib-actions { display: flex; gap: 6px; border-top: 1px solid var(--bord); padding-top: 8px; }
 

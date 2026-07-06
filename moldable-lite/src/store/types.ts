@@ -49,6 +49,7 @@ export interface Project {
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
   importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
+  thumb?: string; // small rendered preview of the current model (webp/png data URL), refreshed on each change
   pins?: Pin[]; // spatial notes / AI-edit markers on the model
   genSource?: GenSource;
   chat?: ChatTurn[];

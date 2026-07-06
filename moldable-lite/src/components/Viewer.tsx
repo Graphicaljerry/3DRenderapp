@@ -4,6 +4,8 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 
 export interface ViewerHandle {
   resetView: () => void;
+  /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
+  captureThumbnail: () => string | null;
 }
 
 export interface PickedPoint {
@@ -291,10 +293,73 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     resetView() {
       if (st.current) frameToObject(st.current);
     },
+    captureThumbnail() {
+      return st.current ? captureThumbnail(st.current) : null;
+    },
   }));
 
   return <div ref={mount} className="viewerCanvas" />;
 });
+
+// Render a clean, consistent library thumbnail: the model alone on the scene
+// background, framed 3/4, with the grid, dimensions and pins hidden — captured
+// off-screen so the on-screen view (zoom, labels, angle) is never disturbed.
+function captureThumbnail(s: Internals): string | null {
+  if (!s.mesh) return null;
+  const W = 384, H = 288;
+  // Hide chrome for the shot.
+  const gridVis = s.grid.visible;
+  const dimsVis = s.dims?.visible;
+  const pinsVis = s.pins?.visible;
+  s.grid.visible = false;
+  if (s.dims) s.dims.visible = false;
+  if (s.pins) s.pins.visible = false;
+
+  const cam = new THREE.PerspectiveCamera(45, W / H, 0.1, 5000);
+  cam.up.set(0, 0, 1);
+  const box = new THREE.Box3().setFromObject(s.mesh);
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const r = Math.max(sphere.radius, 1);
+  const dist = r / Math.sin((cam.fov * Math.PI) / 180 / 2);
+  const dirv = new THREE.Vector3(1, -1.3, 0.9).normalize();
+  cam.position.copy(sphere.center.clone().add(dirv.multiplyScalar(dist * 1.05)));
+  cam.near = dist / 100;
+  cam.far = dist * 100;
+  cam.lookAt(sphere.center);
+  cam.updateProjectionMatrix();
+
+  const target = new THREE.WebGLRenderTarget(W, H, { samples: 4 });
+  const prevTarget = s.renderer.getRenderTarget();
+  let url: string | null = null;
+  try {
+    s.renderer.setRenderTarget(target);
+    s.renderer.render(s.scene, cam);
+    const buf = new Uint8Array(W * H * 4);
+    s.renderer.readRenderTargetPixels(target, 0, 0, W, H, buf);
+    const cv = document.createElement("canvas");
+    cv.width = W;
+    cv.height = H;
+    const ctx = cv.getContext("2d")!;
+    const img = ctx.createImageData(W, H);
+    // WebGL reads bottom-to-top; flip rows into the top-down 2D canvas.
+    for (let y = 0; y < H; y++) {
+      const src = (H - 1 - y) * W * 4;
+      img.data.set(buf.subarray(src, src + W * 4), y * W * 4);
+    }
+    ctx.putImageData(img, 0, 0);
+    url = cv.toDataURL("image/webp", 0.72);
+    if (!url.startsWith("data:image/webp")) url = cv.toDataURL("image/png"); // Safari fallback
+  } catch {
+    url = null;
+  } finally {
+    s.renderer.setRenderTarget(prevTarget);
+    target.dispose();
+    s.grid.visible = gridVis;
+    if (s.dims) s.dims.visible = dimsVis!;
+    if (s.pins) s.pins.visible = pinsVis!;
+  }
+  return url;
+}
 
 function frameToObject(s: Internals) {
   if (!s.mesh) return;

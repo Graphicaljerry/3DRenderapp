@@ -132,6 +132,27 @@ Ruled out (in-space / crowded / generic descriptor):
   Rayo (Rayo Innovations + *Rayon* CAD), Joya (Joya Software House), Nodo (Nodo motion-control app),
   Chispa (dating app), Maqueta / Pieza / Boceto (generic in Spanish 3D tutorials; Boceto also used by Planner 5D).
 
+## Round 4 — positioning-aligned (2026-07)
+The positioning sharpened to **"can design, can't CAD" → sketch / SVG / idea becomes a printable
+3D model.** Two consequences for the name:
+
+1. **Retire "Moldable" before any public launch.** In the maker world "mold" reads as *injection
+   molding / silicone molds / resin casting* — a different process than FDM + CAD — and "moldable"
+   (soft, pliable) subtly fights the brand's *accuracy* promise. Fine as a working codename; not a
+   launch name. (Also `moldable.ai` is taken.)
+
+2. **Lean into the sketch → form story.** The strongest candidate already vetted clean fits it exactly:
+
+   - **★ Trazo** (TRAH-so) — Spanish "a stroke / line / sketch." Literally "from a stroke to a form,"
+     which *is* the product; calm, design-y, premium, globally pronounceable; matches the earlier
+     Spanish-phonetic preference; verified clean in 3D/CAD/AI (Round 3). **Lead recommendation.**
+   - **Perfil** (per-FEEL) — Spanish "profile"; ties to the new revolve/profile → 3D. Design-literate. *(verify)*
+   - **Formo** — coined from "form"; short, neutral (precise + artistic), app-like. *(verify)*
+   - **Trama** (mesh/weave, Round 3) — good for the generative-mesh side; secondary to Trazo.
+
+   Domain: brand-first per the confirmed brief — `.app` / `.design` / `.studio` all acceptable; run a
+   quick RDAP + USPTO pass on the pick (`trazo.app` / `trazo.design`) before committing.
+
 ## Brand directions explored (in Figma)
 Three identity directions were mocked in the Figma file (frame "Brand directions — pick one"), all now
 showing the **Moldable** wordmark: **A · Workshop** (industrial grotesk, graphite + blue/green),

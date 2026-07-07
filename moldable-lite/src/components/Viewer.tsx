@@ -235,7 +235,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         });
         return;
       }
-      if (!s2.tri) return;
+      if (!ensureTri(s2)) return; // builds the pick map on first click after an edit
       const hit = rc.intersectObject(s2.mesh, false)[0];
       if (!hit || hit.faceIndex == null) return;
       s2.lockedHit = { faceIndex: hit.faceIndex, point: hit.point.clone() };
@@ -328,8 +328,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         renderer.domElement.style.cursor = hit ? "crosshair" : "";
         return;
       }
-      // Face / edge / vertex hover-highlight.
-      if (s2.tri) {
+      // Face / edge / vertex hover-highlight. ensureTri builds the pick map on first hover
+      // after an edit (kept off the per-edit critical path so model swaps feel instant).
+      if (ensureTri(s2)) {
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (hit && hit.faceIndex != null) {
           showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
@@ -429,7 +430,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.material.needsUpdate = true;
     const mesh = new THREE.Mesh(geometry, s.material);
     s.content.add(mesh);
-    s.tri = buildTriData(geometry);
+    // NOTE: s.tri (the welded adjacency map for face/edge picking) is built lazily on the
+    // first hover/box-select in select mode — see ensureTri. Building it here would run a
+    // heavy weld pass on the main thread on EVERY edit, stalling the orbit for ~1s even
+    // when the user never picks anything. Deferring it makes edits feel real-time.
     geometry.computeBoundingBox();
     const gs = geometry.boundingBox!.getSize(new THREE.Vector3());
     s.markR = Math.min(2, Math.max(0.5, Math.max(gs.x, gs.y, gs.z) * 0.008)); // edge/vertex marker size
@@ -614,6 +618,13 @@ type FeatureInfo =
 
 /** Precompute triangle normals, welded-vertex adjacency, unique vertices, and the
     model's sharp edges — everything hover-selection needs. */
+/** Build the pick-adjacency map on demand (first hover/box-select after an edit) and
+ *  cache it on the state. Keeps the heavy weld pass off the per-edit critical path. */
+function ensureTri(s: Internals): TriData | null {
+  if (!s.tri && s.mesh) s.tri = buildTriData(s.mesh.geometry as THREE.BufferGeometry);
+  return s.tri;
+}
+
 function buildTriData(geo: THREE.BufferGeometry): TriData {
   const pos = geo.getAttribute("position") as THREE.BufferAttribute;
   const idx = geo.index;
@@ -862,7 +873,7 @@ function selectFacesInBox(
   s: Internals, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer,
   sx: number, sy: number, ex: number, ey: number,
 ): PickedFeature[] {
-  const tri = s.tri, mesh = s.mesh;
+  const tri = ensureTri(s), mesh = s.mesh;
   if (!tri || !mesh) return [];
   const rect = renderer.domElement.getBoundingClientRect();
   const minX = Math.min(sx, ex) - rect.left, maxX = Math.max(sx, ex) - rect.left;
@@ -916,7 +927,7 @@ function selectFacesInBox(
 /** Highlight the face/edge/vertex under the cursor and return its metrics. Caches
     the last resolved target so a hover that stays on it rebuilds nothing. */
 function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: number, hit: THREE.Vector3): FeatureInfo | null {
-  const tri = s.tri;
+  const tri = ensureTri(s);
   if (!tri) return null;
   const showOnly = (m: THREE.Mesh) => { s.highlight.visible = m === s.highlight; s.edgeHi.visible = m === s.edgeHi; s.vertHi.visible = m === s.vertHi; };
 

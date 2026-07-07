@@ -259,6 +259,7 @@ interface Props {
     askAi: () => void;
     saveNote: () => void;
     del: () => void;
+    clearAll: () => void;
     close: () => void;
     pick: (pt: PickedPoint) => void;
     select: (id: string) => void;
@@ -524,11 +525,20 @@ export function Workspace(p: Props) {
                 <button
                   className={`ghost sm${p.pinCtl.mode ? " on" : ""}`}
                   aria-pressed={p.pinCtl.mode}
-                  title="Pin mode: click the model to mark a spot for a note or an AI edit (double-click works anytime)"
+                  title="Pin mode: while on, click the model to mark a spot for a note or an AI edit"
                   onClick={p.pinCtl.toggleMode}
                 >
                   Pin
                 </button>
+                {p.pins.length > 0 && (
+                  <button
+                    className="ghost sm"
+                    title={`Remove all ${p.pins.length} pin${p.pins.length > 1 ? "s" : ""}`}
+                    onClick={p.pinCtl.clearAll}
+                  >
+                    Clear pins ({p.pins.length})
+                  </button>
+                )}
                 <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
                   {p.showDims ? "Hide dimensions" : "Dimensions"}
                 </button>

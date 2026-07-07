@@ -7,7 +7,7 @@ import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/Extrude
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
 import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClient";
 import type { SplitPiece } from "./print/split";
-import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit } from "./components/Viewer";
+import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
@@ -280,6 +280,9 @@ export default function App() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectKind, setSelectKind] = useState<SelectKind>("face");
   const [transformMode, setTransformMode] = useState<TransformMode>("off");
+  const [measureMode, setMeasureMode] = useState(false);
+  const [measurePending, setMeasurePending] = useState<[number, number, number] | null>(null);
+  const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
   const [selectedFaces, setSelectedFaces] = useState<PickedFeature[]>([]); // box/marquee multi-select
   const [facesText, setFacesText] = useState("");
@@ -620,6 +623,10 @@ export default function App() {
   function applyResultNoCommit(res: EngineResult) {
     setResult(res);
     setSplitPieces(null); // any new/changed model invalidates a prior split's pieces
+    // Measurements are anchored to the display mesh's coords, which shift when the model
+    // rebuilds/recenters — drop them (and any half-made one) so none linger at stale spots.
+    setMeasurements([]);
+    setMeasurePending(null);
     setGeometry(res.geometry);
     setDims(res.dims);
     setCodeBuffer(sourceText(res.source));
@@ -1101,6 +1108,14 @@ export default function App() {
     } finally {
       setStatus("idle");
     }
+  }
+
+  /** Measure tool: first click sets an anchor, second click records a point-to-point
+   *  measurement (a labelled distance line in the viewer). No AI, no model change. */
+  function onMeasurePoint(p: [number, number, number]) {
+    if (!measurePending) { setMeasurePending(p); return; }
+    setMeasurements((m) => [...m, { id: mid(), a: measurePending, b: p }]);
+    setMeasurePending(null);
   }
 
   // ---------------- generate ----------------
@@ -1697,7 +1712,7 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => setSelectMode((m) => { const on = !m; if (on) setTransformMode("off"); else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
+          toggleMode: () => setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
           kind: selectKind,
           // Switching mode clears the other kind's selection so only one edit target is live.
           setKind: (k) => { setSelectKind(k); setSelectedFaces([]); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
@@ -1719,10 +1734,24 @@ export default function App() {
         }}
         transformCtl={{
           mode: transformMode,
-          // Entering Transform turns off Select and clears any pick (one tool owns the pointer).
-          setMode: (m) => { setTransformMode(m); if (m !== "off") { setSelectMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
+          // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
+          setMode: (m) => { setTransformMode(m); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
           busy: status === "generating",
+        }}
+        measureCtl={{
+          mode: measureMode,
+          toggle: () => setMeasureMode((on) => {
+            const next = !on;
+            if (next) { setSelectMode(false); setTransformMode("off"); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); }
+            else setMeasurePending(null);
+            return next;
+          }),
+          pending: measurePending,
+          items: measurements,
+          point: onMeasurePoint,
+          remove: (id) => setMeasurements((m) => m.filter((x) => x.id !== id)),
+          clear: () => { setMeasurements([]); setMeasurePending(null); },
         }}
       />
       {showSettings && (

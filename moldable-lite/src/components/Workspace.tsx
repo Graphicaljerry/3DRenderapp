@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
@@ -306,6 +306,15 @@ interface Props {
     commit: (c: TransformCommit) => void;
     busy: boolean;
   };
+  measureCtl: {
+    mode: boolean;
+    toggle: () => void;
+    pending: [number, number, number] | null;
+    items: Measurement[];
+    point: (p: [number, number, number]) => void;
+    remove: (id: string) => void;
+    clear: () => void;
+  };
 }
 
 export function Workspace(p: Props) {
@@ -573,6 +582,19 @@ export function Workspace(p: Props) {
                     <button className={p.transformCtl.mode === "scale" ? "on" : ""} title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}>Scale</button>
                   </div>
                 )}
+                <button
+                  className={`ghost sm${p.measureCtl.mode ? " on" : ""}`}
+                  aria-pressed={p.measureCtl.mode}
+                  title="Measure tool: click two points on the model to see the distance between them"
+                  onClick={p.measureCtl.toggle}
+                >
+                  Measure
+                </button>
+                {p.measureCtl.mode && p.measureCtl.items.length > 0 && (
+                  <button className="ghost sm" title="Clear all measurements" onClick={p.measureCtl.clear}>
+                    Clear ({p.measureCtl.items.length})
+                  </button>
+                )}
                 {p.pins.length > 0 && (
                   <button
                     className="ghost sm"
@@ -610,11 +632,15 @@ export function Workspace(p: Props) {
                 selectKind={p.featureCtl.kind}
                 boxSelectionActive={p.facesCtl.faces.length > 0}
                 transformMode={p.transformCtl.mode}
+                measureMode={p.measureCtl.mode}
+                measurePending={p.measureCtl.pending}
+                measurements={p.measureCtl.items}
                 onPickFaces={p.featureCtl.pickFaces}
                 onPickPoint={p.pinCtl.pick}
                 onPickFeature={p.featureCtl.pick}
                 onSelectPin={p.pinCtl.select}
                 onTransformCommit={p.transformCtl.commit}
+                onMeasurePoint={p.measureCtl.point}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
               {p.pinCtl.active && (
@@ -712,6 +738,11 @@ export function Workspace(p: Props) {
               )}
               {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
                 <div className="box-hint">Shift-drag to box-select multiple faces</div>
+              )}
+              {p.measureCtl.mode && (
+                <div className="box-hint">
+                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points on the model to measure between them"}
+                </div>
               )}
               {p.tab === "3d" && p.splitCtl.pieces && p.splitCtl.pieces.length > 0 && (
                 <SplitPiecesPanel splitCtl={p.splitCtl} />

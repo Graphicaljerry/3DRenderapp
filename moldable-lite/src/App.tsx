@@ -10,7 +10,7 @@ import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
-import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
+import type { BuildInput, EngineResult, ExportFormat, CadOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
@@ -580,6 +580,7 @@ export default function App() {
       summary,
       code: res.source.kind === "code" ? res.source.code : undefined,
       params: res.source.kind === "code" ? res.source.params : undefined,
+      ops: res.source.kind === "code" ? res.source.ops : undefined,
       importFile: res.source.kind === "code" ? importFileRef.current ?? undefined : undefined,
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
@@ -1010,6 +1011,36 @@ export default function App() {
     );
   }
 
+  // Direct fillet/chamfer on the picked edge/corner — computed by replicad in the
+  // worker with NO AI call (free). Commits a version so Undo works.
+  async function applyDirectOp(type: "fillet" | "chamfer", size: number) {
+    const f = selectedFeature;
+    if (!f || (f.kind !== "edge" && f.kind !== "vertex") || !size) return;
+    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Direct fillet/chamfer works on Precise (CAD) models.", error: true }]);
+      return;
+    }
+    const src = result.source;
+    // Picked coords are in display space; map them back to the engine's own coords
+    // (the display is recentred on the bed) so the fillet finder hits the real edge.
+    const p = f.at ?? [f.cx, f.cy, f.cz];
+    const rc = result.recenter ?? [0, 0, 0];
+    const op: CadOp = { type, at: [p[0] + rc[0], p[1] + rc[1], p[2] + rc[2]], size };
+    setSelectedFeature(null);
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
+      const verb = type === "fillet" ? "Rounded" : "Chamfered";
+      const what = f.kind === "vertex" ? "corner" : "edge";
+      applyResult(res, project?.name ?? deriveName("Edited part"), `${verb} an ${what} by ${size} mm — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${verb} the ${what} (${size} mm) directly — no AI, no tokens spent.` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   // ---------------- generate ----------------
   /** Enter the guided "fix a broken part" flow: precise mode, a photo-first nudge,
    *  and a helper message with the coin/card-for-scale trick. */
@@ -1341,7 +1372,7 @@ export default function App() {
       }
       const bi: BuildInput =
         next.engine === "replicad"
-          ? { kind: "code", code: next.code ?? "", params: next.params }
+          ? { kind: "code", code: next.code ?? "", params: next.params, ops: next.ops }
           : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
       applyResultNoCommit(await sel.engine.build(bi));
     }
@@ -1566,6 +1597,7 @@ export default function App() {
           pick: pickFeature,
           pickFaces,
           askAi: askAiFeature,
+          directOp: applyDirectOp,
           clear: () => setSelectedFeature(null),
         }}
         facesCtl={{

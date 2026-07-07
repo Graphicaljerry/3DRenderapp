@@ -3,7 +3,7 @@ import opencascadeWasm from "replicad-opencascadejs/src/replicad_single.wasm?url
 import * as replicad from "replicad";
 import { setOC } from "replicad";
 import { expose } from "comlink";
-import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, EdgeMesh } from "./workerMessages";
+import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, EdgeMesh, WorkerOp } from "./workerMessages";
 
 // ---- OCCT boot. locateFile MUST return the ?url import so emscripten fetches the hashed wasm. ----
 let ocReady: Promise<void> | null = null;
@@ -35,8 +35,25 @@ function sanitize(code: string): string {
 // passed to main() as its third argument so code can modify it directly.
 let importedShape: any = null;
 
+/** Apply the user's direct fillet/chamfer ops to a built shape. `containsPoint`
+ *  matches every edge through the target point, so an edge midpoint rounds that edge
+ *  and a corner vertex rounds all edges meeting there. Each op reports its own error. */
+function applyOps(shape: any, ops?: WorkerOp[]): any {
+  let s = shape;
+  for (const op of ops ?? []) {
+    try {
+      const filter = (e: any) => e.containsPoint(op.at);
+      s = op.type === "fillet" ? s.fillet(op.size, filter) : s.chamfer(op.size, filter);
+    } catch (e: any) {
+      const kind = op.type === "fillet" ? "Fillet" : "Chamfer";
+      throw new Error(`${kind} of ${op.size} mm didn't apply here — try a smaller size or a different edge. (${String(e?.message ?? e)})`);
+    }
+  }
+  return s;
+}
+
 // ---- Compile untrusted LLM code at global scope; shadow ambient globals. ----
-function runToShape(rawCode: string, params?: Record<string, number>): any {
+function runToShape(rawCode: string, params?: Record<string, number>, ops?: WorkerOp[]): any {
   const code = sanitize(rawCode);
   // Do NOT pre-declare `main` — the user's code defines `function main(...)`, and a
   // `let main` here collides ("Identifier 'main' has already been declared").
@@ -60,7 +77,7 @@ function runToShape(rawCode: string, params?: Record<string, number>): any {
   if (!shape || typeof shape.mesh !== "function") {
     throw new Error("main() must return a replicad Shape (a Solid).");
   }
-  return shape;
+  return applyOps(shape, ops);
 }
 
 function dimsOf(shape: any): { x: number; y: number; z: number } {
@@ -101,10 +118,10 @@ const api: CadWorkerApi = {
     importedShape = null;
   },
 
-  async build(code: string, params?: Record<string, number>): Promise<WorkerBuildResult> {
+  async build(code: string, params?: Record<string, number>, ops?: WorkerOp[]): Promise<WorkerBuildResult> {
     try {
       await ensureOC();
-      const shape = runToShape(code, params);
+      const shape = runToShape(code, params, ops);
       const faces = shape.mesh(MESH_OPTS) as FaceMesh;
       const edges = shape.meshEdges(MESH_OPTS) as EdgeMesh;
       const dims = dimsOf(shape);
@@ -121,9 +138,9 @@ const api: CadWorkerApi = {
     }
   },
 
-  async exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>): Promise<Blob> {
+  async exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>, ops?: WorkerOp[]): Promise<Blob> {
     await ensureOC();
-    const shape = runToShape(code, params);
+    const shape = runToShape(code, params, ops);
     return format === "step"
       ? shape.blobSTEP()
       : shape.blobSTL({ tolerance: 0.01, angularTolerance: 0.1, binary: true });

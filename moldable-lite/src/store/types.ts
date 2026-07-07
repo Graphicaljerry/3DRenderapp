@@ -1,3 +1,5 @@
+import type { CadOp } from "../engine/types";
+
 export type StoredEngineKind = "replicad" | "primitive" | "generative";
 
 export interface ChatTurn {
@@ -31,6 +33,7 @@ export interface Version {
   engine: StoredEngineKind;
   code?: string; // replicad source at this snapshot
   params?: Record<string, number>; // slider overrides applied to the code
+  ops?: CadOp[]; // direct fillet/chamfer ops applied on top of the code
   spec?: unknown; // primitive spec at this snapshot
   dims?: { x: number; y: number; z: number };
   glb?: Blob; // generative mesh at this snapshot (so it re-renders without re-calling the API)
@@ -46,6 +49,7 @@ export interface Project {
   engine: StoredEngineKind;
   code?: string; // HEAD replicad source
   params?: Record<string, number>; // HEAD slider overrides
+  ops?: CadOp[]; // HEAD direct fillet/chamfer ops
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
   importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)

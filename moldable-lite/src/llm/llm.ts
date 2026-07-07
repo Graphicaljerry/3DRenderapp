@@ -4,6 +4,17 @@
 
 import { generate as generateAnthropic, MODELS, type ApiMsg, type StreamHandlers } from "./anthropic";
 import { generateCompat } from "./openaiCompat";
+import { modelSupportsReasoning } from "./openrouterModels";
+
+export type ReasoningEffort = "off" | "low" | "medium" | "high";
+/** OpenRouter "thinking" effort — user-set in Settings, applied to reasoning-capable models. */
+export function getReasoningEffort(): ReasoningEffort {
+  try {
+    const v = localStorage.getItem("moldable_or_reasoning");
+    if (v === "off" || v === "low" || v === "medium" || v === "high") return v;
+  } catch {}
+  return "medium";
+}
 
 export type LlmProviderId = "anthropic" | "gemini" | "openai" | "groq" | "openrouter" | "ollama" | "custom";
 
@@ -125,15 +136,25 @@ export async function generateLlm(
   const p = llmPreset(s.provider);
   const baseUrl = s.provider === "custom" ? s.baseUrl ?? "" : p.baseUrl!;
   if (!baseUrl) throw new Error("Set the custom provider's Base URL in Settings.");
+  const model = s.model || p.defaultModel;
+  // Turn on "thinking" for OpenRouter models that support it — the reasoning param
+  // is only sent when the catalogue says the model supports it, so it never 400s
+  // a model that doesn't. Off = never send it.
+  let extraBody: Record<string, unknown> | undefined;
+  if (s.provider === "openrouter") {
+    const effort = getReasoningEffort();
+    if (effort !== "off" && modelSupportsReasoning(model)) extraBody = { reasoning: { effort } };
+  }
   return generateCompat(
     {
       baseUrl,
       apiKey: keys[s.provider],
-      model: s.model || p.defaultModel,
+      model,
       system,
       messages,
       relayPrefix: p.relayPrefix,
       proxyBase,
+      extraBody,
     },
     h,
   );

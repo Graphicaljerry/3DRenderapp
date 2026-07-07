@@ -15,6 +15,7 @@ export interface CompatRequest {
   messages: ApiMsg[];
   relayPrefix?: string; // e.g. "groq" -> /prox/groq/<path> when direct fails
   proxyBase?: string;
+  extraBody?: Record<string, unknown>; // provider-specific extras (e.g. OpenRouter `reasoning`)
 }
 
 function toCompatContent(c: import("./anthropic").ApiMsg["content"]): unknown {
@@ -36,6 +37,7 @@ function body(r: CompatRequest, stream: boolean): string {
       { role: "system", content: r.system },
       ...r.messages.map((m) => ({ role: m.role, content: toCompatContent(m.content) })),
     ],
+    ...(r.extraBody ?? {}),
   });
 }
 

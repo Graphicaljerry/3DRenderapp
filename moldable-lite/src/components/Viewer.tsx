@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 export interface ViewerHandle {
   resetView: () => void;
@@ -12,12 +13,18 @@ export interface PickedPoint {
   x: number; y: number; z: number;
   nx: number; ny: number; nz: number;
 }
-/** A selected flat face: its centre, outward normal, in-plane size, and a human label. */
-export interface PickedFace {
-  cx: number; cy: number; cz: number;
-  nx: number; ny: number; nz: number;
-  w: number; h: number;
+/** A selected model feature — a face, edge or vertex — with everything an edit needs. */
+export interface PickedFeature {
+  kind: "face" | "edge" | "vertex";
   label: string;
+  cx: number; cy: number; cz: number; // face centre / edge midpoint / vertex
+  nx?: number; ny?: number; nz?: number; // face normal
+  w?: number; h?: number; // face in-plane size
+  ax?: number; ay?: number; az?: number; // edge endpoint A
+  bx?: number; by?: number; bz?: number; // edge endpoint B
+  len?: number; // edge length
+  curved?: boolean; // face: a curved surface (not a flat plane)
+  closed?: boolean; // edge: a closed loop (e.g. a rim), no distinct ends
 }
 export interface ViewerPin { id: string; x: number; y: number; z: number; }
 
@@ -31,8 +38,9 @@ interface Props {
   selectedPin: string | null;
   pinMode: boolean;
   selectMode: boolean;
+  selectKind: "face" | "edge" | "vertex";
   onPickPoint: (p: PickedPoint) => void;
-  onPickFace: (f: PickedFace) => void;
+  onPickFeature: (f: PickedFeature) => void;
   onSelectPin: (id: string) => void;
 }
 
@@ -43,12 +51,29 @@ const THEME_GRID: Record<string, [number, number]> = { light: [0xced2d8, 0xe3e6e
 const LABEL_MIN_PX = 16;
 const LABEL_MAX_PX = 53;
 
+interface EdgeChain {
+  segs: number[]; // sharp-segment indices making up this physical edge
+  ax: number; ay: number; az: number; // one end (or centroid if closed)
+  bx: number; by: number; bz: number; // other end
+  cx: number; cy: number; cz: number; // representative point
+  len: number; // total length along the edge
+  closed: boolean; // a loop (e.g. a cylinder rim) has no distinct ends
+}
+
 interface TriData {
   normals: Float32Array; // per-triangle unit normal
   d: Float32Array; // per-triangle plane offset (normal · vertex)
+  degen: Uint8Array; // 1 = zero-area triangle (normal unreliable)
   count: number;
   pos: THREE.BufferAttribute;
   idx: THREE.BufferAttribute | null;
+  adj: Int32Array; // count*3 — neighbouring triangle across each edge (-1 = none)
+  vpos: Float32Array; // unique welded vertex positions
+  nUnique: number;
+  edges: Float32Array; // sharp-edge segments: [ax,ay,az, bx,by,bz] per segment
+  edgeCount: number;
+  edgeChainId: Int32Array; // per sharp segment → physical-edge (chain) index
+  chains: EdgeChain[]; // physical edges (subdivided/curved segments chained)
 }
 
 interface Internals {
@@ -62,17 +87,21 @@ interface Internals {
   dims: THREE.Group | null;
   pins: THREE.Group | null;
   material: THREE.MeshStandardMaterial;
-  highlight: THREE.Mesh; // blue overlay for the hovered/selected face
+  highlight: THREE.Mesh; // translucent overlay for the hovered/selected face
+  edgeHi: THREE.Mesh; // solid marker for a hovered/selected edge (a thin cylinder)
+  vertHi: THREE.Mesh; // solid marker for a hovered/selected vertex (a small sphere)
+  markR: number; // marker radius, scaled to the model
   tri: TriData | null;
-  lockedFace: number; // triangle index of the click-selected face (-1 = none)
+  lockedHit: { faceIndex: number; point: THREE.Vector3 } | null; // click-locked feature
+  selCache: { key: string; info: FeatureInfo; region: Uint8Array | null } | null; // hover perf guard
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, pinMode, selectMode, onPickPoint, onPickFace, onSelectPin }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, pinMode, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ pinMode, selectMode, onPickPoint, onPickFace, onSelectPin });
-  cb.current = { pinMode, selectMode, onPickPoint, onPickFace, onSelectPin };
+  const cb = useRef({ pinMode, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin });
+  cb.current = { pinMode, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -120,6 +149,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     highlight.renderOrder = 2;
     scene.add(highlight);
 
+    // Solid blue markers for edge (thin cylinder) + vertex (small sphere) selection,
+    // drawn over the model so they read clearly like a CAD selection.
+    const markMat = new THREE.MeshBasicMaterial({ color: 0x2563eb, depthTest: false, transparent: true, opacity: 0.95 });
+    const edgeHi = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), markMat);
+    const vertHi = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), markMat);
+    edgeHi.visible = vertHi.visible = false;
+    edgeHi.renderOrder = vertHi.renderOrder = 3;
+    scene.add(edgeHi, vertHi);
+
     let raf = 0;
     const animate = () => {
       controls.update();
@@ -162,21 +200,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           return;
         }
       }
-      // Face-select mode: single click locks the face under the cursor.
+      // Select mode: single click locks the face / edge / vertex under the cursor.
       if (cb.current.selectMode && !viaDblClick) {
         if (!s2.mesh || !s2.tri) return;
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (!hit || hit.faceIndex == null) return;
-        s2.lockedFace = hit.faceIndex;
-        const info = showFace(s2, hit.faceIndex);
-        if (info) {
-          const r1p = (n: number) => Math.round(n * 10) / 10;
-          cb.current.onPickFace({
-            cx: r1p(info.center.x), cy: r1p(info.center.y), cz: r1p(info.center.z),
-            nx: r1p(info.normal.x), ny: r1p(info.normal.y), nz: r1p(info.normal.z),
-            w: r1p(info.w), h: r1p(info.h), label: faceLabel(info.normal),
-          });
-        }
+        s2.lockedHit = { faceIndex: hit.faceIndex, point: hit.point.clone() };
+        const info = showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
+        if (info) cb.current.onPickFeature(featureToPayload(info));
         return;
       }
       if (viaDblClick ? cb.current.pinMode : !cb.current.pinMode) return; // dblclick covers non-pin-mode
@@ -220,17 +251,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (hp) { setHover(String(hp.object.userData.pinId)); return; }
       }
       setHover(null);
-      // Face hover-highlight in select mode.
+      // Face / edge / vertex hover-highlight in select mode.
       if (cb.current.selectMode && s2.mesh && s2.tri) {
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (hit && hit.faceIndex != null) {
-          showFace(s2, hit.faceIndex);
+          showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
           renderer.domElement.style.cursor = "crosshair";
           return;
         }
-        // Off the model — fall back to the locked face, if any.
-        if (s2.lockedFace >= 0) showFace(s2, s2.lockedFace);
-        else s2.highlight.visible = false;
+        // Off the model — fall back to the locked feature, if any.
+        if (s2.lockedHit) showFeature(s2, cb.current.selectKind, s2.lockedHit.faceIndex, s2.lockedHit.point);
+        else { s2.highlight.visible = false; s2.edgeHi.visible = false; s2.vertHi.visible = false; }
         renderer.domElement.style.cursor = "";
       }
     };
@@ -250,7 +281,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, tri: null, lockedFace: -1, ro };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, ro };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -264,6 +295,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       disposeDims(st.current);
       highlight.geometry.dispose();
       (highlight.material as THREE.Material).dispose();
+      edgeHi.geometry.dispose();
+      vertHi.geometry.dispose();
+      markMat.dispose();
       renderer.dispose();
       el.removeChild(renderer.domElement);
       st.current = null;
@@ -285,10 +319,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
     s.content.clear();
     s.mesh = null;
-    // Reset the face selection whenever the model changes.
+    // Reset the feature selection whenever the model changes.
     s.tri = null;
-    s.lockedFace = -1;
+    s.lockedHit = null;
+    s.selCache = null;
     s.highlight.visible = false;
+    s.highlight.geometry.dispose();
+    s.highlight.geometry = new THREE.BufferGeometry();
+    s.edgeHi.visible = false;
+    s.vertHi.visible = false;
     if (!geometry) {
       updateDims(s, showDims, units);
       return;
@@ -297,6 +336,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const mesh = new THREE.Mesh(geometry, s.material);
     s.content.add(mesh);
     s.tri = buildTriData(geometry);
+    geometry.computeBoundingBox();
+    const gs = geometry.boundingBox!.getSize(new THREE.Vector3());
+    s.markR = Math.min(2, Math.max(0.5, Math.max(gs.x, gs.y, gs.z) * 0.008)); // edge/vertex marker size
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geometry, 30),
       new THREE.LineBasicMaterial({ color: "#2a2e35" }),
@@ -315,14 +357,26 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
 
-  // Leaving select mode clears the highlight + locked face.
+  // Leaving select mode clears the highlight + locked feature.
   useEffect(() => {
     const s = st.current;
     if (!s || selectMode) return;
-    s.lockedFace = -1;
+    s.lockedHit = null;
     s.highlight.visible = false;
+    s.edgeHi.visible = false;
+    s.vertHi.visible = false;
     s.renderer.domElement.style.cursor = "";
   }, [selectMode]);
+
+  // Re-highlight the locked feature when the selection kind (face/edge/vertex) changes,
+  // and re-emit it so the app's edit panel switches to the new kind in sync.
+  useEffect(() => {
+    const s = st.current;
+    if (s?.lockedHit) {
+      const info = showFeature(s, selectKind, s.lockedHit.faceIndex, s.lockedHit.point);
+      if (info) cb.current.onPickFeature(featureToPayload(info));
+    }
+  }, [selectKind]);
 
   useEffect(() => {
     const s = st.current;
@@ -442,75 +496,319 @@ function captureThumbnail(s: Internals): string | null {
   return url;
 }
 
-// ---- face selection --------------------------------------------------------
+// ---- feature selection (face / edge / vertex) ------------------------------
 
-/** Precompute each triangle's plane (unit normal + offset) for coplanar grouping. */
+type FeatureInfo =
+  | { kind: "face"; center: THREE.Vector3; normal: THREE.Vector3; w: number; h: number; curved: boolean }
+  | { kind: "edge"; a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; len: number; closed: boolean }
+  | { kind: "vertex"; pos: THREE.Vector3 };
+
+/** Precompute triangle normals, welded-vertex adjacency, unique vertices, and the
+    model's sharp edges — everything hover-selection needs. */
 function buildTriData(geo: THREE.BufferGeometry): TriData {
   const pos = geo.getAttribute("position") as THREE.BufferAttribute;
   const idx = geo.index;
   const count = idx ? idx.count / 3 : pos.count / 3;
+  const corner = (c: number) => (idx ? idx.getX(c) : c);
+
+  // Weld coincident vertices (quantise to 1 µm) → stable ids for adjacency.
+  const vidOf = new Map<string, number>();
+  const vid = new Uint32Array(count * 3);
+  const vpos: number[] = [];
+  const vv = new THREE.Vector3();
+  for (let c = 0; c < count * 3; c++) {
+    vv.fromBufferAttribute(pos, corner(c));
+    const key = `${Math.round(vv.x * 1000)}_${Math.round(vv.y * 1000)}_${Math.round(vv.z * 1000)}`;
+    let id = vidOf.get(key);
+    if (id === undefined) { id = vpos.length / 3; vidOf.set(key, id); vpos.push(vv.x, vv.y, vv.z); }
+    vid[c] = id;
+  }
+  const nUnique = vpos.length / 3;
+
+  // Per-triangle normal + plane offset. Zero-area triangles are flagged so their
+  // unreliable (zero) normals never create false creases or block flood-fill.
   const normals = new Float32Array(count * 3);
   const d = new Float32Array(count);
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const degen = new Uint8Array(count);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c3 = new THREE.Vector3();
   const ab = new THREE.Vector3(), ac = new THREE.Vector3(), n = new THREE.Vector3();
   for (let t = 0; t < count; t++) {
-    const i0 = idx ? idx.getX(t * 3) : t * 3;
-    const i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
-    const i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
-    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
-    ab.subVectors(b, a); ac.subVectors(c, a); n.crossVectors(ab, ac).normalize();
+    a.fromBufferAttribute(pos, corner(t * 3));
+    b.fromBufferAttribute(pos, corner(t * 3 + 1));
+    c3.fromBufferAttribute(pos, corner(t * 3 + 2));
+    ab.subVectors(b, a); ac.subVectors(c3, a); n.crossVectors(ab, ac);
+    const area = n.length();
+    if (area < 1e-9) { degen[t] = 1; continue; } // leave normal 0, d 0
+    n.divideScalar(area);
     normals[t * 3] = n.x; normals[t * 3 + 1] = n.y; normals[t * 3 + 2] = n.z;
     d[t] = n.dot(a);
   }
-  return { normals, d, count, pos, idx };
+
+  // Edge → triangle adjacency (welded) with occurrence counting (handles >2-triangle
+  // non-manifold edges gracefully), plus sharp edges (crease > 30° / boundary / non-manifold).
+  const adj = new Int32Array(count * 3).fill(-1);
+  const rec = new Map<string, { va: number; vb: number; t: number; e: number; count: number; sharp: boolean }>();
+  const COS30 = Math.cos((30 * Math.PI) / 180);
+  for (let t = 0; t < count; t++) {
+    for (let e = 0; e < 3; e++) {
+      const va = vid[t * 3 + e], vb = vid[t * 3 + ((e + 1) % 3)];
+      const key = va < vb ? `${va}_${vb}` : `${vb}_${va}`;
+      const r = rec.get(key);
+      if (r === undefined) {
+        rec.set(key, { va, vb, t, e, count: 1, sharp: false });
+      } else {
+        r.count++;
+        if (r.count === 2) {
+          adj[t * 3 + e] = r.t;
+          adj[r.t * 3 + r.e] = t;
+          if (!degen[t] && !degen[r.t]) {
+            const dot = normals[t * 3] * normals[r.t * 3] + normals[t * 3 + 1] * normals[r.t * 3 + 1] + normals[t * 3 + 2] * normals[r.t * 3 + 2];
+            if (dot < COS30) r.sharp = true;
+          }
+        }
+      }
+    }
+  }
+  // One segment per physical edge: boundary (count 1), non-manifold (count ≥ 3), or crease.
+  const segVa: number[] = [], segVb: number[] = [];
+  for (const r of rec.values()) {
+    if (r.count === 1 || r.count >= 3 || r.sharp) { segVa.push(r.va); segVb.push(r.vb); }
+  }
+  const edgeCount = segVa.length;
+  const edges = new Float32Array(edgeCount * 6);
+  for (let i = 0; i < edgeCount; i++) {
+    const va = segVa[i], vb = segVb[i];
+    edges.set([vpos[va * 3], vpos[va * 3 + 1], vpos[va * 3 + 2], vpos[vb * 3], vpos[vb * 3 + 1], vpos[vb * 3 + 2]], i * 6);
+  }
+
+  // Chain sharp segments into physical edges: walk across vertices of degree 2 so a
+  // subdivided straight edge OR a curved rim reads as ONE edge; stop at junctions.
+  const vseg = new Map<number, number[]>();
+  const push = (v: number, i: number) => { const l = vseg.get(v); if (l) l.push(i); else vseg.set(v, [i]); };
+  for (let i = 0; i < edgeCount; i++) { push(segVa[i], i); push(segVb[i], i); }
+  const edgeChainId = new Int32Array(edgeCount).fill(-1);
+  const chains: EdgeChain[] = [];
+  for (let start = 0; start < edgeCount; start++) {
+    if (edgeChainId[start] >= 0) continue;
+    const cid = chains.length;
+    const segs: number[] = [];
+    const stack = [start];
+    edgeChainId[start] = cid;
+    while (stack.length) {
+      const si = stack.pop()!;
+      segs.push(si);
+      for (const v of [segVa[si], segVb[si]]) {
+        const list = vseg.get(v)!;
+        if (list.length !== 2) continue; // junction — don't merge across
+        for (const nb of list) if (edgeChainId[nb] < 0) { edgeChainId[nb] = cid; stack.push(nb); }
+      }
+    }
+    // metrics: length, ends (vertices used once), centroid
+    const vcount = new Map<number, number>();
+    let len = 0;
+    const cen = new THREE.Vector3();
+    for (const si of segs) {
+      vcount.set(segVa[si], (vcount.get(segVa[si]) ?? 0) + 1);
+      vcount.set(segVb[si], (vcount.get(segVb[si]) ?? 0) + 1);
+      len += Math.hypot(edges[si * 6 + 3] - edges[si * 6], edges[si * 6 + 4] - edges[si * 6 + 1], edges[si * 6 + 5] - edges[si * 6 + 2]);
+      cen.add(new THREE.Vector3(edges[si * 6], edges[si * 6 + 1], edges[si * 6 + 2]));
+      cen.add(new THREE.Vector3(edges[si * 6 + 3], edges[si * 6 + 4], edges[si * 6 + 5]));
+    }
+    cen.multiplyScalar(1 / (segs.length * 2));
+    const ends = [...vcount.entries()].filter(([, c]) => c === 1).map(([v]) => v);
+    const closed = ends.length < 2;
+    const pv = (v: number) => new THREE.Vector3(vpos[v * 3], vpos[v * 3 + 1], vpos[v * 3 + 2]);
+    const A = closed ? cen : pv(ends[0]);
+    const B = closed ? cen : pv(ends[1]);
+    const C = closed ? cen : new THREE.Vector3().addVectors(A, B).multiplyScalar(0.5);
+    chains.push({ segs, ax: A.x, ay: A.y, az: A.z, bx: B.x, by: B.y, bz: B.z, cx: C.x, cy: C.y, cz: C.z, len, closed });
+  }
+
+  return { normals, d, degen, count, pos, idx, adj, vpos: new Float32Array(vpos), nUnique, edges, edgeCount, edgeChainId, chains };
 }
 
-/** Triangles coplanar with `faceIndex` (same normal + plane offset) — the flat face. */
-function coplanarTriangles(tri: TriData, faceIndex: number): number[] {
-  const nx = tri.normals[faceIndex * 3], ny = tri.normals[faceIndex * 3 + 1], nz = tri.normals[faceIndex * 3 + 2];
-  const dd = tri.d[faceIndex];
+/** Flood-fill the connected smooth region (flat OR curved) around a triangle,
+    crossing shared edges only where the crease stays gentle — stops at sharp edges. */
+function smoothRegion(tri: TriData, start: number): number[] {
+  const COS = Math.cos((33 * Math.PI) / 180);
+  const seen = new Uint8Array(tri.count);
   const out: number[] = [];
-  for (let t = 0; t < tri.count; t++) {
-    const dot = tri.normals[t * 3] * nx + tri.normals[t * 3 + 1] * ny + tri.normals[t * 3 + 2] * nz;
-    if (dot > 0.9986 && Math.abs(tri.d[t] - dd) < 0.15) out.push(t); // ~3° + 0.15 mm
+  const stack = [start];
+  seen[start] = 1;
+  while (stack.length) {
+    const t = stack.pop()!;
+    out.push(t);
+    if (tri.degen[t]) continue; // a sliver's normal is unreliable — don't grow from it
+    const tx = tri.normals[t * 3], ty = tri.normals[t * 3 + 1], tz = tri.normals[t * 3 + 2];
+    for (let e = 0; e < 3; e++) {
+      const nb = tri.adj[t * 3 + e];
+      if (nb < 0 || seen[nb] || tri.degen[nb]) continue;
+      const dot = tx * tri.normals[nb * 3] + ty * tri.normals[nb * 3 + 1] + tz * tri.normals[nb * 3 + 2];
+      if (dot > COS) { seen[nb] = 1; stack.push(nb); }
+    }
   }
   return out;
 }
 
-/** Build the highlight geometry for the face under `faceIndex`, show it, return its metrics. */
-function showFace(s: Internals, faceIndex: number): { center: THREE.Vector3; normal: THREE.Vector3; w: number; h: number } | null {
-  if (!s.tri) return null;
-  const tris = coplanarTriangles(s.tri, faceIndex);
-  if (!tris.length) return null;
-  const { pos, idx } = s.tri;
-  const positions = new Float32Array(tris.length * 9);
-  const v = new THREE.Vector3();
-  const bbox = new THREE.Box3();
-  let p = 0;
-  for (const t of tris) {
-    for (let k = 0; k < 3; k++) {
-      const vi = idx ? idx.getX(t * 3 + k) : t * 3 + k;
-      v.fromBufferAttribute(pos, vi);
-      positions[p++] = v.x; positions[p++] = v.y; positions[p++] = v.z;
-      bbox.expandByPoint(v);
-    }
+function nearestVertexId(tri: TriData, p: THREE.Vector3): number {
+  let best = 0, bestD = Infinity;
+  for (let i = 0; i < tri.nUnique; i++) {
+    const dx = tri.vpos[i * 3] - p.x, dy = tri.vpos[i * 3 + 1] - p.y, dz = tri.vpos[i * 3 + 2] - p.z;
+    const dd = dx * dx + dy * dy + dz * dz;
+    if (dd < bestD) { bestD = dd; best = i; }
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-  s.highlight.geometry.dispose();
-  s.highlight.geometry = geo;
-  s.highlight.visible = true;
+  return best;
+}
 
-  const center = bbox.getCenter(new THREE.Vector3());
-  const size = bbox.getSize(new THREE.Vector3());
-  const normal = new THREE.Vector3(s.tri.normals[faceIndex * 3], s.tri.normals[faceIndex * 3 + 1], s.tri.normals[faceIndex * 3 + 2]);
-  // In-plane extent = the two bbox dims not aligned with the normal.
-  const dims = [size.x, size.y, size.z];
-  const axis = Math.abs(normal.x) > 0.9 ? 0 : Math.abs(normal.y) > 0.9 ? 1 : Math.abs(normal.z) > 0.9 ? 2 : -1;
-  let w: number, h: number;
-  if (axis >= 0) { const rest = dims.filter((_, i) => i !== axis); w = rest[0]; h = rest[1]; }
-  else { const sorted = [...dims].sort((a, b) => b - a); w = sorted[0]; h = sorted[1]; }
-  return { center, normal, w, h };
+/** Index of the physical edge (chain) whose nearest tessellation segment is closest to p. */
+function nearestEdgeChainId(tri: TriData, p: THREE.Vector3): number {
+  if (!tri.edgeCount) return -1;
+  let best = -1, bestD = Infinity;
+  const a = new THREE.Vector3(), ab = new THREE.Vector3(), ap = new THREE.Vector3(), proj = new THREE.Vector3();
+  for (let i = 0; i < tri.edgeCount; i++) {
+    a.set(tri.edges[i * 6], tri.edges[i * 6 + 1], tri.edges[i * 6 + 2]);
+    ab.set(tri.edges[i * 6 + 3] - a.x, tri.edges[i * 6 + 4] - a.y, tri.edges[i * 6 + 5] - a.z);
+    ap.subVectors(p, a);
+    const t = Math.max(0, Math.min(1, ap.dot(ab) / Math.max(ab.lengthSq(), 1e-9)));
+    proj.copy(a).addScaledVector(ab, t);
+    const dd = proj.distanceToSquared(p);
+    if (dd < bestD) { bestD = dd; best = i; }
+  }
+  return best < 0 ? -1 : tri.edgeChainId[best];
+}
+
+/** Highlight the face/edge/vertex under the cursor and return its metrics. Caches
+    the last resolved target so a hover that stays on it rebuilds nothing. */
+function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: number, hit: THREE.Vector3): FeatureInfo | null {
+  const tri = s.tri;
+  if (!tri) return null;
+  const showOnly = (m: THREE.Mesh) => { s.highlight.visible = m === s.highlight; s.edgeHi.visible = m === s.edgeHi; s.vertHi.visible = m === s.vertHi; };
+
+  if (kind === "face") {
+    // Fast path: cursor still inside the cached region → nothing to rebuild.
+    if (s.selCache?.region && s.selCache.info.kind === "face" && s.selCache.region[faceIndex]) {
+      showOnly(s.highlight);
+      return s.selCache.info;
+    }
+    const tris = smoothRegion(tri, faceIndex);
+    if (!tris.length) return null;
+    const { pos, idx } = tri;
+    const positions = new Float32Array(tris.length * 9);
+    const v = new THREE.Vector3();
+    const bbox = new THREE.Box3();
+    let p = 0;
+    for (const t of tris) {
+      for (let k = 0; k < 3; k++) {
+        v.fromBufferAttribute(pos, idx ? idx.getX(t * 3 + k) : t * 3 + k);
+        positions[p++] = v.x; positions[p++] = v.y; positions[p++] = v.z;
+        bbox.expandByPoint(v);
+      }
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    s.highlight.geometry.dispose();
+    s.highlight.geometry = geo;
+    const center = bbox.getCenter(new THREE.Vector3());
+    const size = bbox.getSize(new THREE.Vector3());
+    const normal = new THREE.Vector3(tri.normals[faceIndex * 3], tri.normals[faceIndex * 3 + 1], tri.normals[faceIndex * 3 + 2]);
+    // Curved if the region's normals fan out — the flat-plane framing wouldn't fit.
+    const COS18 = Math.cos((18 * Math.PI) / 180);
+    let curved = false;
+    for (const t of tris) {
+      if (tri.degen[t]) continue;
+      if (normal.x * tri.normals[t * 3] + normal.y * tri.normals[t * 3 + 1] + normal.z * tri.normals[t * 3 + 2] < COS18) { curved = true; break; }
+    }
+    const dims = [size.x, size.y, size.z];
+    const axis = Math.abs(normal.x) > 0.9 ? 0 : Math.abs(normal.y) > 0.9 ? 1 : Math.abs(normal.z) > 0.9 ? 2 : -1;
+    let w: number, h: number;
+    if (axis >= 0 && !curved) { const rest = dims.filter((_, i) => i !== axis); w = rest[0]; h = rest[1]; }
+    else { const sorted = [...dims].sort((x, y) => y - x); w = sorted[0]; h = sorted[1]; }
+    const info: FeatureInfo = { kind: "face", center, normal, w, h, curved };
+    const region = new Uint8Array(tri.count);
+    for (const t of tris) region[t] = 1;
+    s.selCache = { key: `face:${faceIndex}`, info, region };
+    showOnly(s.highlight);
+    return info;
+  }
+
+  if (kind === "edge") {
+    const chainId = nearestEdgeChainId(tri, hit);
+    if (chainId < 0) return null;
+    if (s.selCache?.key === `edge:${chainId}` && s.selCache.info.kind === "edge") { showOnly(s.edgeHi); return s.selCache.info; }
+    const ch = tri.chains[chainId];
+    // Highlight the WHOLE physical edge (a tube along every segment), not one chord.
+    const parts: THREE.BufferGeometry[] = [];
+    const yA = new THREE.Vector3(0, 1, 0);
+    const A = new THREE.Vector3(), B = new THREE.Vector3(), dir = new THREE.Vector3(), mid = new THREE.Vector3(), q = new THREE.Quaternion(), mtx = new THREE.Matrix4(), scl = new THREE.Vector3();
+    for (const si of ch.segs) {
+      A.set(tri.edges[si * 6], tri.edges[si * 6 + 1], tri.edges[si * 6 + 2]);
+      B.set(tri.edges[si * 6 + 3], tri.edges[si * 6 + 4], tri.edges[si * 6 + 5]);
+      dir.subVectors(B, A);
+      const L = dir.length();
+      if (L < 1e-6) continue;
+      dir.divideScalar(L);
+      mid.addVectors(A, B).multiplyScalar(0.5);
+      q.setFromUnitVectors(yA, dir);
+      scl.set(s.markR, L, s.markR);
+      mtx.compose(mid, q, scl);
+      const cyl = new THREE.CylinderGeometry(1, 1, 1, 8);
+      cyl.applyMatrix4(mtx);
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute("position", cyl.getAttribute("position"));
+      if (cyl.index) pg.setIndex(cyl.index);
+      parts.push(pg);
+    }
+    if (!parts.length) return null;
+    const merged = mergeGeometries(parts, false);
+    s.edgeHi.geometry.dispose();
+    s.edgeHi.geometry = merged;
+    s.edgeHi.position.set(0, 0, 0);
+    s.edgeHi.quaternion.identity();
+    s.edgeHi.scale.set(1, 1, 1);
+    const info: FeatureInfo = {
+      kind: "edge",
+      a: new THREE.Vector3(ch.ax, ch.ay, ch.az),
+      b: new THREE.Vector3(ch.bx, ch.by, ch.bz),
+      c: new THREE.Vector3(ch.cx, ch.cy, ch.cz),
+      len: ch.len, closed: ch.closed,
+    };
+    s.selCache = { key: `edge:${chainId}`, info, region: null };
+    showOnly(s.edgeHi);
+    return info;
+  }
+
+  const vId = nearestVertexId(tri, hit);
+  if (s.selCache?.key === `vertex:${vId}` && s.selCache.info.kind === "vertex") { showOnly(s.vertHi); return s.selCache.info; }
+  const nv = new THREE.Vector3(tri.vpos[vId * 3], tri.vpos[vId * 3 + 1], tri.vpos[vId * 3 + 2]);
+  s.vertHi.position.copy(nv);
+  s.vertHi.scale.setScalar(s.markR * 1.8);
+  const info: FeatureInfo = { kind: "vertex", pos: nv };
+  s.selCache = { key: `vertex:${vId}`, info, region: null };
+  showOnly(s.vertHi);
+  return info;
+}
+
+/** Map an internal FeatureInfo to the rounded, serialisable payload the app edits with. */
+function featureToPayload(info: FeatureInfo): PickedFeature {
+  const r = (n: number) => Math.round(n * 10) / 10;
+  if (info.kind === "face") {
+    return {
+      kind: "face", label: info.curved ? "curved surface" : `${faceLabel(info.normal)} face`, curved: info.curved,
+      cx: r(info.center.x), cy: r(info.center.y), cz: r(info.center.z),
+      nx: r(info.normal.x), ny: r(info.normal.y), nz: r(info.normal.z),
+      w: r(info.w), h: r(info.h),
+    };
+  }
+  if (info.kind === "edge") {
+    return {
+      kind: "edge", label: info.closed ? "edge loop" : "edge", closed: info.closed,
+      cx: r(info.c.x), cy: r(info.c.y), cz: r(info.c.z),
+      ax: r(info.a.x), ay: r(info.a.y), az: r(info.a.z),
+      bx: r(info.b.x), by: r(info.b.y), bz: r(info.b.z),
+      len: r(info.len),
+    };
+  }
+  return { kind: "vertex", label: "corner", cx: r(info.pos.x), cy: r(info.pos.y), cz: r(info.pos.z) };
 }
 
 /** Human name for a face from its outward normal (Z-up). */

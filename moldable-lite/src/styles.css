@@ -283,6 +283,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .seg { display: inline-flex; background: var(--surf); border: 1px solid var(--bord); border-radius: 9px; padding: 2px; }
 .seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); white-space: nowrap; }
 .seg button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
+.seg.sm button { padding: 3px 9px; font-size: 11px; }
 .modehint { font-size: 11px; color: var(--subt); }
 /* Web-search toggle in the composer — cycles Auto → On → Off. */
 .web-toggle { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid var(--bord); border-radius: var(--r-md); background: var(--bg); color: var(--mut); font-size: 12px; font-weight: 500; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }

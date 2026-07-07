@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Viewer, type ViewerHandle, type PickedPoint, type PickedFace } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
@@ -263,13 +263,15 @@ interface Props {
     pick: (pt: PickedPoint) => void;
     select: (id: string) => void;
   };
-  faceCtl: {
+  featureCtl: {
     mode: boolean;
     toggleMode: () => void;
-    selected: PickedFace | null;
+    kind: "face" | "edge" | "vertex";
+    setKind: (k: "face" | "edge" | "vertex") => void;
+    selected: PickedFeature | null;
     text: string;
     setText: (s: string) => void;
-    pick: (f: PickedFace) => void;
+    pick: (f: PickedFeature) => void;
     askAi: () => void;
     clear: () => void;
   };
@@ -503,13 +505,22 @@ export function Workspace(p: Props) {
             {(p.tab === "3d" || p.tab === "params") && (
               <div className="viewer-tools">
                 <button
-                  className={`ghost sm${p.faceCtl.mode ? " on" : ""}`}
-                  aria-pressed={p.faceCtl.mode}
-                  title="Select a face: hover to highlight, click to pick it, then tell the AI exactly what to change on it"
-                  onClick={p.faceCtl.toggleMode}
+                  className={`ghost sm${p.featureCtl.mode ? " on" : ""}`}
+                  aria-pressed={p.featureCtl.mode}
+                  title="Select mode: hover to highlight a face/edge/corner, click to pick it, then tell the AI what to change on it"
+                  onClick={p.featureCtl.toggleMode}
                 >
-                  Select face
+                  Select
                 </button>
+                {p.featureCtl.mode && (
+                  <div className="seg sm">
+                    {(["face", "edge", "vertex"] as const).map((k) => (
+                      <button key={k} className={p.featureCtl.kind === k ? "on" : ""} onClick={() => p.featureCtl.setKind(k)}>
+                        {k === "vertex" ? "Corner" : k.charAt(0).toUpperCase() + k.slice(1)}
+                      </button>
+                    ))}
+                  </div>
+                )}
                 <button
                   className={`ghost sm${p.pinCtl.mode ? " on" : ""}`}
                   aria-pressed={p.pinCtl.mode}
@@ -543,9 +554,10 @@ export function Workspace(p: Props) {
                 pins={p.pins}
                 selectedPin={p.pinCtl.active?.pin.id ?? null}
                 pinMode={p.pinCtl.mode}
-                selectMode={p.faceCtl.mode}
+                selectMode={p.featureCtl.mode}
+                selectKind={p.featureCtl.kind}
                 onPickPoint={p.pinCtl.pick}
-                onPickFace={p.faceCtl.pick}
+                onPickFeature={p.featureCtl.pick}
                 onSelectPin={p.pinCtl.select}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
@@ -577,31 +589,37 @@ export function Workspace(p: Props) {
                   {p.activeKind !== "replicad" && <p className="fine">AI edits need a Precise (CAD) model — notes work everywhere.</p>}
                 </div>
               )}
-              {p.faceCtl.selected && (
+              {p.featureCtl.selected && (
                 <div className="pin-panel">
                   <div className="pin-head">
                     <span>
-                      {p.faceCtl.selected.label.charAt(0).toUpperCase() + p.faceCtl.selected.label.slice(1)} face · {p.faceCtl.selected.w} × {p.faceCtl.selected.h} mm
+                      {(() => {
+                        const f = p.featureCtl.selected!;
+                        const cap = f.label.charAt(0).toUpperCase() + f.label.slice(1);
+                        if (f.kind === "face") return `${cap} · ${f.w} × ${f.h} mm`;
+                        if (f.kind === "edge") return `${cap} · ${f.len} mm long`;
+                        return `Corner · ${f.cx}, ${f.cy}, ${f.cz} mm`;
+                      })()}
                     </span>
-                    <button className="x" aria-label="Clear selection" onClick={p.faceCtl.clear}><IconX /></button>
+                    <button className="x" aria-label="Clear selection" onClick={p.featureCtl.clear}><IconX /></button>
                   </div>
                   <textarea
                     rows={2}
-                    value={p.faceCtl.text}
-                    onChange={(e) => p.faceCtl.setText(e.target.value)}
-                    placeholder="e.g. add two 4 mm screw holes · round these corners 2 mm"
+                    value={p.featureCtl.text}
+                    onChange={(e) => p.featureCtl.setText(e.target.value)}
+                    placeholder={p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep"}
                   />
                   <div className="param-actions">
                     <button
                       className="primary sm"
-                      disabled={!p.faceCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
-                      onClick={p.faceCtl.askAi}
+                      disabled={!p.featureCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
+                      onClick={p.featureCtl.askAi}
                     >
-                      Ask AI to change this face
+                      Ask AI to change this
                     </button>
-                    <button className="ghost sm" onClick={p.faceCtl.clear}>Cancel</button>
+                    <button className="ghost sm" onClick={p.featureCtl.clear}>Cancel</button>
                   </div>
-                  {p.activeKind !== "replicad" && <p className="fine">Face edits need a Precise (CAD) model.</p>}
+                  {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
                 </div>
               )}
               {/* Parameters dock over the 3D view so you can watch the model update live — close returns to the plain 3D view. */}

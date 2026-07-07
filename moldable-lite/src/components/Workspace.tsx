@@ -198,6 +198,7 @@ interface Props {
   brain: { provider: LlmProviderId; model: string };
   hasBrainKey: (provider: LlmProviderId) => boolean;
   onPickBrain: (provider: LlmProviderId, model: string) => void;
+  autoPick: string; // "Auto → <model> (<why>)" shown when OpenRouter Auto picks per request
   genProvider: string;
   genModel: string;
   hasGenKey: (provider: string) => boolean;
@@ -431,7 +432,9 @@ export function Workspace(p: Props) {
                 )}
               </div>
               <span className="modehint">
-                {p.mode === "precise"
+                {p.mode === "precise" && p.autoPick
+                  ? p.autoPick
+                  : p.mode === "precise"
                   ? p.guided
                     ? "Replacement part — clearance is added to fitted features"
                     : p.imageUrl

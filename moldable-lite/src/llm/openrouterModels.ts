@@ -152,3 +152,36 @@ export function modelSupportsReasoning(id: string): boolean {
   const m = cachedOpenRouterModels().find((x) => x.id === id);
   return !!m?.reasoning;
 }
+
+// Sentinel model id meaning "let Moldable pick the OpenRouter model per request".
+export const AUTO_MODEL = "auto";
+
+// Words that signal a geometrically/relationally HARD request that benefits from a
+// stronger (often reasoning) model rather than a cheap-fast one.
+const HARD_RE =
+  /\b(thread|gear|involute|tangent|toleranc|press.?fit|snap.?fit|helix|spline|sweep|loft|revolve|assembl|mate|constraint|symmetr|parametric|equation|angle|degree|chamfer|gusset|lattice|honeycomb|clearance|interfere|mesh with|fit together|screw|bolt|nut|hinge|bearing)\b/i;
+
+export interface AutoPick {
+  model: ORModel;
+  tier: "fast" | "strong";
+  reason: string;
+}
+
+/** Classify a CAD request and choose an OpenRouter model from the recommended set:
+ *  a cheap-fast model for small edits, a strong (reasoning-preferred) model for fresh
+ *  generations or geometrically hard asks. Returns null if the catalogue is empty. */
+export function pickAutoModel(models: ORModel[], opts: { prompt: string; isEdit: boolean }): AutoPick | null {
+  const recs = recommendedForApp(models);
+  if (!recs.length) return null;
+  const prompt = opts.prompt ?? "";
+  const words = prompt.trim() ? prompt.trim().split(/\s+/).length : 0;
+  const hard = HARD_RE.test(prompt) || words > 40 || (!opts.isEdit && words > 20);
+  if (!opts.isEdit || hard) {
+    // Prefer a reasoning model for hard/fresh work; otherwise the top-ranked model.
+    const strong = recs.find((m) => m.reasoning) ?? recs[0];
+    return { model: strong, tier: "strong", reason: !opts.isEdit ? "new model" : "complex edit" };
+  }
+  // Simple edit → cheapest recommended model (fast + low token cost).
+  const cheap = [...recs].sort((a, b) => (a.inPrice ?? 9) - (b.inPrice ?? 9))[0] ?? recs[0];
+  return { model: cheap, tier: "fast", reason: "small edit" };
+}

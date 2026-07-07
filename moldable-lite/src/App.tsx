@@ -5,7 +5,8 @@ import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
 import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
-import { geometryToSTL } from "./print/exportClient";
+import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClient";
+import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
@@ -237,6 +238,7 @@ export default function App() {
     });
 
   const [result, setResult] = useState<EngineResult | null>(null);
+  const [splitPieces, setSplitPieces] = useState<SplitPiece[] | null>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
@@ -588,6 +590,7 @@ export default function App() {
 
   function applyResultNoCommit(res: EngineResult) {
     setResult(res);
+    setSplitPieces(null); // any new/changed model invalidates a prior split's pieces
     setGeometry(res.geometry);
     setDims(res.dims);
     setCodeBuffer(sourceText(res.source));
@@ -694,18 +697,39 @@ export default function App() {
         supportsStep: false,
         glb: geometryToSTL(out.geometry),
       });
+      setSplitPieces(out.pieces); // enables the colour-coded pieces list + per-piece / ZIP export
       setMessages((m) => [
         ...m,
         {
           id: mid(),
           role: "assistant",
-          text: `Split into ${out.parts} parts — each fits your ${bed.x} × ${bed.y} mm bed — and laid them out on the plate. Export STL/3MF, print the pieces, and glue or pin them together. (This replaces the single model; use History to go back.)`,
+          text: `Split into ${out.parts} colour-coded pieces — each fits your ${bed.x} × ${bed.y} mm bed. Export them all as separate STLs/3MFs (or one file), print, and glue or pin them together. (This replaces the single model; use Undo or History to go back.)`,
         },
       ]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Split failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
+    }
+  }
+
+  const pieceBlob = (g: THREE.BufferGeometry, format: "stl" | "3mf") => (format === "stl" ? geometryToSTL(g) : geometryTo3MF(g));
+  function exportPiece(index: number, format: "stl" | "3mf") {
+    const piece = splitPieces?.[index];
+    if (!piece) return;
+    const base = safeFileName(project?.name ?? "model", format).replace(/\.[^.]+$/, "");
+    downloadBlob(pieceBlob(piece.geometry, format), `${base}-part${index + 1}.${format}`);
+  }
+  async function exportAllPieces(format: "stl" | "3mf") {
+    if (!splitPieces?.length) return;
+    const base = safeFileName(project?.name ?? "model", format).replace(/\.[^.]+$/, "");
+    try {
+      const files: Record<string, Blob> = {};
+      splitPieces.forEach((p, i) => { files[`${base}-part${i + 1}.${format}`] = pieceBlob(p.geometry, format); });
+      const zip = await zipModelFiles(files);
+      downloadBlob(zip, `${base}-parts-${format}.zip`);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
     }
   }
 
@@ -1460,6 +1484,7 @@ export default function App() {
         onRepair={repairMesh}
         onSimplify={simplifyMesh}
         onSplit={splitMesh}
+        splitCtl={{ pieces: splitPieces, exportPiece, exportAll: exportAllPieces, clear: () => setSplitPieces(null) }}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy }}

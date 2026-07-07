@@ -8,6 +8,7 @@ import type { EngineKind, ExportFormat } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
+import type { SplitPiece } from "../print/split";
 import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
@@ -241,6 +242,12 @@ interface Props {
   onRepair: () => void;
   onSimplify: () => void;
   onSplit: () => void;
+  splitCtl: {
+    pieces: SplitPiece[] | null;
+    exportPiece: (index: number, format: "stl" | "3mf") => void;
+    exportAll: (format: "stl" | "3mf") => void;
+    clear: () => void;
+  };
   versions: Version[];
   onRestore: (id: string) => void;
   undoCtl: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean; busy: boolean };
@@ -636,6 +643,9 @@ export function Workspace(p: Props) {
                   </div>
                   {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
                 </div>
+              )}
+              {p.tab === "3d" && p.splitCtl.pieces && p.splitCtl.pieces.length > 0 && (
+                <SplitPiecesPanel splitCtl={p.splitCtl} />
               )}
               {/* Parameters dock over the 3D view so you can watch the model update live — close returns to the plain 3D view. */}
               {p.tab === "params" && (
@@ -1128,6 +1138,36 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
         </div>
       )}
       <button className="primary" disabled={disabled} onClick={() => setOpen((o) => !o)}>Export ▾</button>
+    </div>
+  );
+}
+
+function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
+  const [format, setFormat] = useState<"stl" | "3mf">("stl");
+  const pieces = splitCtl.pieces ?? [];
+  return (
+    <div className="split-panel">
+      <div className="pin-head">
+        <span>{pieces.length} pieces</span>
+        <button className="x" aria-label="Hide pieces list" onClick={splitCtl.clear}><IconX /></button>
+      </div>
+      <div className="split-actions">
+        <div className="seg sm">
+          <button className={format === "stl" ? "on" : ""} onClick={() => setFormat("stl")}>STL</button>
+          <button className={format === "3mf" ? "on" : ""} onClick={() => setFormat("3mf")}>3MF</button>
+        </div>
+        <button className="primary sm" onClick={() => splitCtl.exportAll(format)}>Download all ({format.toUpperCase()} zip)</button>
+      </div>
+      <div className="split-list">
+        {pieces.map((pc, i) => (
+          <div className="split-row" key={i}>
+            <span className="split-swatch" style={{ background: pc.color }} />
+            <span className="split-label">Part {i + 1}<span className="fine"> · {pc.dims.x} × {pc.dims.y} × {pc.dims.z} mm</span></span>
+            <button className="ghost sm" title={`Download part ${i + 1} as ${format.toUpperCase()}`} onClick={() => splitCtl.exportPiece(i, format)}>{format.toUpperCase()}</button>
+          </div>
+        ))}
+      </div>
+      <p className="fine">Each piece is a separate printable island. Print them, then glue or pin together.</p>
     </div>
   );
 }

@@ -384,6 +384,15 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .pin-head .x { background: none; border: none; color: var(--subt); font-size: 14px; padding: 0; }
 .pin-panel textarea { width: 100%; border: 1px solid var(--bord); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; background: var(--bg); color: var(--ink); }
 .pin-panel .param-actions { margin-top: 10px; flex-wrap: wrap; }
+/* Split-pieces list: floats bottom-left so it clears the top-left pin/feature panel and top-right stats. */
+.split-panel { position: absolute; left: 12px; bottom: 12px; z-index: 6; width: 290px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: var(--shadow-md); }
+.split-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.split-list { max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.split-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
+.split-swatch { width: 14px; height: 14px; border-radius: 4px; flex: none; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
+.split-label { flex: 1; font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.split-label .fine { display: inline; }
+.split-panel > .fine { margin-top: 8px; }
 /* The one live/attention signal wears the sparing orange — a real "working now"
    cue, distinct from the teal brand. */
 .gen-pill { display: inline-flex; align-items: center; gap: 7px; color: var(--live); font-variant-numeric: tabular-nums; }

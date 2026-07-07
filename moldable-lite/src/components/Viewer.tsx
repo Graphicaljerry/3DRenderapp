@@ -604,7 +604,7 @@ function captureThumbnail(s: Internals): string | null {
 // ---- feature selection (face / edge / vertex) ------------------------------
 
 type FeatureInfo =
-  | { kind: "face"; center: THREE.Vector3; normal: THREE.Vector3; w: number; h: number; curved: boolean }
+  | { kind: "face"; center: THREE.Vector3; normal: THREE.Vector3; w: number; h: number; curved: boolean; onFace: THREE.Vector3 }
   | { kind: "edge"; a: THREE.Vector3; b: THREE.Vector3; c: THREE.Vector3; len: number; closed: boolean }
   | { kind: "vertex"; pos: THREE.Vector3 };
 
@@ -842,7 +842,13 @@ function faceRegionInfo(tri: TriData, tris: number[], rep: number): { info: Feat
   let w: number, h: number;
   if (axis >= 0 && !curved) { const rest = dims.filter((_, i) => i !== axis); w = rest[0]; h = rest[1]; }
   else { const sorted = [...dims].sort((x, y) => y - x); w = sorted[0]; h = sorted[1]; }
-  return { info: { kind: "face", center, normal, w, h, curved }, positions };
+  // A point guaranteed ON the face (the representative triangle's centroid) — the bbox
+  // centre can fall off an L-shaped face, but a triangle centroid never does. Used to
+  // resolve the exact face for direct extrude/fillet ops.
+  const onFace = new THREE.Vector3();
+  for (let k = 0; k < 3; k++) onFace.add(new THREE.Vector3().fromBufferAttribute(tri.pos, tri.idx ? tri.idx.getX(rep * 3 + k) : rep * 3 + k));
+  onFace.multiplyScalar(1 / 3);
+  return { info: { kind: "face", center, normal, w, h, curved, onFace }, positions };
 }
 
 /** Marquee face selection: every smooth face with a visible triangle whose centroid
@@ -998,6 +1004,7 @@ function featureToPayload(info: FeatureInfo): PickedFeature {
       cx: r(info.center.x), cy: r(info.center.y), cz: r(info.center.z),
       nx: r(info.normal.x), ny: r(info.normal.y), nz: r(info.normal.z),
       w: r(info.w), h: r(info.h),
+      at: [info.onFace.x, info.onFace.y, info.onFace.z], // full-precision point on the face
     };
   }
   if (info.kind === "edge") {

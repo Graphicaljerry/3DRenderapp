@@ -4,7 +4,7 @@ import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
-import type { EngineKind, ExportFormat } from "../engine/types";
+import type { EngineKind, ExportFormat, CadOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
@@ -290,7 +290,7 @@ interface Props {
     pick: (f: PickedFeature) => void;
     pickFaces: (faces: PickedFeature[]) => void;
     askAi: () => void;
-    directOp: (type: "fillet" | "chamfer", size: number) => void;
+    directOp: (type: CadOp["type"], size: number) => void;
     clear: () => void;
   };
   facesCtl: {
@@ -636,9 +636,9 @@ export function Workspace(p: Props) {
                     </span>
                     <button className="x" aria-label="Clear selection" onClick={p.featureCtl.clear}><IconX /></button>
                   </div>
-                  {(p.featureCtl.selected.kind === "edge" || p.featureCtl.selected.kind === "vertex") && p.activeKind === "replicad" && (
+                  {p.activeKind === "replicad" && (
                     <DirectOpBar
-                      what={p.featureCtl.selected.kind === "vertex" ? "corner" : "edge"}
+                      kind={p.featureCtl.selected.kind}
                       busy={p.status === "generating"}
                       onApply={p.featureCtl.directOp}
                     />
@@ -1188,23 +1188,29 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
   );
 }
 
-// Free, instant fillet/chamfer on the picked edge/corner — computed locally by
-// replicad, no AI call. Shown in the selection panel for edge/corner picks.
-function DirectOpBar({ what, busy, onApply }: { what: string; busy: boolean; onApply: (type: "fillet" | "chamfer", size: number) => void }) {
+// Free, instant geometry ops on the picked edge/corner/face — computed locally by
+// replicad, no AI call. Faces also get Extrude (push out / pull in).
+function DirectOpBar({ kind, busy, onApply }: { kind: SelectKind; busy: boolean; onApply: (type: CadOp["type"], size: number) => void }) {
   const [size, setSize] = useState(2);
+  const face = kind === "face";
+  const what = kind === "vertex" ? "corner" : kind === "face" ? "face" : "edge";
+  const round: CadOp["type"] = face ? "face-fillet" : "fillet";
+  const chamfer: CadOp["type"] = face ? "face-chamfer" : "chamfer";
   return (
     <div className="directop">
       <span className="directop-label">Quick edit — free, no AI</span>
       <div className="directop-row">
         <input
-          type="number" min={0.2} max={50} step={0.2} value={size}
-          onChange={(e) => setSize(Math.max(0.1, Number(e.target.value) || 0))}
+          type="number" min={face ? -50 : 0.2} max={50} step={0.2} value={size}
+          onChange={(e) => setSize(Number(e.target.value) || 0)}
           aria-label="size in mm"
         />
         <span className="fine">mm</span>
-        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("fillet", size)} title={`Round this ${what} by ${size} mm — no tokens`}>Round</button>
-        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("chamfer", size)} title={`Chamfer this ${what} by ${size} mm — no tokens`}>Chamfer</button>
+        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(round, Math.abs(size))} title={`Round the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Round</button>
+        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(chamfer, Math.abs(size))} title={`Chamfer the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Chamfer</button>
+        {face && <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("extrude", size)} title={`Push this face out (+) or in (−) by ${size} mm — no tokens`}>Extrude</button>}
       </div>
+      {face && <p className="fine">Extrude: positive pushes the face out, negative pulls it in.</p>}
     </div>
   );
 }

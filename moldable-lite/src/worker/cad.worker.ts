@@ -35,18 +35,37 @@ function sanitize(code: string): string {
 // passed to main() as its third argument so code can modify it directly.
 let importedShape: any = null;
 
-/** Apply the user's direct fillet/chamfer ops to a built shape. `containsPoint`
- *  matches every edge through the target point, so an edge midpoint rounds that edge
- *  and a corner vertex rounds all edges meeting there. Each op reports its own error. */
+/** Apply the user's direct ops to a built shape — all local, no AI.
+ *  edge/corner: fillet/chamfer every edge through the point.
+ *  face-fillet/chamfer: round/bevel all edges bounding the face at the point.
+ *  extrude: push the face out (+) or in (−) by the distance. Each op reports its own error. */
 function applyOps(shape: any, ops?: WorkerOp[]): any {
+  const R: any = replicad;
   let s = shape;
   for (const op of ops ?? []) {
     try {
-      const filter = (e: any) => e.containsPoint(op.at);
-      s = op.type === "fillet" ? s.fillet(op.size, filter) : s.chamfer(op.size, filter);
+      if (op.type === "fillet" || op.type === "chamfer") {
+        const filter = (e: any) => e.containsPoint(op.at);
+        s = op.type === "fillet" ? s.fillet(op.size, filter) : s.chamfer(op.size, filter);
+      } else {
+        const face = new R.FaceFinder().containsPoint(op.at).find(s, { unique: true });
+        if (!face) throw new Error("couldn't resolve the face at that point");
+        if (op.type === "extrude") {
+          // Extrude the face (holes preserved) along its outward normal by the distance;
+          // positive fuses (push out), negative cuts (pull in).
+          const vec = face.normalAt(op.at).normalized().multiply(op.size);
+          const prism = R.basicFaceExtrusion(face, vec);
+          s = op.size >= 0 ? s.fuse(prism) : s.cut(prism);
+        } else {
+          const inFace = (e: any) => e.inPlane(R.makePlaneFromFace(face));
+          s = op.type === "face-fillet" ? s.fillet(op.size, inFace) : s.chamfer(op.size, inFace);
+        }
+      }
     } catch (e: any) {
-      const kind = op.type === "fillet" ? "Fillet" : "Chamfer";
-      throw new Error(`${kind} of ${op.size} mm didn't apply here — try a smaller size or a different edge. (${String(e?.message ?? e)})`);
+      const label = op.type === "extrude"
+        ? `Extrude of ${op.size} mm`
+        : `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
+      throw new Error(`${label} didn't apply here — try a smaller size or a different spot. (${String(e?.message ?? e)})`);
     }
   }
   return s;

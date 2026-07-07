@@ -4,13 +4,14 @@ import type { ModelSpec } from "../cad/spec";
 export type EngineKind = "replicad" | "primitive" | "generative";
 export type ExportFormat = "stl" | "3mf" | "step" | "obj";
 
-// A direct, client-side geometry op the user applies to a picked edge/corner —
-// computed by replicad in the worker with NO LLM/API call. `at` is the target point
-// (an edge's midpoint, or a corner's vertex): fillet/chamfer hits every edge through it.
+// A direct, client-side geometry op the user applies to a picked edge/corner/face —
+// computed by replicad in the worker with NO LLM/API call. `at` is a point ON the
+// target: for edge/corner ops it's on the edge (fillet/chamfer every edge through it);
+// for face ops it's on the face (the FaceFinder resolves which face).
 export interface CadOp {
-  type: "fillet" | "chamfer";
+  type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude";
   at: [number, number, number];
-  size: number; // fillet radius / chamfer size, mm
+  size: number; // fillet radius / chamfer size / extrude distance (signed: +out, -in), mm
 }
 
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a

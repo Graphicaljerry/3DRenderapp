@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
 import type { Version } from "../store/types";
-import type { EngineKind, ExportFormat, CadOp } from "../engine/types";
+import type { EngineKind, ExportFormat, CadOp, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
@@ -290,7 +290,7 @@ interface Props {
     pick: (f: PickedFeature) => void;
     pickFaces: (faces: PickedFeature[]) => void;
     askAi: () => void;
-    directOp: (type: CadOp["type"], size: number) => void;
+    directOp: (type: PointOp["type"], size: number) => void;
     clear: () => void;
   };
   facesCtl: {
@@ -299,6 +299,12 @@ interface Props {
     setText: (s: string) => void;
     askAi: () => void;
     clear: () => void;
+  };
+  transformCtl: {
+    mode: TransformMode;
+    setMode: (m: TransformMode) => void;
+    commit: (c: TransformCommit) => void;
+    busy: boolean;
   };
 }
 
@@ -552,6 +558,21 @@ export function Workspace(p: Props) {
                     ))}
                   </div>
                 )}
+                <button
+                  className={`ghost sm${p.transformCtl.mode !== "off" ? " on" : ""}`}
+                  aria-pressed={p.transformCtl.mode !== "off"}
+                  disabled={p.transformCtl.busy}
+                  title="Transform tool: rotate the whole part (great for print orientation) or scale it — drag the gizmo, no AI, no tokens"
+                  onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "rotate" : "off")}
+                >
+                  Transform
+                </button>
+                {p.transformCtl.mode !== "off" && (
+                  <div className="seg sm mode-seg">
+                    <button className={p.transformCtl.mode === "rotate" ? "on" : ""} title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}>Rotate</button>
+                    <button className={p.transformCtl.mode === "scale" ? "on" : ""} title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}>Scale</button>
+                  </div>
+                )}
                 {p.pins.length > 0 && (
                   <button
                     className="ghost sm"
@@ -588,10 +609,12 @@ export function Workspace(p: Props) {
                 selectMode={p.featureCtl.mode}
                 selectKind={p.featureCtl.kind}
                 boxSelectionActive={p.facesCtl.faces.length > 0}
+                transformMode={p.transformCtl.mode}
                 onPickFaces={p.featureCtl.pickFaces}
                 onPickPoint={p.pinCtl.pick}
                 onPickFeature={p.featureCtl.pick}
                 onSelectPin={p.pinCtl.select}
+                onTransformCommit={p.transformCtl.commit}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
               {p.pinCtl.active && (
@@ -1190,12 +1213,12 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
 
 // Free, instant geometry ops on the picked edge/corner/face — computed locally by
 // replicad, no AI call. Faces also get Extrude (push out / pull in).
-function DirectOpBar({ kind, busy, onApply }: { kind: SelectKind; busy: boolean; onApply: (type: CadOp["type"], size: number) => void }) {
+function DirectOpBar({ kind, busy, onApply }: { kind: SelectKind; busy: boolean; onApply: (type: PointOp["type"], size: number) => void }) {
   const [size, setSize] = useState(2);
   const face = kind === "face";
   const what = kind === "vertex" ? "corner" : kind === "face" ? "face" : "edge";
-  const round: CadOp["type"] = face ? "face-fillet" : "fillet";
-  const chamfer: CadOp["type"] = face ? "face-chamfer" : "chamfer";
+  const round: PointOp["type"] = face ? "face-fillet" : "fillet";
+  const chamfer: PointOp["type"] = face ? "face-chamfer" : "chamfer";
   return (
     <div className="directop">
       <span className="directop-label">Quick edit — free, no AI</span>

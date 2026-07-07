@@ -212,6 +212,22 @@ button { font-family: inherit; cursor: pointer; }
 .fits { font-size: 12px; }
 .fits.ok { color: var(--accent-d); }
 .fits.no { color: var(--danger); }
+/* "Path to print" stepper — Model → Check → Print-ready, ending at Export. */
+.p2p { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.p2p-step { display: inline-flex; align-items: center; gap: 5px; border: none; background: none; padding: 0; font-size: 12px; font-weight: 500; color: var(--subt); }
+button.p2p-step { cursor: pointer; transition: color .15s ease; }
+button.p2p-step:hover { color: var(--ink2); }
+button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
+.p2p-step.done { color: var(--ink2); }
+.p2p-step.warn { color: var(--warn); }
+.p2p-step:not(:first-child)::before { content: "→"; color: var(--bord-strong); font-weight: 400; }
+.p2p-dot { width: 13px; height: 13px; border-radius: 50%; border: 1.5px solid var(--subt); display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box; flex: none; }
+.p2p-dot.pending { border-style: dashed; }
+.p2p-dot.done { background: var(--accent); border-color: var(--accent); }
+.p2p-dot.done::after { content: "✓"; color: #fff; font-size: 8px; font-weight: 800; line-height: 1; }
+.p2p-dot.warn { background: var(--warn); border-color: var(--warn); }
+.p2p-dot.warn::after { content: "!"; color: #fff; font-size: 9px; font-weight: 800; line-height: 1; }
+@media (max-width: 640px) { .p2p-lab { display: none; } }
 .export-wrap { margin-left: auto; position: relative; }
 /* z-index above the docked side panel (6): the transient menu always wins. */
 .export-menu { position: absolute; right: 0; bottom: 46px; z-index: 8; width: 280px; max-width: calc(100vw - 20px); background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; }

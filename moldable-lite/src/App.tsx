@@ -6,7 +6,7 @@ import { MeasureModal } from "./components/MeasureModal";
 import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
 import { geometryToSTL } from "./print/exportClient";
-import type { ViewerHandle, PickedFace } from "./components/Viewer";
+import type { ViewerHandle, PickedFeature } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
@@ -249,9 +249,10 @@ export default function App() {
   const [pinMode, setPinMode] = useState(false);
   const [activePinId, setActivePinId] = useState<string | null>(null);
   const [pinText, setPinText] = useState("");
-  // Face-select: hover-highlight + click a flat face, then edit it precisely.
+  // Feature-select: hover-highlight + click a face / edge / vertex, then edit it precisely.
   const [selectMode, setSelectMode] = useState(false);
-  const [selectedFace, setSelectedFace] = useState<PickedFace | null>(null);
+  const [selectKind, setSelectKind] = useState<"face" | "edge" | "vertex">("face");
+  const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
   const [faceText, setFaceText] = useState("");
 
   const [mode, setMode] = useState<Mode>("precise");
@@ -913,27 +914,35 @@ export default function App() {
     setPinText("");
   }
 
-  function pickFace(f: PickedFace) {
-    setSelectedFace(f);
+  function pickFeature(f: PickedFeature) {
+    setSelectedFeature(f);
     setFaceText("");
     setPinMode(false); // the two selection modes are mutually exclusive
   }
-  function askAiFace() {
-    if (!selectedFace || !faceText.trim()) return;
-    const f = selectedFace;
+  /** Describe the picked face/edge/vertex precisely so the AI edits exactly it. */
+  function featureDirective(f: PickedFeature): string {
+    if (f.kind === "face") {
+      return `Apply this on the ${f.label} — a flat/smooth surface facing (${f.nx}, ${f.ny}, ${f.nz}), ` +
+        `centred at x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm, spanning about ${f.w} × ${f.h} mm. ` +
+        `Keep the change ON this face and centred on it unless I say otherwise.`;
+    }
+    if (f.kind === "edge") {
+      return `Apply this to the edge running from (${f.ax}, ${f.ay}, ${f.az}) to (${f.bx}, ${f.by}, ${f.bz}) mm, ` +
+        `about ${f.len} mm long (midpoint x=${f.cx}, y=${f.cy}, z=${f.cz}). Target just this edge (e.g. a fillet or chamfer along it).`;
+    }
+    return `Apply this at the corner/vertex at x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm. Target just this corner (e.g. round or chamfer it).`;
+  }
+  function askAiFeature() {
+    if (!selectedFeature || !faceText.trim()) return;
+    const f = selectedFeature;
     const note = faceText.trim();
-    setSelectedFace(null);
+    setSelectedFeature(null);
     setSelectMode(false);
     setFaceText("");
-    // A face gives the model a real target: which flat surface, its centre, the way
-    // it faces, and how big it is — so the edit lands on THAT face, not a guess.
     const size = dims ? `The whole part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
     void send(
-      `Modify the current CAD model: ${note}. ${size}` +
-        `Apply this on the ${f.label} face — a flat surface facing (${f.nx}, ${f.ny}, ${f.nz}), ` +
-        `centred at x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm, spanning about ${f.w} × ${f.h} mm ` +
-        `(coordinates are Z-up, in millimetres). Keep the change ON this face and centred on it unless I say otherwise. ` +
-        `Leave the rest of the part unchanged and return the full updated code.`,
+      `Modify the current CAD model: ${note}. ${size}${featureDirective(f)} ` +
+        `(coordinates are Z-up, in millimetres). Leave the rest of the part unchanged and return the full updated code.`,
       "precise",
     );
   }
@@ -1426,15 +1435,17 @@ export default function App() {
           pick: pickPin,
           select: selectPin,
         }}
-        faceCtl={{
+        featureCtl={{
           mode: selectMode,
-          toggleMode: () => { setSelectMode((m) => !m); setPinMode(false); setSelectedFace(null); },
-          selected: selectedFace,
+          toggleMode: () => { setSelectMode((m) => !m); setPinMode(false); setSelectedFeature(null); },
+          kind: selectKind,
+          setKind: (k) => { setSelectKind(k); setSelectedFeature(null); },
+          selected: selectedFeature,
           text: faceText,
           setText: setFaceText,
-          pick: pickFace,
-          askAi: askAiFace,
-          clear: () => setSelectedFace(null),
+          pick: pickFeature,
+          askAi: askAiFeature,
+          clear: () => setSelectedFeature(null),
         }}
       />
       {showSettings && (

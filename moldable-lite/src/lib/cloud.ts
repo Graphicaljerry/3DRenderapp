@@ -8,7 +8,7 @@
 // - The same Supabase project hosts the relay edge function that unlocks
 //   Tripo/Meshy/fal on the hosted site (DEFAULT_RELAY).
 
-import { encryptPayload, decryptPayload, gatherSettings } from "./backup";
+import { encryptPayload, decryptPayload, gatherSettings, LOCAL_ONLY_KEYS } from "./backup";
 import { listProjects, getProject, putProject } from "../store/projects";
 import type { Project } from "../store/types";
 
@@ -155,7 +155,10 @@ export async function cloudSyncPull(): Promise<{ settings: number; projects: num
   if (sJson) {
     const data = JSON.parse(sJson) as Record<string, string>;
     for (const [k, v] of Object.entries(data)) {
-      if (k.startsWith("moldable_") && localStorage.getItem(k) !== v) {
+      // Never adopt device-local keys — adopting a stale cloud copy of a
+      // per-sync-changing key (moldable_last_sync) would keep flagging a change
+      // and reload forever. (Legacy blobs may still contain them.)
+      if (k.startsWith("moldable_") && !LOCAL_ONLY_KEYS.has(k) && localStorage.getItem(k) !== v) {
         localStorage.setItem(k, v);
         settings++;
       }

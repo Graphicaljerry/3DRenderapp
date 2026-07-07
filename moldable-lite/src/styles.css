@@ -51,6 +51,7 @@
   --shadow-lg: 0 16px 44px rgba(0,0,0,.55);
 }
 [data-theme="dark"] .bubble { background: #27282b; }
+[data-theme="dark"] .msg.user .bubble { background: color-mix(in srgb, #22c55e 17%, #27282b); }
 [data-theme="dark"] .msg.assistant .bubble { background: var(--accent-w); }
 [data-theme="dark"] .msg.err .bubble { background: #392629; color: #ff9ba0; }
 [data-theme="dark"] .banner { background: #33290f; color: #e3b568; border-bottom-color: #443a22; }
@@ -161,6 +162,8 @@ button { font-family: inherit; cursor: pointer; }
 .msg.user { align-self: flex-end; align-items: flex-end; }
 .who { font-size: 10px; font-weight: 600; color: var(--subt); }
 .bubble { font-size: 13px; line-height: 1.45; color: var(--ink2); background: #eff1f4; border-radius: 12px; padding: 10px 12px; white-space: pre-wrap; }
+/* The user's own messages get a slight green tint so they read as "yours". */
+.msg.user .bubble { background: color-mix(in srgb, #22c55e 10%, #eff1f4); }
 .bubble-img { display: block; max-width: 180px; max-height: 180px; width: auto; border-radius: 8px; margin-bottom: 6px; }
 .bubble-img:last-child { margin-bottom: 0; }
 .msg.assistant .bubble { background: var(--accent-w); }

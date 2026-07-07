@@ -116,7 +116,14 @@ button { font-family: inherit; cursor: pointer; }
 .wordmark { font-weight: 700; font-size: 17px; letter-spacing: 0.2px; }
 .lite { font-size: 10px; font-weight: 600; color: var(--mut); background: var(--surf); border: 1px solid var(--bord); border-radius: 6px; padding: 1px 5px; text-transform: uppercase; }
 .sep { color: var(--subt); margin: 0 4px; }
-.project { font-size: 14px; font-weight: 500; color: var(--ink2); max-width: 40vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Click-to-rename title beside the logo. Looks like plain text; reveals a pencil
+   and a subtle recessed field on hover so it reads as editable. */
+.project { display: inline-flex; align-items: center; gap: 6px; max-width: 40vw; background: none; border: 1px solid transparent; border-radius: var(--r-sm); padding: 3px 7px; margin-left: -3px; font-size: 14px; font-weight: 500; color: var(--ink2); transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.project .project-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project:hover { background: var(--surf); border-color: var(--bord); color: var(--ink); }
+.project-pen { flex: 0 0 auto; opacity: 0; color: var(--subt); transition: opacity .15s ease; }
+.project:hover .project-pen { opacity: 1; }
+.project-edit { max-width: 40vw; width: 22ch; background: var(--bg); border: 1px solid var(--accent); border-radius: var(--r-sm); padding: 3px 7px; margin-left: -3px; font-size: 14px; font-weight: 500; color: var(--ink); font-family: inherit; }
 .topbar-right { display: flex; align-items: center; gap: 10px; }
 .pill { font-size: 11px; font-weight: 500; color: var(--accent-d); background: var(--accent-w); border-radius: 12px; padding: 4px 10px; }
 .pill-warn { color: var(--warn); background: #f4efe2; }

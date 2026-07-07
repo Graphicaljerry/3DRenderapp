@@ -1266,7 +1266,14 @@ export default function App() {
       openrouterKey: llmKeys["openrouter"],
       openrouterModel: llm.provider === "openrouter" ? llm.model : "",
     };
-    const wantWeb = !!p && (webMode === "on" || (webMode === "auto" && detectProductQuery(p) && (!visionImage || guided)));
+    // Text-only web research is pointless — and actively confusing — when a photo IS the
+    // reference and the prompt names no product ("make it look like this"): the research model
+    // never sees the image, so it replies "no image was provided". Only research with an image
+    // attached when the text actually names a real product to look up (e.g. "iPhone 16 Pro case").
+    const productNamed = detectProductQuery(p);
+    const wantWeb = !!p
+      && (!visionImage || guided || productNamed)
+      && (webMode === "on" || (webMode === "auto" && productNamed && (!visionImage || guided)));
     if (wantWeb && webMode === "on" && !canResearch(researchKeys)) {
       // Forced on but no browsing-capable key — tell the user rather than silently skip.
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
@@ -1327,7 +1334,11 @@ export default function App() {
             `Here is the current replicad program:\n\`\`\`js\n${currentCode}\n\`\`\`\n\n` +
             `Apply this change: ${pWithFacts}\n\nReply with SEARCH/REPLACE blocks only (see EDIT MODE).`,
         };
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, [editMsg], { onToken: (_t, full) => setStreamingText(full) }, effectiveProxy);
+        // Include the recent conversation so the edit has full context — the user may refer back
+        // to earlier turns ("make it match what I said before"). The edit-block savings are on
+        // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
+        const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full) }, effectiveProxy);
         finalRaw = raw;
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {

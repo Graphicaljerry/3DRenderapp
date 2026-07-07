@@ -14,7 +14,7 @@ import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
-import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, type ORModel } from "./llm/openrouterModels";
+import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -239,6 +239,7 @@ export default function App() {
 
   const [result, setResult] = useState<EngineResult | null>(null);
   const [splitPieces, setSplitPieces] = useState<SplitPiece[] | null>(null);
+  const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
@@ -1086,7 +1087,18 @@ export default function App() {
 
     // ---- precise (LLM -> replicad/primitive; photo = vision -> exact CAD) ----
     if (!p && !image) return;
-    const effLlm: LlmSettings = override?.llm ?? (llm.provider === "anthropic" ? { ...llm, model } : llm); // retry-with-model override
+    let effLlm: LlmSettings = override?.llm ?? (llm.provider === "anthropic" ? { ...llm, model } : llm); // retry-with-model override
+    // OpenRouter "Auto": classify this request and pick a concrete model (cheap-fast
+    // for small edits, strong/reasoning for fresh or complex work) so the user doesn't
+    // hand-pick among hundreds — and we don't pay for a big model on a tiny edit.
+    if (effLlm.provider === "openrouter" && effLlm.model === AUTO_MODEL) {
+      const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: promptText, isEdit: !!result });
+      const chosen = pick?.model.id ?? llmPreset("openrouter").defaultModel;
+      effLlm = { ...effLlm, model: chosen };
+      setAutoPick(pick ? `Auto → ${shortModelName(chosen)} (${pick.reason})` : `Auto → ${shortModelName(chosen)}`);
+    } else {
+      setAutoPick("");
+    }
     if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
       // Never fail silently: say why, and point at the free paths.
       setMessages((m) => [
@@ -1440,6 +1452,7 @@ export default function App() {
         brain={{ provider: llm.provider, model: llm.provider === "anthropic" ? model : llm.model }}
         hasBrainKey={(prov) => (prov === "anthropic" ? !!key : !llmPreset(prov).needsKey || !!llmKeys[prov])}
         onPickBrain={pickBrain}
+        autoPick={autoPick}
         genProvider={genEng.provider}
         genModel={genEng.model}
         hasGenKey={(prov) => { const pr = getProvider(prov); return !pr?.needsKey || !!providerKeys[prov]; }}
@@ -1927,6 +1940,23 @@ function SettingsModal({
                   <>
                     <label>Base URL (ends in /v1)</label>
                     <input value={lbase} onChange={(e) => setLbase(e.target.value)} placeholder="https://my-host/v1" />
+                  </>
+                )}
+                {lp === "openrouter" && (
+                  <>
+                    <label>Model choice</label>
+                    <div className="or-recs">
+                      <button
+                        type="button"
+                        className={`or-rec${lmodel === AUTO_MODEL ? " on" : ""}`}
+                        onClick={() => setLmodel(AUTO_MODEL)}
+                        title="Auto — Moldable picks the model per request: a cheap-fast model for small edits, a strong reasoning model for new or complex parts. Saves tokens."
+                      >
+                        Auto
+                        <span className="or-think" title="Picks a model per request">smart</span>
+                      </button>
+                    </div>
+                    <p className="fine">Auto = Moldable picks per request (cheap model for small edits, strong reasoning model for new/complex parts) to save tokens.</p>
                   </>
                 )}
                 {lp === "openrouter" && orRecs.length > 0 && (

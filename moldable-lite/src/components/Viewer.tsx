@@ -388,6 +388,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const s = st.current;
     if (!s) return;
+    // Only auto-frame the camera the FIRST time a model appears — on later updates
+    // (fillet, extrude, an AI edit, a param tweak) keep the user's current view/angle
+    // instead of snapping back to default. "Reset view" re-frames on demand.
+    const hadMesh = !!s.mesh;
     // Dispose the replaced model's GPU buffers (geometry + its edge overlay) —
     // otherwise every regeneration leaks VRAM until the tab slows down.
     if (s.mesh) {
@@ -436,7 +440,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     mesh.add(edges);
     s.mesh = mesh;
     updateDims(s, showDims, units);
-    frameToObject(s);
+    if (!hadMesh) frameToObject(s); // keep the current camera on edits; frame only on first load
   }, [geometry]);
 
   useEffect(() => {

@@ -1494,6 +1494,7 @@ export default function App() {
 
   async function openProjectById(p: Project) {
     setShowLibrary(false);
+    setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
     setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error, image: c.image })));
     setPins(p.pins ?? []);

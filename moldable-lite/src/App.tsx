@@ -43,6 +43,17 @@ import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloud
 export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode };
 export type Mode = "precise" | "generative";
 
+export type SettingsPane = "ai" | "mesh" | "printer" | "appearance" | "sync";
+// User chat-bubble tint presets (mixed over the bubble base in CSS, both themes).
+export const DEFAULT_USER_TINT = "#14b8a6";
+export const BUBBLE_TINTS: { label: string; color: string }[] = [
+  { label: "Teal", color: "#14b8a6" },
+  { label: "Green", color: "#22c55e" },
+  { label: "Blue", color: "#3b82f6" },
+  { label: "Violet", color: "#8b5cf6" },
+  { label: "Amber", color: "#f59e0b" },
+  { label: "Slate", color: "#64748b" },
+];
 const KEY_LS = "moldable_key";
 const MODEL_LS = "moldable_model";
 const PRINTER_LS = "moldable_printer";
@@ -142,7 +153,10 @@ export default function App() {
   const [llm, setLlm] = useState<LlmSettings>(loadLlm);
   const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
-  const [settingsPane, setSettingsPane] = useState<"ai" | "mesh" | "printer" | "sync">("ai");
+  const [settingsPane, setSettingsPane] = useState<SettingsPane>("ai");
+  const [userTint, setUserTint] = useState<string>(() => localStorage.getItem("moldable_user_tint") || DEFAULT_USER_TINT);
+  useEffect(() => { document.documentElement.style.setProperty("--user-tint", userTint); }, [userTint]);
+  function saveUserTint(c: string) { setUserTint(c); try { localStorage.setItem("moldable_user_tint", c); } catch {} }
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "synced">("idle");
   // When the last successful push/pull finished — shown in Settings → Sync and
   // persisted so it survives reloads.
@@ -1624,6 +1638,8 @@ export default function App() {
           onSavePrinter={savePrinter}
           onSaveGen={saveGenSettings}
           initialPane={settingsPane}
+          userTint={userTint}
+          onSaveTint={saveUserTint}
           lastSyncAt={lastSyncAt}
           onSynced={markSynced}
           onClose={() => setShowSettings(false)}
@@ -1782,6 +1798,8 @@ function SettingsModal({
   onSavePrinter,
   onSaveGen,
   initialPane,
+  userTint,
+  onSaveTint,
   lastSyncAt,
   onSynced,
   onClose,
@@ -1799,12 +1817,14 @@ function SettingsModal({
   onSaveLlm: (s: LlmSettings, keys: Record<string, string>) => void;
   onSavePrinter: (p: PrinterDefaults) => void;
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
-  initialPane?: "ai" | "mesh" | "printer" | "sync";
+  initialPane?: SettingsPane;
+  userTint: string;
+  onSaveTint: (c: string) => void;
   lastSyncAt: number | null;
   onSynced: () => void;
   onClose: () => void;
 }) {
-  const [pane, setPane] = useState<"ai" | "mesh" | "printer" | "sync">(initialPane ?? "ai");
+  const [pane, setPane] = useState<SettingsPane>(initialPane ?? "ai");
   const [passphrase, setPassphrase] = useState("");
   const [syncMsg, setSyncMsg] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
@@ -1947,12 +1967,36 @@ function SettingsModal({
         </div>
 
         <div className="seg stabs">
-          {(["ai", "mesh", "printer", "sync"] as const).map((t) => (
+          {(["ai", "mesh", "printer", "appearance", "sync"] as const).map((t) => (
             <button key={t} className={pane === t ? "on" : ""} onClick={() => setPane(t)}>
-              {t === "ai" ? "AI brain" : t === "mesh" ? "3D engine" : t === "printer" ? "Printer" : "Sync"}
+              {t === "ai" ? "AI brain" : t === "mesh" ? "3D engine" : t === "printer" ? "Printer" : t === "appearance" ? "Appearance" : "Sync"}
             </button>
           ))}
         </div>
+
+        {pane === "appearance" && (
+          <>
+            <p className="pane-desc">Personalise the look. More options may appear here over time.</p>
+            <label>Your chat bubble colour</label>
+            <div className="tint-swatches">
+              {BUBBLE_TINTS.map((t) => (
+                <button
+                  key={t.color}
+                  type="button"
+                  className={`tint-swatch${userTint.toLowerCase() === t.color.toLowerCase() ? " on" : ""}`}
+                  style={{ ["--sw" as string]: t.color }}
+                  title={t.label}
+                  aria-label={t.label}
+                  onClick={() => onSaveTint(t.color)}
+                >
+                  <span className="tint-dot" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="fine">Applies to your own messages in the chat — a subtle tint so they stand out from Moldable's replies.</p>
+          </>
+        )}
 
         {pane === "ai" && (
           <>

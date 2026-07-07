@@ -118,6 +118,35 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
   );
 }
 
+/** The "path to a print-ready file" — the differentiator competitors stop short of.
+    Reflects real state (model → checked → print-ready) and jumps to the check. */
+function PathToPrint({ hasModel, report, onOpenCheck }: {
+  hasModel: boolean;
+  report: PrintabilityReport | null;
+  onOpenCheck: () => void;
+}) {
+  const checked = !!report;
+  const ready = !!report && report.manifold.isWatertight && report.bedFit.fitsRotated && report.triangleCount <= HEAVY_TRIANGLES;
+  const readyState: "pending" | "done" | "warn" = !report ? "pending" : ready ? "done" : "warn";
+  const steps: { label: string; state: "pending" | "done" | "warn"; click?: () => void }[] = [
+    { label: "Design", state: hasModel ? "done" : "pending" },
+    { label: "Check", state: checked ? "done" : "pending", click: hasModel ? onOpenCheck : undefined },
+    { label: readyState === "warn" ? "Needs fix" : "Print Ready", state: readyState, click: checked ? onOpenCheck : undefined },
+  ];
+  return (
+    <div className="p2p" title="Your path to a print-ready file — Moldable takes you all the way to export">
+      {steps.map((s, i) => {
+        const inner = <><i className={`p2p-dot ${s.state}`} /><span className="p2p-lab">{s.label}</span></>;
+        return s.click ? (
+          <button key={i} type="button" className={`p2p-step ${s.state}`} onClick={s.click}>{inner}</button>
+        ) : (
+          <span key={i} className={`p2p-step ${s.state}`}>{inner}</span>
+        );
+      })}
+    </div>
+  );
+}
+
 /** Format overall W×D×H in the chosen unit (unit shown once). */
 function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): string {
   if (units === "in") {
@@ -548,11 +577,7 @@ export function Workspace(p: Props) {
           <div className="statusbar">
             <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
             {p.status === "generating" && <GenTimer />}
-            {p.report && (
-              <span className={`fits ${p.report.bedFit.fitsRotated ? "ok" : "no"}`}>
-                {p.report.bedFit.fitsAsIs ? "fits bed" : p.report.bedFit.fitsWithRotation ? "fits (rotated)" : "larger than bed"}
-              </span>
-            )}
+            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => p.setTab("print")} />
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />
           </div>
         </section>

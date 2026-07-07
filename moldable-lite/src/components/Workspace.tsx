@@ -30,6 +30,55 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
   { f: "obj", label: "OBJ", desc: "Mesh (reference)" },
 ];
 
+/** The project name beside the logo — click to rename; Enter/blur saves, Esc cancels. */
+function ProjectTitle({ name, onRename }: { name: string; onRename: (n: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (!editing) setDraft(name);
+  }, [name, editing]);
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+  const commit = () => {
+    setEditing(false);
+    const v = draft.trim();
+    if (v && v !== name) onRename(v);
+  };
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className="project-edit"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          else if (e.key === "Escape") {
+            setDraft(name);
+            setEditing(false);
+          }
+        }}
+        maxLength={80}
+        aria-label="Project name"
+      />
+    );
+  }
+  return (
+    <button className="project" onClick={() => setEditing(true)} title="Rename project">
+      <span className="project-name">{name}</span>
+      <svg className="project-pen" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M12 20h9" /><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+      </svg>
+    </button>
+  );
+}
+
 /** Format overall W×D×H in the chosen unit (unit shown once). */
 function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): string {
   if (units === "in") {
@@ -42,6 +91,7 @@ function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): st
 
 interface Props {
   projectName: string;
+  onRename: (name: string) => void;
   activeKind: EngineKind;
   genLabel: string;
   fellBack: boolean;
@@ -171,7 +221,7 @@ export function Workspace(p: Props) {
             <span className="wordmark">Moldable</span>
           </button>
           <span className="sep">/</span>
-          <span className="project">{p.projectName}</span>
+          <ProjectTitle name={p.projectName} onRename={p.onRename} />
         </div>
         <div className="topbar-right">
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>

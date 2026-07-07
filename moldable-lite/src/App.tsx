@@ -188,6 +188,16 @@ export default function App() {
     return () => unsub?.();
   }, []);
 
+  // Periodic safety-net autosync: push everything (API keys, settings, chats,
+  // model alterations) to the account on a timer, so nothing depends on a single
+  // change path remembering to sync. No-op while signed out.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (accountEmailRef.current) void cloudSyncPush().catch(() => {});
+    }, 45_000);
+    return () => clearInterval(id);
+  }, []);
+
   const [sel, setSel] = useState<EngineSelection | null>(null);
   const [booting, setBooting] = useState(false);
   const genEngine = useRef(new GenerativeEngine());
@@ -373,6 +383,25 @@ export default function App() {
     setGenEng({ provider, model: gmodel });
     setProxyBase(proxy);
     scheduleSync();
+  }
+
+  // Rename the project from the title beside the logo. Saves under the new name
+  // in the Library and syncs. If nothing's been generated yet, start a shell so
+  // the name (and any chat so far) is preserved.
+  function renameProject(name: string) {
+    const clean = name.trim().slice(0, 80);
+    if (!clean) return;
+    const pr = projectRef.current;
+    if (pr) {
+      const next = { ...pr, name: clean, updatedAt: Date.now() };
+      projectRef.current = next;
+      persist(next);
+    } else {
+      const chat = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
+      const shell = { ...newProject(clean, "replicad"), chat, pins };
+      projectRef.current = shell;
+      persist(shell);
+    }
   }
 
   // Quick model/engine switches from the in-chat picker (no keys touched — that
@@ -1171,6 +1200,7 @@ export default function App() {
     <>
       <Workspace
         projectName={project?.name ?? "Untitled part"}
+        onRename={renameProject}
         activeKind={activeKind}
         genLabel={getProvider(genEng.provider)?.label ?? genEng.provider}
         fellBack={sel?.fellBack ?? false}

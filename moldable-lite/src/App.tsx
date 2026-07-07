@@ -895,6 +895,11 @@ export default function App() {
     setActivePinId(null);
     setPinText("");
   }
+  function clearAllPins() {
+    setPins([]);
+    setActivePinId(null);
+    setPinText("");
+  }
   function askAiPin() {
     if (!activePin || !pinText.trim()) return;
     const { pin, face } = activePin;
@@ -1440,6 +1445,7 @@ export default function App() {
           askAi: askAiPin,
           saveNote: savePinNote,
           del: deletePin,
+          clearAll: clearAllPins,
           close: () => setActivePinId(null),
           pick: pickPin,
           select: selectPin,

@@ -182,9 +182,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     raf = requestAnimationFrame(animate);
 
-    // ---- tap-to-pin: raycast picks on click (pin mode) / double-click (always) ----
+    // ---- tap picks: a pin marker, a face/edge/vertex (select mode), or a new pin
+    // (pin mode). A plain click with neither mode on does nothing — pins only ever
+    // drop while Pin mode is active, so they can't scatter across the model. ----
     const rc = new THREE.Raycaster();
-    const handleTap = (e: { clientX: number; clientY: number }, viaDblClick: boolean) => {
+    const handleTap = (e: { clientX: number; clientY: number }) => {
       const s2 = st.current;
       if (!s2) return;
       const rect = renderer.domElement.getBoundingClientRect();
@@ -201,7 +203,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
       }
       // Select mode: single click locks the face / edge / vertex under the cursor.
-      if (cb.current.selectMode && !viaDblClick) {
+      if (cb.current.selectMode) {
         if (!s2.mesh || !s2.tri) return;
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (!hit || hit.faceIndex == null) return;
@@ -210,7 +212,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (info) cb.current.onPickFeature(featureToPayload(info));
         return;
       }
-      if (viaDblClick ? cb.current.pinMode : !cb.current.pinMode) return; // dblclick covers non-pin-mode
+      if (!cb.current.pinMode) return; // no pin unless Pin mode is on
       if (!s2.mesh) return;
       const hit = rc.intersectObject(s2.mesh, false)[0];
       if (!hit || !hit.face) return;
@@ -226,9 +228,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const d = downAt;
       downAt = null;
       if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) return; // it was an orbit drag
-      handleTap(e, false);
+      handleTap(e);
     };
-    const onDbl = (e: MouseEvent) => handleTap(e, true);
     // Hover feedback: highlight a pin the cursor is over (and show a pointer cursor).
     const setHover = (id: string | null) => {
       if (hoveredRef.current === id) return;
@@ -270,7 +271,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     renderer.domElement.addEventListener("pointerup", onUp);
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("pointerleave", onLeave);
-    renderer.domElement.addEventListener("dblclick", onDbl);
 
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth, h = el.clientHeight;
@@ -290,7 +290,6 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerleave", onLeave);
-      renderer.domElement.removeEventListener("dblclick", onDbl);
       controls.dispose();
       disposeDims(st.current);
       highlight.geometry.dispose();

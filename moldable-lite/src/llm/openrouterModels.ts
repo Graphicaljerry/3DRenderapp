@@ -109,29 +109,42 @@ const FAMILY: { re: RegExp; score: number }[] = [
 ];
 const EXCLUDE = /(vision-only|image|audio|tts|whisper|embed|guard|moderation|rerank|-nano|-mini-tiny|3b|1\.5b|0\.5b)/i;
 
-/** Best models in the live catalogue for Moldable's CAD brain, ranked. */
+/** Coarse family key so we don't recommend eight flavours of the same model —
+ *  e.g. claude-sonnet-4, -4.5, -4.6, -latest all collapse to "anthropic/claude-sonnet". */
+function familyKey(id: string): string {
+  const vendor = id.split("/")[0];
+  const base = shortModelName(id)
+    .replace(/-(preview|exp|beta|latest|instruct|thinking|\d{4}-\d{2}-\d{2}|\d{6,8})$/g, "")
+    .replace(/[-.]?\d+(\.\d+)*/g, "") // strip version numbers
+    .replace(/-v$/, "")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+  return `${vendor}/${base}`;
+}
+
+/** Best models in the live catalogue for Moldable's CAD brain — diverse across
+ *  vendors/families (best of each), ranked. */
 export function recommendedForApp(models: ORModel[], reasoningOnly = false): ORModel[] {
   const scored = models
     .map((m) => {
       const fam = FAMILY.find((f) => f.re.test(m.id));
       if (!fam || EXCLUDE.test(m.id)) return null;
       const score = fam.score + (m.reasoning ? 8 : 0) + (m.inPrice === 0 ? 1 : 0);
-      return { m, score };
+      return { m, score, family: familyKey(m.id) };
     })
-    .filter((x): x is { m: ORModel; score: number } => !!x)
+    .filter((x): x is { m: ORModel; score: number; family: string } => !!x)
     .filter((x) => (reasoningOnly ? x.m.reasoning : true));
-  scored.sort((a, b) => b.score - a.score || (a.m.inPrice ?? 9) - (b.m.inPrice ?? 9));
-  // De-dupe to one entry per short name (keep the cheapest/highest-ranked), cap the list.
-  const seen = new Set<string>();
-  const out: ORModel[] = [];
-  for (const { m } of scored) {
-    const k = shortModelName(m.id);
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(m);
-    if (out.length >= 8) break;
+  // Keep only the best (highest score, then cheapest) model per family, so one
+  // vendor with many variants can't crowd out the rest.
+  const best = new Map<string, { m: ORModel; score: number; family: string }>();
+  for (const x of scored) {
+    const cur = best.get(x.family);
+    if (!cur || x.score > cur.score || (x.score === cur.score && (x.m.inPrice ?? 9) < (cur.m.inPrice ?? 9))) best.set(x.family, x);
   }
-  return out;
+  return [...best.values()]
+    .sort((a, b) => b.score - a.score || (a.m.inPrice ?? 9) - (b.m.inPrice ?? 9))
+    .slice(0, 8)
+    .map((x) => x.m);
 }
 
 /** Does this OpenRouter model id support reasoning? (from the cached catalogue) */

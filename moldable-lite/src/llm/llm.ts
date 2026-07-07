@@ -85,7 +85,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     needsKey: true,
     baseUrl: "https://openrouter.ai/api/v1",
     relayPrefix: "openrouter",
-    defaultModel: "google/gemini-3-flash",
+    defaultModel: "google/gemini-2.5-flash",
     keyHint: "sk-or-… from openrouter.ai/keys",
     hint: "One key that reaches many different models — prices vary per model; some are free.",
   },

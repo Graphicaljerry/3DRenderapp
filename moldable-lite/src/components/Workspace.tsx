@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Viewer, type ViewerHandle, type PickedPoint } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFace } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
@@ -263,6 +263,16 @@ interface Props {
     pick: (pt: PickedPoint) => void;
     select: (id: string) => void;
   };
+  faceCtl: {
+    mode: boolean;
+    toggleMode: () => void;
+    selected: PickedFace | null;
+    text: string;
+    setText: (s: string) => void;
+    pick: (f: PickedFace) => void;
+    askAi: () => void;
+    clear: () => void;
+  };
 }
 
 export function Workspace(p: Props) {
@@ -493,6 +503,14 @@ export function Workspace(p: Props) {
             {(p.tab === "3d" || p.tab === "params") && (
               <div className="viewer-tools">
                 <button
+                  className={`ghost sm${p.faceCtl.mode ? " on" : ""}`}
+                  aria-pressed={p.faceCtl.mode}
+                  title="Select a face: hover to highlight, click to pick it, then tell the AI exactly what to change on it"
+                  onClick={p.faceCtl.toggleMode}
+                >
+                  Select face
+                </button>
+                <button
                   className={`ghost sm${p.pinCtl.mode ? " on" : ""}`}
                   aria-pressed={p.pinCtl.mode}
                   title="Pin mode: click the model to mark a spot for a note or an AI edit (double-click works anytime)"
@@ -525,7 +543,9 @@ export function Workspace(p: Props) {
                 pins={p.pins}
                 selectedPin={p.pinCtl.active?.pin.id ?? null}
                 pinMode={p.pinCtl.mode}
+                selectMode={p.faceCtl.mode}
                 onPickPoint={p.pinCtl.pick}
+                onPickFace={p.faceCtl.pick}
                 onSelectPin={p.pinCtl.select}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
@@ -555,6 +575,33 @@ export function Workspace(p: Props) {
                     <button className="ghost sm danger" onClick={p.pinCtl.del}>Delete</button>
                   </div>
                   {p.activeKind !== "replicad" && <p className="fine">AI edits need a Precise (CAD) model — notes work everywhere.</p>}
+                </div>
+              )}
+              {p.faceCtl.selected && (
+                <div className="pin-panel">
+                  <div className="pin-head">
+                    <span>
+                      {p.faceCtl.selected.label.charAt(0).toUpperCase() + p.faceCtl.selected.label.slice(1)} face · {p.faceCtl.selected.w} × {p.faceCtl.selected.h} mm
+                    </span>
+                    <button className="x" aria-label="Clear selection" onClick={p.faceCtl.clear}><IconX /></button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={p.faceCtl.text}
+                    onChange={(e) => p.faceCtl.setText(e.target.value)}
+                    placeholder="e.g. add two 4 mm screw holes · round these corners 2 mm"
+                  />
+                  <div className="param-actions">
+                    <button
+                      className="primary sm"
+                      disabled={!p.faceCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
+                      onClick={p.faceCtl.askAi}
+                    >
+                      Ask AI to change this face
+                    </button>
+                    <button className="ghost sm" onClick={p.faceCtl.clear}>Cancel</button>
+                  </div>
+                  {p.activeKind !== "replicad" && <p className="fine">Face edits need a Precise (CAD) model.</p>}
                 </div>
               )}
               {/* Parameters dock over the 3D view so you can watch the model update live — close returns to the plain 3D view. */}

@@ -6,7 +6,7 @@ import { MeasureModal } from "./components/MeasureModal";
 import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
 import { geometryToSTL } from "./print/exportClient";
-import type { ViewerHandle } from "./components/Viewer";
+import type { ViewerHandle, PickedFace } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
@@ -249,6 +249,10 @@ export default function App() {
   const [pinMode, setPinMode] = useState(false);
   const [activePinId, setActivePinId] = useState<string | null>(null);
   const [pinText, setPinText] = useState("");
+  // Face-select: hover-highlight + click a flat face, then edit it precisely.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedFace, setSelectedFace] = useState<PickedFace | null>(null);
+  const [faceText, setFaceText] = useState("");
 
   const [mode, setMode] = useState<Mode>("precise");
   // Guided "fix a broken part" flow + FDM fit tolerance (applies to mating features).
@@ -909,6 +913,31 @@ export default function App() {
     setPinText("");
   }
 
+  function pickFace(f: PickedFace) {
+    setSelectedFace(f);
+    setFaceText("");
+    setPinMode(false); // the two selection modes are mutually exclusive
+  }
+  function askAiFace() {
+    if (!selectedFace || !faceText.trim()) return;
+    const f = selectedFace;
+    const note = faceText.trim();
+    setSelectedFace(null);
+    setSelectMode(false);
+    setFaceText("");
+    // A face gives the model a real target: which flat surface, its centre, the way
+    // it faces, and how big it is — so the edit lands on THAT face, not a guess.
+    const size = dims ? `The whole part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
+    void send(
+      `Modify the current CAD model: ${note}. ${size}` +
+        `Apply this on the ${f.label} face — a flat surface facing (${f.nx}, ${f.ny}, ${f.nz}), ` +
+        `centred at x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm, spanning about ${f.w} × ${f.h} mm ` +
+        `(coordinates are Z-up, in millimetres). Keep the change ON this face and centred on it unless I say otherwise. ` +
+        `Leave the rest of the part unchanged and return the full updated code.`,
+      "precise",
+    );
+  }
+
   // ---------------- generate ----------------
   /** Enter the guided "fix a broken part" flow: precise mode, a photo-first nudge,
    *  and a helper message with the coin/card-for-scale trick. */
@@ -1386,7 +1415,7 @@ export default function App() {
         pins={pins}
         pinCtl={{
           mode: pinMode,
-          toggleMode: () => setPinMode((m) => !m),
+          toggleMode: () => { setPinMode((m) => !m); setSelectMode(false); },
           active: activePin,
           text: pinText,
           setText: setPinText,
@@ -1396,6 +1425,16 @@ export default function App() {
           close: () => setActivePinId(null),
           pick: pickPin,
           select: selectPin,
+        }}
+        faceCtl={{
+          mode: selectMode,
+          toggleMode: () => { setSelectMode((m) => !m); setPinMode(false); setSelectedFace(null); },
+          selected: selectedFace,
+          text: faceText,
+          setText: setFaceText,
+          pick: pickFace,
+          askAi: askAiFace,
+          clear: () => setSelectedFace(null),
         }}
       />
       {showSettings && (

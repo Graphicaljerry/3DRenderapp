@@ -12,6 +12,13 @@ export interface PickedPoint {
   x: number; y: number; z: number;
   nx: number; ny: number; nz: number;
 }
+/** A selected flat face: its centre, outward normal, in-plane size, and a human label. */
+export interface PickedFace {
+  cx: number; cy: number; cz: number;
+  nx: number; ny: number; nz: number;
+  w: number; h: number;
+  label: string;
+}
 export interface ViewerPin { id: string; x: number; y: number; z: number; }
 
 interface Props {
@@ -23,7 +30,9 @@ interface Props {
   pins: ViewerPin[];
   selectedPin: string | null;
   pinMode: boolean;
+  selectMode: boolean;
   onPickPoint: (p: PickedPoint) => void;
+  onPickFace: (f: PickedFace) => void;
   onSelectPin: (id: string) => void;
 }
 
@@ -33,6 +42,14 @@ const THEME_GRID: Record<string, [number, number]> = { light: [0xced2d8, 0xe3e6e
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
 const LABEL_MIN_PX = 16;
 const LABEL_MAX_PX = 53;
+
+interface TriData {
+  normals: Float32Array; // per-triangle unit normal
+  d: Float32Array; // per-triangle plane offset (normal · vertex)
+  count: number;
+  pos: THREE.BufferAttribute;
+  idx: THREE.BufferAttribute | null;
+}
 
 interface Internals {
   renderer: THREE.WebGLRenderer;
@@ -45,14 +62,17 @@ interface Internals {
   dims: THREE.Group | null;
   pins: THREE.Group | null;
   material: THREE.MeshStandardMaterial;
+  highlight: THREE.Mesh; // blue overlay for the hovered/selected face
+  tri: TriData | null;
+  lockedFace: number; // triangle index of the click-selected face (-1 = none)
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, pinMode, onPickPoint, onSelectPin }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, pinMode, selectMode, onPickPoint, onPickFace, onSelectPin }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ pinMode, onPickPoint, onSelectPin });
-  cb.current = { pinMode, onPickPoint, onSelectPin };
+  const cb = useRef({ pinMode, selectMode, onPickPoint, onPickFace, onSelectPin });
+  cb.current = { pinMode, selectMode, onPickPoint, onPickFace, onSelectPin };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -87,6 +107,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     scene.add(content);
 
     const material = new THREE.MeshStandardMaterial({ color: "#c7ccd3", metalness: 0.05, roughness: 0.75 });
+
+    // Blue overlay drawn on top of the hovered / selected face (Blender/Shapr-style).
+    const highlight = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({
+        color: 0x2563eb, transparent: true, opacity: 0.42, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      }),
+    );
+    highlight.visible = false;
+    highlight.renderOrder = 2;
+    scene.add(highlight);
 
     let raf = 0;
     const animate = () => {
@@ -130,6 +162,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           return;
         }
       }
+      // Face-select mode: single click locks the face under the cursor.
+      if (cb.current.selectMode && !viaDblClick) {
+        if (!s2.mesh || !s2.tri) return;
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (!hit || hit.faceIndex == null) return;
+        s2.lockedFace = hit.faceIndex;
+        const info = showFace(s2, hit.faceIndex);
+        if (info) {
+          const r1p = (n: number) => Math.round(n * 10) / 10;
+          cb.current.onPickFace({
+            cx: r1p(info.center.x), cy: r1p(info.center.y), cz: r1p(info.center.z),
+            nx: r1p(info.normal.x), ny: r1p(info.normal.y), nz: r1p(info.normal.z),
+            w: r1p(info.w), h: r1p(info.h), label: faceLabel(info.normal),
+          });
+        }
+        return;
+      }
       if (viaDblClick ? cb.current.pinMode : !cb.current.pinMode) return; // dblclick covers non-pin-mode
       if (!s2.mesh) return;
       const hit = rc.intersectObject(s2.mesh, false)[0];
@@ -159,15 +208,31 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
       if (!s2 || downAt) return; // don't fight an orbit drag
-      if (!s2.pins || !s2.pins.children.length) { setHover(null); return; }
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       rc.setFromCamera(ndc, camera);
-      const hp = rc.intersectObjects(s2.pins.children, false)[0];
-      setHover(hp ? String(hp.object.userData.pinId) : null);
+      // Pin hover takes priority.
+      if (s2.pins && s2.pins.children.length) {
+        const hp = rc.intersectObjects(s2.pins.children, false)[0];
+        if (hp) { setHover(String(hp.object.userData.pinId)); return; }
+      }
+      setHover(null);
+      // Face hover-highlight in select mode.
+      if (cb.current.selectMode && s2.mesh && s2.tri) {
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (hit && hit.faceIndex != null) {
+          showFace(s2, hit.faceIndex);
+          renderer.domElement.style.cursor = "crosshair";
+          return;
+        }
+        // Off the model — fall back to the locked face, if any.
+        if (s2.lockedFace >= 0) showFace(s2, s2.lockedFace);
+        else s2.highlight.visible = false;
+        renderer.domElement.style.cursor = "";
+      }
     };
     const onLeave = () => setHover(null);
     renderer.domElement.addEventListener("pointerdown", onDown);
@@ -185,7 +250,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, ro };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, tri: null, lockedFace: -1, ro };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -197,6 +262,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.removeEventListener("dblclick", onDbl);
       controls.dispose();
       disposeDims(st.current);
+      highlight.geometry.dispose();
+      (highlight.material as THREE.Material).dispose();
       renderer.dispose();
       el.removeChild(renderer.domElement);
       st.current = null;
@@ -218,6 +285,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
     s.content.clear();
     s.mesh = null;
+    // Reset the face selection whenever the model changes.
+    s.tri = null;
+    s.lockedFace = -1;
+    s.highlight.visible = false;
     if (!geometry) {
       updateDims(s, showDims, units);
       return;
@@ -225,6 +296,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
     const mesh = new THREE.Mesh(geometry, s.material);
     s.content.add(mesh);
+    s.tri = buildTriData(geometry);
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geometry, 30),
       new THREE.LineBasicMaterial({ color: "#2a2e35" }),
@@ -242,6 +314,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
+
+  // Leaving select mode clears the highlight + locked face.
+  useEffect(() => {
+    const s = st.current;
+    if (!s || selectMode) return;
+    s.lockedFace = -1;
+    s.highlight.visible = false;
+    s.renderer.domElement.style.cursor = "";
+  }, [selectMode]);
 
   useEffect(() => {
     const s = st.current;
@@ -359,6 +440,85 @@ function captureThumbnail(s: Internals): string | null {
     if (s.pins) s.pins.visible = pinsVis!;
   }
   return url;
+}
+
+// ---- face selection --------------------------------------------------------
+
+/** Precompute each triangle's plane (unit normal + offset) for coplanar grouping. */
+function buildTriData(geo: THREE.BufferGeometry): TriData {
+  const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+  const idx = geo.index;
+  const count = idx ? idx.count / 3 : pos.count / 3;
+  const normals = new Float32Array(count * 3);
+  const d = new Float32Array(count);
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3();
+  const ab = new THREE.Vector3(), ac = new THREE.Vector3(), n = new THREE.Vector3();
+  for (let t = 0; t < count; t++) {
+    const i0 = idx ? idx.getX(t * 3) : t * 3;
+    const i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1;
+    const i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
+    ab.subVectors(b, a); ac.subVectors(c, a); n.crossVectors(ab, ac).normalize();
+    normals[t * 3] = n.x; normals[t * 3 + 1] = n.y; normals[t * 3 + 2] = n.z;
+    d[t] = n.dot(a);
+  }
+  return { normals, d, count, pos, idx };
+}
+
+/** Triangles coplanar with `faceIndex` (same normal + plane offset) — the flat face. */
+function coplanarTriangles(tri: TriData, faceIndex: number): number[] {
+  const nx = tri.normals[faceIndex * 3], ny = tri.normals[faceIndex * 3 + 1], nz = tri.normals[faceIndex * 3 + 2];
+  const dd = tri.d[faceIndex];
+  const out: number[] = [];
+  for (let t = 0; t < tri.count; t++) {
+    const dot = tri.normals[t * 3] * nx + tri.normals[t * 3 + 1] * ny + tri.normals[t * 3 + 2] * nz;
+    if (dot > 0.9986 && Math.abs(tri.d[t] - dd) < 0.15) out.push(t); // ~3° + 0.15 mm
+  }
+  return out;
+}
+
+/** Build the highlight geometry for the face under `faceIndex`, show it, return its metrics. */
+function showFace(s: Internals, faceIndex: number): { center: THREE.Vector3; normal: THREE.Vector3; w: number; h: number } | null {
+  if (!s.tri) return null;
+  const tris = coplanarTriangles(s.tri, faceIndex);
+  if (!tris.length) return null;
+  const { pos, idx } = s.tri;
+  const positions = new Float32Array(tris.length * 9);
+  const v = new THREE.Vector3();
+  const bbox = new THREE.Box3();
+  let p = 0;
+  for (const t of tris) {
+    for (let k = 0; k < 3; k++) {
+      const vi = idx ? idx.getX(t * 3 + k) : t * 3 + k;
+      v.fromBufferAttribute(pos, vi);
+      positions[p++] = v.x; positions[p++] = v.y; positions[p++] = v.z;
+      bbox.expandByPoint(v);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  s.highlight.geometry.dispose();
+  s.highlight.geometry = geo;
+  s.highlight.visible = true;
+
+  const center = bbox.getCenter(new THREE.Vector3());
+  const size = bbox.getSize(new THREE.Vector3());
+  const normal = new THREE.Vector3(s.tri.normals[faceIndex * 3], s.tri.normals[faceIndex * 3 + 1], s.tri.normals[faceIndex * 3 + 2]);
+  // In-plane extent = the two bbox dims not aligned with the normal.
+  const dims = [size.x, size.y, size.z];
+  const axis = Math.abs(normal.x) > 0.9 ? 0 : Math.abs(normal.y) > 0.9 ? 1 : Math.abs(normal.z) > 0.9 ? 2 : -1;
+  let w: number, h: number;
+  if (axis >= 0) { const rest = dims.filter((_, i) => i !== axis); w = rest[0]; h = rest[1]; }
+  else { const sorted = [...dims].sort((a, b) => b - a); w = sorted[0]; h = sorted[1]; }
+  return { center, normal, w, h };
+}
+
+/** Human name for a face from its outward normal (Z-up). */
+function faceLabel(n: THREE.Vector3): string {
+  const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+  if (az >= ax && az >= ay) return n.z > 0 ? "top" : "bottom";
+  if (ay >= ax) return n.y > 0 ? "back" : "front";
+  return n.x > 0 ? "right" : "left";
 }
 
 function frameToObject(s: Internals) {

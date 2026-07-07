@@ -935,7 +935,9 @@ function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: 
     if (chainId < 0) return null;
     if (s.selCache?.key === `edge:${chainId}` && s.selCache.info.kind === "edge") { showOnly(s.edgeHi); return s.selCache.info; }
     const ch = tri.chains[chainId];
-    // Highlight the WHOLE physical edge (a tube along every segment), not one chord.
+    // Highlight the WHOLE physical edge (a thin tube along every segment, not one chord).
+    // A real edge has no width, so keep the tube slim — just enough to read as a line.
+    const er = Math.max(0.1, s.markR * 0.32);
     const parts: THREE.BufferGeometry[] = [];
     const yA = new THREE.Vector3(0, 1, 0);
     const A = new THREE.Vector3(), B = new THREE.Vector3(), dir = new THREE.Vector3(), mid = new THREE.Vector3(), q = new THREE.Quaternion(), mtx = new THREE.Matrix4(), scl = new THREE.Vector3();
@@ -948,7 +950,7 @@ function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: 
       dir.divideScalar(L);
       mid.addVectors(A, B).multiplyScalar(0.5);
       q.setFromUnitVectors(yA, dir);
-      scl.set(s.markR, L, s.markR);
+      scl.set(er, L, er);
       mtx.compose(mid, q, scl);
       const cyl = new THREE.CylinderGeometry(1, 1, 1, 8);
       cyl.applyMatrix4(mtx);

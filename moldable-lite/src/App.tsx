@@ -41,6 +41,14 @@ import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
+// Run heavy, non-urgent work after the browser has painted the current frame — keeps the
+// model swap feeling instant. Uses requestIdleCallback where available, else a short timeout.
+function scheduleIdle(fn: () => void): void {
+  const ric = (globalThis as any).requestIdleCallback as undefined | ((cb: () => void, o?: any) => number);
+  if (ric) ric(() => fn(), { timeout: 300 });
+  else setTimeout(fn, 32);
+}
+
 export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode };
 export type Mode = "precise" | "generative";
 
@@ -258,6 +266,7 @@ export default function App() {
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
+  const reportJob = useRef(0); // guards the deferred printability pass against stale results
   const [status, setStatus] = useState<"idle" | "generating">("idle");
   const [streamingText, setStreamingText] = useState("");
   const [codeBuffer, setCodeBuffer] = useState("");
@@ -613,7 +622,12 @@ export default function App() {
     setGeometry(res.geometry);
     setDims(res.dims);
     setCodeBuffer(sourceText(res.source));
-    setReport(computeReport(res.geometry));
+    // Printability analysis is a heavy synchronous mesh pass — run it AFTER the new geometry
+    // has painted so the model swap feels instant. Guard with a job token so a rapid sequence
+    // of edits only keeps the latest report. Old report stays on screen for the ~1 frame gap.
+    const geo = res.geometry;
+    const job = ++reportJob.current;
+    scheduleIdle(() => { if (reportJob.current === job) setReport(computeReport(geo)); });
     if (res.source.kind === "code") {
       const defs = extractParams(res.source.code);
       setCadDefaults(defs);

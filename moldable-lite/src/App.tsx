@@ -1025,29 +1025,32 @@ export default function App() {
     );
   }
 
-  // Direct fillet/chamfer on the picked edge/corner — computed by replicad in the
-  // worker with NO AI call (free). Commits a version so Undo works.
-  async function applyDirectOp(type: "fillet" | "chamfer", size: number) {
+  // Direct geometry op on the picked edge / corner / face — computed by replicad in
+  // the worker with NO AI call (free). Commits a version so Undo works.
+  async function applyDirectOp(type: CadOp["type"], size: number) {
     const f = selectedFeature;
-    if (!f || (f.kind !== "edge" && f.kind !== "vertex") || !size) return;
+    if (!f || !size) return;
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Direct fillet/chamfer works on Precise (CAD) models.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
       return;
     }
     const src = result.source;
     // Picked coords are in display space; map them back to the engine's own coords
-    // (the display is recentred on the bed) so the fillet finder hits the real edge.
+    // (the display is recentred on the bed) so the finder hits the real edge/face.
     const p = f.at ?? [f.cx, f.cy, f.cz];
     const rc = result.recenter ?? [0, 0, 0];
     const op: CadOp = { type, at: [p[0] + rc[0], p[1] + rc[1], p[2] + rc[2]], size };
     setSelectedFeature(null);
+    setSelectedFaces([]);
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
-      const verb = type === "fillet" ? "Rounded" : "Chamfered";
-      const what = f.kind === "vertex" ? "corner" : "edge";
-      applyResult(res, project?.name ?? deriveName("Edited part"), `${verb} an ${what} by ${size} mm — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${verb} the ${what} (${size} mm) directly — no AI, no tokens spent.` }]);
+      const label =
+        type === "extrude" ? `${size >= 0 ? "Extruded" : "Recessed"} the face by ${Math.abs(size)} mm`
+        : type.includes("chamfer") ? `Chamfered the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${size} mm`
+        : `Rounded the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${size} mm`;
+      applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label} directly — no AI, no tokens spent.` }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     } finally {

@@ -28,7 +28,7 @@ export type ReplicadExportFormat = "stl" | "step";
 // Direct client-side geometry op (fillet/chamfer a picked edge/corner), applied after
 // the code builds. Mirrors CadOp in engine/types (kept local so the worker has no deps).
 export interface WorkerOp {
-  type: "fillet" | "chamfer";
+  type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude";
   at: [number, number, number];
   size: number;
 }

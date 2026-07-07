@@ -29,18 +29,19 @@
 
 /* ---------- dark mode ---------- */
 :root[data-theme="dark"] {
-  --ink: #edf2f0;
-  --ink2: #c4cec9;
-  --mut: #8c968f;
-  --subt: #69736c;
-  --bord: #273230;
-  --bord-subtle: #1e2725;
-  --bord-strong: #35423e;
-  --surf: #0f1413;        /* app background */
-  --bg: #171e1c;          /* panels — lighter than surf: elevation by lightness */
-  --accent: #2dd4bf;      /* brand teal, brightened for dark */
-  --accent-d: #5eead4;
-  --accent-w: #14302b;
+  /* Neutral greys/blacks — no green tint. Teal appears only as the accent. */
+  --ink: #ececed;
+  --ink2: #c6c7c9;
+  --mut: #8d8e90;
+  --subt: #666769;
+  --bord: #2c2d2f;
+  --bord-subtle: #212123;
+  --bord-strong: #3b3c3e;
+  --surf: #121213;        /* app background — near-black, not pure black */
+  --bg: #1c1c1e;          /* panels — lighter than surf: elevation by lightness */
+  --accent: #14b8a6;      /* brand teal — same hue & saturation as light mode */
+  --accent-d: #109b8c;    /* hover */
+  --accent-w: #202124;    /* neutral wash (pills / assistant bubbles); teal stays in the text/fill */
   --live: #ff7a43;
   --warn: #d9a441;
   --danger: #ff7076;
@@ -49,14 +50,14 @@
   --shadow-md: 0 4px 16px rgba(0,0,0,.45);
   --shadow-lg: 0 16px 44px rgba(0,0,0,.55);
 }
-[data-theme="dark"] .bubble { background: #262b31; }
-[data-theme="dark"] .msg.assistant .bubble { background: #20302c; }
+[data-theme="dark"] .bubble { background: #27282b; }
+[data-theme="dark"] .msg.assistant .bubble { background: var(--accent-w); }
 [data-theme="dark"] .msg.err .bubble { background: #392629; color: #ff9ba0; }
 [data-theme="dark"] .banner { background: #33290f; color: #e3b568; border-bottom-color: #443a22; }
 [data-theme="dark"] .code { background: #16191d; color: #cfd4da; }
-[data-theme="dark"] .prow, [data-theme="dark"] .param-row { border-bottom-color: #262b31; }
+[data-theme="dark"] .prow, [data-theme="dark"] .param-row { border-bottom-color: #27282b; }
 [data-theme="dark"] .tabs button.on { background: var(--bord); color: var(--ink); box-shadow: none; }
-[data-theme="dark"] .sync-status { border-color: #2f4a44; }
+[data-theme="dark"] .sync-status { border-color: var(--bord-strong); }
 [data-theme="dark"] .sync-status.err { background: #392629; color: #ff9ba0; border-color: #553338; }
 [data-theme="dark"] .pill-warn { background: #33290f; }
 [data-theme="dark"] .chip { background: #22262c; }

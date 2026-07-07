@@ -96,10 +96,42 @@ async function viaAnthropic(request: string, apiKey: string): Promise<string | n
   return clean(text);
 }
 
+// OpenRouter's built-in web plugin — lets OpenRouter users (one key, many models)
+// get the same grounded lookup without a separate Gemini/Anthropic key.
+async function viaOpenRouter(request: string, apiKey: string, model: string): Promise<string | null> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://moldable.app",
+      "X-Title": "Moldable",
+    },
+    body: JSON.stringify({
+      model: model || "google/gemini-2.5-flash",
+      messages: [{ role: "user", content: researchPrompt(request) }],
+      plugins: [{ id: "web", max_results: 3 }],
+      max_tokens: 1024,
+    }),
+    signal: timeoutSignal(60_000),
+  });
+  if (!res.ok) throw new Error(`OpenRouter research HTTP ${res.status}`);
+  const j: any = await res.json();
+  const text = j?.choices?.[0]?.message?.content;
+  return clean(typeof text === "string" ? text : "");
+}
+
 export interface ResearchKeys {
   geminiKey?: string;
   geminiModel?: string;
   anthropicKey?: string;
+  openrouterKey?: string;
+  openrouterModel?: string;
+}
+
+/** True when at least one configured provider can actually browse the web. */
+export function canResearch(keys: ResearchKeys): boolean {
+  return !!(keys.geminiKey || keys.anthropicKey || keys.openrouterKey);
 }
 
 /** Look up the product's real dimensions online. Plain-text spec sheet, or null. */
@@ -112,7 +144,13 @@ export async function researchDimensions(request: string, keys: ResearchKeys): P
   }
   if (keys.anthropicKey) {
     try {
-      return await viaAnthropic(request, keys.anthropicKey);
+      const r = await viaAnthropic(request, keys.anthropicKey);
+      if (r) return r;
+    } catch {}
+  }
+  if (keys.openrouterKey) {
+    try {
+      return await viaOpenRouter(request, keys.openrouterKey, keys.openrouterModel ?? "");
     } catch {}
   }
   return null;

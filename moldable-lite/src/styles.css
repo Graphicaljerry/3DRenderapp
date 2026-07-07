@@ -259,6 +259,14 @@ button { font-family: inherit; cursor: pointer; }
 .seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); white-space: nowrap; }
 .seg button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
 .modehint { font-size: 11px; color: var(--subt); }
+/* Web-search toggle in the composer — cycles Auto → On → Off. */
+.web-toggle { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid var(--bord); border-radius: var(--r-md); background: var(--bg); color: var(--mut); font-size: 12px; font-weight: 500; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.web-toggle:hover { border-color: var(--bord-strong); color: var(--ink2); }
+.web-toggle .web-state { font-weight: 600; }
+.web-toggle.web-on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
+.web-toggle.web-off { opacity: 0.65; }
+.link-inline { color: var(--accent-d); text-decoration: underline; }
+.link-inline:hover { color: var(--accent); }
 /* Fit tolerance — quiet segmented control, shown only in the guided flow. */
 .fitbar { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .fit-label { font-size: 11px; font-weight: 600; color: var(--subt); }

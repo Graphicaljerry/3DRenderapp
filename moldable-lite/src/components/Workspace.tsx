@@ -8,10 +8,11 @@ import type { EngineKind, ExportFormat } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
+import { shortModelName } from "../llm/openrouterModels";
 import type { FitId } from "../llm/prompts";
 import { PROVIDERS } from "../gen/registry";
 
@@ -104,6 +105,8 @@ interface Props {
   onToggleTheme: () => void;
   mode: Mode;
   setMode: (m: Mode) => void;
+  webMode: "auto" | "on" | "off";
+  onCycleWeb: () => void;
   guided: boolean;
   onStartGuided: () => void;
   fit: FitId;
@@ -303,6 +306,18 @@ export function Workspace(p: Props) {
                   <BrainPicker brain={p.brain} hasKey={p.hasBrainKey} onPick={p.onPickBrain} />
                 ) : (
                   <EnginePicker provider={p.genProvider} model={p.genModel} hasKey={p.hasGenKey} onPick={p.onPickEngine} />
+                )}
+                {p.mode === "precise" && (
+                  <button
+                    type="button"
+                    className={`web-toggle web-${p.webMode}`}
+                    onClick={p.onCycleWeb}
+                    aria-label={`Web search: ${p.webMode}`}
+                    title="Web search for real dimensions before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
+                  >
+                    <IconGlobe size={13} />
+                    <span className="web-state">{p.webMode === "auto" ? "Auto" : p.webMode === "on" ? "On" : "Off"}</span>
+                  </button>
                 )}
               </div>
               <span className="modehint">
@@ -625,7 +640,7 @@ function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
 function brainValue(brain: { provider: LlmProviderId; model: string }): string {
   return brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;
 }
-function brainGroups(hasKey: (p: LlmProviderId) => boolean): PickGroup[] {
+function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: LlmProviderId; model: string }): PickGroup[] {
   const claudeKey = hasKey("anthropic");
   return [
     {
@@ -636,8 +651,12 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean): PickGroup[] {
       label: "Other providers",
       items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic").map((pr) => {
         const needs = pr.needsKey && !hasKey(pr.id);
-        const sub = [pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
-        return { value: `${pr.id}|`, name: pr.label.split(" — ")[0], sub };
+        const base = pr.label.split(" — ")[0];
+        // Surface the active model on the current provider so the picker trigger
+        // reads e.g. "OpenRouter · claude-sonnet-4.5" instead of just "OpenRouter".
+        const active = brain?.provider === pr.id && brain.model ? shortModelName(brain.model) : "";
+        const sub = [active, pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
+        return { value: `${pr.id}|`, name: active ? `${base} · ${active}` : base, sub };
       }),
     },
   ];
@@ -654,7 +673,7 @@ function engineGroups(hasKey: (p: string) => boolean): PickGroup[] {
 
 /** In-chat quick switch for the Precise (CAD) AI brain. */
 function BrainPicker({ brain, hasKey, onPick }: { brain: { provider: LlmProviderId; model: string }; hasKey: (p: LlmProviderId) => boolean; onPick: (p: LlmProviderId, m: string) => void }) {
-  return <ModelMenu value={brainValue(brain)} groups={brainGroups(hasKey)} title="Which AI writes the CAD — switch models on the fly" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov as LlmProviderId, m); }} />;
+  return <ModelMenu value={brainValue(brain)} groups={brainGroups(hasKey, brain)} title="Which AI writes the CAD — switch models on the fly" onPick={(v) => { const [prov, m] = splitVal(v); onPick(prov as LlmProviderId, m); }} />;
 }
 
 /** In-chat quick switch for the Generative (AI mesh) engine + model. */
@@ -668,7 +687,7 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   genProvider: string; genModel: string; hasGenKey: (p: string) => boolean; onPick: (value: string) => void;
 }) {
   const value = mode === "generative" ? `${genProvider}|${genModel}` : brainValue(brain);
-  const groups = mode === "generative" ? engineGroups(hasGenKey) : brainGroups(hasBrainKey);
+  const groups = mode === "generative" ? engineGroups(hasGenKey) : brainGroups(hasBrainKey, brain);
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 

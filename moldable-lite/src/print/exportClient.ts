@@ -76,3 +76,11 @@ export function geometryTo3MF(geometry: THREE.BufferGeometry): Blob {
 }
 
 const f = (n: number) => (Math.round(n * 1000) / 1000).toString();
+
+/** Bundle several already-exported model files into one .zip (for "export each piece
+ *  as a separate STL/3MF"). Keys are the in-zip filenames. */
+export async function zipModelFiles(files: Record<string, Blob>): Promise<Blob> {
+  const entries: Record<string, Uint8Array> = {};
+  for (const [name, blob] of Object.entries(files)) entries[name] = new Uint8Array(await blob.arrayBuffer());
+  return new Blob([zipSync(entries) as unknown as BlobPart], { type: "application/zip" });
+}

@@ -5,12 +5,24 @@
 
 import * as THREE from "three";
 import { Evaluator, Brush, INTERSECTION } from "three-bvh-csg";
-import { mergeGeometries, mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+
+export interface SplitPiece {
+  geometry: THREE.BufferGeometry; // laid-out, position-only — one printable island
+  color: string; // "#rrggbb" used both in the viewer and as the piece's label swatch
+  dims: { x: number; y: number; z: number };
+}
 
 export interface SplitResult {
   parts: number;
-  geometry: THREE.BufferGeometry;
+  geometry: THREE.BufferGeometry; // all pieces merged, with a per-piece vertex "color" for display
+  pieces: SplitPiece[]; // each piece on its own, for separate STL/3MF export
   dims: { x: number; y: number; z: number };
+}
+
+/** Evenly-spaced distinct hue per piece, so adjacent parts read as different colours. */
+function pieceColor(i: number, n: number): THREE.Color {
+  return new THREE.Color().setHSL((i / Math.max(1, n)) % 1, 0.6, 0.55);
 }
 
 const CSG_MAT = new THREE.MeshStandardMaterial();
@@ -41,7 +53,7 @@ export function splitToFitBed(geometry: THREE.BufferGeometry, bed: { x: number; 
   box.getSize(size);
   const { nx, ny, nz } = partsNeeded({ x: size.x, y: size.y, z: size.z }, bed, marginMm);
   if (nx * ny * nz <= 1) {
-    return { parts: 1, geometry, dims: { x: r1(size.x), y: r1(size.y), z: r1(size.z) } };
+    return { parts: 1, geometry, pieces: [], dims: { x: r1(size.x), y: r1(size.y), z: r1(size.z) } };
   }
 
   const cx = size.x / nx, cy = size.y / ny, cz = size.z / nz;
@@ -73,17 +85,20 @@ export function splitToFitBed(geometry: THREE.BufferGeometry, bed: { x: number; 
     }
   }
   if (parts.length <= 1) {
-    return { parts: parts.length || 1, geometry, dims: { x: r1(size.x), y: r1(size.y), z: r1(size.z) } };
+    return { parts: parts.length || 1, geometry, pieces: [], dims: { x: r1(size.x), y: r1(size.y), z: r1(size.z) } };
   }
 
-  // Recenter each part (centered in X/Y, resting on Z=0) and track the widest footprint.
+  // Recenter each part (centered in X/Y, resting on Z=0), track its own size and
+  // the widest footprint for tiling.
   let maxW = 0, maxD = 0;
+  const partSize: THREE.Vector3[] = [];
   for (const g of parts) {
     g.computeBoundingBox();
     const b = g.boundingBox!;
     const s = new THREE.Vector3();
     b.getSize(s);
     g.translate(-(b.min.x + s.x / 2), -(b.min.y + s.y / 2), -b.min.z);
+    partSize.push(s.clone());
     maxW = Math.max(maxW, s.x);
     maxD = Math.max(maxD, s.y);
   }
@@ -98,16 +113,31 @@ export function splitToFitBed(geometry: THREE.BufferGeometry, bed: { x: number; 
     g.translate((col - (cols - 1) / 2) * stepX, (row - (rows - 1) / 2) * stepY, 0);
   });
 
-  // Weld coincident seam vertices the cutter duplicated (no hole-filling, so the
-  // volume stays exact). Remaining T-junction seams are normal for CSG cuts and
-  // print fine — slicers and the export preflight auto-repair them.
-  let merged = mergeGeometries(parts, false);
-  try {
-    merged = mergeVertices(merged, 1e-4);
-  } catch {}
+  // Keep each piece on its own for separate export; assign a distinct colour.
+  const pieces: SplitPiece[] = parts.map((g, i) => {
+    const c = pieceColor(i, parts.length);
+    const s = partSize[i];
+    return { geometry: g, color: "#" + c.getHexString(), dims: { x: r1(s.x), y: r1(s.y), z: r1(s.z) } };
+  });
+
+  // Build the merged DISPLAY geometry with a per-piece vertex colour, so the viewer
+  // shows the pieces colour-coded. Colours live on a clone so the export pieces stay
+  // position-only (STL/3MF ignore colour anyway).
+  const coloured = parts.map((g, i) => {
+    const cg = posOnly(g);
+    const n = (cg.getAttribute("position") as THREE.BufferAttribute).count;
+    const c = pieceColor(i, parts.length);
+    const col = new Float32Array(n * 3);
+    for (let v = 0; v < n; v++) { col[v * 3] = c.r; col[v * 3 + 1] = c.g; col[v * 3 + 2] = c.b; }
+    cg.setAttribute("color", new THREE.BufferAttribute(col, 3));
+    return cg;
+  });
+  // Don't weld across pieces here — welding would blend seam colours; each piece is
+  // already welded internally enough for display. Volume/printability use the pieces.
+  const merged = mergeGeometries(coloured, false);
   merged.computeVertexNormals();
   merged.computeBoundingBox();
   const ms = new THREE.Vector3();
   merged.boundingBox!.getSize(ms);
-  return { parts: parts.length, geometry: merged, dims: { x: r1(ms.x), y: r1(ms.y), z: r1(ms.z) } };
+  return { parts: parts.length, geometry: merged, pieces, dims: { x: r1(ms.x), y: r1(ms.y), z: r1(ms.z) } };
 }

@@ -332,6 +332,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       return;
     }
 
+    // Colour-coded split pieces bake a per-vertex "color"; honour it (white base so
+    // the colours aren't tinted). Plain models fall back to the neutral grey.
+    const hasColor = !!geometry.getAttribute("color");
+    s.material.vertexColors = hasColor;
+    s.material.color.set(hasColor ? "#ffffff" : "#c7ccd3");
+    s.material.needsUpdate = true;
     const mesh = new THREE.Mesh(geometry, s.material);
     s.content.add(mesh);
     s.tri = buildTriData(geometry);

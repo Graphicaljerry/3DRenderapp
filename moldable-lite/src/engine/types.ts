@@ -4,15 +4,38 @@ import type { ModelSpec } from "../cad/spec";
 export type EngineKind = "replicad" | "primitive" | "generative";
 export type ExportFormat = "stl" | "3mf" | "step" | "obj";
 
-// A direct, client-side geometry op the user applies to a picked edge/corner/face —
-// computed by replicad in the worker with NO LLM/API call. `at` is a point ON the
-// target: for edge/corner ops it's on the edge (fillet/chamfer every edge through it);
-// for face ops it's on the face (the FaceFinder resolves which face).
-export interface CadOp {
+// A direct, client-side geometry op the user applies with NO LLM/API call — computed by
+// replicad in the worker. Two families:
+//  • point-anchored (fillet/chamfer/extrude): `at` is a point ON the target edge/corner/face.
+//  • whole-body transforms (translate/rotate/scale): rigid moves of the entire solid, authored
+//    by the transform gizmo. These preview instantly in three.js and commit as one op.
+export type Vec3 = [number, number, number];
+
+/** Point-anchored op on a picked edge/corner/face. */
+export interface PointOp {
   type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude";
-  at: [number, number, number];
+  at: Vec3;
   size: number; // fillet radius / chamfer size / extrude distance (signed: +out, -in), mm
 }
+/** Move the whole solid by a vector (engine coords; recenter-invariant). */
+export interface TranslateOp {
+  type: "translate";
+  delta: Vec3;
+}
+/** Rotate the whole solid `angleDeg` degrees about an axis through `center` (engine coords). */
+export interface RotateOp {
+  type: "rotate";
+  axis: Vec3;
+  angleDeg: number;
+  center: Vec3;
+}
+/** Uniformly scale the whole solid by `factor` about `center` (engine coords). */
+export interface ScaleOp {
+  type: "scale";
+  factor: number;
+  center: Vec3;
+}
+export type CadOp = PointOp | TranslateOp | RotateOp | ScaleOp;
 
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.

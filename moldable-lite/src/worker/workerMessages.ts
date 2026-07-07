@@ -25,13 +25,15 @@ export type WorkerBuildResult = WorkerBuildOk | WorkerBuildErr;
 
 export type ReplicadExportFormat = "stl" | "step";
 
-// Direct client-side geometry op (fillet/chamfer a picked edge/corner), applied after
-// the code builds. Mirrors CadOp in engine/types (kept local so the worker has no deps).
-export interface WorkerOp {
-  type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude";
-  at: [number, number, number];
-  size: number;
-}
+// Direct client-side geometry ops applied after the code builds. Mirrors CadOp in
+// engine/types (kept local so the worker has no deps). Point-anchored fillet/chamfer/extrude
+// plus whole-body transforms translate/rotate/scale authored by the gizmo.
+type Vec3 = [number, number, number];
+export type WorkerOp =
+  | { type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude"; at: Vec3; size: number }
+  | { type: "translate"; delta: Vec3 }
+  | { type: "rotate"; axis: Vec3; angleDeg: number; center: Vec3 }
+  | { type: "scale"; factor: number; center: Vec3 };
 
 export interface CadWorkerApi {
   init(): Promise<boolean>;

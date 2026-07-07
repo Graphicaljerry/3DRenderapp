@@ -1,7 +1,15 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+
+/** Whole-body transform gizmo modes. "off" hides the gizmo (Select tool is in charge). */
+export type TransformMode = "off" | "rotate" | "scale";
+/** Payload emitted on gizmo release — App maps `center` to engine coords (+recenter). */
+export type TransformCommit =
+  | { kind: "rotate"; axis: [number, number, number]; angleDeg: number; center: [number, number, number] }
+  | { kind: "scale"; factor: number; center: [number, number, number] };
 
 export interface ViewerHandle {
   resetView: () => void;
@@ -40,10 +48,12 @@ interface Props {
   selectMode: boolean;
   selectKind: SelectKind;
   boxSelectionActive: boolean; // App still holds a box-selected face set → keep the overlay
+  transformMode: TransformMode; // whole-body gizmo: off / rotate / scale
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[]) => void;
   onSelectPin: (id: string) => void;
+  onTransformCommit: (c: TransformCommit) => void;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -104,13 +114,16 @@ interface Internals {
   selCache: { key: string; info: FeatureInfo; region: Uint8Array | null } | null; // hover perf guard
   box: { sx: number; sy: number; div: HTMLDivElement } | null; // in-progress marquee
   ro: ResizeObserver;
+  tc: TransformControls; // whole-body move/rotate/scale gizmo
+  pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
+  transforming: boolean; // a gizmo drag is in progress (freezes orbit + select picking)
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, onPickPoint, onPickFeature, onPickFaces, onSelectPin }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, onPickPoint, onPickFeature, onPickFaces, onSelectPin });
-  cb.current = { selectMode, selectKind, onPickPoint, onPickFeature, onPickFaces, onSelectPin };
+  const cb = useRef({ selectMode, selectKind, transformMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit });
+  cb.current = { selectMode, selectKind, transformMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -179,6 +192,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     multiHi.renderOrder = 2;
     scene.add(multiHi);
 
+    // Whole-body transform gizmo (rotate/scale). Attached to a pivot at the model centre
+    // (see enterTransform) so rotation spins in place rather than swinging about the bed origin.
+    const tc = new TransformControls(camera, renderer.domElement);
+    tc.setSpace("world");
+    tc.setSize(0.9);
+    tc.setRotationSnap(THREE.MathUtils.degToRad(15));
+    tc.setScaleSnap(0.05);
+    scene.add(tc.getHelper());
+    tc.addEventListener("dragging-changed", (e: any) => {
+      const s = st.current;
+      if (!s) return;
+      controls.enabled = !e.value;
+      s.transforming = e.value;
+      if (!e.value) commitTransform(s, cb.current.onTransformCommit); // released → emit one op
+    });
+    // Keep the scale PREVIEW uniform (replicad scale is uniform only) so what you drag is what
+    // you get — collapse any per-axis handle drag to a single factor live.
+    tc.addEventListener("objectChange", () => {
+      const s = st.current;
+      if (!s || !s.pivot || tc.getMode() !== "scale") return;
+      const c = [s.pivot.scale.x, s.pivot.scale.y, s.pivot.scale.z];
+      let f = 1, md = 0;
+      for (const v of c) { const d = Math.abs(Math.log(Math.max(1e-3, Math.abs(v)))); if (d > md) { md = d; f = Math.abs(v); } }
+      f = Math.max(0.05, f);
+      s.pivot.scale.set(f, f, f);
+    });
+
     let raf = 0;
     const animate = () => {
       controls.update();
@@ -210,6 +250,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const handleTap = (e: { clientX: number; clientY: number }) => {
       const s2 = st.current;
       if (!s2) return;
+      if (cb.current.transformMode !== "off" || s2.transforming) return; // gizmo owns the pointer
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -309,6 +350,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         return;
       }
       if (!s2 || downAt) return; // don't fight an orbit drag
+      if (cb.current.transformMode !== "off" || s2.transforming) return; // gizmo mode: no hover-pick
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -360,7 +402,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -372,6 +414,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       window.removeEventListener("keydown", onShiftKey);
       window.removeEventListener("keyup", onShiftKey);
       controls.dispose();
+      tc.detach();
+      tc.dispose();
       disposeDims(st.current);
       highlight.geometry.dispose();
       (highlight.material as THREE.Material).dispose();
@@ -393,6 +437,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // (fillet, extrude, an AI edit, a param tweak) keep the user's current view/angle
     // instead of snapping back to default. "Reset view" re-frames on demand.
     const hadMesh = !!s.mesh;
+    // A gizmo may be attached to a pivot holding the current mesh — detach and drop the pivot
+    // before we dispose/replace the mesh (content.clear() below removes the pivot too).
+    s.tc.detach();
+    s.pivot = null;
     // Dispose the replaced model's GPU buffers (geometry + its edge overlay) —
     // otherwise every regeneration leaks VRAM until the tab slows down.
     if (s.mesh) {
@@ -445,7 +493,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.mesh = mesh;
     updateDims(s, showDims, units);
     if (!hadMesh) frameToObject(s); // keep the current camera on edits; frame only on first load
+    if (cb.current.transformMode !== "off") enterTransform(s, cb.current.transformMode); // re-arm gizmo on the new mesh
   }, [geometry]);
+
+  // Toggle the transform gizmo on/off and switch rotate↔scale.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (transformMode === "off") {
+      exitTransform(s);
+      updateDims(s, showDims, units); // restore dimension lines hidden during transform
+    } else {
+      enterTransform(s, transformMode);
+    }
+  }, [transformMode]);
 
   useEffect(() => {
     if (st.current) updateDims(st.current, showDims, units);
@@ -1041,6 +1102,74 @@ function faceLabel(n: THREE.Vector3): string {
   if (az >= ax && az >= ay) return n.z > 0 ? "top" : "bottom";
   if (ay >= ax) return n.y > 0 ? "back" : "front";
   return n.x > 0 ? "right" : "left";
+}
+
+// ---- Whole-body transform gizmo (rotate/scale) ----
+// The gizmo drives a pivot Group placed at the model's centre; the mesh is reparented under
+// it so a rotation spins the part in place (not about the bed origin). On release we read the
+// pivot's transform, emit ONE parametric op, and let the worker rebuild replace the preview.
+
+/** Attach the gizmo: build a pivot at the model centre, reparent the mesh under it. */
+function enterTransform(s: Internals, mode: "rotate" | "scale") {
+  if (!s.mesh) { s.tc.detach(); return; }
+  if (s.pivot) exitTransform(s); // tear down any prior pivot first
+  s.mesh.geometry.computeBoundingBox();
+  const center = s.mesh.geometry.boundingBox!.getCenter(new THREE.Vector3()); // mesh sits at content origin
+  const pivot = new THREE.Group();
+  pivot.position.copy(center);
+  s.content.add(pivot);
+  s.content.remove(s.mesh);
+  pivot.add(s.mesh);
+  s.mesh.position.copy(center.clone().negate()); // keep the mesh visually put
+  s.pivot = pivot;
+  s.tc.setMode(mode === "scale" ? "scale" : "rotate");
+  s.tc.attach(pivot);
+  if (s.dims) s.dims.visible = false; // dimension lines don't follow the pivot — hide while transforming
+}
+
+/** Detach the gizmo and put the mesh back under content with an identity transform. */
+function exitTransform(s: Internals) {
+  s.tc.detach();
+  const pivot = s.pivot;
+  if (pivot) {
+    if (s.mesh && s.mesh.parent === pivot) {
+      pivot.remove(s.mesh);
+      s.mesh.position.set(0, 0, 0);
+      s.mesh.quaternion.identity();
+      s.mesh.scale.set(1, 1, 1);
+      s.content.add(s.mesh);
+    }
+    s.content.remove(pivot);
+  }
+  s.pivot = null;
+}
+
+/** Read the pivot's net transform and emit one rotate/scale op (display coords; App adds recenter). */
+function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
+  const pivot = s.pivot;
+  if (!pivot) return;
+  const c = pivot.position;
+  const center: [number, number, number] = [c.x, c.y, c.z];
+  if (s.tc.getMode() === "scale") {
+    // replicad scale is UNIFORM only, so map any handle (even a per-axis one) to a single factor:
+    // take the component that moved most from 1, and clamp positive (never flip/degenerate).
+    const comps = [pivot.scale.x, pivot.scale.y, pivot.scale.z];
+    let factor = 1, maxDev = 0;
+    for (const v of comps) {
+      const dev = Math.abs(Math.log(Math.max(1e-3, Math.abs(v))));
+      if (dev > maxDev) { maxDev = dev; factor = Math.abs(v); }
+    }
+    factor = Math.max(0.05, factor); // never zero/negative
+    if (Math.abs(factor - 1) < 1e-3) return; // no meaningful change
+    emit({ kind: "scale", factor, center });
+  } else {
+    const q = pivot.quaternion.clone().normalize();
+    const vlen = Math.hypot(q.x, q.y, q.z);
+    const angle = 2 * Math.atan2(vlen, q.w); // radians, signed with axis
+    if (angle < 1e-4) return;
+    const axis: [number, number, number] = vlen > 1e-8 ? [q.x / vlen, q.y / vlen, q.z / vlen] : [0, 0, 1];
+    emit({ kind: "rotate", axis, angleDeg: (angle * 180) / Math.PI, center });
+  }
 }
 
 function frameToObject(s: Internals) {

@@ -49,6 +49,10 @@ const PICK_TOL = 0.25;
 function applyOneOp(shape: any, op: WorkerOp): any {
   const R: any = replicad;
   try {
+    // Whole-body rigid transforms (gizmo). Cheap gp_Trsf, no re-triangulation.
+    if (op.type === "translate") return shape.translate(op.delta);
+    if (op.type === "rotate") return shape.rotate(op.angleDeg, op.center, op.axis); // angle in DEGREES
+    if (op.type === "scale") return shape.scale(op.factor, op.center); // uniform only
     if (op.type === "fillet" || op.type === "chamfer") {
       const filter = (e: any) => e.withinDistance(PICK_TOL, op.at);
       return op.type === "fillet" ? shape.fillet(op.size, filter) : shape.chamfer(op.size, filter);
@@ -70,10 +74,16 @@ function applyOneOp(shape: any, op: WorkerOp): any {
     const inFace = (e: any) => e.inPlane(R.makePlaneFromFace(face));
     return op.type === "face-fillet" ? shape.fillet(op.size, inFace) : shape.chamfer(op.size, inFace);
   } catch (e: any) {
-    const label = op.type === "extrude"
-      ? `Extrude of ${op.size} mm`
-      : `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
-    throw new Error(`${label} didn't apply here — try a smaller size or a different spot. (${String(e?.message ?? e)})`);
+    const detail = String(e?.message ?? e);
+    let label: string;
+    switch (op.type) {
+      case "translate": label = "Move"; break;
+      case "rotate": label = `Rotate of ${op.angleDeg}°`; break;
+      case "scale": label = `Scale ×${op.factor}`; break;
+      case "extrude": label = `Extrude of ${op.size} mm`; break;
+      default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
+    }
+    throw new Error(`${label} didn't apply here — try a smaller amount or a different spot. (${detail})`);
   }
 }
 
@@ -133,6 +143,18 @@ function buildShape(code: string, params: Record<string, number> | undefined, op
   for (const op of opsArr) s = applyOneOp(s, op);
   opCache = { key, ops: opsArr.slice(), shape: s };
   return s;
+}
+
+/** Centre on XY and drop min-z to 0 — the same normalize the display does, so an exported
+ *  STL/STEP sits on the bed matching the viewer (matters after a gizmo rotate reorients it). */
+function dropToBed(shape: any): any {
+  try {
+    const bb = shape.boundingBox;
+    const [min, max] = bb.bounds as [number[], number[]];
+    return shape.translate([-(min[0] + max[0]) / 2, -(min[1] + max[1]) / 2, -min[2]]);
+  } catch {
+    return shape; // unusual bbox API? export as-authored
+  }
 }
 
 function dimsOf(shape: any): { x: number; y: number; z: number } {
@@ -197,7 +219,7 @@ const api: CadWorkerApi = {
 
   async exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>, ops?: WorkerOp[]): Promise<Blob> {
     await ensureOC();
-    const shape = buildShape(code, params, ops);
+    const shape = dropToBed(buildShape(code, params, ops));
     return format === "step"
       ? shape.blobSTEP()
       : shape.blobSTL({ tolerance: 0.01, angularTolerance: 0.1, binary: true });

@@ -7,10 +7,10 @@ import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/Extrude
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
 import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClient";
 import type { SplitPiece } from "./print/split";
-import type { ViewerHandle, PickedFeature, SelectKind } from "./components/Viewer";
+import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
-import type { BuildInput, EngineResult, ExportFormat, CadOp } from "./engine/types";
+import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
@@ -279,6 +279,7 @@ export default function App() {
   // drop a point marker ("point" = the old Pin). Then edit the picked thing precisely.
   const [selectMode, setSelectMode] = useState(false);
   const [selectKind, setSelectKind] = useState<SelectKind>("face");
+  const [transformMode, setTransformMode] = useState<TransformMode>("off");
   const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
   const [selectedFaces, setSelectedFaces] = useState<PickedFeature[]>([]); // box/marquee multi-select
   const [facesText, setFacesText] = useState("");
@@ -1042,7 +1043,7 @@ export default function App() {
 
   // Direct geometry op on the picked edge / corner / face — computed by replicad in
   // the worker with NO AI call (free). Commits a version so Undo works.
-  async function applyDirectOp(type: CadOp["type"], size: number) {
+  async function applyDirectOp(type: PointOp["type"], size: number) {
     const f = selectedFeature;
     if (!f || !size) return;
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
@@ -1054,7 +1055,7 @@ export default function App() {
     // (the display is recentred on the bed) so the finder hits the real edge/face.
     const p = f.at ?? [f.cx, f.cy, f.cz];
     const rc = result.recenter ?? [0, 0, 0];
-    const op: CadOp = { type, at: [p[0] + rc[0], p[1] + rc[1], p[2] + rc[2]], size };
+    const op: PointOp = { type, at: [p[0] + rc[0], p[1] + rc[1], p[2] + rc[2]], size };
     setSelectedFeature(null);
     setSelectedFaces([]);
     setStatus("generating");
@@ -1065,6 +1066,35 @@ export default function App() {
         : type.includes("chamfer") ? `Chamfered the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${size} mm`
         : `Rounded the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${size} mm`;
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label} directly — no AI, no tokens spent.` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Commit a whole-body transform-gizmo drag as ONE parametric op (rotate/scale). The gizmo
+   *  reports its pivot in display coords; map the pivot centre back to engine coords (+recenter),
+   *  exactly like applyDirectOp does for picked points. No AI, no tokens. */
+  async function authorObjectOp(commit: TransformCommit) {
+    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") return;
+    const src = result.source;
+    const rc = result.recenter ?? [0, 0, 0];
+    const c = commit.center;
+    const center: [number, number, number] = [c[0] + rc[0], c[1] + rc[1], c[2] + rc[2]];
+    const op: CadOp =
+      commit.kind === "rotate"
+        ? { type: "rotate", axis: commit.axis, angleDeg: commit.angleDeg, center }
+        : { type: "scale", factor: commit.factor, center };
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
+      const label =
+        commit.kind === "rotate"
+          ? `Rotated ${Math.round(commit.angleDeg)}°`
+          : `Scaled to ${Math.round(commit.factor * 100)}%`;
+      applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `transform ${commit.kind}`);
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label} directly — no AI, no tokens spent.` }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
@@ -1656,7 +1686,7 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => setSelectMode((m) => { const on = !m; if (!on) { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
+          toggleMode: () => setSelectMode((m) => { const on = !m; if (on) setTransformMode("off"); else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
           kind: selectKind,
           // Switching mode clears the other kind's selection so only one edit target is live.
           setKind: (k) => { setSelectKind(k); setSelectedFaces([]); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
@@ -1675,6 +1705,13 @@ export default function App() {
           setText: setFacesText,
           askAi: askAiFaces,
           clear: () => setSelectedFaces([]),
+        }}
+        transformCtl={{
+          mode: transformMode,
+          // Entering Transform turns off Select and clears any pick (one tool owns the pointer).
+          setMode: (m) => { setTransformMode(m); if (m !== "off") { setSelectMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
+          commit: authorObjectOp,
+          busy: status === "generating",
         }}
       />
       {showSettings && (

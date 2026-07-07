@@ -80,6 +80,7 @@ interface TriData {
   edgeCount: number;
   edgeChainId: Int32Array; // per sharp segment → physical-edge (chain) index
   chains: EdgeChain[]; // physical edges (subdivided/curved segments chained)
+  faceId: Int32Array | null; // per-triangle replicad B-rep face id (null for plain meshes)
 }
 
 interface Internals {
@@ -615,6 +616,19 @@ function buildTriData(geo: THREE.BufferGeometry): TriData {
   const count = idx ? idx.count / 3 : pos.count / 3;
   const corner = (c: number) => (idx ? idx.getX(c) : c);
 
+  // Per-triangle B-rep face id from replicad's faceGroups (preserved by syncFaces on
+  // userData). Present for CAD models — lets face-select grab the exact face and stop
+  // at fillets. null for plain meshes (STL/GLB), where we fall back to the flood-fill.
+  let faceId: Int32Array | null = null;
+  const groups = geo.userData?.faceGroups as { start: number; count: number; faceId: number }[] | undefined;
+  if (groups && groups.length) {
+    faceId = new Int32Array(count).fill(-1);
+    for (const g of groups) {
+      const t0 = Math.floor(g.start / 3), t1 = Math.min(count, Math.floor((g.start + g.count) / 3));
+      for (let t = t0; t < t1; t++) faceId[t] = g.faceId;
+    }
+  }
+
   // Weld coincident vertices (quantise to 1 µm) → stable ids for adjacency.
   const vidOf = new Map<string, number>();
   const vid = new Uint32Array(count * 3);
@@ -732,7 +746,7 @@ function buildTriData(geo: THREE.BufferGeometry): TriData {
     chains.push({ segs, ax: A.x, ay: A.y, az: A.z, bx: B.x, by: B.y, bz: B.z, cx: C.x, cy: C.y, cz: C.z, len, closed });
   }
 
-  return { normals, d, degen, count, pos, idx, adj, vpos: new Float32Array(vpos), nUnique, edges, edgeCount, edgeChainId, chains };
+  return { normals, d, degen, count, pos, idx, adj, vpos: new Float32Array(vpos), nUnique, edges, edgeCount, edgeChainId, chains, faceId };
 }
 
 /** Flood-fill the connected smooth region (flat OR curved) around a triangle,
@@ -756,6 +770,20 @@ function smoothRegion(tri: TriData, start: number): number[] {
     }
   }
   return out;
+}
+
+/** Triangles making up the face at `seed`. For CAD models we group by the exact
+ *  replicad B-rep face id, so a flat face is selected cleanly and stops at its fillets;
+ *  meshes without face ids fall back to the dihedral flood-fill. */
+function faceRegion(tri: TriData, seed: number): number[] {
+  const fid = tri.faceId;
+  if (fid && fid[seed] >= 0) {
+    const target = fid[seed];
+    const out: number[] = [];
+    for (let t = 0; t < tri.count; t++) if (fid[t] === target) out.push(t);
+    if (out.length) return out;
+  }
+  return smoothRegion(tri, seed);
 }
 
 function nearestVertexId(tri: TriData, p: THREE.Vector3): number {
@@ -851,7 +879,7 @@ function selectFacesInBox(
       const hit = rc.intersectObject(mesh, false)[0];
       if (!hit || hit.faceIndex !== t) continue; // behind another face → not visible
     }
-    const region = smoothRegion(tri, t);
+    const region = faceRegion(tri, t);
     for (const rt of region) seen[rt] = 1;
     const { info, positions } = faceRegionInfo(tri, region, t);
     faces.push(featureToPayload(info));
@@ -888,7 +916,7 @@ function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: 
       showOnly(s.highlight);
       return s.selCache.info;
     }
-    const tris = smoothRegion(tri, faceIndex);
+    const tris = faceRegion(tri, faceIndex);
     if (!tris.length) return null;
     const { info, positions } = faceRegionInfo(tri, tris, faceIndex);
     const geo = new THREE.BufferGeometry();

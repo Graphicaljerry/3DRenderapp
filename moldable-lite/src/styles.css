@@ -181,6 +181,17 @@ button { font-family: inherit; cursor: pointer; }
 .tabs button:hover:not(.on) { color: var(--ink2); }
 .tabs button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
+/* The Face/Edge/Corner/Point control eases in when you click Select. */
+.mode-seg { animation: seg-in .22s cubic-bezier(.23,1,.32,1); transform-origin: left center; }
+@keyframes seg-in { from { opacity: 0; transform: translateX(-10px) scale(.96); } to { opacity: 1; transform: none; } }
+/* Selection / pieces panels pop in gently instead of snapping. */
+.pin-panel, .split-panel { animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+@keyframes panel-in { from { opacity: 0; transform: translateY(-7px) scale(.985); } to { opacity: 1; transform: none; } }
+.box-hint { animation: hint-in .22s cubic-bezier(.23,1,.32,1); }
+@keyframes hint-in { from { opacity: 0; transform: translate(-50%, 7px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) {
+  .mode-seg, .pin-panel, .split-panel, .box-hint { animation: none; }
+}
 .viewer-body { flex: 1; position: relative; min-height: 0; min-width: 0; overflow: hidden; }
 /* Absolutely positioned so the canvas is sized by the body (which the grid
    controls), never the other way round — this breaks the resize feedback loop. */

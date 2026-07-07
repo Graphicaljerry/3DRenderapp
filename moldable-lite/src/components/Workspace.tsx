@@ -543,7 +543,7 @@ export function Workspace(p: Props) {
                   Select
                 </button>
                 {p.featureCtl.mode && (
-                  <div className="seg sm">
+                  <div className="seg sm mode-seg">
                     {SELECT_MODES.map((m, i) => (
                       <button key={m.kind} className={p.featureCtl.kind === m.kind ? "on" : ""} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
                         {m.label}

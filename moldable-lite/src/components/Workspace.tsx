@@ -118,6 +118,22 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
   );
 }
 
+/** Glanceable mesh + print stats on the model (Meshy's Faces/Vertices, reframed
+    for slicing: triangles, watertight, volume, bed fit). */
+function MeshStats({ report }: { report: PrintabilityReport }) {
+  const heavy = report.triangleCount > HEAVY_TRIANGLES;
+  const wt = report.manifold.isWatertight;
+  const fit = report.bedFit;
+  return (
+    <div className="mesh-stats" role="status" aria-label="Mesh and print stats">
+      <div className="ms-row"><span>Triangles</span><b className={heavy ? "warn" : ""}>{report.triangleCount.toLocaleString()}{heavy ? " · heavy" : ""}</b></div>
+      <div className="ms-row"><span>Watertight</span><b className={wt ? "ok" : "bad"}>{wt ? "Yes" : `${report.manifold.boundaryEdges} open`}</b></div>
+      <div className="ms-row"><span>Volume</span><b>{(report.volume.approxVolume / 1000).toFixed(1)} cm³</b></div>
+      <div className="ms-row"><span>Fits bed</span><b className={fit.fitsRotated ? "ok" : "bad"}>{fit.fitsAsIs ? "Yes" : fit.fitsWithRotation ? "Rotated" : "No"}</b></div>
+    </div>
+  );
+}
+
 /** The "path to a print-ready file" — the differentiator competitors stop short of.
     Reflects real state (model → checked → print-ready) and jumps to the check. */
 function PathToPrint({ hasModel, report, onOpenCheck }: {
@@ -253,6 +269,7 @@ export function Workspace(p: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
+  const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -489,6 +506,7 @@ export function Workspace(p: Props) {
                   {p.units === "mm" ? "mm" : "inches"}
                 </button>
                 <button className="ghost sm" onClick={() => p.setWireframe((w) => !w)}>{p.wireframe ? "Solid" : "Wireframe"}</button>
+                <button className={`ghost sm${showStats ? " on" : ""}`} aria-pressed={showStats} title="Show mesh & print stats on the model" onClick={() => setShowStats((s) => !s)}>Stats</button>
                 <button className="ghost sm" onClick={() => p.viewerRef.current?.resetView()}>Reset view</button>
               </div>
             )}
@@ -509,6 +527,7 @@ export function Workspace(p: Props) {
                 onPickPoint={p.pinCtl.pick}
                 onSelectPin={p.pinCtl.select}
               />
+              {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
               {p.pinCtl.active && (
                 <div className="pin-panel">
                   <div className="pin-head">

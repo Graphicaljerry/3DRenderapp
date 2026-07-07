@@ -4,6 +4,9 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
+/** A point-to-point measurement on the model (display coords). */
+export type Measurement = { id: string; a: [number, number, number]; b: [number, number, number] };
+
 /** Whole-body transform gizmo modes. "off" hides the gizmo (Select tool is in charge). */
 export type TransformMode = "off" | "rotate" | "scale";
 /** Payload emitted on gizmo release — App maps `center` to engine coords (+recenter). */
@@ -49,11 +52,15 @@ interface Props {
   selectKind: SelectKind;
   boxSelectionActive: boolean; // App still holds a box-selected face set → keep the overlay
   transformMode: TransformMode; // whole-body gizmo: off / rotate / scale
+  measureMode: boolean; // click two points to measure the distance between them
+  measurePending: [number, number, number] | null; // the first clicked point, awaiting the second
+  measurements: Measurement[]; // committed point-to-point measurements to render
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[]) => void;
   onSelectPin: (id: string) => void;
   onTransformCommit: (c: TransformCommit) => void;
+  onMeasurePoint: (p: [number, number, number]) => void;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -117,13 +124,14 @@ interface Internals {
   tc: TransformControls; // whole-body move/rotate/scale gizmo
   pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
   transforming: boolean; // a gizmo drag is in progress (freezes orbit + select picking)
+  measures: THREE.Group; // point-to-point measurement lines + labels
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit });
-  cb.current = { selectMode, selectKind, transformMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -156,6 +164,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
     const content = new THREE.Group();
     scene.add(content);
+
+    const measures = new THREE.Group(); // point-to-point measurement annotations
+    scene.add(measures);
 
     const material = new THREE.MeshStandardMaterial({ color: "#c7ccd3", metalness: 0.05, roughness: 0.75 });
 
@@ -227,7 +238,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const s = st.current;
       const vpH = el.clientHeight || 1;
       const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
-      for (const grp of [s?.dims, s?.pins]) {
+      for (const grp of [s?.dims, s?.pins, s?.measures]) {
         if (!grp) continue;
         for (const o of grp.children) {
           if (!(o as THREE.Sprite).isSprite || !o.userData.dimLabel) continue;
@@ -257,12 +268,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       rc.setFromCamera(ndc, camera);
-      if (s2.pins) {
+      if (s2.pins && !cb.current.measureMode) {
         const hp = rc.intersectObjects(s2.pins.children, false)[0];
         if (hp) {
           cb.current.onSelectPin(String(hp.object.userData.pinId));
           return;
         }
+      }
+      // Measure tool: click a surface point; App pairs two clicks into a measurement.
+      if (cb.current.measureMode) {
+        if (!s2.mesh) return;
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (!hit) return;
+        cb.current.onMeasurePoint([hit.point.x, hit.point.y, hit.point.z]);
+        return;
       }
       if (!cb.current.selectMode || !s2.mesh) return; // nothing picks unless the Select tool is on
       // Point mode drops a surface marker (the old Pin); the others lock a feature.
@@ -402,7 +421,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -507,6 +526,41 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       enterTransform(s, transformMode);
     }
   }, [transformMode]);
+
+  // Render point-to-point measurements (lines + distance labels) and the pending anchor.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    for (const o of [...s.measures.children]) {
+      s.measures.remove(o);
+      const a = o as any;
+      a.geometry?.dispose?.();
+      const mat = a.material;
+      if (Array.isArray(mat)) mat.forEach((m: any) => { m.map?.dispose?.(); m.dispose?.(); });
+      else { mat?.map?.dispose?.(); mat?.dispose?.(); }
+    }
+    if (!measurements.length && !measurePending) return;
+    let modelSize = 40;
+    if (s.mesh) { s.mesh.geometry.computeBoundingBox(); const sz = s.mesh.geometry.boundingBox!.getSize(new THREE.Vector3()); modelSize = Math.max(sz.x, sz.y, sz.z) || 40; }
+    const markR = Math.max(0.4, modelSize * 0.012);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x0d9488, transparent: true, opacity: 0.95, depthTest: false });
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x0d9488, depthTest: false, transparent: true });
+    const addDot = (p: [number, number, number]) => {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(markR, 12, 8), dotMat);
+      m.position.set(p[0], p[1], p[2]); m.renderOrder = 5; s.measures.add(m);
+    };
+    for (const meas of measurements) {
+      const a = new THREE.Vector3(...meas.a), b = new THREE.Vector3(...meas.b);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lineMat);
+      line.renderOrder = 5; s.measures.add(line);
+      addDot(meas.a); addDot(meas.b);
+      const label = makeLabel(fmtDist(a.distanceTo(b), units), { fg: "#0f766e", bg: "rgba(255,255,255,0.94)", border: "#0d9488" });
+      label.position.copy(a.clone().add(b).multiplyScalar(0.5));
+      label.userData.dimLabel = true; label.userData.baseH = modelSize * 0.05;
+      s.measures.add(label);
+    }
+    if (measurePending) addDot(measurePending);
+  }, [measurements, measurePending, units, geometry]);
 
   useEffect(() => {
     if (st.current) updateDims(st.current, showDims, units);
@@ -1321,6 +1375,11 @@ function addDim(
   sprite.scale.set(h * sprite.userData.aspect, h, 1);
   sprite.position.copy(mid);
   g.add(sprite);
+}
+
+/** Format a display-space distance (mm) for a measurement label, honouring the unit toggle. */
+function fmtDist(mm: number, units: "mm" | "in"): string {
+  return units === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${Math.round(mm * 10) / 10} mm`;
 }
 
 function makeLabel(text: string, colors: { fg: string; bg: string; border: string }): THREE.Sprite {

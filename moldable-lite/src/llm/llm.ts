@@ -155,6 +155,7 @@ export async function generateLlm(
       relayPrefix: p.relayPrefix,
       proxyBase,
       extraBody,
+      cacheSystem: s.provider === "openrouter",
     },
     h,
   );

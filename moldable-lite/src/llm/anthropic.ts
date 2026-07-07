@@ -57,7 +57,11 @@ function body(r: LlmRequest, stream: boolean) {
   return JSON.stringify({
     model: r.model,
     max_tokens: r.maxTokens ?? 8192,
-    system: r.system,
+    // The system prompt (replicad API guide + rules + examples) is large and identical
+    // across a session's edits, so cache it: follow-up edits within the TTL read it at
+    // ~0.1x input price instead of re-billing the whole guide every time. Below the
+    // provider's min cache size Anthropic simply skips caching — no error, no downside.
+    system: [{ type: "text", text: r.system, cache_control: { type: "ephemeral" } }],
     messages: r.messages.map((m) => ({ role: m.role, content: toAnthropicContent(m.content) })),
     stream,
   });

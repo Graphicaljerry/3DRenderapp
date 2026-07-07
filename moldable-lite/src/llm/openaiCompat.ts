@@ -16,6 +16,7 @@ export interface CompatRequest {
   relayPrefix?: string; // e.g. "groq" -> /prox/groq/<path> when direct fails
   proxyBase?: string;
   extraBody?: Record<string, unknown>; // provider-specific extras (e.g. OpenRouter `reasoning`)
+  cacheSystem?: boolean; // mark the system prompt as a cache breakpoint (OpenRouter)
 }
 
 function toCompatContent(c: import("./anthropic").ApiMsg["content"]): unknown {
@@ -30,11 +31,17 @@ function toCompatContent(c: import("./anthropic").ApiMsg["content"]): unknown {
 function body(r: CompatRequest, stream: boolean): string {
   // No token/temperature caps: parameter names differ across providers and the
   // replicad programs are small; provider defaults are fine.
+  // OpenRouter honours an Anthropic-style cache_control breakpoint on the system
+  // message (read ~0.1x for cache-supporting models; ignored by providers that cache
+  // implicitly), so a session's edits don't re-bill the whole static system prompt.
+  const systemMsg = r.cacheSystem
+    ? { role: "system", content: [{ type: "text", text: r.system, cache_control: { type: "ephemeral" } }] }
+    : { role: "system", content: r.system };
   return JSON.stringify({
     model: r.model,
     stream,
     messages: [
-      { role: "system", content: r.system },
+      systemMsg,
       ...r.messages.map((m) => ({ role: m.role, content: toCompatContent(m.content) })),
     ],
     ...(r.extraBody ?? {}),

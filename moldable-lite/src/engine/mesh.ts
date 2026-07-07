@@ -9,11 +9,16 @@ export function facesToGeometry(faces: FaceMesh): BufferGeometry {
   if (!faces.normals || faces.normals.length === 0) g.computeVertexNormals();
   g.computeBoundingBox();
   const bb = g.boundingBox;
+  // Recentre for display, but record the offset so picked points (which are in these
+  // display coords) can be mapped back to replicad's shape coords for direct ops.
+  let recenter: [number, number, number] = [0, 0, 0];
   if (bb) {
     const cx = (bb.min.x + bb.max.x) / 2;
     const cy = (bb.min.y + bb.max.y) / 2;
+    recenter = [cx, cy, bb.min.z];
     g.translate(-cx, -cy, -bb.min.z);
   }
+  g.userData.recenter = recenter;
   g.computeBoundingBox();
   return g;
 }

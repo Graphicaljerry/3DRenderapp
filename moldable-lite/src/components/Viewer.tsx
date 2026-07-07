@@ -25,6 +25,7 @@ export interface PickedFeature {
   len?: number; // edge length
   curved?: boolean; // face: a curved surface (not a flat plane)
   closed?: boolean; // edge: a closed loop (e.g. a rim), no distinct ends
+  at?: [number, number, number]; // full-precision on-edge / vertex point for direct fillet/chamfer targeting
 }
 export interface ViewerPin { id: string; x: number; y: number; z: number; }
 
@@ -723,7 +724,11 @@ function buildTriData(geo: THREE.BufferGeometry): TriData {
     const pv = (v: number) => new THREE.Vector3(vpos[v * 3], vpos[v * 3 + 1], vpos[v * 3 + 2]);
     const A = closed ? cen : pv(ends[0]);
     const B = closed ? cen : pv(ends[1]);
-    const C = closed ? cen : new THREE.Vector3().addVectors(A, B).multiplyScalar(0.5);
+    // Representative point: the start of the chain's median segment. OCCT samples edge
+    // vertices ON the true curve, so this point lies exactly on the physical edge (unlike
+    // a chord midpoint or centroid) — which makes it a reliable target for fillet/chamfer.
+    const midSeg = segs[Math.floor(segs.length / 2)];
+    const C = new THREE.Vector3(edges[midSeg * 6], edges[midSeg * 6 + 1], edges[midSeg * 6 + 2]);
     chains.push({ segs, ax: A.x, ay: A.y, az: A.z, bx: B.x, by: B.y, bz: B.z, cx: C.x, cy: C.y, cz: C.z, len, closed });
   }
 
@@ -972,9 +977,10 @@ function featureToPayload(info: FeatureInfo): PickedFeature {
       ax: r(info.a.x), ay: r(info.a.y), az: r(info.a.z),
       bx: r(info.b.x), by: r(info.b.y), bz: r(info.b.z),
       len: r(info.len),
+      at: [info.c.x, info.c.y, info.c.z], // full precision, exactly on the edge
     };
   }
-  return { kind: "vertex", label: "corner", cx: r(info.pos.x), cy: r(info.pos.y), cz: r(info.pos.z) };
+  return { kind: "vertex", label: "corner", cx: r(info.pos.x), cy: r(info.pos.y), cz: r(info.pos.z), at: [info.pos.x, info.pos.y, info.pos.z] };
 }
 
 /** Human name for a face from its outward normal (Z-up). */

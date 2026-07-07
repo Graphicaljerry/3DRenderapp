@@ -63,7 +63,7 @@ export class ReplicadEngine implements Engine {
     if (input.kind !== "code") throw new Error("The replicad engine expects code input.");
     let res: WorkerBuildResult;
     try {
-      res = await this.withWatchdog<WorkerBuildResult>(this.api.build(input.code, input.params) as unknown as Promise<WorkerBuildResult>);
+      res = await this.withWatchdog<WorkerBuildResult>(this.api.build(input.code, input.params, input.ops) as unknown as Promise<WorkerBuildResult>);
     } catch (timeoutErr) {
       this.respawn();
       throw timeoutErr;
@@ -74,12 +74,14 @@ export class ReplicadEngine implements Engine {
       (err as any).stack = res.error.stack;
       throw err;
     }
+    const geometry = facesToGeometry(res.faces);
     return {
       kind: "replicad",
-      geometry: facesToGeometry(res.faces),
+      geometry,
       dims: res.dims,
       source: input,
       supportsStep: true,
+      recenter: (geometry.userData.recenter as [number, number, number]) ?? [0, 0, 0],
     };
   }
 
@@ -90,8 +92,9 @@ export class ReplicadEngine implements Engine {
   async export(result: EngineResult, format: ExportFormat): Promise<Blob> {
     const code = result.source.kind === "code" ? result.source.code : "";
     const params = result.source.kind === "code" ? result.source.params : undefined;
-    if (format === "stl") return this.withWatchdog(this.api.exportBlob(code, "stl", params));
-    if (format === "step") return this.withWatchdog(this.api.exportBlob(code, "step", params));
+    const ops = result.source.kind === "code" ? result.source.ops : undefined;
+    if (format === "stl") return this.withWatchdog(this.api.exportBlob(code, "stl", params, ops));
+    if (format === "step") return this.withWatchdog(this.api.exportBlob(code, "step", params, ops));
     if (format === "obj") return geometryToOBJ(result.geometry);
     return geometryTo3MF(result.geometry);
   }

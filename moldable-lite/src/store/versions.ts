@@ -1,4 +1,5 @@
 import type { Project, Version, StoredEngineKind, GenSource } from "./types";
+import type { CadOp } from "../engine/types";
 import { uid } from "../lib/id";
 
 export interface Snapshot {
@@ -6,6 +7,7 @@ export interface Snapshot {
   summary: string;
   code?: string;
   params?: Record<string, number>;
+  ops?: CadOp[];
   importFile?: Blob;
   spec?: unknown;
   dims?: { x: number; y: number; z: number };
@@ -22,6 +24,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     engine: snap.engine,
     code: snap.code,
     params: snap.params,
+    ops: snap.ops,
     importFile: snap.importFile,
     spec: snap.spec,
     dims: snap.dims,
@@ -33,6 +36,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     engine: snap.engine,
     code: snap.code,
     params: snap.params,
+    ops: snap.ops,
     importFile: snap.importFile,
     spec: snap.spec,
     glb: snap.glb,
@@ -54,6 +58,7 @@ export function restoreVersion(project: Project, versionId: string): Project {
     engine: t.engine,
     code: t.code,
     params: t.params,
+    ops: t.ops,
     importFile: t.importFile,
     spec: t.spec,
     dims: t.dims,
@@ -65,6 +70,7 @@ export function restoreVersion(project: Project, versionId: string): Project {
     engine: t.engine,
     code: t.code,
     params: t.params,
+    ops: t.ops,
     importFile: t.importFile,
     spec: t.spec,
     glb: t.glb,
@@ -94,6 +100,7 @@ export function navigateHead(project: Project, versionId: string): Project {
     engine: t.engine,
     code: t.code,
     params: t.params,
+    ops: t.ops,
     importFile: t.importFile,
     spec: t.spec,
     glb: t.glb,

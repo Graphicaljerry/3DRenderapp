@@ -290,6 +290,7 @@ interface Props {
     pick: (f: PickedFeature) => void;
     pickFaces: (faces: PickedFeature[]) => void;
     askAi: () => void;
+    directOp: (type: "fillet" | "chamfer", size: number) => void;
     clear: () => void;
   };
   facesCtl: {
@@ -635,6 +636,13 @@ export function Workspace(p: Props) {
                     </span>
                     <button className="x" aria-label="Clear selection" onClick={p.featureCtl.clear}><IconX /></button>
                   </div>
+                  {(p.featureCtl.selected.kind === "edge" || p.featureCtl.selected.kind === "vertex") && p.activeKind === "replicad" && (
+                    <DirectOpBar
+                      what={p.featureCtl.selected.kind === "vertex" ? "corner" : "edge"}
+                      busy={p.status === "generating"}
+                      onApply={p.featureCtl.directOp}
+                    />
+                  )}
                   <textarea
                     rows={2}
                     value={p.featureCtl.text}
@@ -1176,6 +1184,27 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
         </div>
       )}
       <button className="primary" disabled={disabled} onClick={() => setOpen((o) => !o)}>Export ▾</button>
+    </div>
+  );
+}
+
+// Free, instant fillet/chamfer on the picked edge/corner — computed locally by
+// replicad, no AI call. Shown in the selection panel for edge/corner picks.
+function DirectOpBar({ what, busy, onApply }: { what: string; busy: boolean; onApply: (type: "fillet" | "chamfer", size: number) => void }) {
+  const [size, setSize] = useState(2);
+  return (
+    <div className="directop">
+      <span className="directop-label">Quick edit — free, no AI</span>
+      <div className="directop-row">
+        <input
+          type="number" min={0.2} max={50} step={0.2} value={size}
+          onChange={(e) => setSize(Math.max(0.1, Number(e.target.value) || 0))}
+          aria-label="size in mm"
+        />
+        <span className="fine">mm</span>
+        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("fillet", size)} title={`Round this ${what} by ${size} mm — no tokens`}>Round</button>
+        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("chamfer", size)} title={`Chamfer this ${what} by ${size} mm — no tokens`}>Chamfer</button>
+      </div>
     </div>
   );
 }

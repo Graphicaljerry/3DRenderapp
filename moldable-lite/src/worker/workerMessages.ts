@@ -25,10 +25,18 @@ export type WorkerBuildResult = WorkerBuildOk | WorkerBuildErr;
 
 export type ReplicadExportFormat = "stl" | "step";
 
+// Direct client-side geometry op (fillet/chamfer a picked edge/corner), applied after
+// the code builds. Mirrors CadOp in engine/types (kept local so the worker has no deps).
+export interface WorkerOp {
+  type: "fillet" | "chamfer";
+  at: [number, number, number];
+  size: number;
+}
+
 export interface CadWorkerApi {
   init(): Promise<boolean>;
   importShape(file: Blob): Promise<{ ok: boolean; error?: string }>;
   clearImport(): Promise<void>;
-  build(code: string, params?: Record<string, number>): Promise<WorkerBuildResult>;
-  exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>): Promise<Blob>;
+  build(code: string, params?: Record<string, number>, ops?: WorkerOp[]): Promise<WorkerBuildResult>;
+  exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>, ops?: WorkerOp[]): Promise<Blob>;
 }

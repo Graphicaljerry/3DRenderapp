@@ -27,7 +27,7 @@ import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
-import { PROVIDERS, getProvider } from "./gen/registry";
+import { PROVIDERS, getProvider, usesMultiView } from "./gen/registry";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject } from "./store/projects";
 import { appendVersion, restoreVersion } from "./store/versions";
@@ -250,6 +250,29 @@ export default function App() {
   const [guided, setGuided] = useState(false);
   const [fit, setFit] = useState<FitId>("snug");
   const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
+  // Extra reference angles for multi-view mesh generation (front is `image`).
+  type ViewSlot = "left" | "back" | "right";
+  const [views, setViews] = useState<Partial<Record<ViewSlot, { blob: Blob; url: string }>>>({});
+  function pickView(slot: ViewSlot, file: File) {
+    setViews((v) => {
+      v[slot] && URL.revokeObjectURL(v[slot]!.url);
+      return { ...v, [slot]: { blob: file, url: URL.createObjectURL(file) } };
+    });
+  }
+  function clearView(slot: ViewSlot) {
+    setViews((v) => {
+      v[slot] && URL.revokeObjectURL(v[slot]!.url);
+      const n = { ...v };
+      delete n[slot];
+      return n;
+    });
+  }
+  function clearAllViews() {
+    setViews((v) => {
+      Object.values(v).forEach((x) => x && URL.revokeObjectURL(x.url));
+      return {};
+    });
+  }
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
@@ -498,6 +521,7 @@ export default function App() {
   function clearImage() {
     if (image) URL.revokeObjectURL(image.url);
     setImage(null);
+    clearAllViews(); // extra angles are meaningless without a front image
   }
 
   // Paste an image straight from the clipboard (screenshot, copied file) anywhere
@@ -929,7 +953,7 @@ export default function App() {
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
       try {
-        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, prompt: p || undefined, provider: ge.provider, model: genModel });
+        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: p || undefined, provider: ge.provider, model: genModel });
         const name = deriveName(p || "Photo model");
         const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? ge.provider})`;
         applyResult(res, name, summary, p || "(image upload)");
@@ -1273,6 +1297,10 @@ export default function App() {
         imageUrl={image?.url ?? null}
         onPickImage={pickImage}
         onClearImage={clearImage}
+        views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
+        onPickView={pickView}
+        onClearView={clearView}
+        multiViewEngine={usesMultiView(genEng.provider, genEng.model)}
         onMeasure={() => setShowMeasure(true)}
         messages={messages}
         status={status}

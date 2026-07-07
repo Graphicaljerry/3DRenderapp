@@ -19,21 +19,33 @@ const run: GenFn = async (input, onProgress, signal) => {
   const base = `${input.proxyBase || ""}/prox/tripo/v2/openapi`;
   const bearer = { authorization: `Bearer ${input.apiKey || ""}` };
 
-  let fileToken: string | undefined;
-  if (input.image) {
-    onProgress({ status: "uploading image…" });
+  const upload = async (blob: Blob): Promise<{ type: string; file_token: string }> => {
     const fd = new FormData();
-    fd.append("file", input.image, "image.png");
+    fd.append("file", blob, "image.png");
     const r = await fetch(`${base}/upload`, { method: "POST", headers: bearer, body: fd, signal });
     const j = await jsonOrThrow(r, "Tripo");
-    fileToken = j.data?.image_token ?? j.data?.file_token;
-    if (!fileToken) throw new Error("Tripo upload returned no image token.");
-  }
+    const token = j.data?.image_token ?? j.data?.file_token;
+    if (!token) throw new Error("Tripo upload returned no image token.");
+    return { type: blob.type.includes("jpeg") ? "jpg" : "png", file_token: token };
+  };
 
-  const ext = input.image?.type.includes("jpeg") ? "jpg" : "png";
-  const taskBody = input.image
-    ? { type: "image_to_model", file: { type: ext, file_token: fileToken } }
-    : { type: "text_to_model", prompt: input.prompt };
+  // Multi-view: Tripo's multiview_to_model wants files ordered [front, left, back, right],
+  // with an empty object for any angle the user didn't supply.
+  const extraViews = [input.views?.left, input.views?.back, input.views?.right];
+  const hasExtra = input.image && extraViews.some(Boolean);
+
+  let taskBody: Record<string, unknown>;
+  if (hasExtra) {
+    onProgress({ status: "uploading views…" });
+    const front = await upload(input.image!);
+    const rest = await Promise.all(extraViews.map((v) => (v ? upload(v) : Promise.resolve({}))));
+    taskBody = { type: "multiview_to_model", files: [front, ...rest] };
+  } else if (input.image) {
+    onProgress({ status: "uploading image…" });
+    taskBody = { type: "image_to_model", file: await upload(input.image) };
+  } else {
+    taskBody = { type: "text_to_model", prompt: input.prompt };
+  }
 
   const cr = await fetch(`${base}/task`, {
     method: "POST",

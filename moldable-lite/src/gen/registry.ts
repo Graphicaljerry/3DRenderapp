@@ -111,6 +111,15 @@ export function getProvider(id: string): ProviderDef | undefined {
   return PROVIDERS.find((p) => p.id === id);
 }
 
+/** Engines that actually consume extra reference angles (front/left/back/right). */
+export function usesMultiView(providerId: string, modelId: string): boolean {
+  if (providerId === "fal") return /hyper3d|rodin/.test(modelId); // Rodin takes an image array
+  if (providerId === "tripo") return modelId === "image_to_model"; // -> multiview_to_model
+  return false;
+}
+/** The engines to recommend when the user wants multi-view accuracy. */
+export const MULTIVIEW_HINT = "fal · Rodin or Tripo";
+
 export function providerOfModel(): ProviderDef {
   return PROVIDERS[0];
 }

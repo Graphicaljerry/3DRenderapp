@@ -80,6 +80,44 @@ function ProjectTitle({ name, onRename }: { name: string; onRename: (n: string) 
   );
 }
 
+/** Extra reference angles for multi-view mesh generation (front is the main photo). */
+function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
+  views: Partial<Record<"left" | "back" | "right", string>>;
+  onPick: (slot: "left" | "back" | "right", f: File) => void;
+  onClear: (slot: "left" | "back" | "right") => void;
+  multiViewEngine: boolean;
+}) {
+  const slots: ("left" | "back" | "right")[] = ["left", "back", "right"];
+  const label = { left: "Left", back: "Back", right: "Right" } as const;
+  return (
+    <div className="mv">
+      <div className="mv-slots">
+        <div className="mv-slot mv-front" title="Front — the reference photo above"><span className="mv-tag">Front</span></div>
+        {slots.map((s) =>
+          views[s] ? (
+            <div className="mv-slot filled" key={s}>
+              <img src={views[s]} alt={label[s]} />
+              <span className="mv-tag">{label[s]}</span>
+              <button type="button" className="mv-x" aria-label={`Remove ${label[s]} view`} onClick={() => onClear(s)}><IconX /></button>
+            </div>
+          ) : (
+            <label className="mv-slot add" key={s} title={`Add a ${label[s].toLowerCase()} photo`}>
+              <span className="mv-plus">+</span>
+              <span className="mv-tag">{label[s]}</span>
+              <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onPick(s, f); e.currentTarget.value = ""; }} />
+            </label>
+          ),
+        )}
+      </div>
+      <p className="mv-hint">
+        {multiViewEngine
+          ? "More angles → a more accurate mesh. This engine uses them."
+          : <>More angles improve accuracy — but this engine uses only the front. Switch to <b>fal · Rodin</b> or <b>Tripo</b> to use them.</>}
+      </p>
+    </div>
+  );
+}
+
 /** Format overall W×D×H in the chosen unit (unit shown once). */
 function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): string {
   if (units === "in") {
@@ -121,6 +159,10 @@ interface Props {
   imageUrl: string | null;
   onPickImage: (f: File) => void;
   onClearImage: () => void;
+  views: Partial<Record<"left" | "back" | "right", string>>;
+  onPickView: (slot: "left" | "back" | "right", f: File) => void;
+  onClearView: (slot: "left" | "back" | "right") => void;
+  multiViewEngine: boolean;
   onMeasure: () => void;
   messages: ChatMessage[];
   status: "idle" | "generating";
@@ -341,6 +383,10 @@ export function Workspace(p: Props) {
                 )}
                 <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
               </div>
+            )}
+
+            {p.mode === "generative" && p.imageUrl && (
+              <MultiViewRow views={p.views} onPick={p.onPickView} onClear={p.onClearView} multiViewEngine={p.multiViewEngine} />
             )}
 
             <form

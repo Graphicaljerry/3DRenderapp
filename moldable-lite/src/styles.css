@@ -317,6 +317,21 @@ button { font-family: inherit; cursor: pointer; }
 .imgchip img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
 .imgchip span { flex: 1; font-size: 12px; color: var(--ink2); }
 .imgchip button { border: none; background: none; color: var(--subt); font-size: 14px; }
+/* Multi-view reference angles (generative). */
+.mv { margin: 6px 12px 0; }
+.mv-slots { display: flex; gap: 6px; }
+.mv-slot { position: relative; width: 54px; height: 54px; border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; overflow: hidden; }
+.mv-slot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.mv-front { border: 1px solid var(--accent); background: var(--accent-w); }
+.mv-slot.add { border: 1px dashed var(--bord-strong); background: var(--surf); color: var(--subt); cursor: pointer; transition: border-color .15s ease, color .15s ease; }
+.mv-slot.add:hover { border-color: var(--accent); color: var(--accent-d); }
+.mv-slot.filled { border: 1px solid var(--bord); }
+.mv-plus { font-size: 16px; line-height: 1; }
+.mv-tag { position: relative; z-index: 1; font-size: 9px; font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.mv-slot.filled .mv-tag, .mv-front .mv-tag { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(0,0,0,.55); color: #fff; padding: 1px 0; text-align: center; }
+.mv-front .mv-tag { background: var(--accent); }
+.mv-x { position: absolute; top: 2px; right: 2px; z-index: 2; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; padding: 0; }
+.mv-hint { font-size: 11px; color: var(--subt); margin: 6px 0 0; line-height: 1.4; }
 .composer { border-top: none; }
 .attach { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--ink2); display: inline-flex; align-items: center; justify-content: center; }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }

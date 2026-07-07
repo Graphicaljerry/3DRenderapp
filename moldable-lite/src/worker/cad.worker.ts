@@ -35,6 +35,13 @@ function sanitize(code: string): string {
 // passed to main() as its third argument so code can modify it directly.
 let importedShape: any = null;
 
+// The picked point comes from the tessellated mesh, so on a CURVED edge/face it sits on the
+// chord and deviates from the true B-rep surface by up to the mesh tolerance (~0.05 mm).
+// replicad's containsPoint uses a 1e-6 mm (nanometre) tolerance, which rejects those points —
+// so direct ops failed on any rounded geometry. Match within a small distance instead. The
+// tolerance is a few× the mesh deviation, still far below the wall spacing on real parts.
+const PICK_TOL = 0.25;
+
 /** Apply ONE direct op to a shape — all local, no AI.
  *  edge/corner: fillet/chamfer every edge through the point.
  *  face-fillet/chamfer: round/bevel all edges bounding the face at the point.
@@ -43,10 +50,15 @@ function applyOneOp(shape: any, op: WorkerOp): any {
   const R: any = replicad;
   try {
     if (op.type === "fillet" || op.type === "chamfer") {
-      const filter = (e: any) => e.containsPoint(op.at);
+      const filter = (e: any) => e.withinDistance(PICK_TOL, op.at);
       return op.type === "fillet" ? shape.fillet(op.size, filter) : shape.chamfer(op.size, filter);
     }
-    const face = new R.FaceFinder().containsPoint(op.at).find(shape, { unique: true });
+    // Faces: exact hit first (flat faces land dead-on); fall back to nearest within tolerance
+    // so a point on a curved face still resolves. unique:true keeps it to a single face.
+    const findFace = () =>
+      new R.FaceFinder().containsPoint(op.at).find(shape, { unique: true }) ||
+      new R.FaceFinder().withinDistance(PICK_TOL, op.at).find(shape, { unique: true });
+    const face = findFace();
     if (!face) throw new Error("couldn't resolve the face at that point");
     if (op.type === "extrude") {
       // Extrude the face (holes preserved) along its outward normal by the distance;

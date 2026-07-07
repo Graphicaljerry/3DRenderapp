@@ -20,6 +20,8 @@ export const PRINTERS: PrinterPreset[] = [
   { brand: "Bambu Lab", model: "X1 Carbon", x: 256, y: 256, z: 256, kind: "FDM" },
   { brand: "Bambu Lab", model: "H2D", x: 350, y: 320, z: 325, kind: "FDM" },
   { brand: "Bambu Lab", model: "H2S", x: 340, y: 320, z: 340, kind: "FDM" },
+  // H2C: single-nozzle 325×320×320 (dual-nozzle 300×320×325) — bambulab store spec.
+  { brand: "Bambu Lab", model: "H2C", x: 325, y: 320, z: 320, kind: "FDM" },
   // Prusa
   { brand: "Prusa", model: "MINI+", x: 180, y: 180, z: 180, kind: "FDM" },
   { brand: "Prusa", model: "MK3S+", x: 250, y: 210, z: 210, kind: "FDM" },

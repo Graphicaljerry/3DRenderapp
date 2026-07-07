@@ -25,12 +25,19 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
   );
 }
 
-/** Everything the app stores in localStorage (keys, providers, printer, units…). */
+// Device-local keys that must NOT sync. `moldable_last_sync` in particular changes
+// on every sync (it's written AFTER each push), so if it synced it would always
+// differ between cloud and local — making the pull report "settings changed"
+// forever and triggering an endless reload loop. `moldable_last_project` is just
+// which project this device last had open, also per-device.
+export const LOCAL_ONLY_KEYS = new Set(["moldable_last_sync", "moldable_last_project"]);
+
+/** Everything the app stores in localStorage (keys, providers, printer, units…), minus device-local keys. */
 export function gatherSettings(): Record<string, string> {
   const out: Record<string, string> = {};
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)!;
-    if (k.startsWith("moldable_")) out[k] = localStorage.getItem(k)!;
+    if (k.startsWith("moldable_") && !LOCAL_ONLY_KEYS.has(k)) out[k] = localStorage.getItem(k)!;
   }
   return out;
 }

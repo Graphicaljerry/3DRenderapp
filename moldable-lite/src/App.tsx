@@ -256,6 +256,8 @@ export default function App() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectKind, setSelectKind] = useState<SelectKind>("face");
   const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
+  const [selectedFaces, setSelectedFaces] = useState<PickedFeature[]>([]); // box/marquee multi-select
+  const [facesText, setFacesText] = useState("");
   const [faceText, setFaceText] = useState("");
 
   const [mode, setMode] = useState<Mode>("precise");
@@ -906,7 +908,8 @@ export default function App() {
     setPins((ps) => [...ps, pin]);
     setActivePinId(pin.id);
     setPinText("");
-    setSelectedFeature(null); // only one editing surface at a time
+    setSelectedFeature(null); // only one editing target at a time
+    setSelectedFaces([]);
   }
   function selectPin(id: string) {
     setActivePinId(id);
@@ -947,9 +950,32 @@ export default function App() {
   function pickFeature(f: PickedFeature) {
     setSelectedFeature(f);
     setFaceText("");
-    // Only one editing target (point vs feature) at a time.
+    // Only one editing target (point vs single feature vs multi) at a time.
     setActivePinId(null);
     setPinText("");
+    setSelectedFaces([]);
+  }
+  function pickFaces(faces: PickedFeature[]) {
+    setSelectedFaces(faces);
+    setFacesText("");
+    if (faces.length) { setSelectedFeature(null); setActivePinId(null); setPinText(""); }
+  }
+  function askAiFaces() {
+    if (!selectedFaces.length || !facesText.trim()) return;
+    const note = facesText.trim();
+    const faces = selectedFaces;
+    setSelectedFaces([]);
+    setSelectMode(false);
+    setFacesText("");
+    const size = dims ? `The whole part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
+    const list = faces
+      .map((f, i) => `  ${i + 1}. the ${f.label} centred at x=${f.cx}, y=${f.cy}, z=${f.cz} mm, facing (${f.nx}, ${f.ny}, ${f.nz}), about ${f.w} × ${f.h} mm`)
+      .join("\n");
+    void send(
+      `Modify the current CAD model: ${note}. ${size}Apply this to these ${faces.length} selected faces (coordinates are Z-up, in millimetres):\n${list}\n` +
+        `Apply the change consistently to each listed face and leave the rest of the part unchanged. Return the full updated code.`,
+      "precise",
+    );
   }
   /** Describe the picked face/edge/vertex precisely so the AI edits exactly it. */
   function featureDirective(f: PickedFeature): string {
@@ -1530,16 +1556,24 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => setSelectMode((m) => { const on = !m; if (!on) { setActivePinId(null); setPinText(""); setSelectedFeature(null); } return on; }),
+          toggleMode: () => setSelectMode((m) => { const on = !m; if (!on) { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
           kind: selectKind,
           // Switching mode clears the other kind's selection so only one edit target is live.
-          setKind: (k) => { setSelectKind(k); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
+          setKind: (k) => { setSelectKind(k); setSelectedFaces([]); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
           selected: selectedFeature,
           text: faceText,
           setText: setFaceText,
           pick: pickFeature,
+          pickFaces,
           askAi: askAiFeature,
           clear: () => setSelectedFeature(null),
+        }}
+        facesCtl={{
+          faces: selectedFaces,
+          text: facesText,
+          setText: setFacesText,
+          askAi: askAiFaces,
+          clear: () => setSelectedFaces([]),
         }}
       />
       {showSettings && (

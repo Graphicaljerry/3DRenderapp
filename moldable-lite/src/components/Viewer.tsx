@@ -38,8 +38,10 @@ interface Props {
   selectedPin: string | null;
   selectMode: boolean;
   selectKind: SelectKind;
+  boxSelectionActive: boolean; // App still holds a box-selected face set → keep the overlay
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
+  onPickFaces: (faces: PickedFeature[]) => void;
   onSelectPin: (id: string) => void;
 }
 
@@ -91,20 +93,22 @@ interface Internals {
   pins: THREE.Group | null;
   material: THREE.MeshStandardMaterial;
   highlight: THREE.Mesh; // translucent overlay for the hovered/selected face
+  multiHi: THREE.Mesh; // overlay for a box-selected SET of faces
   edgeHi: THREE.Mesh; // solid marker for a hovered/selected edge (a thin cylinder)
   vertHi: THREE.Mesh; // solid marker for a hovered/selected vertex (a small sphere)
   markR: number; // marker radius, scaled to the model
   tri: TriData | null;
   lockedHit: { faceIndex: number; point: THREE.Vector3 } | null; // click-locked feature
   selCache: { key: string; info: FeatureInfo; region: Uint8Array | null } | null; // hover perf guard
+  box: { sx: number; sy: number; div: HTMLDivElement } | null; // in-progress marquee
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, onPickPoint, onPickFeature, onPickFaces, onSelectPin }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin });
-  cb.current = { selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin };
+  const cb = useRef({ selectMode, selectKind, onPickPoint, onPickFeature, onPickFaces, onSelectPin });
+  cb.current = { selectMode, selectKind, onPickPoint, onPickFeature, onPickFaces, onSelectPin };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -160,6 +164,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     edgeHi.visible = vertHi.visible = false;
     edgeHi.renderOrder = vertHi.renderOrder = 3;
     scene.add(edgeHi, vertHi);
+
+    // Teal overlay for a box-selected SET of faces (distinct from the blue single-hover).
+    const multiHi = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({
+        color: 0x0d9488, transparent: true, opacity: 0.45, side: THREE.DoubleSide,
+        polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+      }),
+    );
+    multiHi.visible = false;
+    multiHi.renderOrder = 2;
+    scene.add(multiHi);
 
     let raf = 0;
     const animate = () => {
@@ -224,11 +240,50 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const info = showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
       if (info) cb.current.onPickFeature(featureToPayload(info));
     };
+    // Shift while the Select tool is on (and not Point mode) arms a marquee: orbit is
+    // paused so a left-drag draws a selection box instead of rotating the view.
+    const boxArmable = () => cb.current.selectMode && cb.current.selectKind !== "point";
+    const onShiftKey = (e: KeyboardEvent) => {
+      if (e.key !== "Shift") return;
+      const armed = e.type === "keydown" && boxArmable();
+      controls.enabled = !armed;
+      renderer.domElement.style.cursor = armed ? "crosshair" : "";
+      if (!armed && st.current?.box) cancelBox(); // released mid-drag → drop the marquee
+    };
+    const cancelBox = () => {
+      const s2 = st.current;
+      if (!s2?.box) return;
+      s2.box.div.remove();
+      s2.box = null;
+    };
     let downAt: { x: number; y: number } | null = null;
-    const onDown = (e: PointerEvent) => { downAt = { x: e.clientX, y: e.clientY }; };
+    const onDown = (e: PointerEvent) => {
+      downAt = { x: e.clientX, y: e.clientY };
+      const s2 = st.current;
+      if (s2 && s2.mesh && e.shiftKey && boxArmable()) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const div = document.createElement("div");
+        div.className = "marquee";
+        div.style.left = `${e.clientX - rect.left}px`;
+        div.style.top = `${e.clientY - rect.top}px`;
+        el.appendChild(div);
+        s2.box = { sx: e.clientX, sy: e.clientY, div };
+      }
+    };
     const onUp = (e: PointerEvent) => {
       const d = downAt;
       downAt = null;
+      const s2 = st.current;
+      if (s2?.box) {
+        const { sx, sy } = s2.box;
+        cancelBox();
+        // A real drag (not a stray shift-click) → select the faces inside the box.
+        if (Math.hypot(e.clientX - sx, e.clientY - sy) > 4) {
+          const faces = selectFacesInBox(s2, camera, renderer, sx, sy, e.clientX, e.clientY);
+          cb.current.onPickFaces(faces);
+        }
+        return;
+      }
       if (!d || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 6) return; // it was an orbit drag
       handleTap(e);
     };
@@ -241,6 +296,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
+      // Growing a marquee: resize the box div and skip hover work.
+      if (s2?.box) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const x0 = Math.min(s2.box.sx, e.clientX) - rect.left, y0 = Math.min(s2.box.sy, e.clientY) - rect.top;
+        s2.box.div.style.left = `${x0}px`;
+        s2.box.div.style.top = `${y0}px`;
+        s2.box.div.style.width = `${Math.abs(e.clientX - s2.box.sx)}px`;
+        s2.box.div.style.height = `${Math.abs(e.clientY - s2.box.sy)}px`;
+        return;
+      }
       if (!s2 || downAt) return; // don't fight an orbit drag
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
@@ -280,6 +345,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     renderer.domElement.addEventListener("pointerup", onUp);
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("pointerleave", onLeave);
+    window.addEventListener("keydown", onShiftKey);
+    window.addEventListener("keyup", onShiftKey);
 
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth, h = el.clientHeight;
@@ -290,7 +357,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, ro };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -299,10 +366,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerleave", onLeave);
+      window.removeEventListener("keydown", onShiftKey);
+      window.removeEventListener("keyup", onShiftKey);
       controls.dispose();
       disposeDims(st.current);
       highlight.geometry.dispose();
       (highlight.material as THREE.Material).dispose();
+      multiHi.geometry.dispose();
+      (multiHi.material as THREE.Material).dispose();
       edgeHi.geometry.dispose();
       vertHi.geometry.dispose();
       markMat.dispose();
@@ -334,6 +405,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.highlight.visible = false;
     s.highlight.geometry.dispose();
     s.highlight.geometry = new THREE.BufferGeometry();
+    s.multiHi.visible = false;
+    s.multiHi.geometry.dispose();
+    s.multiHi.geometry = new THREE.BufferGeometry();
     s.edgeHi.visible = false;
     s.vertHi.visible = false;
     if (!geometry) {
@@ -377,10 +451,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (!s || selectMode) return;
     s.lockedHit = null;
     s.highlight.visible = false;
+    s.multiHi.visible = false;
     s.edgeHi.visible = false;
     s.vertHi.visible = false;
+    s.controls.enabled = true;
     s.renderer.domElement.style.cursor = "";
   }, [selectMode]);
+
+  // When the app drops the box-selected face set, hide its overlay.
+  useEffect(() => {
+    const s = st.current;
+    if (s && !boxSelectionActive) s.multiHi.visible = false;
+  }, [boxSelectionActive]);
 
   // Re-highlight the locked feature when the selection kind (face/edge/vertex) changes,
   // and re-emit it so the app's edit panel switches to the new kind in sync. Point mode
@@ -388,6 +470,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const s = st.current;
     if (!s) return;
+    s.multiHi.visible = false; // a box-selected set belongs to one mode; switching clears it
     if (selectKind === "point") {
       s.highlight.visible = false; s.edgeHi.visible = false; s.vertHi.visible = false;
       return;
@@ -697,6 +780,96 @@ function nearestEdgeChainId(tri: TriData, p: THREE.Vector3): number {
   return best < 0 ? -1 : tri.edgeChainId[best];
 }
 
+/** Metrics + a triangle-soup position buffer for one smooth face region, given a
+ *  representative triangle `rep` (used for the outward normal + curved test). */
+function faceRegionInfo(tri: TriData, tris: number[], rep: number): { info: FeatureInfo; positions: Float32Array } {
+  const { pos, idx } = tri;
+  const positions = new Float32Array(tris.length * 9);
+  const v = new THREE.Vector3();
+  const bbox = new THREE.Box3();
+  let p = 0;
+  for (const t of tris) {
+    for (let k = 0; k < 3; k++) {
+      v.fromBufferAttribute(pos, idx ? idx.getX(t * 3 + k) : t * 3 + k);
+      positions[p++] = v.x; positions[p++] = v.y; positions[p++] = v.z;
+      bbox.expandByPoint(v);
+    }
+  }
+  const center = bbox.getCenter(new THREE.Vector3());
+  const size = bbox.getSize(new THREE.Vector3());
+  const normal = new THREE.Vector3(tri.normals[rep * 3], tri.normals[rep * 3 + 1], tri.normals[rep * 3 + 2]);
+  const COS18 = Math.cos((18 * Math.PI) / 180);
+  let curved = false;
+  for (const t of tris) {
+    if (tri.degen[t]) continue;
+    if (normal.x * tri.normals[t * 3] + normal.y * tri.normals[t * 3 + 1] + normal.z * tri.normals[t * 3 + 2] < COS18) { curved = true; break; }
+  }
+  const dims = [size.x, size.y, size.z];
+  const axis = Math.abs(normal.x) > 0.9 ? 0 : Math.abs(normal.y) > 0.9 ? 1 : Math.abs(normal.z) > 0.9 ? 2 : -1;
+  let w: number, h: number;
+  if (axis >= 0 && !curved) { const rest = dims.filter((_, i) => i !== axis); w = rest[0]; h = rest[1]; }
+  else { const sorted = [...dims].sort((x, y) => y - x); w = sorted[0]; h = sorted[1]; }
+  return { info: { kind: "face", center, normal, w, h, curved }, positions };
+}
+
+/** Marquee face selection: every smooth face with a visible triangle whose centroid
+ *  falls inside the screen rectangle. Highlights them in the multi-select overlay and
+ *  returns one payload per distinct face. */
+function selectFacesInBox(
+  s: Internals, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer,
+  sx: number, sy: number, ex: number, ey: number,
+): PickedFeature[] {
+  const tri = s.tri, mesh = s.mesh;
+  if (!tri || !mesh) return [];
+  const rect = renderer.domElement.getBoundingClientRect();
+  const minX = Math.min(sx, ex) - rect.left, maxX = Math.max(sx, ex) - rect.left;
+  const minY = Math.min(sy, ey) - rect.top, maxY = Math.max(sy, ey) - rect.top;
+  const { pos, idx, count } = tri;
+  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), cen = new THREE.Vector3(), proj = new THREE.Vector3();
+  const rc = new THREE.Raycaster();
+  const occlude = count <= 20000; // skip the per-triangle visibility raycast on very dense meshes
+  const seen = new Uint8Array(count);
+  const faces: PickedFeature[] = [];
+  const chunks: Float32Array[] = [];
+  let total = 0;
+  for (let t = 0; t < count; t++) {
+    if (tri.degen[t] || seen[t]) continue;
+    const i0 = idx ? idx.getX(t * 3) : t * 3, i1 = idx ? idx.getX(t * 3 + 1) : t * 3 + 1, i2 = idx ? idx.getX(t * 3 + 2) : t * 3 + 2;
+    a.fromBufferAttribute(pos, i0); b.fromBufferAttribute(pos, i1); c.fromBufferAttribute(pos, i2);
+    cen.copy(a).add(b).add(c).multiplyScalar(1 / 3).applyMatrix4(mesh.matrixWorld);
+    proj.copy(cen).project(camera);
+    if (proj.z < -1 || proj.z > 1) continue;
+    const px = (proj.x * 0.5 + 0.5) * rect.width, py = (-proj.y * 0.5 + 0.5) * rect.height;
+    if (px < minX || px > maxX || py < minY || py > maxY) continue;
+    if (occlude) {
+      rc.setFromCamera(new THREE.Vector2(proj.x, proj.y), camera);
+      const hit = rc.intersectObject(mesh, false)[0];
+      if (!hit || hit.faceIndex !== t) continue; // behind another face → not visible
+    }
+    const region = smoothRegion(tri, t);
+    for (const rt of region) seen[rt] = 1;
+    const { info, positions } = faceRegionInfo(tri, region, t);
+    faces.push(featureToPayload(info));
+    chunks.push(positions);
+    total += positions.length;
+  }
+  // Build (or clear) the combined multi-select overlay.
+  s.multiHi.geometry.dispose();
+  if (total) {
+    const merged = new Float32Array(total);
+    let o = 0;
+    for (const ch of chunks) { merged.set(ch, o); o += ch.length; }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
+    s.multiHi.geometry = geo;
+    s.multiHi.visible = true;
+  } else {
+    s.multiHi.geometry = new THREE.BufferGeometry();
+    s.multiHi.visible = false;
+  }
+  return faces;
+}
+
 /** Highlight the face/edge/vertex under the cursor and return its metrics. Caches
     the last resolved target so a hover that stays on it rebuilds nothing. */
 function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: number, hit: THREE.Vector3): FeatureInfo | null {
@@ -712,38 +885,11 @@ function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: 
     }
     const tris = smoothRegion(tri, faceIndex);
     if (!tris.length) return null;
-    const { pos, idx } = tri;
-    const positions = new Float32Array(tris.length * 9);
-    const v = new THREE.Vector3();
-    const bbox = new THREE.Box3();
-    let p = 0;
-    for (const t of tris) {
-      for (let k = 0; k < 3; k++) {
-        v.fromBufferAttribute(pos, idx ? idx.getX(t * 3 + k) : t * 3 + k);
-        positions[p++] = v.x; positions[p++] = v.y; positions[p++] = v.z;
-        bbox.expandByPoint(v);
-      }
-    }
+    const { info, positions } = faceRegionInfo(tri, tris, faceIndex);
     const geo = new THREE.BufferGeometry();
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     s.highlight.geometry.dispose();
     s.highlight.geometry = geo;
-    const center = bbox.getCenter(new THREE.Vector3());
-    const size = bbox.getSize(new THREE.Vector3());
-    const normal = new THREE.Vector3(tri.normals[faceIndex * 3], tri.normals[faceIndex * 3 + 1], tri.normals[faceIndex * 3 + 2]);
-    // Curved if the region's normals fan out — the flat-plane framing wouldn't fit.
-    const COS18 = Math.cos((18 * Math.PI) / 180);
-    let curved = false;
-    for (const t of tris) {
-      if (tri.degen[t]) continue;
-      if (normal.x * tri.normals[t * 3] + normal.y * tri.normals[t * 3 + 1] + normal.z * tri.normals[t * 3 + 2] < COS18) { curved = true; break; }
-    }
-    const dims = [size.x, size.y, size.z];
-    const axis = Math.abs(normal.x) > 0.9 ? 0 : Math.abs(normal.y) > 0.9 ? 1 : Math.abs(normal.z) > 0.9 ? 2 : -1;
-    let w: number, h: number;
-    if (axis >= 0 && !curved) { const rest = dims.filter((_, i) => i !== axis); w = rest[0]; h = rest[1]; }
-    else { const sorted = [...dims].sort((x, y) => y - x); w = sorted[0]; h = sorted[1]; }
-    const info: FeatureInfo = { kind: "face", center, normal, w, h, curved };
     const region = new Uint8Array(tri.count);
     for (const t of tris) region[t] = 1;
     s.selCache = { key: `face:${faceIndex}`, info, region };

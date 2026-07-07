@@ -31,7 +31,7 @@ import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider, usesMultiView } from "./gen/registry";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject } from "./store/projects";
-import { appendVersion, restoreVersion } from "./store/versions";
+import { appendVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
 import type { Project, Pin } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
@@ -1267,31 +1267,76 @@ export default function App() {
     }
   }
 
+  // Rebuild the viewer from a project's HEAD (live) fields — shared by restore, undo/redo,
+  // and opening a project. Does not append or persist; the caller owns that.
+  async function rebuildHead(next: Project) {
+    seedHistory(next.engine, next.code, next.spec);
+    clearImage();
+    if (next.engine === "generative" && next.glb) {
+      await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
+    } else if (sel) {
+      if (sel.engine.setImport) {
+        await sel.engine.setImport(next.importFile ?? null);
+        importFileRef.current = next.importFile ?? null;
+      }
+      const bi: BuildInput =
+        next.engine === "replicad"
+          ? { kind: "code", code: next.code ?? "", params: next.params }
+          : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
+      applyResultNoCommit(await sel.engine.build(bi));
+    }
+  }
+
   async function restoreTo(versionId: string) {
     if (!project) return;
     const next = restoreVersion(project, versionId);
     persist(next);
-    seedHistory(next.engine, next.code, next.spec);
-    clearImage();
     try {
-      if (next.engine === "generative" && next.glb) {
-        await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
-      } else if (sel) {
-        if (sel.engine.setImport) {
-          await sel.engine.setImport(next.importFile ?? null);
-          importFileRef.current = next.importFile ?? null;
-        }
-        const bi: BuildInput =
-          next.engine === "replicad"
-            ? { kind: "code", code: next.code ?? "", params: next.params }
-            : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
-        applyResultNoCommit(await sel.engine.build(bi));
-      }
+      await rebuildHead(next);
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restored an earlier version." }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
     }
   }
+
+  // Undo/redo step HEAD back/forward over the append-only version history, without
+  // appending — so a redo stays available until the next real edit.
+  const hIdx = project ? headIndex(project) : -1;
+  const canUndo = !!project && hIdx > 0;
+  const canRedo = !!project && hIdx >= 0 && hIdx < project.versions.length - 1;
+  const [navBusy, setNavBusy] = useState(false);
+  async function stepHead(dir: -1 | 1) {
+    if (!project || navBusy) return;
+    const i = headIndex(project);
+    const target = project.versions[i + dir];
+    if (!target) return;
+    setNavBusy(true);
+    const next = navigateHead(project, target.id);
+    persist(next);
+    setActivePinId(null);
+    setSelectedFeature(null);
+    try {
+      await rebuildHead(next);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: (dir < 0 ? "Undo" : "Redo") + " failed to rebuild: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setNavBusy(false);
+    }
+  }
+  const undo = () => stepHead(-1);
+  const redo = () => stepHead(1);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // let the field's own undo work
+      e.preventDefault();
+      if (e.shiftKey) { if (canRedo) redo(); }
+      else if (canUndo) undo();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [canUndo, canRedo, hIdx, navBusy, project]);
 
   async function openProjectById(p: Project) {
     setShowLibrary(false);
@@ -1299,22 +1344,10 @@ export default function App() {
     setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error, image: c.image })));
     setPins(p.pins ?? []);
     setActivePinId(null);
-    seedHistory(p.engine, p.code, p.spec);
-    clearImage();
     setGuided(false); // guided is a per-session intent — don't leak it into another project
     setMode(p.engine === "generative" ? "generative" : "precise");
     try {
-      if (p.engine === "generative" && p.glb) {
-        await showFromGlb(p.glb, { kind: "gen", provider: p.genSource?.provider ?? "", model: p.genSource?.model ?? "", prompt: p.genSource?.prompt });
-      } else if (sel) {
-        if (sel.engine.setImport) {
-          await sel.engine.setImport(p.importFile ?? null);
-          importFileRef.current = p.importFile ?? null;
-        }
-        const bi: BuildInput =
-          p.engine === "replicad" ? { kind: "code", code: p.code ?? "", params: p.params } : { kind: "spec", spec: parseSpec(JSON.stringify(p.spec)) };
-        applyResultNoCommit(await sel.engine.build(bi));
-      }
+      await rebuildHead(p);
     } catch {
       /* leave viewer empty if HEAD doesn't rebuild */
     }
@@ -1429,6 +1462,7 @@ export default function App() {
         onSplit={splitMesh}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
+        undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy }}
         supportsStep={result?.supportsStep ?? false}
         canExport={(f) => (result?.kind === "generative" ? genEngine.current.canExport(f) : sel?.engine.canExport(f) ?? false)}
         onExport={exportAs}

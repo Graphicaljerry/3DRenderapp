@@ -15,7 +15,8 @@ import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
 import { simplifyGeometry } from "./print/simplify";
@@ -1265,6 +1266,42 @@ export default function App() {
     let finalRaw = "";
     let ok = false;
     let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
+
+    // ---- edit-block fast path: for a small change to an existing CAD program, ask the
+    // model for only the changed lines (SEARCH/REPLACE), apply + re-execute locally, and
+    // save output tokens. Fully guarded — ANY problem falls through to the full-regen loop
+    // below, so this can only ever save cost, never break an edit.
+    const editing =
+      kind === "replicad" && !visionImage && !guided && result?.source.kind === "code" && !!result.source.code;
+    const currentCode = editing && result?.source.kind === "code" ? result.source.code ?? "" : "";
+    const currentOps = result?.source.kind === "code" ? result.source.ops : undefined;
+    if (editing && currentCode) {
+      try {
+        const editMsg: ApiMsg = {
+          role: "user",
+          content:
+            `Here is the current replicad program:\n\`\`\`js\n${currentCode}\n\`\`\`\n\n` +
+            `Apply this change: ${pWithFacts}\n\nReply with SEARCH/REPLACE blocks only (see EDIT MODE).`,
+        };
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, [editMsg], { onToken: (_t, full) => setStreamingText(full) }, effectiveProxy);
+        finalRaw = raw;
+        const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
+        if (newCode && newCode.trim() && newCode !== currentCode) {
+          const editParams = result?.source.kind === "code" ? result.source.params : undefined;
+          const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
+          const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
+          applyResult(res, project?.name ?? deriveName(p), summary, p);
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false } : x)));
+          // Record the resulting FULL code in history so the next turn has accurate context.
+          apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
+          ok = true;
+        }
+      } catch {
+        /* fall through to the reliable full-regenerate loop */
+      }
+      if (ok) { setStatus("idle"); setStreamingText(""); return; }
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
+    }
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {

@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
-import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport } from "../print/printability";
@@ -16,6 +16,14 @@ import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
 import { shortModelName } from "../llm/openrouterModels";
 import type { FitId } from "../llm/prompts";
 import { PROVIDERS } from "../gen/registry";
+
+// The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
+export const SELECT_MODES: { kind: SelectKind; label: string }[] = [
+  { kind: "face", label: "Face" },
+  { kind: "edge", label: "Edge" },
+  { kind: "vertex", label: "Corner" },
+  { kind: "point", label: "Point" },
+];
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
 const SUGGESTIONS: { text: string; gen?: boolean }[] = [
@@ -260,8 +268,6 @@ interface Props {
   onNew: () => void;
   pins: Pin[];
   pinCtl: {
-    mode: boolean;
-    toggleMode: () => void;
     active: { pin: Pin; index: number; face: string } | null;
     text: string;
     setText: (s: string) => void;
@@ -276,8 +282,8 @@ interface Props {
   featureCtl: {
     mode: boolean;
     toggleMode: () => void;
-    kind: "face" | "edge" | "vertex";
-    setKind: (k: "face" | "edge" | "vertex") => void;
+    kind: SelectKind;
+    setKind: (k: SelectKind) => void;
     selected: PickedFeature | null;
     text: string;
     setText: (s: string) => void;
@@ -523,35 +529,27 @@ export function Workspace(p: Props) {
                 <button
                   className={`ghost sm${p.featureCtl.mode ? " on" : ""}`}
                   aria-pressed={p.featureCtl.mode}
-                  title="Select mode: hover to highlight a face/edge/corner, click to pick it, then tell the AI what to change on it"
+                  title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
                   onClick={p.featureCtl.toggleMode}
                 >
                   Select
                 </button>
                 {p.featureCtl.mode && (
                   <div className="seg sm">
-                    {(["face", "edge", "vertex"] as const).map((k) => (
-                      <button key={k} className={p.featureCtl.kind === k ? "on" : ""} onClick={() => p.featureCtl.setKind(k)}>
-                        {k === "vertex" ? "Corner" : k.charAt(0).toUpperCase() + k.slice(1)}
+                    {SELECT_MODES.map((m, i) => (
+                      <button key={m.kind} className={p.featureCtl.kind === m.kind ? "on" : ""} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
+                        {m.label}
                       </button>
                     ))}
                   </div>
                 )}
-                <button
-                  className={`ghost sm${p.pinCtl.mode ? " on" : ""}`}
-                  aria-pressed={p.pinCtl.mode}
-                  title="Pin mode: while on, click the model to mark a spot for a note or an AI edit"
-                  onClick={p.pinCtl.toggleMode}
-                >
-                  Pin
-                </button>
                 {p.pins.length > 0 && (
                   <button
                     className="ghost sm"
-                    title={`Remove all ${p.pins.length} pin${p.pins.length > 1 ? "s" : ""}`}
+                    title={`Remove all ${p.pins.length} point${p.pins.length > 1 ? "s" : ""}`}
                     onClick={p.pinCtl.clearAll}
                   >
-                    Clear pins ({p.pins.length})
+                    Clear points ({p.pins.length})
                   </button>
                 )}
                 <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
@@ -578,7 +576,6 @@ export function Workspace(p: Props) {
                 theme={p.theme}
                 pins={p.pins}
                 selectedPin={p.pinCtl.active?.pin.id ?? null}
-                pinMode={p.pinCtl.mode}
                 selectMode={p.featureCtl.mode}
                 selectKind={p.featureCtl.kind}
                 onPickPoint={p.pinCtl.pick}
@@ -590,9 +587,9 @@ export function Workspace(p: Props) {
                 <div className="pin-panel">
                   <div className="pin-head">
                     <span>
-                      Pin {p.pinCtl.active.index + 1} · {p.pinCtl.active.face} face · {p.pinCtl.active.pin.x}, {p.pinCtl.active.pin.y}, {p.pinCtl.active.pin.z} mm
+                      Point {p.pinCtl.active.index + 1} · {p.pinCtl.active.face} face · {p.pinCtl.active.pin.x}, {p.pinCtl.active.pin.y}, {p.pinCtl.active.pin.z} mm
                     </span>
-                    <button className="x" aria-label="Close pin" onClick={p.pinCtl.close}><IconX /></button>
+                    <button className="x" aria-label="Close point" onClick={p.pinCtl.close}><IconX /></button>
                   </div>
                   <textarea
                     rows={2}

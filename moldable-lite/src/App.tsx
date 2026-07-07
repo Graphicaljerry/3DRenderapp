@@ -7,7 +7,7 @@ import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/Extrude
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
 import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClient";
 import type { SplitPiece } from "./print/split";
-import type { ViewerHandle, PickedFeature } from "./components/Viewer";
+import type { ViewerHandle, PickedFeature, SelectKind } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
@@ -249,12 +249,12 @@ export default function App() {
   const [cadDefaults, setCadDefaults] = useState<CadParams | null>(null);
   const [paramValues, setParamValues] = useState<CadParams>({});
   const [pins, setPins] = useState<Pin[]>([]);
-  const [pinMode, setPinMode] = useState(false);
   const [activePinId, setActivePinId] = useState<string | null>(null);
   const [pinText, setPinText] = useState("");
-  // Feature-select: hover-highlight + click a face / edge / vertex, then edit it precisely.
+  // One Select tool with modes: hover-highlight + click a face / edge / corner, or
+  // drop a point marker ("point" = the old Pin). Then edit the picked thing precisely.
   const [selectMode, setSelectMode] = useState(false);
-  const [selectKind, setSelectKind] = useState<"face" | "edge" | "vertex">("face");
+  const [selectKind, setSelectKind] = useState<SelectKind>("face");
   const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
   const [faceText, setFaceText] = useState("");
 
@@ -931,7 +931,6 @@ export default function App() {
     const note = pinText.trim();
     savePinNote();
     setActivePinId(null);
-    setPinMode(false);
     // Give the model a directive, localized instruction (not just coordinates):
     // what to change, where, and to keep the rest of the part intact.
     const size = dims ? `The current part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
@@ -948,8 +947,7 @@ export default function App() {
   function pickFeature(f: PickedFeature) {
     setSelectedFeature(f);
     setFaceText("");
-    // Only one editing surface (pin vs feature) at a time.
-    setPinMode(false);
+    // Only one editing target (point vs feature) at a time.
     setActivePinId(null);
     setPinText("");
   }
@@ -1363,16 +1361,25 @@ export default function App() {
   const redo = () => stepHead(1);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.key.toLowerCase() !== "z") return;
       const t = e.target as HTMLElement | null;
-      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return; // let the field's own undo work
-      e.preventDefault();
-      if (e.shiftKey) { if (canRedo) redo(); }
-      else if (canUndo) undo();
+      const typing = !!t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable);
+      if (typing) return; // don't hijack typing (let the field's own undo work too)
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        if (e.shiftKey) { if (canRedo) redo(); }
+        else if (canUndo) undo();
+        return;
+      }
+      // 1–4 switch the Select tool's mode (Face / Edge / Corner / Point) while it's on.
+      if (selectMode && !e.metaKey && !e.ctrlKey && !e.altKey && ["1", "2", "3", "4"].includes(e.key)) {
+        const k = (["face", "edge", "vertex", "point"] as SelectKind[])[Number(e.key) - 1];
+        setSelectKind(k);
+        if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); }
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canUndo, canRedo, hIdx, navBusy, project]);
+  }, [canUndo, canRedo, hIdx, navBusy, project, selectMode]);
 
   async function openProjectById(p: Project) {
     setShowLibrary(false);
@@ -1394,7 +1401,8 @@ export default function App() {
     projectRef.current = null;
     setPins([]);
     setActivePinId(null);
-    setPinMode(false);
+    setSelectMode(false);
+    setSelectedFeature(null);
     importFileRef.current = null;
     void sel?.engine.setImport?.(null);
     setProject(null);
@@ -1509,8 +1517,6 @@ export default function App() {
         onNew={startNew}
         pins={pins}
         pinCtl={{
-          mode: pinMode,
-          toggleMode: () => { setPinMode((m) => !m); setSelectMode(false); setSelectedFeature(null); },
           active: activePin,
           text: pinText,
           setText: setPinText,
@@ -1524,9 +1530,10 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => { setSelectMode((m) => !m); setPinMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); },
+          toggleMode: () => setSelectMode((m) => { const on = !m; if (!on) { setActivePinId(null); setPinText(""); setSelectedFeature(null); } return on; }),
           kind: selectKind,
-          setKind: setSelectKind, // Viewer re-emits the locked feature in the new kind (keeps panel in sync)
+          // Switching mode clears the other kind's selection so only one edit target is live.
+          setKind: (k) => { setSelectKind(k); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
           selected: selectedFeature,
           text: faceText,
           setText: setFaceText,

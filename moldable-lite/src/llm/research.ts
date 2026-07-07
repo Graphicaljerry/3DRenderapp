@@ -22,17 +22,24 @@ export function detectProductQuery(prompt: string): boolean {
 
 function researchPrompt(request: string): string {
   return [
-    `A user wants to 3D-print a part that must fit a real-world product. Their request:`,
+    `You are a dimensioning researcher for a 3D-printing CAD app. A user wants a part that must physically fit or mate with a real-world product. Request:`,
     `"${request}"`,
     ``,
-    `1. Identify the exact product(s) the part must fit.`,
-    `2. Search the web for that product's official physical dimensions.`,
-    `3. Reply as a compact spec sheet in millimetres — one fact per line, with the source site in parentheses.`,
-    `   Include: overall height x width x depth/thickness, corner radius, and the size/position of anything`,
-    `   the part must clear (camera bump, buttons, ports, lens, straps).`,
+    `Goal: gather EVERY real measurement the CAD model needs to build this exact part accurately — not just the overall size.`,
     ``,
+    `Steps:`,
+    `1. Identify the exact product(s) and model/variant (generation, size, region) the part interfaces with.`,
+    `2. Reason about what THIS part is (case, cradle, stand, bracket, mount, adapter, insert, replacement, grip…) and therefore which surfaces and features it must match, clear, grip, or attach to.`,
+    `3. Search the web — prefer the manufacturer's official spec/support page, then reputable teardowns (e.g. iFixit) or datasheets; avoid guessing. Cross-check when sources disagree.`,
+    `4. Collect the dimensions that part needs, e.g. as relevant:`,
+    `   • Overall envelope: height × width × depth/thickness (mm) and corner/edge radii.`,
+    `   • Every feature the part must clear or align to: cameras/lens bump (size, offset, protrusion), buttons, switches, ports/connectors (type + position), speaker/mic grilles, screen bezel, lanyard/strap points.`,
+    `   • Mounting/attachment: hole pattern & spacing, screw/thread size (e.g. M3, 1/4"-20), boss/rail/clip dimensions, connector footprints.`,
+    `   • Mating tolerances: note typical FDM clearance (~0.2–0.4 mm) for any snug/press fit surface.`,
+    ``,
+    `Output: a compact spec sheet in MILLIMETRES, one fact per line as "label: value (source)". Group under the product name. State the product variant you assumed. Flag any figure you're unsure of with "≈". Convert all units to mm.`,
     `If the request involves no specific real-world product, reply with exactly: NONE`,
-    `No markdown, no preamble, under 150 words.`,
+    `No markdown headers, no preamble, keep it under 220 words.`,
   ].join("\n");
 }
 

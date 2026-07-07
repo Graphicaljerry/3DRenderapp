@@ -36,13 +36,16 @@ interface Props {
   theme: "light" | "dark";
   pins: ViewerPin[];
   selectedPin: string | null;
-  pinMode: boolean;
   selectMode: boolean;
-  selectKind: "face" | "edge" | "vertex";
+  selectKind: SelectKind;
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onSelectPin: (id: string) => void;
 }
+
+// The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
+// pick a face / edge / corner. One tool, one segmented control.
+export type SelectKind = "face" | "edge" | "vertex" | "point";
 
 const THEME_SCENE = { light: "#f6f7f9", dark: "#101418" } as const;
 const THEME_GRID: Record<string, [number, number]> = { light: [0xced2d8, 0xe3e6ea], dark: [0x39414b, 0x232a31] };
@@ -97,11 +100,11 @@ interface Internals {
   ro: ResizeObserver;
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, pinMode, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ pinMode, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin });
-  cb.current = { pinMode, selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin };
+  const cb = useRef({ selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin });
+  cb.current = { selectMode, selectKind, onPickPoint, onPickFeature, onSelectPin };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -202,25 +205,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           return;
         }
       }
-      // Select mode: single click locks the face / edge / vertex under the cursor.
-      if (cb.current.selectMode) {
-        if (!s2.mesh || !s2.tri) return;
+      if (!cb.current.selectMode || !s2.mesh) return; // nothing picks unless the Select tool is on
+      // Point mode drops a surface marker (the old Pin); the others lock a feature.
+      if (cb.current.selectKind === "point") {
         const hit = rc.intersectObject(s2.mesh, false)[0];
-        if (!hit || hit.faceIndex == null) return;
-        s2.lockedHit = { faceIndex: hit.faceIndex, point: hit.point.clone() };
-        const info = showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
-        if (info) cb.current.onPickFeature(featureToPayload(info));
+        if (!hit || !hit.face) return;
+        const r1p = (n: number) => Math.round(n * 10) / 10;
+        cb.current.onPickPoint({
+          x: r1p(hit.point.x), y: r1p(hit.point.y), z: r1p(hit.point.z),
+          nx: hit.face.normal.x, ny: hit.face.normal.y, nz: hit.face.normal.z,
+        });
         return;
       }
-      if (!cb.current.pinMode) return; // no pin unless Pin mode is on
-      if (!s2.mesh) return;
+      if (!s2.tri) return;
       const hit = rc.intersectObject(s2.mesh, false)[0];
-      if (!hit || !hit.face) return;
-      const r1p = (n: number) => Math.round(n * 10) / 10;
-      cb.current.onPickPoint({
-        x: r1p(hit.point.x), y: r1p(hit.point.y), z: r1p(hit.point.z),
-        nx: hit.face.normal.x, ny: hit.face.normal.y, nz: hit.face.normal.z,
-      });
+      if (!hit || hit.faceIndex == null) return;
+      s2.lockedHit = { faceIndex: hit.faceIndex, point: hit.point.clone() };
+      const info = showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
+      if (info) cb.current.onPickFeature(featureToPayload(info));
     };
     let downAt: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => { downAt = { x: e.clientX, y: e.clientY }; };
@@ -252,8 +254,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (hp) { setHover(String(hp.object.userData.pinId)); return; }
       }
       setHover(null);
-      // Face / edge / vertex hover-highlight in select mode.
-      if (cb.current.selectMode && s2.mesh && s2.tri) {
+      if (!cb.current.selectMode || !s2.mesh) return;
+      // Point mode: just a crosshair over the model (click to drop a marker).
+      if (cb.current.selectKind === "point") {
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        renderer.domElement.style.cursor = hit ? "crosshair" : "";
+        return;
+      }
+      // Face / edge / vertex hover-highlight.
+      if (s2.tri) {
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (hit && hit.faceIndex != null) {
           showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
@@ -374,10 +383,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   }, [selectMode]);
 
   // Re-highlight the locked feature when the selection kind (face/edge/vertex) changes,
-  // and re-emit it so the app's edit panel switches to the new kind in sync.
+  // and re-emit it so the app's edit panel switches to the new kind in sync. Point mode
+  // has no feature highlight, so just clear the overlays.
   useEffect(() => {
     const s = st.current;
-    if (s?.lockedHit) {
+    if (!s) return;
+    if (selectKind === "point") {
+      s.highlight.visible = false; s.edgeHi.visible = false; s.vertHi.visible = false;
+      return;
+    }
+    if (s.lockedHit) {
       const info = showFeature(s, selectKind, s.lockedHit.faceIndex, s.lockedHit.point);
       if (info) cb.current.onPickFeature(featureToPayload(info));
     }

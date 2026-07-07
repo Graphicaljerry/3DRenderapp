@@ -240,6 +240,7 @@ interface Props {
   onOpenSlicer: (t: SlicerTarget) => void;
   onRepair: () => void;
   onSimplify: () => void;
+  onSplit: () => void;
   versions: Version[];
   onRestore: (id: string) => void;
   supportsStep: boolean;
@@ -588,7 +589,7 @@ export function Workspace(p: Props) {
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
             {p.tab === "print" && (
-              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} />
+              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} />
             )}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -912,7 +913,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const row = (label: string, value: string, ok?: boolean) => (
     <div className="prow">
@@ -945,6 +946,13 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify }: { 
           )}
           <button className="ghost sm" disabled={busy} onClick={onSimplify}>
             Simplify model — halve triangles
+          </button>
+        </div>
+      )}
+      {!report.bedFit.fitsRotated && (
+        <div className="param-actions" style={{ flexWrap: "wrap" }}>
+          <button className="primary sm" disabled={busy} onClick={onSplit}>
+            Split to fit bed — print in pieces
           </button>
         </div>
       )}

@@ -18,6 +18,7 @@ import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_A
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
 import { simplifyGeometry } from "./print/simplify";
+import { splitToFitBed } from "./print/split";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
@@ -54,8 +55,12 @@ function loadLlm(): LlmSettings {
   try {
     const raw = localStorage.getItem(LLM_LS);
     if (raw) {
-      const v = JSON.parse(raw);
-      if (LLM_PRESETS.some((p) => p.id === v.provider)) return v;
+      const v = JSON.parse(raw) as LlmSettings;
+      if (LLM_PRESETS.some((p) => p.id === v.provider)) {
+        // Heal the never-valid OpenRouter default that shipped briefly — it 400s.
+        if (v.provider === "openrouter" && v.model === "google/gemini-3-flash") v.model = "google/gemini-2.5-flash";
+        return v;
+      }
     }
   } catch {}
   return { provider: "anthropic", model: localStorage.getItem(MODEL_LS) ?? MODELS[0].id };
@@ -658,6 +663,42 @@ export default function App() {
       ]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Simplify failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Cut a too-big model into bed-sized parts, laid out on the plate to print + assemble. */
+  async function splitMesh() {
+    if (!result || status === "generating" || !report) return;
+    const bed = report.bedFit.bed;
+    setStatus("generating");
+    try {
+      const out = splitToFitBed(result.geometry, bed);
+      if (out.parts <= 1) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model already fits the bed — no split needed." }]);
+        return;
+      }
+      // The split output is a plain mesh of parts — treat it as a generative result
+      // so export writes exactly these arranged pieces (STEP no longer applies).
+      applyResultNoCommit({
+        kind: "generative",
+        geometry: out.geometry,
+        dims: out.dims,
+        source: { kind: "gen", provider: "split", model: "split-to-fit-bed", prompt: `split into ${out.parts} parts` },
+        supportsStep: false,
+        glb: geometryToSTL(out.geometry),
+      });
+      setMessages((m) => [
+        ...m,
+        {
+          id: mid(),
+          role: "assistant",
+          text: `Split into ${out.parts} parts — each fits your ${bed.x} × ${bed.y} mm bed — and laid them out on the plate. Export STL/3MF, print the pieces, and glue or pin them together. (This replaces the single model; use History to go back.)`,
+        },
+      ]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Split failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -1333,6 +1374,7 @@ export default function App() {
         onOpenSlicer={openSlicer}
         onRepair={repairMesh}
         onSimplify={simplifyMesh}
+        onSplit={splitMesh}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         supportsStep={result?.supportsStep ?? false}

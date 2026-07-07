@@ -361,6 +361,8 @@ button { font-family: inherit; cursor: pointer; }
 .stabs { display: flex; width: 100%; margin: 16px 0 4px; }
 .sync-status { margin: 10px 0 4px; padding: 10px 13px; border-radius: 10px; font-size: 12.5px; line-height: 1.5; background: var(--accent-w); color: var(--ink2); border: 1px solid #cfe3df; }
 .sync-status.err { background: #fbeaea; color: #a23a3a; border-color: #ecc8c8; }
+.sync-when { display: flex; align-items: center; gap: 7px; margin-top: 6px; }
+.sync-when::before { content: ""; width: 7px; height: 7px; border-radius: var(--r-full); background: var(--accent); flex: 0 0 auto; }
 .social-col { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
 .social { display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-weight: 600; padding: 10px 12px; margin-top: 0; }
 .chip.resume { border-color: var(--accent); color: var(--accent); font-weight: 600; }

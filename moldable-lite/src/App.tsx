@@ -137,6 +137,18 @@ export default function App() {
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const [settingsPane, setSettingsPane] = useState<"ai" | "mesh" | "printer" | "sync">("ai");
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "synced">("idle");
+  // When the last successful push/pull finished — shown in Settings → Sync and
+  // persisted so it survives reloads.
+  const [lastSyncAt, setLastSyncAt] = useState<number | null>(() => {
+    const v = localStorage.getItem("moldable_last_sync");
+    return v ? Number(v) : null;
+  });
+  const markSynced = () => {
+    const t = Date.now();
+    localStorage.setItem("moldable_last_sync", String(t));
+    setLastSyncAt(t);
+    setSyncState("synced");
+  };
 
   // Debounced auto-push: any local change (project or settings) uploads shortly
   // after, but only while signed in.
@@ -147,7 +159,7 @@ export default function App() {
     syncTimer.current = setTimeout(() => {
       setSyncState("syncing");
       void cloudSyncPush()
-        .then(() => setSyncState("synced"))
+        .then(() => markSynced())
         .catch(() => setSyncState("idle"));
     }, 2500);
   };
@@ -167,7 +179,7 @@ export default function App() {
       // never appeared on other devices. Pull-first means the cloud still wins on
       // conflicts; this push only adds the local-only settings/projects on top.
       await cloudSyncPush();
-      setSyncState("synced");
+      markSynced();
       if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 400);
     } catch {
       setSyncState("idle");
@@ -193,7 +205,7 @@ export default function App() {
   // change path remembering to sync. No-op while signed out.
   useEffect(() => {
     const id = setInterval(() => {
-      if (accountEmailRef.current) void cloudSyncPush().catch(() => {});
+      if (accountEmailRef.current) void cloudSyncPush().then(() => markSynced()).catch(() => {});
     }, 45_000);
     return () => clearInterval(id);
   }, []);
@@ -1307,6 +1319,8 @@ export default function App() {
           onSavePrinter={savePrinter}
           onSaveGen={saveGenSettings}
           initialPane={settingsPane}
+          lastSyncAt={lastSyncAt}
+          onSynced={markSynced}
           onClose={() => setShowSettings(false)}
         />
       )}
@@ -1463,6 +1477,8 @@ function SettingsModal({
   onSavePrinter,
   onSaveGen,
   initialPane,
+  lastSyncAt,
+  onSynced,
   onClose,
 }: {
   initialKey: string;
@@ -1479,6 +1495,8 @@ function SettingsModal({
   onSavePrinter: (p: PrinterDefaults) => void;
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
   initialPane?: "ai" | "mesh" | "printer" | "sync";
+  lastSyncAt: number | null;
+  onSynced: () => void;
   onClose: () => void;
 }) {
   const [pane, setPane] = useState<"ai" | "mesh" | "printer" | "sync">(initialPane ?? "ai");
@@ -1534,6 +1552,7 @@ function SettingsModal({
       if (op === "sync") {
         await cloudSyncPush();
         const r = await cloudSyncPull();
+        onSynced();
         setSyncMsg("Synced.");
         if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 600);
       }
@@ -1794,6 +1813,11 @@ function SettingsModal({
             {cloudEmail ? (
               <>
                 <p className="fine">Signed in as <b>{cloudEmail}</b> — your projects, chats &amp; settings sync automatically across your devices.</p>
+                <p className="fine sync-when">
+                  {lastSyncAt
+                    ? <>Last synced: <b>{new Date(lastSyncAt).toLocaleString()}</b></>
+                    : "Not synced yet — it'll sync automatically after your next change."}
+                </p>
                 <div className="param-actions">
                   <button className="primary sm" disabled={cloudBusy} onClick={() => doCloud("sync")}>Sync now</button>
                   <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>

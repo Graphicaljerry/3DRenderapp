@@ -288,6 +288,14 @@ interface Props {
     text: string;
     setText: (s: string) => void;
     pick: (f: PickedFeature) => void;
+    pickFaces: (faces: PickedFeature[]) => void;
+    askAi: () => void;
+    clear: () => void;
+  };
+  facesCtl: {
+    faces: PickedFeature[];
+    text: string;
+    setText: (s: string) => void;
     askAi: () => void;
     clear: () => void;
   };
@@ -578,6 +586,8 @@ export function Workspace(p: Props) {
                 selectedPin={p.pinCtl.active?.pin.id ?? null}
                 selectMode={p.featureCtl.mode}
                 selectKind={p.featureCtl.kind}
+                boxSelectionActive={p.facesCtl.faces.length > 0}
+                onPickFaces={p.featureCtl.pickFaces}
                 onPickPoint={p.pinCtl.pick}
                 onPickFeature={p.featureCtl.pick}
                 onSelectPin={p.pinCtl.select}
@@ -643,6 +653,34 @@ export function Workspace(p: Props) {
                   </div>
                   {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
                 </div>
+              )}
+              {p.facesCtl.faces.length > 0 && (
+                <div className="pin-panel">
+                  <div className="pin-head">
+                    <span>{p.facesCtl.faces.length} {p.facesCtl.faces.length === 1 ? "face" : "faces"} selected</span>
+                    <button className="x" aria-label="Clear selection" onClick={p.facesCtl.clear}><IconX /></button>
+                  </div>
+                  <textarea
+                    rows={2}
+                    value={p.facesCtl.text}
+                    onChange={(e) => p.facesCtl.setText(e.target.value)}
+                    placeholder="e.g. add a 3 mm fillet to these faces · shell these 2 mm"
+                  />
+                  <div className="param-actions">
+                    <button
+                      className="primary sm"
+                      disabled={!p.facesCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
+                      onClick={p.facesCtl.askAi}
+                    >
+                      Ask AI to change these
+                    </button>
+                    <button className="ghost sm" onClick={p.facesCtl.clear}>Cancel</button>
+                  </div>
+                  {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
+                </div>
+              )}
+              {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
+                <div className="box-hint">Shift-drag to box-select multiple faces</div>
               )}
               {p.tab === "3d" && p.splitCtl.pieces && p.splitCtl.pieces.length > 0 && (
                 <SplitPiecesPanel splitCtl={p.splitCtl} />

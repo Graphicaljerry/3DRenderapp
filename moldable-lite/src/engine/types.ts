@@ -9,7 +9,14 @@ export type ExportFormat = "stl" | "3mf" | "step" | "obj";
 export type BuildInput =
   | { kind: "code"; code: string; params?: Record<string, number> }
   | { kind: "spec"; spec: ModelSpec }
-  | { kind: "gen"; image?: Blob; prompt?: string; provider: string; model: string };
+  | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string };
+
+/** Extra reference angles (the primary photo is the "front") — used by multi-view engines. */
+export interface MultiViews {
+  left?: Blob;
+  back?: Blob;
+  right?: Blob;
+}
 
 export interface EngineResult {
   kind: EngineKind;

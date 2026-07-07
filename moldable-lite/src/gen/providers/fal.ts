@@ -8,10 +8,14 @@ export const falGenerate: GenFn = async (input, onProgress, signal) => {
 
   const body: any = {};
   if (input.image) {
-    const dataUrl = await blobToDataURL(input.image);
-    // Rodin takes an ARRAY (input_image_urls); Hunyuan takes a single input_image_url.
-    if (input.model.includes("hyper3d") || input.model.includes("rodin")) body.input_image_urls = [dataUrl];
-    else body.input_image_url = dataUrl;
+    const isRodin = input.model.includes("hyper3d") || input.model.includes("rodin");
+    if (isRodin) {
+      // Rodin takes an ARRAY — add any extra reference angles for a better mesh.
+      const angles = [input.image, input.views?.left, input.views?.back, input.views?.right].filter(Boolean) as Blob[];
+      body.input_image_urls = await Promise.all(angles.map(blobToDataURL));
+    } else {
+      body.input_image_url = await blobToDataURL(input.image); // Hunyuan: single front image
+    }
   }
   if (input.prompt) body.prompt = input.prompt;
 

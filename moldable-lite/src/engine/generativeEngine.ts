@@ -32,6 +32,7 @@ export class GenerativeEngine implements Engine {
     const { glb } = await prov.generate(
       {
         image: input.image,
+        views: input.views,
         prompt: input.prompt,
         model: input.model,
         apiKey: this.config.keyFor(prov.id),

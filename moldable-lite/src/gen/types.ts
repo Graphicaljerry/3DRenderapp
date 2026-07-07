@@ -7,6 +7,8 @@ export interface GenProgress {
 
 export interface GenInput {
   image?: Blob;
+  /** Extra reference angles (front is `image`) for multi-view engines. */
+  views?: { left?: Blob; back?: Blob; right?: Blob };
   prompt?: string;
   model: string; // provider-specific model / space id
   apiKey?: string; // user's own key for this provider (from settings)

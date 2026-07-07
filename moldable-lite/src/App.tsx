@@ -12,7 +12,8 @@ import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
-import { detectProductQuery, researchDimensions } from "./llm/research";
+import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
+import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -217,6 +218,18 @@ export default function App() {
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const apiHistory = useRef<ApiMsg[]>([]);
+  // Web research toggle: Auto = smart (looks up named real-world products), On =
+  // always research before building, Off = never. Persisted across sessions.
+  const [webMode, setWebMode] = useState<"auto" | "on" | "off">(() => {
+    const v = localStorage.getItem("moldable_web_mode");
+    return v === "on" || v === "off" ? v : "auto";
+  });
+  const cycleWeb = () =>
+    setWebMode((w) => {
+      const next = w === "auto" ? "on" : w === "on" ? "off" : "auto";
+      localStorage.setItem("moldable_web_mode", next);
+      return next;
+    });
 
   const [result, setResult] = useState<EngineResult | null>(null);
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
@@ -970,16 +983,26 @@ export default function App() {
     // Gemini's free search grounding or Claude's web-search tool; best-effort —
     // if neither key is set or the lookup fails, generation continues as before.
     let researched: string | null = null;
-    // Look up real product dimensions for text requests, and — in the guided
-    // replacement flow — even when a photo is attached, so a named product ("case
-    // for an iPhone 17 Pro") gets web-accurate numbers alongside the picture.
-    if (p && detectProductQuery(p) && (!visionImage || guided)) {
+    // Web research is gated by the composer's Web toggle:
+    //   On   → always look up the web before building
+    //   Auto → smart: only when the request names a real-world product
+    //   Off  → never
+    // In Auto we also skip when a photo is attached (unless guided), since the
+    // picture is the reference; when forced On, honor the user's explicit intent.
+    const researchKeys = {
+      geminiKey: llmKeys["gemini"],
+      geminiModel: llm.provider === "gemini" ? llm.model : "",
+      anthropicKey: key,
+      openrouterKey: llmKeys["openrouter"],
+      openrouterModel: llm.provider === "openrouter" ? llm.model : "",
+    };
+    const wantWeb = !!p && (webMode === "on" || (webMode === "auto" && detectProductQuery(p) && (!visionImage || guided)));
+    if (wantWeb && webMode === "on" && !canResearch(researchKeys)) {
+      // Forced on but no browsing-capable key — tell the user rather than silently skip.
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
+    } else if (wantWeb) {
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
-      researched = await researchDimensions(p, {
-        geminiKey: llmKeys["gemini"],
-        geminiModel: llm.provider === "gemini" ? llm.model : "",
-        anthropicKey: key,
-      });
+      researched = await researchDimensions(p, researchKeys);
       if (researched) {
         // Show the found measurements as their own note, above the working placeholder.
         setMessages((m) => {
@@ -1234,6 +1257,8 @@ export default function App() {
         }}
         mode={mode}
         setMode={setMode}
+        webMode={webMode}
+        onCycleWeb={cycleWeb}
         guided={guided}
         onStartGuided={startGuided}
         fit={fit}
@@ -1597,6 +1622,12 @@ function SettingsModal({
   const [lbase, setLbase] = useState(llm.baseUrl ?? "");
   const [lkeys, setLkeys] = useState<Record<string, string>>(llmKeys);
   const lpre = llmPreset(lp);
+  // OpenRouter has hundreds of models — fetch the live catalogue so the model box
+  // becomes a type-to-search picker (with prices) instead of a blind slug field.
+  const [orModels, setOrModels] = useState<ORModel[]>(() => cachedOpenRouterModels());
+  useEffect(() => {
+    if (lp === "openrouter") void fetchOpenRouterModels().then(setOrModels);
+  }, [lp]);
 
   // 3D engine (Generative mode)
   const [keys, setKeys] = useState<Record<string, string>>(providerKeys);
@@ -1699,9 +1730,28 @@ function SettingsModal({
                     <input value={lbase} onChange={(e) => setLbase(e.target.value)} placeholder="https://my-host/v1" />
                   </>
                 )}
-                <label>Model id</label>
-                <input value={lmodel} onChange={(e) => setLmodel(e.target.value)} placeholder={lpre.defaultModel || "model-name"} />
-                <p className="fine">{lpre.keyHint}</p>
+                <label>Model{lp === "openrouter" ? " — type to search" : " id"}</label>
+                <input
+                  value={lmodel}
+                  onChange={(e) => setLmodel(e.target.value)}
+                  placeholder={lpre.defaultModel || "model-name"}
+                  list={lp === "openrouter" ? "openrouter-models" : undefined}
+                  autoComplete="off"
+                />
+                {lp === "openrouter" && (
+                  <datalist id="openrouter-models">
+                    {orModels.map((mm) => (
+                      <option key={mm.id} value={mm.id}>{mm.name}{fmtORPrice(mm.inPrice) ? ` — ${fmtORPrice(mm.inPrice)}` : ""}</option>
+                    ))}
+                  </datalist>
+                )}
+                {lp === "openrouter" && (
+                  <p className="fine">
+                    {orModels.length ? `${orModels.length} models — start typing (e.g. “sonnet”, “gemini”, “free”) to filter, or ` : "Type a model slug, or "}
+                    browse all at <a className="link-inline" href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">openrouter.ai/models</a>. Currently using: <b>{lmodel || lpre.defaultModel}</b>
+                  </p>
+                )}
+                {lp !== "openrouter" && <p className="fine">{lpre.keyHint}</p>}
               </>
             )}
           </>

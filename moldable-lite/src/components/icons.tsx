@@ -53,6 +53,13 @@ export const IconChevron = ({ size = 14 }: { size?: number }) => (
     <path d="m6 9 6 6 6-6" />
   </svg>
 );
+export const IconGlobe = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3 12h18" />
+    <path d="M12 3a14 14 0 0 1 0 18a14 14 0 0 1 0-18" />
+  </svg>
+);
 export const IconReset = () => (
   <svg width="13" height="13" viewBox="0 0 24 24" {...base} strokeWidth={2}>
     <path d="M3 12a9 9 0 1 0 3-6.7L3 8" />

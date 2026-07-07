@@ -597,7 +597,7 @@ export function Workspace(p: Props) {
                         const f = p.featureCtl.selected!;
                         const cap = f.label.charAt(0).toUpperCase() + f.label.slice(1);
                         if (f.kind === "face") return `${cap} · ${f.w} × ${f.h} mm`;
-                        if (f.kind === "edge") return `Edge · ${f.len} mm long`;
+                        if (f.kind === "edge") return `${cap} · ${f.len} mm long`;
                         return `Corner · ${f.cx}, ${f.cy}, ${f.cz} mm`;
                       })()}
                     </span>

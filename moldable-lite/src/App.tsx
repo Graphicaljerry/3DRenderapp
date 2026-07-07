@@ -881,6 +881,7 @@ export default function App() {
     setPins((ps) => [...ps, pin]);
     setActivePinId(pin.id);
     setPinText("");
+    setSelectedFeature(null); // only one editing surface at a time
   }
   function selectPin(id: string) {
     setActivePinId(id);
@@ -917,18 +918,26 @@ export default function App() {
   function pickFeature(f: PickedFeature) {
     setSelectedFeature(f);
     setFaceText("");
-    setPinMode(false); // the two selection modes are mutually exclusive
+    // Only one editing surface (pin vs feature) at a time.
+    setPinMode(false);
+    setActivePinId(null);
+    setPinText("");
   }
   /** Describe the picked face/edge/vertex precisely so the AI edits exactly it. */
   function featureDirective(f: PickedFeature): string {
     if (f.kind === "face") {
-      return `Apply this on the ${f.label} — a flat/smooth surface facing (${f.nx}, ${f.ny}, ${f.nz}), ` +
+      const shape = f.curved ? "curved surface" : "flat face";
+      return `Apply this on the ${f.label} — a ${shape} facing (${f.nx}, ${f.ny}, ${f.nz}), ` +
         `centred at x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm, spanning about ${f.w} × ${f.h} mm. ` +
-        `Keep the change ON this face and centred on it unless I say otherwise.`;
+        `Keep the change ON this surface and centred on it unless I say otherwise.`;
     }
     if (f.kind === "edge") {
+      if (f.closed) {
+        return `Apply this to the closed edge loop (e.g. a rim) around x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm, ` +
+          `about ${f.len} mm total length. Target just this whole edge loop (e.g. a fillet or chamfer around it).`;
+      }
       return `Apply this to the edge running from (${f.ax}, ${f.ay}, ${f.az}) to (${f.bx}, ${f.by}, ${f.bz}) mm, ` +
-        `about ${f.len} mm long (midpoint x=${f.cx}, y=${f.cy}, z=${f.cz}). Target just this edge (e.g. a fillet or chamfer along it).`;
+        `about ${f.len} mm long (midpoint x=${f.cx}, y=${f.cy}, z=${f.cz}). Target just this whole edge (e.g. a fillet or chamfer along it).`;
     }
     return `Apply this at the corner/vertex at x=${f.cx} mm, y=${f.cy} mm, z=${f.cz} mm. Target just this corner (e.g. round or chamfer it).`;
   }
@@ -1424,7 +1433,7 @@ export default function App() {
         pins={pins}
         pinCtl={{
           mode: pinMode,
-          toggleMode: () => { setPinMode((m) => !m); setSelectMode(false); },
+          toggleMode: () => { setPinMode((m) => !m); setSelectMode(false); setSelectedFeature(null); },
           active: activePin,
           text: pinText,
           setText: setPinText,
@@ -1437,9 +1446,9 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => { setSelectMode((m) => !m); setPinMode(false); setSelectedFeature(null); },
+          toggleMode: () => { setSelectMode((m) => !m); setPinMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); },
           kind: selectKind,
-          setKind: (k) => { setSelectKind(k); setSelectedFeature(null); },
+          setKind: setSelectKind, // Viewer re-emits the locked feature in the new kind (keeps panel in sync)
           selected: selectedFeature,
           text: faceText,
           setText: setFaceText,

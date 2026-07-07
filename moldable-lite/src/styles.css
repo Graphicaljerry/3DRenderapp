@@ -267,6 +267,12 @@ button { font-family: inherit; cursor: pointer; }
 .web-toggle.web-off { opacity: 0.65; }
 .link-inline { color: var(--accent-d); text-decoration: underline; }
 .link-inline:hover { color: var(--accent); }
+/* OpenRouter "recommended for CAD" chips in Settings. */
+.or-recs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.or-rec { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; border: 1px solid var(--bord); border-radius: var(--r-full); background: var(--bg); color: var(--ink2); font-size: 12px; font-weight: 500; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.or-rec:hover { border-color: var(--accent); color: var(--accent-d); }
+.or-rec.on { border-color: var(--accent); background: var(--accent-w); color: var(--accent-d); }
+.or-think { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--live); border: 1px solid color-mix(in srgb, var(--live) 45%, transparent); border-radius: var(--r-xs); padding: 0 4px; line-height: 1.5; }
 /* Fit tolerance — quiet segmented control, shown only in the guided flow. */
 .fitbar { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
 .fit-label { font-size: 11px; font-weight: 600; color: var(--subt); }

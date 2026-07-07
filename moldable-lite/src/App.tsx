@@ -11,9 +11,9 @@ import { getEngineSelection, type EngineSelection } from "./engine/selectEngine"
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
-import { LLM_PRESETS, llmPreset, llmReady, generateLlm, type LlmSettings, type LlmProviderId } from "./llm/llm";
+import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
-import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, type ORModel } from "./llm/openrouterModels";
+import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -1625,9 +1625,11 @@ function SettingsModal({
   // OpenRouter has hundreds of models — fetch the live catalogue so the model box
   // becomes a type-to-search picker (with prices) instead of a blind slug field.
   const [orModels, setOrModels] = useState<ORModel[]>(() => cachedOpenRouterModels());
+  const [orReasoning, setOrReasoning] = useState<ReasoningEffort>(() => getReasoningEffort());
   useEffect(() => {
     if (lp === "openrouter") void fetchOpenRouterModels().then(setOrModels);
   }, [lp]);
+  const orRecs = recommendedForApp(orModels);
 
   // 3D engine (Generative mode)
   const [keys, setKeys] = useState<Record<string, string>>(providerKeys);
@@ -1696,9 +1698,12 @@ function SettingsModal({
                 <li><b>Best free</b> — Google Gemini, about 1,500 requests a day at no cost.</li>
                 <li><b>Also excellent</b> — OpenAI GPT-5.1 (~1-2¢ per part) and Claude Sonnet 5 (~3¢), just behind.</li>
                 <li><b>Cheapest paid</b> — Claude Haiku 4.5, about 1¢ per part.</li>
+                <li><b>One key for all of them</b> — OpenRouter. Pick from the “Recommended for precise CAD” list (Claude, GPT, Gemini Pro, DeepSeek…); some are free. Prices vary per model.</li>
+                <li><b>Thinking / reasoning</b> — models tagged “thinks” (DeepSeek R1, o-series, Gemini/Claude reasoning) work through tricky geometry step-by-step before writing code — more accurate on complex parts, a bit slower. Turn thinking up or off under OpenRouter → “Thinking (reasoning)”.</li>
                 <li><b>Fastest / most private</b> — Groq (free tier) / Ollama (free, runs on your machine).</li>
               </ul>
-              <p className="fine">Tip: name a real product — "a case for my iPhone 17 Pro" — and Moldable first looks up its exact dimensions online (via Gemini's free search grounding, or Claude's web search at ~1¢ a lookup).</p>
+              <p className="fine">These pick the <b>Precise (CAD)</b> brain that writes accurate parametric models. The <b>Generative</b> mesh engines (photo/text → mesh) live in the “3D engine” tab.</p>
+              <p className="fine">Tip: name a real product — "a case for my iPhone 17 Pro" — and with the composer’s <b>Web</b> toggle on Auto/On, Moldable looks up its exact dimensions online first (via Gemini, Claude, or OpenRouter’s web plugin).</p>
             </details>
             {lp === "anthropic" ? (
               <>
@@ -1730,7 +1735,27 @@ function SettingsModal({
                     <input value={lbase} onChange={(e) => setLbase(e.target.value)} placeholder="https://my-host/v1" />
                   </>
                 )}
-                <label>Model{lp === "openrouter" ? " — type to search" : " id"}</label>
+                {lp === "openrouter" && orRecs.length > 0 && (
+                  <>
+                    <label>Recommended for precise CAD</label>
+                    <div className="or-recs">
+                      {orRecs.map((mm) => (
+                        <button
+                          type="button"
+                          key={mm.id}
+                          className={`or-rec${lmodel === mm.id ? " on" : ""}`}
+                          onClick={() => setLmodel(mm.id)}
+                          title={`${mm.id}${fmtORPrice(mm.inPrice) ? ` · ${fmtORPrice(mm.inPrice)}` : ""}${mm.reasoning ? " · thinks (reasoning)" : ""}`}
+                        >
+                          {shortModelName(mm.id)}
+                          {mm.reasoning && <span className="or-think" title="Reasoning / thinking model">thinks</span>}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="fine">Picked for accurate CAD code — strongest at code + spatial reasoning. “thinks” = a reasoning model.</p>
+                  </>
+                )}
+                <label>Model{lp === "openrouter" ? " — or type to search all" : " id"}</label>
                 <input
                   value={lmodel}
                   onChange={(e) => setLmodel(e.target.value)}
@@ -1741,15 +1766,34 @@ function SettingsModal({
                 {lp === "openrouter" && (
                   <datalist id="openrouter-models">
                     {orModels.map((mm) => (
-                      <option key={mm.id} value={mm.id}>{mm.name}{fmtORPrice(mm.inPrice) ? ` — ${fmtORPrice(mm.inPrice)}` : ""}</option>
+                      <option key={mm.id} value={mm.id}>{mm.name}{mm.reasoning ? " · thinks" : ""}{fmtORPrice(mm.inPrice) ? ` — ${fmtORPrice(mm.inPrice)}` : ""}</option>
                     ))}
                   </datalist>
                 )}
                 {lp === "openrouter" && (
-                  <p className="fine">
-                    {orModels.length ? `${orModels.length} models — start typing (e.g. “sonnet”, “gemini”, “free”) to filter, or ` : "Type a model slug, or "}
-                    browse all at <a className="link-inline" href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">openrouter.ai/models</a>. Currently using: <b>{lmodel || lpre.defaultModel}</b>
-                  </p>
+                  <>
+                    <label>Thinking (reasoning)</label>
+                    <select
+                      value={orReasoning}
+                      onChange={(e) => {
+                        const v = e.target.value as ReasoningEffort;
+                        setOrReasoning(v);
+                        try { localStorage.setItem("moldable_or_reasoning", v); } catch {}
+                      }}
+                    >
+                      <option value="off">Off — faster, cheaper</option>
+                      <option value="low">Low</option>
+                      <option value="medium">Medium — recommended</option>
+                      <option value="high">High — deepest, slowest</option>
+                    </select>
+                    <p className="fine">
+                      Applies only to reasoning-capable models (the “thinks” ones). They reason through tricky geometry, fits and threads before writing the code — more accurate, a bit slower/costlier.
+                    </p>
+                    <p className="fine">
+                      {orModels.length ? `${orModels.length} models available — ` : "Type a model slug, or "}
+                      browse all at <a className="link-inline" href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">openrouter.ai/models</a>. Currently using: <b>{lmodel || lpre.defaultModel}</b>
+                    </p>
+                  </>
                 )}
                 {lp !== "openrouter" && <p className="fine">{lpre.keyHint}</p>}
               </>

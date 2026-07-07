@@ -54,6 +54,7 @@ export interface Project {
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest
+  headId?: string; // which version the HEAD (live) fields mirror; enables undo/redo over `versions`
 }
 
 export interface Backend {

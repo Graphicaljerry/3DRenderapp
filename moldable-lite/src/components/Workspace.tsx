@@ -243,6 +243,7 @@ interface Props {
   onSplit: () => void;
   versions: Version[];
   onRestore: (id: string) => void;
+  undoCtl: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean; busy: boolean };
   supportsStep: boolean;
   canExport: (f: ExportFormat) => boolean;
   onExport: (f: ExportFormat) => void;
@@ -505,6 +506,10 @@ export function Workspace(p: Props) {
             </div>
             {(p.tab === "3d" || p.tab === "params") && (
               <div className="viewer-tools">
+                <div className="seg sm">
+                  <button title="Undo (⌘/Ctrl+Z)" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}>Undo</button>
+                  <button title="Redo (⌘/Ctrl+Shift+Z)" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}>Redo</button>
+                </div>
                 <button
                   className={`ghost sm${p.featureCtl.mode ? " on" : ""}`}
                   aria-pressed={p.featureCtl.mode}

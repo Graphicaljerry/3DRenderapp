@@ -39,6 +39,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     genSource: snap.genSource,
     updatedAt: Date.now(),
     versions: [...project.versions, v],
+    headId: v.id,
   };
 }
 
@@ -70,5 +71,34 @@ export function restoreVersion(project: Project, versionId: string): Project {
     genSource: t.genSource,
     updatedAt: Date.now(),
     versions: [...project.versions, v],
+    headId: v.id,
+  };
+}
+
+/** Index of the live HEAD within `versions` (defaults to the newest). */
+export function headIndex(project: Project): number {
+  if (project.headId) {
+    const i = project.versions.findIndex((v) => v.id === project.headId);
+    if (i >= 0) return i;
+  }
+  return project.versions.length - 1;
+}
+
+/** Move HEAD to an existing version WITHOUT appending (undo/redo). The live
+ *  fields mirror that version; `versions` is untouched so redo stays available. Pure. */
+export function navigateHead(project: Project, versionId: string): Project {
+  const t = project.versions.find((v) => v.id === versionId);
+  if (!t) throw new Error("Version not found.");
+  return {
+    ...project,
+    engine: t.engine,
+    code: t.code,
+    params: t.params,
+    importFile: t.importFile,
+    spec: t.spec,
+    glb: t.glb,
+    genSource: t.genSource,
+    updatedAt: Date.now(),
+    headId: t.id,
   };
 }

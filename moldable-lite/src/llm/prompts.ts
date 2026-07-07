@@ -128,6 +128,24 @@ REPLACEMENT-PART MODE. The user is recreating a broken or missing part that has 
 3) Capture function (mounting faces, holes, slots, hooks), not cosmetic detail. Keep it one printable solid with a flat base.
 4) If a critical dimension is unknowable, pick the nearest standard size, apply it, and say so in the summary so the user can correct it.`;
 
+// Appended for a SMALL edit to an existing program: asks for only the changed lines
+// as SEARCH/REPLACE blocks, which cuts output tokens (the expensive side). The app
+// applies the blocks and re-executes; if they don't fit it silently regenerates in full.
+export const EDIT_BLOCK_ADDENDUM = `
+
+EDIT MODE — the user is making a change to the program shown in their message. To save tokens, reply with the MINIMAL edit as one or more SEARCH/REPLACE blocks, NOT the whole file:
+
+<<<<<<< SEARCH
+(exact lines copied verbatim from the current program)
+=======
+(the replacement lines)
+>>>>>>> REPLACE
+
+Rules:
+- Copy the SEARCH text EXACTLY as it appears (whitespace included) so it can be found; keep each SEARCH block small and unique — include a few surrounding lines only if needed to disambiguate.
+- Use multiple blocks for multiple spots. Output ONLY the blocks — no prose, no explanation, no full-file echo.
+- ONLY if the change touches most of the program (a near-total rewrite), return the complete updated program in a single \`\`\`js code block instead.`;
+
 // A one-line fit directive appended to the user's request; maps a friendly
 // setting to an FDM clearance the model applies to mating features.
 export type FitId = "loose" | "snug" | "press";

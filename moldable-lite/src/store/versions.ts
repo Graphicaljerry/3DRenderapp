@@ -15,7 +15,10 @@ export interface Snapshot {
   genSource?: GenSource;
 }
 
-/** Append a version capturing the new state AND advance HEAD to match. Pure. */
+/** Append a version capturing the new state AND advance HEAD to match. Pure.
+ *  If HEAD isn't the newest version (i.e. the user undid and is now making a NEW edit),
+ *  the "redo" branch after HEAD is discarded — the new edit becomes the fresh tip, so a
+ *  later undo steps straight back to it instead of walking through stale future states. */
 export function appendVersion(project: Project, snap: Snapshot): Project {
   const v: Version = {
     id: uid(),
@@ -31,6 +34,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     glb: snap.glb,
     genSource: snap.genSource,
   };
+  const kept = project.versions.slice(0, headIndex(project) + 1); // drop any redo branch past HEAD
   return {
     ...project,
     engine: snap.engine,
@@ -42,7 +46,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     glb: snap.glb,
     genSource: snap.genSource,
     updatedAt: Date.now(),
-    versions: [...project.versions, v],
+    versions: [...kept, v],
     headId: v.id,
   };
 }

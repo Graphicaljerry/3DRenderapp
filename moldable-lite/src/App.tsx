@@ -1067,16 +1067,32 @@ export default function App() {
     setSelectedFeature(null);
     setSelectedFaces([]);
     setStatus("generating");
-    try {
-      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
+    const runOp = async (o: PointOp, note?: string) => {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), o] });
+      const amount = Math.abs(o.size);
       const label =
-        type === "extrude" ? `${size >= 0 ? "Extruded" : "Recessed"} the face by ${Math.abs(size)} mm`
-        : type.includes("chamfer") ? `Chamfered the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${size} mm`
-        : `Rounded the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${size} mm`;
+        type === "extrude" ? `${o.size >= 0 ? "Extruded" : "Recessed"} the face by ${amount} mm`
+        : type.includes("chamfer") ? `Chamfered the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${amount} mm`
+        : `Rounded the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${amount} mm`;
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label} directly — no AI, no tokens spent.` }]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label}${note ?? " directly — no AI, no tokens spent."}` }]);
+    };
+    try {
+      await runOp(op);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+      // When OCCT rejects a size, the worker probes for the biggest one that DOES fit and
+      // tags it "(max=X)". Apply that instead of just complaining — and say both numbers.
+      const max = Number(/\(max=([\d.]+)\)/.exec(String(err?.message ?? ""))?.[1]);
+      if (max > 0 && max < Math.abs(size)) {
+        try {
+          await runOp(
+            { ...op, size: size < 0 ? -max : max },
+            ` — you asked for ${Math.abs(size)} mm, but about ${max} mm is the most that fits there, so that's what I applied. Undo if you'd rather not.`,
+          );
+          return;
+        } catch { /* even the probed max failed in-chain — fall through to the original error */ }
+      }
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err).replace(/ \(max=[\d.]+\)/, ""), error: true }]);
     } finally {
       setStatus("idle");
     }

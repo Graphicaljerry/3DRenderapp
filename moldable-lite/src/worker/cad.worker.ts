@@ -68,7 +68,7 @@ function probeMaxSize(failedSize: number, attempt: (size: number) => any): numbe
  *  edge/corner: fillet/chamfer every edge through the point.
  *  face-fillet/chamfer: round/bevel all edges bounding the face at the point.
  *  extrude: push the face out (+) or in (−) by the distance. */
-function applyOneOp(shape: any, op: WorkerOp): any {
+function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
   const R: any = replicad;
   // The size-attempt closure for this op, if it has a size that can be probed for a max.
   let attempt: ((size: number) => any) | null = null;
@@ -120,8 +120,9 @@ function applyOneOp(shape: any, op: WorkerOp): any {
       default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
     }
     // Sized op that OCCT rejected → find the real limit so the app can say it (and
-    // auto-apply it) instead of the old shrug "try a smaller amount".
-    const sized = attempt && Math.abs(op.type === "extrude" ? (op as any).size : (op as any).size) > 0;
+    // auto-apply it) instead of the old shrug "try a smaller amount". Skipped for live
+    // drag previews (probeLimit=false) — probing every over-limit tick would kill the drag.
+    const sized = probeLimit && attempt && Math.abs((op as any).size) > 0;
     if (sized) {
       const max = probeMaxSize(Math.abs((op as any).size), attempt!);
       if (max) throw new Error(`${label} doesn't fit here — the most this spot allows is about ${max} mm. (max=${max})`);
@@ -159,32 +160,36 @@ function runCode(rawCode: string, params?: Record<string, number>): any {
   return shape;
 }
 
-// Cache the base (code+params) shape and the last op-chain result, so applying one
-// more direct op doesn't re-run the whole program + every prior op each time — the big
-// cost for stacked fillet/chamfer/extrude on a complex model. importGen invalidates the
-// cache when the imported STEP solid changes.
+// Cache the base (code+params) shape and every intermediate of the last op-chain, so a
+// changed/added op only recomputes from where the chains diverge — the big cost for
+// stacked fillet/chamfer/extrude on a complex model. Intermediates make live drag
+// previews cheap: [prior ops..., tentative op] shares the whole prior chain, so each
+// preview tick costs exactly ONE op. importGen invalidates the cache when the imported
+// STEP solid changes.
 let importGen = 0;
 let baseCache: { key: string; shape: any } | null = null;
-let opCache: { key: string; ops: WorkerOp[]; shape: any } | null = null;
+let opCache: { key: string; ops: WorkerOp[]; shapes: any[] } | null = null; // shapes[i] = base + ops[0..i]
 const baseKey = (code: string, params?: Record<string, number>) => `${importGen} ${code} ${JSON.stringify(params ?? {})}`;
-const isPrefix = (a: WorkerOp[], b: WorkerOp[]) => a.length <= b.length && a.every((op, i) => JSON.stringify(op) === JSON.stringify(b[i]));
 
 /** Build the final shape for (code, params, ops), reusing cached work where possible. */
-function buildShape(code: string, params: Record<string, number> | undefined, ops?: WorkerOp[]): any {
+function buildShape(code: string, params: Record<string, number> | undefined, ops?: WorkerOp[], probeLimit = true): any {
   const key = baseKey(code, params);
   const opsArr = ops ?? [];
-  // Fast path: same program + the op-chain only GREW → apply just the new ops.
-  if (opCache && opCache.key === key && isPrefix(opCache.ops, opsArr)) {
-    let s = opCache.shape;
-    for (let i = opCache.ops.length; i < opsArr.length; i++) s = applyOneOp(s, opsArr[i]);
-    opCache = { key, ops: opsArr.slice(), shape: s };
-    return s;
-  }
-  // Otherwise reuse the base shape if the program is unchanged; only re-run code if needed.
   const base = baseCache && baseCache.key === key ? baseCache.shape : (baseCache = { key, shape: runCode(code, params) }).shape;
-  let s = base;
-  for (const op of opsArr) s = applyOneOp(s, op);
-  opCache = { key, ops: opsArr.slice(), shape: s };
+  // Longest shared prefix with the cached chain → start from its intermediate shape.
+  let start = 0;
+  let shapes: any[] = [];
+  if (opCache && opCache.key === key) {
+    const cached = opCache;
+    while (start < cached.ops.length && start < opsArr.length && JSON.stringify(cached.ops[start]) === JSON.stringify(opsArr[start])) start++;
+    shapes = cached.shapes.slice(0, start);
+  }
+  let s = start > 0 ? shapes[start - 1] : base;
+  for (let i = start; i < opsArr.length; i++) {
+    s = applyOneOp(s, opsArr[i], probeLimit);
+    shapes.push(s);
+  }
+  opCache = { key, ops: opsArr.slice(), shapes };
   return s;
 }
 
@@ -240,10 +245,10 @@ const api: CadWorkerApi = {
     importGen++; // invalidate any cached shape built against the cleared import
   },
 
-  async build(code: string, params?: Record<string, number>, ops?: WorkerOp[]): Promise<WorkerBuildResult> {
+  async build(code: string, params?: Record<string, number>, ops?: WorkerOp[], opts?: { probeLimit?: boolean }): Promise<WorkerBuildResult> {
     try {
       await ensureOC();
-      const shape = buildShape(code, params, ops);
+      const shape = buildShape(code, params, ops, opts?.probeLimit !== false);
       const faces = shape.mesh(MESH_OPTS) as FaceMesh;
       const edges = shape.meshEdges(MESH_OPTS) as EdgeMesh;
       const dims = dimsOf(shape);

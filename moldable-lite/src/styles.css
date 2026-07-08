@@ -276,6 +276,16 @@ button { font-family: inherit; cursor: pointer; }
 /* ---------- statusbar + export ---------- */
 .statusbar { display: flex; align-items: center; gap: 14px; padding: 10px 12px; border-top: 1px solid var(--bord); background: var(--surf); border-radius: 0 0 12px 12px; }
 .dims { font-size: 13px; font-weight: 600; color: var(--ink2); }
+/* The chosen 3D-printer plate, always visible; tap → printer settings. */
+.bedchip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; font-size: 12px; color: var(--ink2); background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; cursor: pointer; white-space: nowrap; }
+.bedchip:hover { color: var(--ink); border-color: var(--accent); }
+.bedchip svg { color: var(--accent-d); flex: 0 0 auto; }
+@container (max-width: 680px) { .bedchip-name { display: none; } }
+/* Tools & gestures cheat sheet (the ? button) — tooltips don't exist on touch. */
+.help-sheet { position: absolute; top: 10px; right: 10px; z-index: 9; width: min(360px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink2); animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--ink); }
+.help-row { display: flex; gap: 9px; align-items: flex-start; padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--bord) 55%, transparent); }
+.help-row svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent-d); }
 .fits { font-size: 12px; }
 .fits.ok { color: var(--accent-d); }
 .fits.no { color: var(--danger); }

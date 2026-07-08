@@ -2,14 +2,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement } from "./Viewer";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
-import type { PrintabilityReport } from "../print/printability";
+import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, CadOp, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -130,6 +130,33 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
 
 /** Glanceable mesh + print stats on the model (Meshy's Faces/Vertices, reframed
     for slicing: triangles, watertight, volume, bed fit). */
+/** Tools-and-gestures cheat sheet — the toolbar's hover tooltips don't exist on touch
+ *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
+function HelpSheet({ onClose }: { onClose: () => void }) {
+  const rows: { icon: JSX.Element; text: string }[] = [
+    { icon: <IconCube />, text: "Orbit: drag rotates, pinch or scroll zooms, two-finger drag pans." },
+    { icon: <IconPointer />, text: "Select: pick Face, Edge, Corner or Point (keys 1–4), then tap the model to choose a spot to edit." },
+    { icon: <IconEdgeSel />, text: "Drag the blue arrow to extrude a face or round an edge — the model updates live; type an exact mm in the quick-edit box instead if you prefer." },
+    { icon: <IconCheck />, text: "If a size doesn't fit the geometry, Moldable applies the largest that does and tells you both numbers." },
+    { icon: <IconFaceSel />, text: "Shift-drag (with Select on) box-selects many faces at once." },
+    { icon: <IconTransform />, text: "Transform: move, rotate or scale the whole part — rotate is how you set print orientation." },
+    { icon: <IconRuler />, text: "Measure: tap two points to read the distance between them." },
+    { icon: <IconUndo />, text: "Undo ⌘/Ctrl+Z · Redo ⇧⌘/Ctrl+Shift+Z. Every edit is a restorable version in History." },
+    { icon: <IconPrinter />, text: "The bottom bar shows your printer's plate — tap it to switch printers or bed size." },
+  ];
+  return (
+    <div className="help-sheet" role="dialog" aria-label="Tools and gestures">
+      <div className="help-head">
+        <b>Tools & gestures</b>
+        <button className="x" aria-label="Close help" onClick={onClose}><IconX /></button>
+      </div>
+      {rows.map((r, i) => (
+        <div key={i} className="help-row">{r.icon}<span>{r.text}</span></div>
+      ))}
+    </div>
+  );
+}
+
 function MeshStats({ report }: { report: PrintabilityReport }) {
   const heavy = report.triangleCount > HEAVY_TRIANGLES;
   const wt = report.manifold.isWatertight;
@@ -232,6 +259,8 @@ interface Props {
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
   report: PrintabilityReport | null;
+  printer: PrinterDefaults;
+  onOpenPrinterSettings: () => void;
   wireframe: boolean;
   setWireframe: (f: (w: boolean) => boolean) => void;
   showDims: boolean;
@@ -339,6 +368,7 @@ export function Workspace(p: Props) {
   const chatResize = useRef<{ startX: number; startW: number } | null>(null);
   const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
+  const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -683,6 +713,9 @@ export function Workspace(p: Props) {
                 <button className="ghost sm iconbtn" aria-label="Reset view" title="Re-frame the model in the viewport" onClick={() => p.viewerRef.current?.resetView()}>
                   <IconFrame /><span className="btn-label">Reset view</span>
                 </button>
+                <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
+                  <IconHelp />
+                </button>
               </div>
             )}
           </div>
@@ -716,6 +749,7 @@ export function Workspace(p: Props) {
                 onMeasurePoint={p.measureCtl.point}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
+              {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
               {p.pinCtl.active && (
                 <div className="pin-panel">
                   <div className="pin-head">
@@ -860,6 +894,15 @@ export function Workspace(p: Props) {
 
           <div className="statusbar">
             <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
+            <button
+              className="bedchip"
+              title={`3D printer plate: ${p.printer.name ?? "generic"} — ${p.printer.bed.x} × ${p.printer.bed.y} × ${p.printer.bed.z} mm build volume. Tap to change printers.`}
+              onClick={p.onOpenPrinterSettings}
+            >
+              <IconPrinter size={13} />
+              {p.printer.name && <span className="bedchip-name">{p.printer.name}</span>}
+              <span>{p.printer.bed.x}×{p.printer.bed.y} mm</span>
+            </button>
             {p.status === "generating" && <GenTimer />}
             <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => p.setTab("print")} />
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />

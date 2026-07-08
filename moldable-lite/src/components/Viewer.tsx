@@ -430,7 +430,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         s2.ghost.geometry.dispose();
         s2.ghost.geometry = new THREE.BufferGeometry();
         layoutPushArrow(s2, ud.center, ud.normal, 0, cb.current.units, ud.kind); // rest the arrow (commit may fail)
-        if (Math.abs(dist) > 1e-2) cb.current.onPushPull(dist);
+        cb.current.onPushPull(dist); // ≈0 means "drag ended, nothing to commit" — App restores any live preview
         return;
       }
       if (s2?.box) {
@@ -557,6 +557,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         s2.ghost.geometry.dispose();
         s2.ghost.geometry = new THREE.BufferGeometry();
         layoutPushArrow(s2, ud.center, ud.normal, 0, cb.current.units, ud.kind);
+        cb.current.onPushPull(0); // cancelled — App restores any live preview, commits nothing
         return;
       }
       cancelBox();

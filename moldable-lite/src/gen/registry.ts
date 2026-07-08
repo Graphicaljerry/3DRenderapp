@@ -123,3 +123,30 @@ export const MULTIVIEW_HINT = "fal · Rodin or Tripo";
 export function providerOfModel(): ProviderDef {
   return PROVIDERS[0];
 }
+
+/** "Auto" engine: pick the best mesh provider+model the user can actually run.
+ *  Premium keyed providers beat the free tier (accuracy); within a provider the
+ *  model must match the input (photo vs text). Quality/speed words in the prompt
+ *  steer the free tier between its fast and its high-quality model. */
+export function pickAutoGenEngine(opts: { hasImage: boolean; prompt: string; hasKey: (id: string) => boolean }): { provider: string; model: string; label: string; reason: string } {
+  const wantsDetail = /\b(detailed|high.?quality|accurate|realistic|intricate|best)\b/i.test(opts.prompt);
+  const wantsFast = /\b(quick|fast|draft|rough|simple)\b/i.test(opts.prompt);
+  const order = ["fal", "tripo", "meshy", "replicate", "hf"];
+  for (const id of order) {
+    const prov = PROVIDERS.find((pp) => pp.id === id);
+    if (!prov) continue;
+    if (prov.needsKey && !opts.hasKey(prov.id)) continue;
+    const fits = prov.models.filter((m) => (opts.hasImage ? m.image : m.text));
+    if (!fits.length) continue;
+    let model = fits.find((m) => m.recommended) ?? fits[0];
+    if (prov.id === "hf" && opts.hasImage) {
+      // Free tier: fast+reliable by default; step up for "detailed", stay light for "quick".
+      if (wantsDetail && !wantsFast) model = fits.find((m) => /Hunyuan/i.test(m.id)) ?? model;
+      if (wantsFast) model = fits.find((m) => /stable-fast/i.test(m.id)) ?? model;
+    }
+    const reason = prov.needsKey ? "your best keyed engine" : wantsDetail ? "free, high quality" : "free & reliable";
+    return { provider: prov.id, model: model.id, label: model.label.split(" (")[0].split(" — ")[0], reason };
+  }
+  const hf = PROVIDERS[0];
+  return { provider: hf.id, model: hf.models[0].id, label: hf.models[0].label, reason: "fallback" };
+}

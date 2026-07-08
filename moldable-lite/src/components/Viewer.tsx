@@ -17,6 +17,8 @@ export type TransformCommit =
 
 export interface ViewerHandle {
   resetView: () => void;
+  /** Snap the camera to a standard view, framed on the model. */
+  setView: (v: "top" | "front" | "right" | "iso") => void;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -138,7 +140,7 @@ interface Internals {
   ghost: THREE.Mesh; // translucent live preview of the extruded volume during a push-pull drag
   pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number; live?: boolean } | null; // active push-pull drag; live = a real boolean preview replaced the ghost
   arrowHot: boolean; // pointer is over (or dragging) the push-pull arrow — drawn yellow
-  selBox: THREE.Box3Helper | null; // bounding box around the selected whole part
+  selBox: THREE.Group | null; // selection chrome: bounding box + corner anchor dots
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
@@ -304,13 +306,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const handleTap = (e: { clientX: number; clientY: number }) => {
       const s2 = st.current;
       if (!s2) return;
-      if (cb.current.transformMode !== "off" || s2.transforming) return; // gizmo owns the pointer
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       rc.setFromCamera(ndc, camera);
+      if (cb.current.transformMode !== "off" || s2.transforming) {
+        // Gizmo owns the pointer — except a tap on empty space, which deselects the part.
+        if (!s2.transforming && s2.mesh && !rc.intersectObject(s2.mesh, false)[0]) cb.current.onModelSelect(false);
+        return;
+      }
       if (s2.pins && !cb.current.measureMode) {
         const hp = rc.intersectObjects(s2.pins.children, false)[0];
         if (hp) {
@@ -544,6 +550,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         const hot = !!rc.intersectObject(s2.pushGrab, false)[0];
         setArrowHot(s2, hot);
         if (hot) {
+          // One thing highlighted at a time: the arrow is the target now, so the blue
+          // face/edge overlay under it goes quiet until the pointer leaves the arrow.
+          s2.highlight.visible = false;
+          s2.edgeHi.visible = false;
+          s2.vertHi.visible = false;
           renderer.domElement.style.cursor = "grab";
           return;
         }
@@ -763,18 +774,34 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (!s) return;
     if (s.selBox) {
       s.scene.remove(s.selBox);
-      s.selBox.geometry.dispose();
-      (s.selBox.material as THREE.Material).dispose();
+      s.selBox.traverse((o) => {
+        const m = o as THREE.Mesh;
+        (m.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
+        (m.material as THREE.Material | undefined)?.dispose?.();
+      });
       s.selBox = null;
     }
     if (!modelSelected || !s.mesh) return;
     const box = new THREE.Box3().setFromObject(s.mesh);
+    const group = new THREE.Group();
     const helper = new THREE.Box3Helper(box, new THREE.Color(0x14b8a6));
     (helper.material as THREE.LineBasicMaterial).transparent = true;
     (helper.material as THREE.LineBasicMaterial).opacity = 0.9;
     helper.renderOrder = 4;
-    s.scene.add(helper);
-    s.selBox = helper;
+    group.add(helper);
+    // Corner anchor dots, Spline-style — read as "this object is selected".
+    const size = box.getSize(new THREE.Vector3());
+    const r = Math.max(0.5, Math.max(size.x, size.y, size.z) * 0.012);
+    const dotGeo = new THREE.SphereGeometry(r, 10, 8);
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false });
+    for (const fx of [box.min.x, box.max.x]) for (const fy of [box.min.y, box.max.y]) for (const fz of [box.min.z, box.max.z]) {
+      const d = new THREE.Mesh(dotGeo, dotMat);
+      d.position.set(fx, fy, fz);
+      d.renderOrder = 5;
+      group.add(d);
+    }
+    s.scene.add(group);
+    s.selBox = group;
   }, [modelSelected, geometry]);
 
   // Render point-to-point measurements (lines + distance labels) and the pending anchor.
@@ -919,6 +946,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useImperativeHandle(ref, () => ({
     resetView() {
       if (st.current) frameToObject(st.current);
+    },
+    setView(v) {
+      if (st.current) snapView(st.current, v);
     },
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;
@@ -1680,6 +1710,29 @@ function frameToObject(s: Internals) {
   const dist = r / Math.sin((s.camera.fov * Math.PI) / 180 / 2);
   const dirv = new THREE.Vector3(1, -1.3, 0.9).normalize();
   s.camera.position.copy(center.clone().add(dirv.multiplyScalar(dist * 1.15)));
+  s.camera.near = dist / 100;
+  s.camera.far = dist * 100;
+  s.camera.updateProjectionMatrix();
+  s.controls.target.copy(center);
+  s.controls.update();
+}
+
+/** Snap the camera to a standard view, framed on the model (Z-up: top = looking down -Z). */
+function snapView(s: Internals, v: "top" | "front" | "right" | "iso") {
+  if (!s.mesh) return;
+  const box = new THREE.Box3().setFromObject(s.mesh);
+  const sphere = box.getBoundingSphere(new THREE.Sphere());
+  const center = sphere.center;
+  const r = Math.max(sphere.radius, 1);
+  const dist = (r / Math.sin((s.camera.fov * Math.PI) / 180 / 2)) * 1.15;
+  const dirs: Record<string, THREE.Vector3> = {
+    top: new THREE.Vector3(0, -0.001, 1), // hair of tilt keeps OrbitControls' pole happy
+    front: new THREE.Vector3(0, -1, 0.0015),
+    right: new THREE.Vector3(1, 0, 0.0015),
+    iso: new THREE.Vector3(1, -1.3, 0.9),
+  };
+  const dirv = dirs[v].clone().normalize();
+  s.camera.position.copy(center.clone().add(dirv.multiplyScalar(dist)));
   s.camera.near = dist / 100;
   s.camera.far = dist * 100;
   s.camera.updateProjectionMatrix();

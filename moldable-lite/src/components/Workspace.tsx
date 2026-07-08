@@ -173,6 +173,47 @@ function MicButton({ value, onChange }: { value: string; onChange: (t: string) =
   );
 }
 
+/** Docked selection inspector — the selected part's numbers, editable. replicad scale is
+ *  uniform-only, so editing any one dimension rescales the whole part to match it. */
+function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }: {
+  dims: { x: number; y: number; z: number }; units: "mm" | "in"; busy: boolean; canScale: boolean;
+  onScale: (axis: "x" | "y" | "z", target: number) => void; onDeselect: () => void;
+}) {
+  const [draft, setDraft] = useState<{ axis: "x" | "y" | "z"; v: string } | null>(null);
+  const show = (n: number) => (units === "in" ? (n / 25.4).toFixed(2) : String(Math.round(n * 10) / 10));
+  const commit = () => {
+    if (!draft) return;
+    let v = Number(draft.v);
+    if (units === "in") v *= 25.4;
+    if (Number.isFinite(v) && v > 0.1 && Math.abs(v - dims[draft.axis]) > 1e-3) onScale(draft.axis, v);
+    setDraft(null);
+  };
+  const rows: { axis: "x" | "y" | "z"; label: string }[] = [
+    { axis: "x", label: "W" }, { axis: "y", label: "D" }, { axis: "z", label: "H" },
+  ];
+  return (
+    <div className="inspector" role="region" aria-label="Selection">
+      <div className="lp-head"><b>Selection</b><button className="x" aria-label="Deselect" onClick={onDeselect}><IconX /></button></div>
+      {rows.map((r) => (
+        <label key={r.axis} className="ins-row">
+          <span className="ins-lab">{r.label}</span>
+          <input
+            inputMode="decimal"
+            disabled={!canScale || busy}
+            value={draft?.axis === r.axis ? draft.v : show(dims[r.axis])}
+            onFocus={(e) => { setDraft({ axis: r.axis, v: show(dims[r.axis]) }); e.currentTarget.select(); }}
+            onChange={(e) => setDraft({ axis: r.axis, v: e.target.value })}
+            onBlur={commit}
+            onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget as HTMLInputElement).blur(); if (e.key === "Escape") setDraft(null); }}
+          />
+          <span className="ins-unit">{units}</span>
+        </label>
+      ))}
+      <div className="ins-note">{canScale ? "Edit any size — the whole part rescales to match (uniform)." : "Resizing needs the CAD engine."}</div>
+    </div>
+  );
+}
+
 /** Tools-and-gestures cheat sheet — the toolbar's hover tooltips don't exist on touch
  *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
 function HelpSheet({ onClose }: { onClose: () => void }) {
@@ -304,6 +345,7 @@ interface Props {
   report: PrintabilityReport | null;
   modelSelected: boolean;
   onModelSelect: (sel: boolean) => void;
+  onScaleTo: (axis: "x" | "y" | "z", target: number) => void; // uniform-scale the part so `axis` hits target mm
   printer: PrinterDefaults;
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
@@ -802,6 +844,18 @@ export function Workspace(p: Props) {
                 onMeasurePoint={p.measureCtl.point}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
+              {(p.tab === "3d" || p.tab === "params") && p.geometry && (
+                <div className="view-snaps" role="group" aria-label="View angles">
+                  {(["top", "front", "right", "iso"] as const).map((v) => (
+                    <button key={v} onClick={() => p.viewerRef.current?.setView(v)} title={v === "iso" ? "3/4 view" : `Look at the ${v}`}>
+                      {v === "top" ? "Top" : v === "front" ? "Front" : v === "right" ? "Right" : "3D"}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
+                <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind === "replicad"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
+              )}
               {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
               {showLayers && (p.tab === "3d" || p.tab === "params") && (
                 <div className="layers-panel" role="region" aria-label="Objects on the canvas">

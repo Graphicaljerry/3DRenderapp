@@ -1,6 +1,6 @@
 import { BufferGeometry } from "three";
-import { syncFaces, syncLines } from "replicad-threejs-helper";
-import type { FaceMesh, EdgeMesh } from "../worker/workerMessages";
+import { syncFaces } from "replicad-threejs-helper";
+import type { FaceMesh } from "../worker/workerMessages";
 
 /** replicad face payload -> BufferGeometry, recentred to sit on the bed (min z -> 0). */
 export function facesToGeometry(faces: FaceMesh): BufferGeometry {
@@ -24,8 +24,3 @@ export function facesToGeometry(faces: FaceMesh): BufferGeometry {
   return g;
 }
 
-export function edgesToGeometry(edges: EdgeMesh): BufferGeometry {
-  const g = new BufferGeometry();
-  syncLines(g, edges as any);
-  return g;
-}

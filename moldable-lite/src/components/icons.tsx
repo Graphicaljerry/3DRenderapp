@@ -199,6 +199,13 @@ export const IconHistory = ({ size = 14 }: { size?: number }) => (
   </svg>
 );
 
+export const IconMic = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <rect x="9" y="2.5" width="6" height="11" rx="3" />
+    <path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21M8.5 21h7" />
+  </svg>
+);
+
 export const IconHelp = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <circle cx="12" cy="12" r="9.2" />

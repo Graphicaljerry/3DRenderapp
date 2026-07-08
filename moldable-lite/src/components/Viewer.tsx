@@ -682,11 +682,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     geometry.computeBoundingBox();
     const gs = geometry.boundingBox!.getSize(new THREE.Vector3());
     s.markR = Math.min(2, Math.max(0.5, Math.max(gs.x, gs.y, gs.z) * 0.008)); // edge/vertex marker size
-    const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(geometry, 30),
-      new THREE.LineBasicMaterial({ color: "#2a2e35" }),
-    );
-    mesh.add(edges);
+    // The crease-edge overlay is a main-thread EdgesGeometry pass — heavy on dense
+    // models. Live-drag preview geometry (userData.preview) skips it: many swaps per
+    // second, and the drag reads fine shaded-only. The commit re-adds it.
+    if (!geometry.userData.preview) {
+      const edges = new THREE.LineSegments(
+        new THREE.EdgesGeometry(geometry, 30),
+        new THREE.LineBasicMaterial({ color: "#2a2e35" }),
+      );
+      mesh.add(edges);
+    }
     s.mesh = mesh;
     updateDims(s, showDims, units);
     if (!hadMesh) frameToObject(s); // keep the current camera on edits; frame only on first load

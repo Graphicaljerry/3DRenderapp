@@ -10,9 +10,11 @@ export interface ORModel {
   ctx?: number;
   reasoning?: boolean; // model can "think" (supported_parameters includes reasoning)
   tools?: boolean;
+  vision?: boolean; // model accepts image input (architecture.input_modalities)
 }
 
-const LS = "moldable_openrouter_models";
+// v2: adds `vision` — the old cached shape lacks it, so a new key forces a refetch.
+const LS = "moldable_openrouter_models_v2";
 const TTL = 24 * 60 * 60 * 1000; // a day
 let cache: ORModel[] | null = null;
 let inflight: Promise<ORModel[]> | null = null;
@@ -58,6 +60,7 @@ export async function fetchOpenRouterModels(): Promise<ORModel[]> {
             ctx: m?.context_length,
             reasoning: sp.includes("reasoning") || sp.includes("include_reasoning"),
             tools: sp.includes("tools"),
+            vision: Array.isArray(m?.architecture?.input_modalities) ? m.architecture.input_modalities.includes("image") : undefined,
           };
         })
         .filter((m: ORModel) => !!m.id);
@@ -170,16 +173,26 @@ export interface AutoPick {
 /** Classify a CAD request and choose an OpenRouter model from the recommended set:
  *  a cheap-fast model for small edits, a strong (reasoning-preferred) model for fresh
  *  generations or geometrically hard asks. Returns null if the catalogue is empty. */
-export function pickAutoModel(models: ORModel[], opts: { prompt: string; isEdit: boolean }): AutoPick | null {
-  const recs = recommendedForApp(models);
+export function pickAutoModel(models: ORModel[], opts: { prompt: string; isEdit: boolean; hasImage?: boolean }): AutoPick | null {
+  let recs = recommendedForApp(models);
   if (!recs.length) return null;
+  // A photo in the request needs a model that ACCEPTS images — a text-only pick 404s
+  // at OpenRouter ("No endpoints found that support image input"). Filter to vision
+  // models; if the recommended set has none, take the best vision model in the whole
+  // catalogue. (An old cache without modality info changes nothing.)
+  if (opts.hasImage && models.some((m) => m.vision !== undefined)) {
+    const seeing = recs.filter((m) => m.vision);
+    recs = seeing.length ? seeing : recommendedForApp(models.filter((m) => !!m.vision));
+    if (!recs.length) return null;
+  }
   const prompt = opts.prompt ?? "";
   const words = prompt.trim() ? prompt.trim().split(/\s+/).length : 0;
-  const hard = HARD_RE.test(prompt) || words > 40 || (!opts.isEdit && words > 20);
+  // A photo means "match this" — treat it as hard work even when phrased as a small edit.
+  const hard = HARD_RE.test(prompt) || words > 40 || (!opts.isEdit && words > 20) || !!opts.hasImage;
   if (!opts.isEdit || hard) {
     // Prefer a reasoning model for hard/fresh work; otherwise the top-ranked model.
     const strong = recs.find((m) => m.reasoning) ?? recs[0];
-    return { model: strong, tier: "strong", reason: !opts.isEdit ? "new model" : "complex edit" };
+    return { model: strong, tier: "strong", reason: !opts.isEdit ? "new model" : opts.hasImage ? "photo edit" : "complex edit" };
   }
   // Simple edit → cheapest recommended model (fast + low token cost).
   const cheap = [...recs].sort((a, b) => (a.inPrice ?? 9) - (b.inPrice ?? 9))[0] ?? recs[0];

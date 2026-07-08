@@ -1136,6 +1136,7 @@ export default function App() {
             const rc1 = res.recenter ?? [0, 0, 0];
             const [dx, dy, dz] = [rc1[0] - rc0[0], rc1[1] - rc0[1], rc1[2] - rc0[2]];
             if (dx || dy || dz) res.geometry.translate(dx, dy, dz);
+            res.geometry.userData.preview = true; // viewer skips per-tick frills (edge overlay)
             setGeometry(res.geometry);
           } catch { /* past the feasible limit at this size — keep the last good preview */ }
         }
@@ -1296,10 +1297,21 @@ export default function App() {
     // for small edits, strong/reasoning for fresh or complex work) so the user doesn't
     // hand-pick among hundreds — and we don't pay for a big model on a tiny edit.
     if (effLlm.provider === "openrouter" && effLlm.model === AUTO_MODEL) {
-      const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: promptText, isEdit: !!result });
+      const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: promptText, isEdit: !!result, hasImage: !!image });
       const chosen = pick?.model.id ?? llmPreset("openrouter").defaultModel;
       effLlm = { ...effLlm, model: chosen };
       setAutoPick(pick ? `Auto → ${shortModelName(chosen)} (${pick.reason})` : `Auto → ${shortModelName(chosen)}`);
+    } else if (effLlm.provider === "openrouter" && image && cachedOpenRouterModels().find((x) => x.id === effLlm.model)?.vision === false) {
+      // Hand-picked model that can't SEE the attached photo → OpenRouter 404s ("No
+      // endpoints found that support image input"). Swap to a vision pick and say so.
+      const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: promptText, isEdit: !!result, hasImage: true });
+      if (pick) {
+        const from = shortModelName(effLlm.model);
+        effLlm = { ...effLlm, model: pick.model.id };
+        setAutoPick(`${from} can't see photos → ${shortModelName(pick.model.id)}`);
+      } else {
+        setAutoPick("");
+      }
     } else {
       setAutoPick("");
     }

@@ -9,7 +9,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -130,6 +130,48 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
 
 /** Glanceable mesh + print stats on the model (Meshy's Faces/Vertices, reframed
     for slicing: triangles, watertight, volume, bed fit). */
+/** Dictation into the chat box via the Web Speech API. Renders nothing where the
+ *  API doesn't exist; recognition text (finals + live interim) replaces everything
+ *  typed after the point dictation started. */
+function MicButton({ value, onChange }: { value: string; onChange: (t: string) => void }) {
+  const SRClass = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition;
+  const [listening, setListening] = useState(false);
+  const rec = useRef<any>(null);
+  const base = useRef(""); // text already in the box when dictation started
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  useEffect(() => () => { try { rec.current?.abort?.(); } catch { /* already stopped */ } }, []);
+  if (!SRClass) return null;
+  const start = () => {
+    const r = new SRClass();
+    rec.current = r;
+    base.current = valueRef.current ? valueRef.current.replace(/\s+$/, "") + " " : "";
+    r.lang = navigator.language || "en-US";
+    r.continuous = true;
+    r.interimResults = true;
+    r.onresult = (e: any) => {
+      let text = "";
+      for (let i = 0; i < e.results.length; i++) text += e.results[i][0].transcript;
+      onChange((base.current + text).replace(/ {2,}/g, " "));
+    };
+    r.onend = () => { setListening(false); rec.current = null; };
+    r.onerror = () => setListening(false);
+    try { r.start(); setListening(true); } catch { setListening(false); }
+  };
+  return (
+    <button
+      type="button"
+      className={`mic${listening ? " on" : ""}`}
+      aria-label={listening ? "Stop dictation" : "Dictate"}
+      aria-pressed={listening}
+      title={listening ? "Stop dictation" : "Dictate your request instead of typing"}
+      onClick={() => (listening ? rec.current?.stop?.() : start())}
+    >
+      <IconMic />
+    </button>
+  );
+}
+
 /** Tools-and-gestures cheat sheet — the toolbar's hover tooltips don't exist on touch
  *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
 function HelpSheet({ onClose }: { onClose: () => void }) {
@@ -576,6 +618,7 @@ export function Workspace(p: Props) {
                         : "Describe a part, or a change…"
                 }
               />
+              <MicButton value={p.input} onChange={p.setInput} />
               <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
             </form>
           </div>

@@ -3,7 +3,7 @@ import opencascadeWasm from "replicad-opencascadejs/src/replicad_single.wasm?url
 import * as replicad from "replicad";
 import { setOC } from "replicad";
 import { expose } from "comlink";
-import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, EdgeMesh, WorkerOp } from "./workerMessages";
+import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, WorkerOp } from "./workerMessages";
 
 // ---- OCCT boot. locateFile MUST return the ?url import so emscripten fetches the hashed wasm. ----
 let ocReady: Promise<void> | null = null;
@@ -18,6 +18,8 @@ function ensureOC(): Promise<void> {
 }
 
 const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
+// Live-drag previews trade a little surface fidelity for rebuild speed.
+const MESH_OPTS_COARSE = { tolerance: 0.2, angularTolerance: 0.6 };
 
 /**
  * Some models emit a stray `let main;` / `var main;` alongside `function main(...)`
@@ -245,14 +247,16 @@ const api: CadWorkerApi = {
     importGen++; // invalidate any cached shape built against the cleared import
   },
 
-  async build(code: string, params?: Record<string, number>, ops?: WorkerOp[], opts?: { probeLimit?: boolean }): Promise<WorkerBuildResult> {
+  async build(code: string, params?: Record<string, number>, ops?: WorkerOp[], opts?: { probeLimit?: boolean; coarse?: boolean }): Promise<WorkerBuildResult> {
     try {
       await ensureOC();
       const shape = buildShape(code, params, ops, opts?.probeLimit !== false);
-      const faces = shape.mesh(MESH_OPTS) as FaceMesh;
-      const edges = shape.meshEdges(MESH_OPTS) as EdgeMesh;
+      // NOTE: no meshEdges() here — the viewer derives its edge overlay from the face mesh
+      // itself, so tessellating the B-rep edges on every build was pure wasted time.
+      // Live-drag previews mesh coarser (the commit re-meshes at full quality).
+      const faces = shape.mesh(opts?.coarse ? MESH_OPTS_COARSE : MESH_OPTS) as FaceMesh;
       const dims = dimsOf(shape);
-      return { ok: true, faces, edges, dims };
+      return { ok: true, faces, dims };
     } catch (e: any) {
       return {
         ok: false,

@@ -63,7 +63,7 @@ export class ReplicadEngine implements Engine {
     if (input.kind !== "code") throw new Error("The replicad engine expects code input.");
     let res: WorkerBuildResult;
     try {
-      res = await this.withWatchdog<WorkerBuildResult>(this.api.build(input.code, input.params, input.ops, input.preview ? { probeLimit: false } : undefined) as unknown as Promise<WorkerBuildResult>);
+      res = await this.withWatchdog<WorkerBuildResult>(this.api.build(input.code, input.params, input.ops, input.preview ? { probeLimit: false, coarse: true } : undefined) as unknown as Promise<WorkerBuildResult>);
     } catch (timeoutErr) {
       this.respawn();
       throw timeoutErr;

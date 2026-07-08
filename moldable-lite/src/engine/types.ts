@@ -68,5 +68,5 @@ export interface Engine {
   canExport(format: ExportFormat): boolean;
   export(result: EngineResult, format: ExportFormat): Promise<Blob>;
   /** CAD engines only: load a STEP file as the live `imported` solid (null clears). */
-  setImport?(file: Blob | null): Promise<void>;
+  setImport?(file: Blob | null, kind?: "step" | "stl"): Promise<void>;
 }

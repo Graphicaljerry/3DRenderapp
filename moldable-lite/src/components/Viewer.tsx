@@ -57,6 +57,8 @@ interface Props {
   measurePending: [number, number, number] | null; // the first clicked point, awaiting the second
   measurements: Measurement[]; // committed point-to-point measurements to render
   pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round
+  modelSelected: boolean; // draw a bounding box around the whole part
+  onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[]) => void;
@@ -134,14 +136,16 @@ interface Internals {
   pushArrow: THREE.Group; // drag-to-extrude handle on a selected flat face (shaft + cone + grab)
   pushGrab: THREE.Mesh; // invisible fat cylinder used to raycast/grab the arrow
   ghost: THREE.Mesh; // translucent live preview of the extruded volume during a push-pull drag
-  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number } | null; // active push-pull drag (scoped to its pointer)
+  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number; live?: boolean } | null; // active push-pull drag; live = a real boolean preview replaced the ghost
+  arrowHot: boolean; // pointer is over (or dragging) the push-pull arrow — drawn yellow
+  selBox: THREE.Box3Helper | null; // bounding box around the selected whole part
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -263,8 +267,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
 
     let raf = 0;
+    let frame = 0;
     const animate = () => {
       controls.update();
+      // A selected feature's arrow can sit outside the viewport when zoomed in — re-anchor
+      // it to a visible point of the highlighted feature so it's always grabbable.
+      if (++frame % 15 === 0) {
+        const sv = st.current;
+        if (sv && sv.pushArrow.visible && !sv.pushDrag) keepArrowReachable(sv, camera, cb.current.units);
+      }
       // Keep dimension labels at a constant, readable on-screen size (clamped to
       // a 12–40pt band) regardless of zoom, so they never balloon or vanish.
       const s = st.current;
@@ -315,7 +326,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         cb.current.onMeasurePoint([hit.point.x, hit.point.y, hit.point.z]);
         return;
       }
-      if (!cb.current.selectMode || !s2.mesh) return; // nothing picks unless the Select tool is on
+      // No tool active → a tap on the part selects the WHOLE model (bounding box);
+      // a tap on empty space deselects. Tools take over below when armed.
+      if (!cb.current.selectMode) {
+        if (s2.mesh) cb.current.onModelSelect(!!rc.intersectObject(s2.mesh, false)[0]);
+        return;
+      }
+      if (!s2.mesh) return; // nothing picks unless the Select tool is on
       // Point mode drops a surface marker (the old Pin); the others lock a feature.
       if (cb.current.selectKind === "point") {
         const hit = rc.intersectObject(s2.mesh, false)[0];
@@ -391,6 +408,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const bnd = cap.length ? faceBoundary(cap) : new Float32Array();
           s2.pushDrag = { start: center, n, plane, base, cap, bnd, size: modelSizeOf(s2), pointerId: e.pointerId };
           controls.enabled = false;
+          setArrowHot(s2, true);
+          renderer.domElement.style.cursor = "grabbing";
           // Pen/touch: without preventDefault Safari treats the drag as a scroll gesture and
           // starves us of pointermove events — the classic "Apple Pencil barely drags" failure.
           e.preventDefault();
@@ -424,6 +443,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (s2?.pushDrag) {
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* capture already lost */ }
         controls.enabled = true;
+        setArrowHot(s2, false);
+        renderer.domElement.style.cursor = "";
         const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
         const dist = ud.dist ?? 0;
         s2.pushDrag = null;
@@ -482,7 +503,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           cb.current.onPushPullLive(dist, solid); // mm box sync + boolean live preview
           // Live prism preview grows/shrinks with the drag — the face appears to extrude in real time.
           const pd = s2.pushDrag;
-          if (pd.cap.length && Math.abs(dist) > 1e-3) {
+          if (pd.cap.length && !pd.live && Math.abs(dist) > 1e-3) {
             const pos = buildGhost(pd.cap, pd.bnd, [pd.n.x, pd.n.y, pd.n.z], dist);
             s2.ghost.geometry.dispose();
             const g = new THREE.BufferGeometry();
@@ -515,6 +536,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       rc.setFromCamera(ndc, camera);
+      // The push-pull arrow owns hover: it lights up yellow with a grab cursor, and the
+      // feature-hover beneath is frozen — pointing at the arrow must never retarget the
+      // pick to the face/edge behind it (the classic wrong-face extrude).
+      if (s2.pushArrow.visible) {
+        s2.pushArrow.updateMatrixWorld(true);
+        const hot = !!rc.intersectObject(s2.pushGrab, false)[0];
+        setArrowHot(s2, hot);
+        if (hot) {
+          renderer.domElement.style.cursor = "grab";
+          return;
+        }
+      }
       // Pin hover takes priority.
       if (s2.pins && s2.pins.children.length) {
         const hp = rc.intersectObjects(s2.pins.children, false)[0];
@@ -556,6 +589,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (s2?.pushDrag) {
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* already lost */ }
         controls.enabled = true;
+        setArrowHot(s2, false);
+        renderer.domElement.style.cursor = "";
         const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
         s2.pushDrag = null;
         ud.dist = 0;
@@ -588,7 +623,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -640,6 +675,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // (fillet, extrude, an AI edit, a param tweak) keep the user's current view/angle
     // instead of snapping back to default. "Reset view" re-frames on demand.
     const hadMesh = !!s.mesh;
+    // A live boolean preview replaces the ghost prism mid-drag — both drawing the same
+    // volume z-fights into a glitchy shimmer, and the real solid is strictly better.
+    if (geometry?.userData.preview && s.pushDrag) {
+      s.pushDrag.live = true;
+      s.ghost.visible = false;
+    }
     // A gizmo may be attached to a pivot holding the current mesh — detach and drop the pivot
     // before we dispose/replace the mesh (content.clear() below removes the pivot too).
     s.tc.detach();
@@ -716,6 +757,26 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
   }, [transformMode]);
 
+  // Bounding box around the selected whole part (layers panel / idle-mode tap / transform).
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (s.selBox) {
+      s.scene.remove(s.selBox);
+      s.selBox.geometry.dispose();
+      (s.selBox.material as THREE.Material).dispose();
+      s.selBox = null;
+    }
+    if (!modelSelected || !s.mesh) return;
+    const box = new THREE.Box3().setFromObject(s.mesh);
+    const helper = new THREE.Box3Helper(box, new THREE.Color(0x14b8a6));
+    (helper.material as THREE.LineBasicMaterial).transparent = true;
+    (helper.material as THREE.LineBasicMaterial).opacity = 0.9;
+    helper.renderOrder = 4;
+    s.scene.add(helper);
+    s.selBox = helper;
+  }, [modelSelected, geometry]);
+
   // Render point-to-point measurements (lines + distance labels) and the pending anchor.
   useEffect(() => {
     const s = st.current;
@@ -760,6 +821,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.pushArrow.userData.normal = pushArrow.normal;
     s.pushArrow.userData.kind = pushArrow.kind;
     s.pushArrow.userData.dist = 0;
+    s.pushArrow.userData.home = undefined; // new feature → new true anchor
+    setArrowHot(s, false);
     layoutPushArrow(s, pushArrow.center, pushArrow.normal, 0, units, pushArrow.kind);
   }, [pushArrow, units, geometry]);
 
@@ -1529,6 +1592,51 @@ function modelSizeOf(s: Internals): number {
   return Math.max(sz.x, sz.y, sz.z) || 40;
 }
 
+/** Tint the push-pull arrow: yellow while hovered/dragged, brand blue at rest. */
+function setArrowHot(s: Internals, hot: boolean) {
+  if (s.arrowHot === hot) return;
+  s.arrowHot = hot;
+  const mat = (s.pushArrow.children[0] as THREE.Mesh)?.material as THREE.MeshBasicMaterial | undefined;
+  mat?.color.set(hot ? 0xeab308 : 0x2563eb);
+}
+
+/** If the arrow's anchor left the viewport (zoomed/panned away), re-anchor it to the
+ *  in-view point of the highlighted feature closest to the screen centre — the handle
+ *  should always be grabbable without hunting for it. Returns to the true anchor when
+ *  that comes back into view. Drag math is anchor-relative, so moving it is safe. */
+function keepArrowReachable(s: Internals, camera: THREE.PerspectiveCamera, units: "mm" | "in") {
+  const ud = s.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet"; dist: number; home?: [number, number, number] };
+  if (!ud.home) ud.home = [...ud.center] as [number, number, number];
+  const IN = 0.88; // NDC margin that counts as "on screen"
+  const v = new THREE.Vector3();
+  const onScreen = (x: number, y: number, z: number) => {
+    v.set(x, y, z).project(camera);
+    return Math.abs(v.x) < IN && Math.abs(v.y) < IN && v.z > -1 && v.z < 1 ? v.x * v.x + v.y * v.y : Infinity;
+  };
+  // The true anchor is visible → snap home (no-op if already there).
+  if (onScreen(ud.home[0], ud.home[1], ud.home[2]) !== Infinity) {
+    if (ud.center[0] !== ud.home[0] || ud.center[1] !== ud.home[1] || ud.center[2] !== ud.home[2]) {
+      ud.center = [...ud.home] as [number, number, number];
+      layoutPushArrow(s, ud.center, ud.normal, 0, units, ud.kind);
+    }
+    return;
+  }
+  if (onScreen(ud.center[0], ud.center[1], ud.center[2]) !== Infinity) return; // current spot still fine
+  // Candidates: the highlighted feature's own vertices (face overlay or edge tube).
+  const srcMesh = s.highlight.visible ? s.highlight : s.edgeHi.visible ? s.edgeHi : null;
+  const pos = srcMesh?.geometry.getAttribute("position") as THREE.BufferAttribute | undefined;
+  if (!pos || !pos.count) return;
+  const step = Math.max(1, Math.floor(pos.count / 80)); // ~80 samples is plenty
+  let best = -1, bestD = Infinity;
+  for (let i = 0; i < pos.count; i += step) {
+    const d = onScreen(pos.getX(i), pos.getY(i), pos.getZ(i));
+    if (d < bestD) { bestD = d; best = i; }
+  }
+  if (best < 0 || bestD === Infinity) return; // feature fully off-screen — nothing sensible to do
+  ud.center = [pos.getX(best), pos.getY(best), pos.getZ(best)];
+  layoutPushArrow(s, ud.center, ud.normal, 0, units, ud.kind);
+}
+
 /** Position/scale the arrow along the handle direction for a given (signed) distance.
  *  dist 0 draws the resting handle; during a drag it grows/flips to show magnitude + sign.
  *  kind "fillet" labels it as a radius (R …); "extrude" labels a signed distance. */
@@ -1547,8 +1655,8 @@ function layoutPushArrow(s: Internals, center: [number, number, number], normal:
   shaft.position.set(0, L * 0.42, 0); shaft.scale.set(rS, L * 0.84, rS);
   cone.position.set(0, L * 0.92, 0); cone.scale.set(rS * 3.4, L * 0.16, rS * 3.4);
   // Generous invisible grab target so the thin arrow is easy to click.
-  const grabR = Math.max(rS * 8, size * 0.06);
-  grab.position.set(0, L * 0.55, 0); grab.scale.set(grabR, L * 1.3, grabR);
+  const grabR = Math.max(rS * 10, size * 0.075);
+  grab.position.set(0, L * 0.55, 0); grab.scale.set(grabR, L * 1.45, grabR);
   s.pushArrow.updateMatrixWorld(true);
   // Live distance label while dragging (child index 3); removed at rest.
   const old = g.children[3];

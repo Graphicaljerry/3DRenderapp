@@ -10,7 +10,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -302,6 +302,8 @@ interface Props {
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
   report: PrintabilityReport | null;
+  modelSelected: boolean;
+  onModelSelect: (sel: boolean) => void;
   printer: PrinterDefaults;
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
@@ -413,6 +415,7 @@ export function Workspace(p: Props) {
   const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
+  const [showLayers, setShowLayers] = useState(false); // objects/layers side list
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -758,6 +761,9 @@ export function Workspace(p: Props) {
                 <button className="ghost sm iconbtn" aria-label="Reset view" title="Re-frame the model in the viewport" onClick={() => p.viewerRef.current?.resetView()}>
                   <IconFrame /><span className="btn-label">Reset view</span>
                 </button>
+                <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select the model, pins and measurements" onClick={() => setShowLayers((v) => !v)}>
+                  <IconLayers />
+                </button>
                 <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
                   <IconHelp />
                 </button>
@@ -779,6 +785,8 @@ export function Workspace(p: Props) {
                 selectMode={p.featureCtl.mode}
                 selectKind={p.featureCtl.kind}
                 boxSelectionActive={p.facesCtl.faces.length > 0}
+                modelSelected={p.modelSelected}
+                onModelSelect={p.onModelSelect}
                 transformMode={p.transformCtl.mode}
                 measureMode={p.measureCtl.mode}
                 measurePending={p.measureCtl.pending}
@@ -795,6 +803,34 @@ export function Workspace(p: Props) {
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
               {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
+              {showLayers && (p.tab === "3d" || p.tab === "params") && (
+                <div className="layers-panel" role="region" aria-label="Objects on the canvas">
+                  <div className="lp-head"><b>Objects</b><button className="x" aria-label="Close objects" onClick={() => setShowLayers(false)}><IconX /></button></div>
+                  <button className={`lp-row${p.modelSelected ? " on" : ""}`} disabled={!p.geometry} title="Select the whole part (shows its bounding box)" onClick={() => p.onModelSelect(!p.modelSelected)}>
+                    <IconCube /><span className="lp-name">Model</span>
+                    {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
+                  </button>
+                  {(p.splitCtl.pieces ?? []).map((pc, i) => (
+                    <div key={`pc${i}`} className="lp-row static">
+                      <span className="lp-dot" style={{ background: pc.color }} /><span className="lp-name">Piece {i + 1}</span>
+                      <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
+                    </div>
+                  ))}
+                  {p.pins.map((pin, i) => (
+                    <button key={pin.id} className={`lp-row${p.pinCtl.active?.pin.id === pin.id ? " on" : ""}`} title="Select this point marker" onClick={() => p.pinCtl.select(pin.id)}>
+                      <span className="lp-dot pin">{i + 1}</span><span className="lp-name">{pin.text ? pin.text.slice(0, 26) : `Point ${i + 1}`}</span>
+                    </button>
+                  ))}
+                  {p.measureCtl.items.map((mm, i) => (
+                    <div key={mm.id} className="lp-row static">
+                      <IconRuler /><span className="lp-name">Measure {i + 1}</span>
+                      <span className="lp-sub">{Math.round(Math.hypot(mm.b[0] - mm.a[0], mm.b[1] - mm.a[1], mm.b[2] - mm.a[2]) * 10) / 10} mm</span>
+                      <button className="x" aria-label="Delete measurement" onClick={() => p.measureCtl.remove(mm.id)}><IconX /></button>
+                    </div>
+                  ))}
+                  {!p.geometry && <div className="lp-empty">Nothing on the canvas yet</div>}
+                </div>
+              )}
               {p.pinCtl.active && (
                 <div className="pin-panel">
                   <div className="pin-head">

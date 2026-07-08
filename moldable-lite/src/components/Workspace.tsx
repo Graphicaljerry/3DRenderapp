@@ -597,7 +597,7 @@ export function Workspace(p: Props) {
                 )}
               </div>
               <span className="modehint">
-                {p.mode === "precise" && p.autoPick
+                {p.autoPick
                   ? p.autoPick
                   : p.mode === "precise"
                   ? p.guided
@@ -1195,13 +1195,14 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: 
   ];
 }
 function engineGroups(hasKey: (p: string) => boolean): PickGroup[] {
-  return PROVIDERS.map((pv) => {
+  const auto: PickGroup = { label: "Automatic", items: [{ value: "auto|auto", name: "Auto", sub: "best engine for the job — picked per request" }] };
+  return [auto, ...PROVIDERS.map((pv) => {
     const needs = pv.needsKey && !hasKey(pv.id);
     return {
       label: `${pv.label}${pv.free ? " · free" : ""}${needs ? " · add key" : ""}`,
       items: pv.models.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `${pv.id}|${mm.id}`, name, sub }; }),
     };
-  });
+  })];
 }
 
 /** In-chat quick switch for the Precise (CAD) AI brain. */

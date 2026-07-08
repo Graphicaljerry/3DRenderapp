@@ -31,7 +31,7 @@ import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
-import { PROVIDERS, getProvider, usesMultiView } from "./gen/registry";
+import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine } from "./gen/registry";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject } from "./store/projects";
 import { appendVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
@@ -129,6 +129,7 @@ function loadGenEng(): { provider: string; model: string } {
     const raw = localStorage.getItem(GENENG_LS);
     if (raw) {
       const v = JSON.parse(raw);
+      if (v.provider === "auto") return { provider: "auto", model: "auto" };
       const prov = PROVIDERS.find((pp) => pp.id === v.provider);
       if (prov) {
         // Migrate stale stored model ids (renamed/dead Spaces) to the provider's default.
@@ -144,7 +145,8 @@ function loadGenEng(): { provider: string; model: string } {
       }
     }
   } catch {}
-  return { provider: "hf", model: defaultModelOf(PROVIDERS[0]) };
+  // Default: Auto — the app picks the best engine per request (each reply says which).
+  return { provider: "auto", model: "auto" };
 }
 
 let msgSeq = 0;
@@ -1328,11 +1330,34 @@ export default function App() {
 
     if (useGen) {
       if (!p && !image) return;
-      const ge = override?.genEng ?? genEng; // retry-with-model can override the engine
+      let ge = override?.genEng ?? genEng; // retry-with-model can override the engine
+      if (ge.provider === "auto") {
+        const pick = pickAutoGenEngine({ hasImage: !!image, prompt: p, hasKey: (id) => !!providerKeys[id] });
+        ge = { provider: pick.provider, model: pick.model };
+        setAutoPick(`Auto → ${pick.label} (${pick.reason})`);
+      } else {
+        setAutoPick("");
+      }
       const prov = getProvider(ge.provider);
       if (prov?.needsKey && !providerKeys[prov.id]) {
         setShowSettings(true);
         return;
+      }
+      // Web-grounded dimensions for TEXT mesh prompts that name a real product — the same
+      // lookup Precise uses, so "a phone stand for an iPhone 17 Pro" is proportioned from
+      // real numbers. Skipped for photo inputs (the photo IS the reference).
+      let genPrompt = p;
+      if (p && !image && detectProductQuery(p)) {
+        const rk = { geminiKey: llmKeys["gemini"], geminiModel: llm.provider === "gemini" ? llm.model : "", anthropicKey: key, openrouterKey: llmKeys["openrouter"], openrouterModel: llm.provider === "openrouter" ? llm.model : "" };
+        if (canResearch(rk)) {
+          try {
+            const rr = await researchDimensions(p, rk);
+            if (rr) {
+              genPrompt = `${p}\n\nReal product measurements (researched online, mm):\n${rr.text}`;
+              setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Measurements found online:\n${rr.text}`, sources: rr.sources }]);
+            }
+          } catch { /* research is best-effort */ }
+        }
       }
 
       // Text-only request on an image-only model? Auto-switch to a text-capable
@@ -1378,7 +1403,7 @@ export default function App() {
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
       try {
-        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: p || undefined, provider: ge.provider, model: genModel });
+        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: ge.provider, model: genModel });
         const name = deriveName(p || "Photo model");
         const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? ge.provider})`;
         applyResult(res, name, summary, p || "(image upload)");
@@ -1805,7 +1830,7 @@ export default function App() {
         projectName={project?.name ?? "Untitled part"}
         onRename={renameProject}
         activeKind={activeKind}
-        genLabel={getProvider(genEng.provider)?.label ?? genEng.provider}
+        genLabel={genEng.provider === "auto" ? "Auto — best engine" : getProvider(genEng.provider)?.label ?? genEng.provider}
         fellBack={sel?.fellBack ?? false}
         bootError={sel?.bootError}
         booting={booting || (!sel && mode === "precise")}

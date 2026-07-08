@@ -9,7 +9,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -18,11 +18,12 @@ import type { FitId } from "../llm/prompts";
 import { PROVIDERS } from "../gen/registry";
 
 // The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
-export const SELECT_MODES: { kind: SelectKind; label: string }[] = [
-  { kind: "face", label: "Face" },
-  { kind: "edge", label: "Edge" },
-  { kind: "vertex", label: "Corner" },
-  { kind: "point", label: "Point" },
+// Each carries an icon so the label can collapse on narrow viewer columns (iPad).
+export const SELECT_MODES: { kind: SelectKind; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
+  { kind: "face", label: "Face", icon: IconFaceSel },
+  { kind: "edge", label: "Edge", icon: IconEdgeSel },
+  { kind: "vertex", label: "Corner", icon: IconCornerSel },
+  { kind: "point", label: "Point", icon: IconPointSel },
 ];
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
@@ -581,11 +582,15 @@ export function Workspace(p: Props) {
         <section className={`viewer${p.tab === "params" ? " params-docked" : ""}`}>
           <div className="viewer-head">
             <div className="tabs">
-              {(["3d", "code", "params", "print", "history"] as const).map((t) => (
-                <button key={t} className={p.tab === t ? "on" : ""} onClick={() => p.setTab(t)}>
-                  {t === "3d" ? "3D View" : t === "code" ? "Source" : t === "params" ? "Params" : t === "print" ? "Printability" : "History"}
-                </button>
-              ))}
+              {(["3d", "code", "params", "print", "history"] as const).map((t) => {
+                const label = t === "3d" ? "3D View" : t === "code" ? "Source" : t === "params" ? "Params" : t === "print" ? "Printability" : "History";
+                const Ic = t === "3d" ? IconCube : t === "code" ? IconCode : t === "params" ? IconSliders : t === "print" ? IconPrinter : IconHistory;
+                return (
+                  <button key={t} className={`iconbtn${p.tab === t ? " on" : ""}`} aria-label={label} title={label} onClick={() => p.setTab(t)}>
+                    <Ic /><span className="btn-label">{label}</span>
+                  </button>
+                );
+              })}
             </div>
             {(p.tab === "3d" || p.tab === "params") && (
               <div className="viewer-tools">
@@ -605,8 +610,8 @@ export function Workspace(p: Props) {
                 {p.featureCtl.mode && (
                   <div className="seg sm mode-seg">
                     {SELECT_MODES.map((m, i) => (
-                      <button key={m.kind} className={p.featureCtl.kind === m.kind ? "on" : ""} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
-                        {m.label}
+                      <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
+                        <m.icon /><span className="btn-label">{m.label}</span>
                       </button>
                     ))}
                   </div>
@@ -623,9 +628,9 @@ export function Workspace(p: Props) {
                 </button>
                 {p.transformCtl.mode !== "off" && (
                   <div className="seg sm mode-seg">
-                    <button className={p.transformCtl.mode === "move" ? "on" : ""} title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}>Move</button>
-                    <button className={p.transformCtl.mode === "rotate" ? "on" : ""} title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}>Rotate</button>
-                    <button className={p.transformCtl.mode === "scale" ? "on" : ""} title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}>Scale</button>
+                    <button className={`iconbtn${p.transformCtl.mode === "move" ? " on" : ""}`} aria-label="Move" title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}><IconTransform /><span className="btn-label">Move</span></button>
+                    <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
+                    <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                   </div>
                 )}
                 <button

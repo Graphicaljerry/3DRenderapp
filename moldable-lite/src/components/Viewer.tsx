@@ -595,7 +595,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       window.removeEventListener("keyup", onShiftKey);
       controls.dispose();
       tc.detach();
-      tc.dispose();
+      // three r169's TransformControls.dispose() calls this.traverse(), which the class no
+      // longer has (it stopped extending Object3D; fixed upstream in later releases). Calling
+      // it throws and takes the whole app down on unmount — which StrictMode's dev
+      // mount→cleanup→mount cycle hits on EVERY load. Do the same work by hand instead:
+      // drop the pointer listeners, then dispose the gizmo helper's GPU resources.
+      tc.disconnect();
+      const tcHelper = tc.getHelper();
+      scene.remove(tcHelper);
+      tcHelper.traverse((child) => {
+        const c = child as THREE.Mesh;
+        (c.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
+        const m = c.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(m)) m.forEach((x) => x.dispose());
+        else m?.dispose?.();
+      });
       ghost.geometry.dispose();
       (ghost.material as THREE.Material).dispose();
       disposeDims(st.current);

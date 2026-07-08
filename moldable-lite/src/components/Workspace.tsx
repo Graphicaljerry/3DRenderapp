@@ -365,7 +365,7 @@ interface Props {
     directOp: (type: PointOp["type"], size: number) => void;
     pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null;
     pushPull: (distance: number) => void;
-    pushLive: (distance: number) => void; // live drag value → mirrored into the quick-edit mm box
+    pushLive: (distance: number, solid?: Float32Array | null) => void; // live drag value + optional boolean-preview prism
     liveMm: number | null;
     clear: () => void;
   };

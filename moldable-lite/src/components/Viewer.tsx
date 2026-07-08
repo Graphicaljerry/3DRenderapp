@@ -64,7 +64,9 @@ interface Props {
   onTransformCommit: (c: TransformCommit) => void;
   onMeasurePoint: (p: [number, number, number]) => void;
   onPushPull: (distance: number) => void;
-  onPushPullLive: (distance: number) => void; // fires as the drag moves (snapped) — keeps the mm box in sync
+  // Fires as the drag moves (snapped). `solid` is the closed prism (display coords) for the
+  // Manifold boolean live preview — present only for extrude drags with a captured cap.
+  onPushPullLive: (distance: number, solid?: Float32Array | null) => void;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -473,7 +475,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           if (dist === ud.dist) return; // snapped value unchanged → skip the label/ghost rebuild (pen fires fast)
           ud.dist = dist;
           layoutPushArrow(s2, ud.center, ud.normal, dist, cb.current.units, ud.kind);
-          cb.current.onPushPullLive(dist); // keep the quick-edit mm box in sync with the drag
+          const pdd = s2.pushDrag;
+          const solid = ud.kind !== "fillet" && pdd.cap.length && Math.abs(dist) > 1e-3
+            ? buildSolidPrism(pdd.cap, pdd.bnd, [pdd.n.x, pdd.n.y, pdd.n.z], dist)
+            : null;
+          cb.current.onPushPullLive(dist, solid); // mm box sync + boolean live preview
           // Live prism preview grows/shrinks with the drag — the face appears to extrude in real time.
           const pd = s2.pushDrag;
           if (pd.cap.length && Math.abs(dist) > 1e-3) {
@@ -1434,7 +1440,7 @@ function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
 
 /** Boundary edges of a triangle soup (the selected face) as [ax,ay,az,bx,by,bz,…] — an edge
  *  shared by two triangles is interior; those touched once bound the face. Computed once per drag. */
-function faceBoundary(cap: Float32Array): Float32Array {
+export function faceBoundary(cap: Float32Array): Float32Array {
   const key = (i: number) => {
     const x = Math.round(cap[i] * 100), y = Math.round(cap[i + 1] * 100), z = Math.round(cap[i + 2] * 100);
     return `${x}_${y}_${z}`;
@@ -1457,6 +1463,36 @@ function faceBoundary(cap: Float32Array): Float32Array {
     if (n === 1) out.push(cap[i], cap[i + 1], cap[i + 2], cap[j], cap[j + 1], cap[j + 2]);
   }
   return new Float32Array(out);
+}
+
+/** Closed prism solid for the boolean live preview: the ghost's offset cap + walls, plus a
+ *  reversed bottom cap sealing the original face. Winding: the cap comes from the model's
+ *  outward-facing triangles, and each boundary edge keeps its in-triangle order, which makes
+ *  buildGhost's walls face outward for a positive (along +n) extrude; a negative extrude
+ *  mirrors the solid, so every triangle is flipped to restore outward orientation. */
+export function buildSolidPrism(cap: Float32Array, bnd: Float32Array, n: [number, number, number], dist: number): Float32Array {
+  const ghost = buildGhost(cap, bnd, n, dist); // offset cap + side walls
+  const out = new Float32Array(ghost.length + cap.length);
+  out.set(ghost, 0);
+  // Bottom cap: the original face, wound in reverse so it faces out of the solid (−n).
+  let o = ghost.length;
+  for (let t = 0; t < cap.length; t += 9) {
+    out.set(cap.subarray(t, t + 3), o);
+    out.set(cap.subarray(t + 6, t + 9), o + 3);
+    out.set(cap.subarray(t + 3, t + 6), o + 6);
+    o += 9;
+  }
+  if (dist < 0) {
+    // Mirrored solid → inside-out; swap two vertices of every triangle.
+    for (let t = 0; t < out.length; t += 9) {
+      for (let k = 0; k < 3; k++) {
+        const a = out[t + 3 + k];
+        out[t + 3 + k] = out[t + 6 + k];
+        out[t + 6 + k] = a;
+      }
+    }
+  }
+  return out;
 }
 
 /** Build the live prism preview: the face cap offset by n·dist, plus side walls swept from the

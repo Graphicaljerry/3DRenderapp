@@ -201,12 +201,26 @@ button { font-family: inherit; cursor: pointer; }
 .viewer { container-type: inline-size; }
 .iconbtn { display: inline-flex; align-items: center; gap: 6px; }
 .iconbtn svg { flex: 0 0 auto; }
-@container (max-width: 1080px) {
-  .viewer-tools .btn-label { display: none; }
+/* Tiered label collapse so the head stays ONE row at every width. Secondary labels
+   (view tabs + the Face/Edge/Corner/Point & Move/Rotate/Scale segs) drop first;
+   at iPad-width columns everything is recognizable icons (tooltips + aria-labels
+   carry the names). */
+@container (max-width: 1500px) {
+  .tabs .btn-label, .mode-seg .btn-label { display: none; }
+}
+@container (max-width: 1180px) {
+  .viewer-head .btn-label { display: none; }
   .viewer-tools { gap: 5px; }
   .viewer-tools .ghost.sm { padding: 5px 8px; }
   .viewer-tools .seg button { padding: 5px 8px; }
   .tabs button { padding: 5px 8px; font-size: 12px; }
+}
+/* Portrait iPad / very narrow columns: tighten paddings so the icon row still fits. */
+@container (max-width: 680px) {
+  .viewer-tools { gap: 3px; }
+  .viewer-tools .ghost.sm { padding: 5px 6px; }
+  .viewer-tools .seg button, .tabs button { padding: 5px 6px; }
+  .viewer-head { gap: 6px; }
 }
 /* The Face/Edge/Corner/Point control eases in when you click Select. */
 .mode-seg { animation: seg-in .22s cubic-bezier(.23,1,.32,1); transform-origin: left center; }

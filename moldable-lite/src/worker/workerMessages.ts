@@ -14,7 +14,6 @@ export interface EdgeMesh {
 export interface WorkerBuildOk {
   ok: true;
   faces: FaceMesh;
-  edges: EdgeMesh;
   dims: { x: number; y: number; z: number };
 }
 export interface WorkerBuildErr {
@@ -39,6 +38,6 @@ export interface CadWorkerApi {
   init(): Promise<boolean>;
   importShape(file: Blob): Promise<{ ok: boolean; error?: string }>;
   clearImport(): Promise<void>;
-  build(code: string, params?: Record<string, number>, ops?: WorkerOp[], opts?: { probeLimit?: boolean }): Promise<WorkerBuildResult>;
+  build(code: string, params?: Record<string, number>, ops?: WorkerOp[], opts?: { probeLimit?: boolean; coarse?: boolean }): Promise<WorkerBuildResult>;
   exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>, ops?: WorkerOp[]): Promise<Blob>;
 }

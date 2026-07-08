@@ -50,6 +50,15 @@
   --shadow-md: 0 4px 16px rgba(0,0,0,.45);
   --shadow-lg: 0 16px 44px rgba(0,0,0,.55);
 }
+/* ---- Scrollbars: thin, rounded, quiet — matched to the theme instead of the OS
+   default chrome. Standard properties for Firefox, ::-webkit-* for Safari/Chrome. ---- */
+* { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--mut) 38%, transparent) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--mut) 34%, transparent); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--mut) 55%, transparent); border: 2px solid transparent; background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
 [data-theme="dark"] .bubble { background: #27282b; }
 [data-theme="dark"] .msg.user .bubble { background: color-mix(in srgb, var(--user-tint, #14b8a6) 28%, #2b2c2f); color: var(--ink); }
 [data-theme="dark"] .msg.assistant .bubble { background: var(--accent-w); }
@@ -186,6 +195,12 @@ button { font-family: inherit; cursor: pointer; }
 .composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); }
 .composer input { flex: 1; height: 40px; padding: 0 12px; border: 1px solid var(--bord); border-radius: 10px; font-size: 13px; }
 .send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+/* Dictation mic — quiet next to Send; pulses while listening. */
+.mic { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
+.mic:hover { color: var(--ink); border-color: var(--accent); }
+.mic.on { background: var(--accent); border-color: var(--accent); color: #fff; animation: mic-pulse 1.6s ease-in-out infinite; }
+@keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
+@media (prefers-reduced-motion: reduce) { .mic.on { animation: none; } }
 .send:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- viewer ---------- */

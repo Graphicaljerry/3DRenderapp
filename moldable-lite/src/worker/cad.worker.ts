@@ -74,7 +74,10 @@ function applyOneOp(shape: any, op: WorkerOp): any {
     const inFace = (e: any) => e.inPlane(R.makePlaneFromFace(face));
     return op.type === "face-fillet" ? shape.fillet(op.size, inFace) : shape.chamfer(op.size, inFace);
   } catch (e: any) {
-    const detail = String(e?.message ?? e);
+    // OCCT failures often surface as a bare exception pointer ("11389816") — meaningless
+    // to users. Translate those to plain language; keep real messages verbatim.
+    const raw = String(e?.message ?? e).trim();
+    const detail = /^\d+$/.test(raw) ? "the size is too large for this geometry" : raw;
     let label: string;
     switch (op.type) {
       case "translate": label = "Move"; break;

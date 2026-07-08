@@ -64,6 +64,7 @@ interface Props {
   onTransformCommit: (c: TransformCommit) => void;
   onMeasurePoint: (p: [number, number, number]) => void;
   onPushPull: (distance: number) => void;
+  onPushPullLive: (distance: number) => void; // fires as the drag moves (snapped) — keeps the mm box in sync
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -131,14 +132,14 @@ interface Internals {
   pushArrow: THREE.Group; // drag-to-extrude handle on a selected flat face (shaft + cone + grab)
   pushGrab: THREE.Mesh; // invisible fat cylinder used to raycast/grab the arrow
   ghost: THREE.Mesh; // translucent live preview of the extruded volume during a push-pull drag
-  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array } | null; // active push-pull drag
+  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number } | null; // active push-pull drag
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -363,7 +364,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const n = new THREE.Vector3(...ud.normal).normalize();
           const camDir = camera.getWorldDirection(new THREE.Vector3());
           const planeN = camDir.clone().projectOnPlane(n).negate();
-          if (planeN.lengthSq() < 1e-6) { downAt = null; return; } // looking straight down the normal → skip
+          // Reject a drag whose axis points nearly at the camera: the projected plane is so
+          // glancing that a few pixels of pointer motion become tens of millimetres (the
+          // "Fillet of 150 mm" mystery on iPad). ~10° of separation is the working minimum.
+          if (planeN.lengthSq() < 0.03) { downAt = null; return; }
           planeN.normalize();
           const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeN, center);
           const hit0 = new THREE.Vector3();
@@ -374,9 +378,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const capAttr = isExtrude ? (s2.highlight.geometry.getAttribute("position") as THREE.BufferAttribute | undefined) : undefined;
           const cap = capAttr ? (capAttr.array as Float32Array).slice() : new Float32Array();
           const bnd = cap.length ? faceBoundary(cap) : new Float32Array();
-          s2.pushDrag = { start: center, n, plane, base, cap, bnd };
+          s2.pushDrag = { start: center, n, plane, base, cap, bnd, size: modelSizeOf(s2) };
           controls.enabled = false;
-          renderer.domElement.setPointerCapture?.(e.pointerId);
+          // Pen/touch: without preventDefault Safari treats the drag as a scroll gesture and
+          // starves us of pointermove events — the classic "Apple Pencil barely drags" failure.
+          e.preventDefault();
+          try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* capture unsupported */ }
           downAt = null;
           return;
         }
@@ -397,15 +404,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const s2 = st.current;
       // End a push-pull drag → commit the extrude distance as one op.
       if (s2?.pushDrag) {
-        renderer.domElement.releasePointerCapture?.(e.pointerId);
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* capture already lost */ }
         controls.enabled = true;
-        const ud = s2.pushArrow.userData as { dist: number };
+        const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
         const dist = ud.dist ?? 0;
         s2.pushDrag = null;
         ud.dist = 0;
         s2.ghost.visible = false; // the real solid replaces the preview on commit
         s2.ghost.geometry.dispose();
         s2.ghost.geometry = new THREE.BufferGeometry();
+        layoutPushArrow(s2, ud.center, ud.normal, 0, cb.current.units, ud.kind); // rest the arrow (commit may fail)
         if (Math.abs(dist) > 1e-2) cb.current.onPushPull(dist);
         return;
       }
@@ -433,6 +441,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const s2 = st.current;
       // Push-pull drag: project the pointer onto the drag plane and read the along-normal distance.
       if (s2?.pushDrag) {
+        e.preventDefault(); // keep Safari from reinterpreting a pen/touch drag mid-gesture
         const rect = renderer.domElement.getBoundingClientRect();
         const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
         rc.setFromCamera(ndc, camera);
@@ -441,9 +450,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
           let dist = hit.sub(s2.pushDrag.start).dot(s2.pushDrag.n) - s2.pushDrag.base;
           dist = Math.round(dist * 2) / 2; // snap to 0.5 mm
-          if (ud.kind === "fillet") dist = Math.max(0, dist); // a radius is never negative
+          // Clamp to sane bounds for the part so a glancing projection can never run away.
+          if (ud.kind === "fillet") dist = Math.min(Math.max(0, dist), s2.pushDrag.size * 0.5);
+          else dist = Math.max(-s2.pushDrag.size * 2, Math.min(s2.pushDrag.size * 2, dist));
+          if (dist === ud.dist) return; // snapped value unchanged → skip the label/ghost rebuild (pen fires fast)
           ud.dist = dist;
           layoutPushArrow(s2, ud.center, ud.normal, dist, cb.current.units, ud.kind);
+          cb.current.onPushPullLive(dist); // keep the quick-edit mm box in sync with the drag
           // Live prism preview grows/shrinks with the drag — the face appears to extrude in real time.
           const pd = s2.pushDrag;
           if (pd.cap.length && Math.abs(dist) > 1e-3) {
@@ -507,10 +520,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
     };
     const onLeave = () => setHover(null);
+    // Safari fires pointercancel for system gestures (palm rejection, Scribble); without this
+    // a pen drag can die mid-way and leave the drag armed with orbit frozen.
+    const onCancelPtr = (e: PointerEvent) => {
+      downAt = null;
+      const s2 = st.current;
+      if (s2?.pushDrag) {
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* already lost */ }
+        controls.enabled = true;
+        const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
+        s2.pushDrag = null;
+        ud.dist = 0;
+        s2.ghost.visible = false;
+        s2.ghost.geometry.dispose();
+        s2.ghost.geometry = new THREE.BufferGeometry();
+        layoutPushArrow(s2, ud.center, ud.normal, 0, cb.current.units, ud.kind);
+        return;
+      }
+      cancelBox();
+    };
+    // Belt-and-braces: OrbitControls sets this too, but our custom drags depend on it —
+    // without it iPadOS steals pen/touch drags for scrolling.
+    renderer.domElement.style.touchAction = "none";
     renderer.domElement.addEventListener("pointerdown", onDown);
     renderer.domElement.addEventListener("pointerup", onUp);
     renderer.domElement.addEventListener("pointermove", onMove);
     renderer.domElement.addEventListener("pointerleave", onLeave);
+    renderer.domElement.addEventListener("pointercancel", onCancelPtr);
     window.addEventListener("keydown", onShiftKey);
     window.addEventListener("keyup", onShiftKey);
 
@@ -532,6 +568,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerleave", onLeave);
+      renderer.domElement.removeEventListener("pointercancel", onCancelPtr);
       window.removeEventListener("keydown", onShiftKey);
       window.removeEventListener("keyup", onShiftKey);
       controls.dispose();

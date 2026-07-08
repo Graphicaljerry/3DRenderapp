@@ -317,6 +317,20 @@ button { font-family: inherit; cursor: pointer; }
 .bedchip:hover { color: var(--ink); border-color: var(--accent); }
 .bedchip svg { color: var(--accent-d); flex: 0 0 auto; }
 @container (max-width: 680px) { .bedchip-name { display: none; } }
+/* Standard-view snaps, floated at the bottom centre of the canvas (Spline-style). */
+.view-snaps { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; display: flex; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.view-snaps button { border: none; background: none; padding: 4px 11px; font-size: 11.5px; font-weight: 600; color: var(--mut); border-radius: 999px; }
+.view-snaps button:hover { background: var(--surf); color: var(--ink); }
+
+/* Docked selection inspector (top-right, under the stats card if both show). */
+.inspector { position: absolute; top: 10px; right: 10px; z-index: 8; width: 172px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px 10px 10px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.ins-row { display: flex; align-items: center; gap: 7px; margin: 5px 0; }
+.ins-lab { width: 14px; font-size: 11px; font-weight: 700; color: var(--subt); }
+.ins-row input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 7px; background: var(--bg); color: var(--ink); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.ins-row input:focus { border-color: var(--accent); }
+.ins-unit { font-size: 10.5px; color: var(--subt); width: 20px; }
+.ins-note { font-size: 10.5px; line-height: 1.45; color: var(--subt); margin-top: 6px; }
+
 /* Objects/layers list — everything on the canvas, selectable. */
 .layers-panel { position: absolute; top: 10px; left: 10px; z-index: 9; width: min(240px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .lp-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 7px; color: var(--ink); }

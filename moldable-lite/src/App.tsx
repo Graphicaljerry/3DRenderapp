@@ -72,6 +72,12 @@ export const BUBBLE_TINTS: { label: string; color: string }[] = [
 const KEY_LS = "moldable_key";
 const MODEL_LS = "moldable_model";
 const PRINTER_LS = "moldable_printer";
+
+// Fresh-chat engine routing: organic/sculptural language → the generative mesh engine
+// (CAD can't sculpt); dimensioned/functional language → Precise CAD. Both matching →
+// leave the user's current mode alone.
+const ORGANIC_RE = /\b(figurine|figure|statue|sculpt(?:ure|ed)?|character|creature|animal|dog|cat|dragon|dinosaur|mask|bust|head of|face of|monster|superhero|iron\s?man|batman|pokemon|pikachu|skull|gnome|ornament|organic|life[- ]?like|realistic (?:model|version))\b/i;
+const CADISH_RE = /\b(\d+(?:\.\d+)?\s*(?:mm|cm|inch|inches|in\b)|bracket|mount(?:ing)?|holder|case|enclosure|adapter|clip|hook|gear|thread(?:ed)?|screw|bolt|hole|stand|tray|spacer|hinge|clamp|knob|plate|wall thickness|tolerance|snap[- ]?fit|press[- ]?fit)\b/i;
 const PKEYS_LS = "moldable_provider_keys";
 const PROXY_LS = "moldable_proxy";
 const GENENG_LS = "moldable_geneng";
@@ -272,6 +278,7 @@ export default function App() {
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
+  const modeTouched = useRef(false); // user clicked the Precise/Generative switch themselves
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
@@ -1099,7 +1106,9 @@ export default function App() {
         : type.includes("chamfer") ? `Chamfered the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${amount} mm`
         : `Rounded the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${amount} mm`;
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label}${note ?? " directly — no AI, no tokens spent."}` }]);
+      // Plain successes stay out of the chat (History records them); clamped sizes DO get
+      // a message — the user asked for a number they didn't get.
+      if (note) setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label}${note}` }]);
     };
     try {
       await runOp(op);
@@ -1195,6 +1204,31 @@ export default function App() {
     })();
   }
 
+  /** Select/deselect the whole part: bounding box + anchors AND the move gizmo, Spline-style —
+   *  selecting an object IS having transform handles on it. Other tools stand down. */
+  function selectModel(sel: boolean) {
+    setModelSelected(sel);
+    setTransformMode(sel ? "move" : "off");
+    if (sel) {
+      setSelectMode(false);
+      setMeasureMode(false);
+      setActivePinId(null);
+      setPinText("");
+      setSelectedFeature(null);
+      setSelectedFaces([]);
+    }
+  }
+
+  /** Inspector edit: uniform-scale the part so the given axis hits `target` mm. */
+  function scaleToDim(axis: "x" | "y" | "z", target: number) {
+    if (!geometry || !dims) return;
+    const factor = target / dims[axis];
+    if (!Number.isFinite(factor) || factor <= 0.001) return;
+    geometry.computeBoundingBox();
+    const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
+    void authorObjectOp({ kind: "scale", factor: Math.round(factor * 1000) / 1000, center: [c.x, c.y, c.z] });
+  }
+
   /** Commit a whole-body transform-gizmo drag as ONE parametric op (rotate/scale). The gizmo
    *  reports its pivot in display coords; map the pivot centre back to engine coords (+recenter),
    *  exactly like applyDirectOp does for picked points. No AI, no tokens. */
@@ -1224,7 +1258,7 @@ export default function App() {
           ? `Rotated ${Math.round(commit.angleDeg)}°`
           : `Scaled to ${Math.round(commit.factor * 100)}%`;
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `transform ${commit.kind}`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label} directly — no AI, no tokens spent.` }]);
+      // Routine transforms stay out of the chat — History and the status bar record them.
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     } finally {
@@ -1270,8 +1304,27 @@ export default function App() {
     const p = promptText.trim();
     if (status === "generating") return;
     if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
+    // Fresh chat + the user never touched the engine switch → route by what the words
+    // describe. Organic/sculptural things are beyond CAD's reach and belong on the mesh
+    // engine; dimensioned functional parts belong in CAD. One notice, one tap to override.
+    let routedMode: Mode | null = null;
+    if (!forceMode && !result && !modeTouched.current && p) {
+      const organic = ORGANIC_RE.test(p) && !CADISH_RE.test(p);
+      const cadish = CADISH_RE.test(p) && !ORGANIC_RE.test(p);
+      if (mode === "precise" && organic) routedMode = "generative";
+      else if (mode === "generative" && cadish) routedMode = "precise";
+      if (routedMode) {
+        setMode(routedMode);
+        setMessages((m) => [...m, {
+          id: mid(), role: "assistant",
+          text: routedMode === "generative"
+            ? "This sounds organic/sculptural — I routed it to **Generative (AI mesh)**, which models freeform shapes far better than CAD. Tap Precise (CAD) above to override."
+            : "This sounds like a dimensioned, functional part — I routed it to **Precise (CAD)** for exact measurements and STEP export. Tap Generative (AI mesh) above to override.",
+        }]);
+      }
+    }
     // The mode switch decides: Generative -> mesh provider; Precise + photo -> vision CAD.
-    const useGen = (forceMode ?? mode) === "generative";
+    const useGen = (routedMode ?? forceMode ?? mode) === "generative";
 
     if (useGen) {
       if (!p && !image) return;
@@ -1771,7 +1824,7 @@ export default function App() {
           });
         }}
         mode={mode}
-        setMode={setMode}
+        setMode={(m) => { modeTouched.current = true; setMode(m); }}
         webMode={webMode}
         onCycleWeb={cycleWeb}
         guided={guided}
@@ -1807,7 +1860,8 @@ export default function App() {
         dims={dims}
         report={report}
         modelSelected={modelSelected || transformMode !== "off"}
-        onModelSelect={setModelSelected}
+        onModelSelect={selectModel}
+        onScaleTo={scaleToDim}
         printer={printer}
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}
@@ -1913,7 +1967,7 @@ export default function App() {
         transformCtl={{
           mode: transformMode,
           // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
-          setMode: (m) => { setTransformMode(m); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
+          setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
           busy: status === "generating",
         }}

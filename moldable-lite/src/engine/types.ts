@@ -40,7 +40,7 @@ export type CadOp = PointOp | TranslateOp | RotateOp | ScaleOp;
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.
 export type BuildInput =
-  | { kind: "code"; code: string; params?: Record<string, number>; ops?: CadOp[] }
+  | { kind: "code"; code: string; params?: Record<string, number>; ops?: CadOp[]; preview?: boolean } // preview: live-drag rebuild — skip limit probing
   | { kind: "spec"; spec: ModelSpec }
   | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string };
 

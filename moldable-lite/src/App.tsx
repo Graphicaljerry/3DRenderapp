@@ -1093,9 +1093,56 @@ export default function App() {
         } catch { /* even the probed max failed in-chain — fall through to the original error */ }
       }
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err).replace(/ \(max=[\d.]+\)/, ""), error: true }]);
+      setGeometry(result.geometry); // the op failed — clear any lingering live-drag preview
     } finally {
       setStatus("idle");
     }
+  }
+
+  // ---- Live push-pull preview: rebuild the REAL solid while the arrow drags (Shapr-style),
+  // so the fillet/extrude appears on the model in real time instead of only on release.
+  // One worker build in flight at a time; only the newest dragged value is kept (coalescing),
+  // so a fast pen never queues stale rebuilds. gen invalidates the loop on commit/cancel. ----
+  const livePrev = useRef({ next: null as number | null, running: false, gen: 0 });
+
+  function previewDirectOp(dist: number) {
+    setLiveDragMm(dist); // keep the quick-edit mm box in sync (pre-existing behaviour)
+    const f = selectedFeature;
+    if (!f || !result || result.source.kind !== "code" || !sel || activeKind !== "replicad") return;
+    const lp = livePrev.current;
+    lp.next = dist;
+    if (lp.running) return;
+    lp.running = true;
+    const gen = lp.gen;
+    // Snapshot the drag's inputs once — they are fixed for the drag's duration.
+    const src = result.source;
+    const rc0 = result.recenter ?? [0, 0, 0];
+    const p = f.at ?? [f.cx, f.cy, f.cz];
+    const at: [number, number, number] = [p[0] + rc0[0], p[1] + rc0[1], p[2] + rc0[2]];
+    const type: PointOp["type"] = f.kind === "face" ? "extrude" : "fillet";
+    void (async () => {
+      try {
+        while (lp.next !== null && lp.gen === gen) {
+          const d = lp.next;
+          lp.next = null;
+          const size = type === "extrude" ? d : Math.abs(d);
+          if (Math.abs(size) < 0.05) continue;
+          try {
+            const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), { type, at, size }], preview: true });
+            if (lp.gen !== gen) break; // committed/cancelled while building — drop it
+            // Hold the display frame steady mid-drag: each rebuild recentres against its NEW
+            // bounds, which would make the model creep under the arrow. Shift the preview back
+            // into the pre-drag frame; the commit snaps to the proper frame as it always did.
+            const rc1 = res.recenter ?? [0, 0, 0];
+            const [dx, dy, dz] = [rc1[0] - rc0[0], rc1[1] - rc0[1], rc1[2] - rc0[2]];
+            if (dx || dy || dz) res.geometry.translate(dx, dy, dz);
+            setGeometry(res.geometry);
+          } catch { /* past the feasible limit at this size — keep the last good preview */ }
+        }
+      } finally {
+        lp.running = false;
+      }
+    })();
   }
 
   /** Commit a whole-body transform-gizmo drag as ONE parametric op (rotate/scale). The gizmo
@@ -1692,6 +1739,8 @@ export default function App() {
         geometry={geometry}
         dims={dims}
         report={report}
+        printer={printer}
+        onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}
         setWireframe={setWireframe}
         showDims={showDims}
@@ -1763,13 +1812,26 @@ export default function App() {
             return null;
           })(),
           pushPull: (dist: number) => {
+            // End of an arrow drag: stop the live-preview loop before committing.
+            livePrev.current.gen++;
+            livePrev.current.next = null;
+            if (Math.abs(dist) < 0.01) {
+              if (result) setGeometry(result.geometry); // dragged back to ~0 → restore the real model
+              return;
+            }
             const f = selectedFeature;
             if (f?.kind === "face") applyDirectOp("extrude", dist);
             else applyDirectOp("fillet", Math.abs(dist));
           },
-          pushLive: setLiveDragMm,
+          pushLive: previewDirectOp,
           liveMm: liveDragMm,
-          clear: () => { setLiveDragMm(null); setSelectedFeature(null); },
+          clear: () => {
+            livePrev.current.gen++;
+            livePrev.current.next = null;
+            if (result) setGeometry(result.geometry); // drop any un-committed live preview
+            setLiveDragMm(null);
+            setSelectedFeature(null);
+          },
         }}
         facesCtl={{
           faces: selectedFaces,

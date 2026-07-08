@@ -137,7 +137,12 @@ button { font-family: inherit; cursor: pointer; }
 .banner-detail { color: var(--mut); }
 
 /* ---------- split ---------- */
-.split { flex: 1; display: grid; grid-template-columns: 400px 1fr; gap: 12px; padding: 12px; min-height: 0; }
+/* --chat-w is set inline by the resize handle; the divider column sits between chat
+   and viewer. The ≤900px stacked layout overrides all of this and hides the handle. */
+.split { flex: 1; display: grid; grid-template-columns: var(--chat-w, 400px) 8px 1fr; gap: 8px; padding: 12px; min-height: 0; }
+.chat-resize { cursor: col-resize; touch-action: none; position: relative; align-self: stretch; margin: 0 -6px; padding: 0 6px; z-index: 5; }
+.chat-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%); border-radius: 2px; background: var(--bord); transition: background-color .15s ease; }
+.chat-resize:hover::after, .chat-resize:active::after { background: var(--accent); }
 /* min-width:0 lets the 1fr viewer column shrink back below the WebGL canvas'
    explicit pixel width — without it, collapsing then reopening the chat leaves
    the canvas propping the column open and overflowing the viewport. */
@@ -190,6 +195,19 @@ button { font-family: inherit; cursor: pointer; }
 .tabs button:hover:not(.on) { color: var(--ink2); }
 .tabs button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
+/* Toolbar buttons carry an icon + a text label; the label collapses when the viewer
+   COLUMN (not the viewport — the chat width matters) gets narrow, so on iPad the row
+   stays on one line instead of wrapping and squashing the 3D view. */
+.viewer { container-type: inline-size; }
+.iconbtn { display: inline-flex; align-items: center; gap: 6px; }
+.iconbtn svg { flex: 0 0 auto; }
+@container (max-width: 1080px) {
+  .viewer-tools .btn-label { display: none; }
+  .viewer-tools { gap: 5px; }
+  .viewer-tools .ghost.sm { padding: 5px 8px; }
+  .viewer-tools .seg button { padding: 5px 8px; }
+  .tabs button { padding: 5px 8px; font-size: 12px; }
+}
 /* The Face/Edge/Corner/Point control eases in when you click Select. */
 .mode-seg { animation: seg-in .22s cubic-bezier(.23,1,.32,1); transform-origin: left center; }
 @keyframes seg-in { from { opacity: 0; transform: translateX(-10px) scale(.96); } to { opacity: 1; transform: none; } }
@@ -543,6 +561,7 @@ details.guide { margin-top: 10px; }
   .split.chat-collapsed { grid-template-columns: 1fr; grid-template-rows: 1fr 40px; }
   .split.chat-collapsed .viewer { grid-row: 1; }
   .split.chat-collapsed .chat-rail { grid-row: 2; }
+  .chat-resize { display: none; } /* stacked layout: no column to resize */
   .chat-rail-label { writing-mode: horizontal-tb; transform: none; }
   .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
   .modehint { display: none; }

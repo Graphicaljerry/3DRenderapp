@@ -9,7 +9,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -326,6 +326,17 @@ export function Workspace(p: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
+  // Resizable chat column: drag the divider to trade chat width for 3D-viewer room
+  // (most valuable on iPad-sized screens). Persisted; double-click resets.
+  const CHAT_W_DEFAULT = 400;
+  const clampChatW = (w: number) => Math.min(640, Math.max(280, Math.round(w)));
+  const [chatW, setChatW] = useState(() => {
+    try { const v = Number(localStorage.getItem("moldable_chat_w")); return Number.isFinite(v) && v > 0 ? clampChatW(v) : CHAT_W_DEFAULT; } catch { return CHAT_W_DEFAULT; }
+  });
+  const chatWRef = useRef(chatW);
+  chatWRef.current = chatW;
+  const chatResize = useRef<{ startX: number; startW: number } | null>(null);
+  const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
 
   // Paste a reference image from the clipboard anywhere in the app.
@@ -417,7 +428,7 @@ export function Workspace(p: Props) {
         </div>
       )}
 
-      <main className={`split${chatOpen ? "" : " chat-collapsed"}`}>
+      <main className={`split${chatOpen ? "" : " chat-collapsed"}`} style={{ "--chat-w": `${chatW}px` } as CSSProperties}>
         {!chatOpen && (
           <button className="chat-rail" title="Show chat" aria-label="Show chat" onClick={() => setChatOpen(true)}>
             <span className="chat-rail-label">Chat ›</span>
@@ -539,6 +550,34 @@ export function Workspace(p: Props) {
           </div>
         </section>
 
+        {chatOpen && (
+          <div
+            className="chat-resize"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize chat panel"
+            title="Drag to resize the chat — double-click to reset"
+            onPointerDown={(e) => {
+              e.preventDefault(); // keep iPadOS from treating the pen/touch drag as a scroll
+              chatResize.current = { startX: e.clientX, startW: chatWRef.current };
+              try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+            }}
+            onPointerMove={(e) => {
+              const r = chatResize.current;
+              if (!r) return;
+              setChatW(clampChatW(r.startW + (e.clientX - r.startX)));
+            }}
+            onPointerUp={(e) => {
+              if (!chatResize.current) return;
+              chatResize.current = null;
+              try { (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); } catch { /* already lost */ }
+              saveChatW(chatWRef.current);
+            }}
+            onPointerCancel={() => { chatResize.current = null; }}
+            onDoubleClick={() => { setChatW(CHAT_W_DEFAULT); saveChatW(CHAT_W_DEFAULT); }}
+          />
+        )}
+
         <section className={`viewer${p.tab === "params" ? " params-docked" : ""}`}>
           <div className="viewer-head">
             <div className="tabs">
@@ -551,16 +590,17 @@ export function Workspace(p: Props) {
             {(p.tab === "3d" || p.tab === "params") && (
               <div className="viewer-tools">
                 <div className="seg sm">
-                  <button title="Undo (⌘/Ctrl+Z)" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}>Undo</button>
-                  <button title="Redo (⌘/Ctrl+Shift+Z)" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}>Redo</button>
+                  <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
+                  <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
                 </div>
                 <button
-                  className={`ghost sm${p.featureCtl.mode ? " on" : ""}`}
+                  className={`ghost sm iconbtn${p.featureCtl.mode ? " on" : ""}`}
                   aria-pressed={p.featureCtl.mode}
+                  aria-label="Select"
                   title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
                   onClick={p.featureCtl.toggleMode}
                 >
-                  Select
+                  <IconPointer />
                 </button>
                 {p.featureCtl.mode && (
                   <div className="seg sm mode-seg">
@@ -572,13 +612,14 @@ export function Workspace(p: Props) {
                   </div>
                 )}
                 <button
-                  className={`ghost sm${p.transformCtl.mode !== "off" ? " on" : ""}`}
+                  className={`ghost sm iconbtn${p.transformCtl.mode !== "off" ? " on" : ""}`}
                   aria-pressed={p.transformCtl.mode !== "off"}
+                  aria-label="Transform"
                   disabled={p.transformCtl.busy}
                   title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
                   onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
                 >
-                  Transform
+                  <IconTransform /><span className="btn-label">Transform</span>
                 </button>
                 {p.transformCtl.mode !== "off" && (
                   <div className="seg sm mode-seg">
@@ -588,12 +629,13 @@ export function Workspace(p: Props) {
                   </div>
                 )}
                 <button
-                  className={`ghost sm${p.measureCtl.mode ? " on" : ""}`}
+                  className={`ghost sm iconbtn${p.measureCtl.mode ? " on" : ""}`}
                   aria-pressed={p.measureCtl.mode}
+                  aria-label="Measure"
                   title="Measure tool: click two points on the model to see the distance between them"
                   onClick={p.measureCtl.toggle}
                 >
-                  Measure
+                  <IconRuler /><span className="btn-label">Measure</span>
                 </button>
                 {p.measureCtl.mode && p.measureCtl.items.length > 0 && (
                   <button className="ghost sm" title="Clear all measurements" onClick={p.measureCtl.clear}>
@@ -609,15 +651,33 @@ export function Workspace(p: Props) {
                     Clear points ({p.pins.length})
                   </button>
                 )}
-                <button className={`ghost sm${p.showDims ? " on" : ""}`} aria-pressed={p.showDims} onClick={() => p.setShowDims((d) => !d)}>
-                  {p.showDims ? "Hide dimensions" : "Dimensions"}
+                <button
+                  className={`ghost sm iconbtn${p.showDims ? " on" : ""}`}
+                  aria-pressed={p.showDims}
+                  aria-label="Dimensions"
+                  title={p.showDims ? "Hide the dimension lines" : "Show the dimension lines"}
+                  onClick={() => p.setShowDims((d) => !d)}
+                >
+                  <IconDims /><span className="btn-label">Dimensions</span>
                 </button>
-                <button className="ghost sm" title="Toggle units" onClick={() => p.setUnits((u) => (u === "mm" ? "in" : "mm"))}>
-                  {p.units === "mm" ? "mm" : "inches"}
+                <button className="ghost sm" title={`Units: ${p.units === "mm" ? "millimetres" : "inches"} — tap to switch`} onClick={() => p.setUnits((u) => (u === "mm" ? "in" : "mm"))}>
+                  {p.units === "mm" ? "mm" : "in"}
                 </button>
-                <button className="ghost sm" onClick={() => p.setWireframe((w) => !w)}>{p.wireframe ? "Solid" : "Wireframe"}</button>
-                <button className={`ghost sm${showStats ? " on" : ""}`} aria-pressed={showStats} title="Show mesh & print stats on the model" onClick={() => setShowStats((s) => !s)}>Stats</button>
-                <button className="ghost sm" onClick={() => p.viewerRef.current?.resetView()}>Reset view</button>
+                <button
+                  className={`ghost sm iconbtn${p.wireframe ? " on" : ""}`}
+                  aria-pressed={p.wireframe}
+                  aria-label="Wireframe"
+                  title={p.wireframe ? "Back to solid shading" : "Show the mesh as wireframe"}
+                  onClick={() => p.setWireframe((w) => !w)}
+                >
+                  <IconWireframe /><span className="btn-label">Wireframe</span>
+                </button>
+                <button className={`ghost sm iconbtn${showStats ? " on" : ""}`} aria-pressed={showStats} aria-label="Stats" title="Show mesh & print stats on the model" onClick={() => setShowStats((s) => !s)}>
+                  <IconStats /><span className="btn-label">Stats</span>
+                </button>
+                <button className="ghost sm iconbtn" aria-label="Reset view" title="Re-frame the model in the viewport" onClick={() => p.viewerRef.current?.resetView()}>
+                  <IconFrame /><span className="btn-label">Reset view</span>
+                </button>
               </div>
             )}
           </div>

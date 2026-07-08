@@ -66,6 +66,104 @@ export const IconReset = () => (
     <path d="M3 3v5h5" />
   </svg>
 );
+// ---- Viewer-toolbar icons (15px in `sm` buttons; labels collapse at narrow widths) ----
+
+export const IconUndo = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <path d="M9 14 4 9l5-5" />
+    <path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11" />
+  </svg>
+);
+export const IconRedo = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <path d="m15 14 5-5-5-5" />
+    <path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13" />
+  </svg>
+);
+/** Classic selection-tool cursor arrow. */
+export const IconPointer = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M5 3l7.4 17.5 2.2-7.2 7.2-2.4Z" />
+  </svg>
+);
+/** Four-way move arrows — the transform tool. */
+export const IconTransform = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M12 2v20M2 12h20" />
+    <path d="m8.5 5.5 3.5-3.5 3.5 3.5M8.5 18.5 12 22l3.5-3.5M5.5 8.5 2 12l3.5 3.5M18.5 8.5 22 12l-3.5 3.5" />
+  </svg>
+);
+export const IconRuler = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M3.5 16.5 16.5 3.5 20.5 7.5 7.5 20.5Z" />
+    <path d="m8.5 12.5 1.8 1.8M11.5 9.5l1.8 1.8M14.5 6.5l1.8 1.8" />
+  </svg>
+);
+/** A dimension line with end ticks. */
+export const IconDims = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M3 5v14M21 5v14M3 12h18" />
+    <path d="m7 9-4 3 4 3M17 9l4 3-4 3" />
+  </svg>
+);
+/** Isometric wire cube. */
+export const IconWireframe = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.6}>
+    <path d="M12 3 4 7.5v9L12 21l8-4.5v-9Z" />
+    <path d="M4 7.5 12 12l8-4.5M12 12v9" />
+  </svg>
+);
+export const IconStats = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <path d="M5 20v-6M11 20V6M17 20v-9M3 20h18" />
+  </svg>
+);
+/** Frame-with-dot — re-frame / reset the view. */
+export const IconFrame = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 9V6a2 2 0 0 1 2-2h3M15 4h3a2 2 0 0 1 2 2v3M20 15v3a2 2 0 0 1-2 2h-3M9 20H6a2 2 0 0 1-2-2v-3" />
+    <circle cx="12" cy="12" r="2.2" />
+  </svg>
+);
+
+/** Select-mode glyphs: a face (surface), an edge, a corner, a point on the model. */
+export const IconFaceSel = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" />
+    <path d="M4 8.5 12 13l8-4.5M12 13v7" opacity=".35" />
+  </svg>
+);
+export const IconEdgeSel = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" opacity=".35" />
+    <path d="M12 13v7" strokeWidth={2.6} />
+    <path d="M4 8.5 12 13l8-4.5" opacity=".35" />
+  </svg>
+);
+export const IconCornerSel = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5ZM4 8.5 12 13l8-4.5M12 13v7" opacity=".35" />
+    <circle cx="12" cy="13" r="2.6" fill="currentColor" stroke="none" />
+  </svg>
+);
+export const IconPointSel = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
+    <path d="M12 3v4M12 17v4M3 12h4M17 12h4" />
+  </svg>
+);
+export const IconRotate = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <path d="M20 12a8 8 0 1 1-2.3-5.6" />
+    <path d="M20 2.5V7h-4.5" />
+  </svg>
+);
+export const IconScale = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M14 3h7v7M10 21H3v-7M21 3l-8 8M3 21l8-8" />
+  </svg>
+);
+
 export const IconGitHub = () => (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
     <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />

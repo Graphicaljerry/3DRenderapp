@@ -21,6 +21,24 @@ called `moldable-lite` for continuity with earlier runs.
   to a dependency-light primitive+CSG engine (the model emits a JSON spec). Everything still works
   except STEP export (a banner tells you). The app never dies on a WASM hiccup.
 
+## Direct edits & live previews (dual-kernel)
+
+Dragging the blue arrow (push-pull extrude, drag-to-fillet) edits the model **live**, with two
+kernels sharing the work — see [`../docs/NOTES_PREVIEW_ENGINE.md`](../docs/NOTES_PREVIEW_ENGINE.md)
+for the full engineering notes:
+
+- **OCCT is always the source of truth.** Every released drag / typed value commits as one
+  parametric op through the CAD worker; exports and history only ever see OCCT geometry.
+- **Extrude drags preview through [Manifold](https://github.com/elalish/manifold)** (robust mesh
+  booleans, WASM, its own worker): a closed prism is fused/cut against the display mesh per tick —
+  a few ms per boolean, no CAD kernel in the loop.
+- **Fillet drags preview through OCCT** (mesh booleans can't fillet). The CAD worker caches every
+  intermediate of the op chain, so one drag tick costs exactly one OCCT op, meshed coarse.
+- **If a size doesn't fit** (e.g. a 33 mm fillet on a 1.4 mm wall) the worker bisects for the
+  largest size that *does*, applies it, and the chat states both numbers.
+- **Any Manifold failure** (a mesh it can't weld into a solid) silently falls back to the OCCT
+  preview path; a failed preview tick keeps the last good frame.
+
 ## Features
 
 - **Streaming chat** with a **self-healing loop** — on a build/compile error the exact error is fed

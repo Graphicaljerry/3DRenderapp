@@ -9,6 +9,7 @@ import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClien
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
+import { previewSetBase, previewBoolean } from "./engine/previewEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
@@ -1101,20 +1102,24 @@ export default function App() {
 
   // ---- Live push-pull preview: rebuild the REAL solid while the arrow drags (Shapr-style),
   // so the fillet/extrude appears on the model in real time instead of only on release.
-  // One worker build in flight at a time; only the newest dragged value is kept (coalescing),
-  // so a fast pen never queues stale rebuilds. gen invalidates the loop on commit/cancel. ----
-  const livePrev = useRef({ next: null as number | null, running: false, gen: 0 });
+  // Two kernels: extrude drags boolean a closed prism against the display mesh in the
+  // Manifold worker (pure mesh math, ~60fps-class); fillet drags — and any Manifold
+  // failure — rebuild through OCCT. One build in flight at a time; only the newest dragged
+  // value is kept (coalescing). gen invalidates the loop on commit/cancel; OCCT stays the
+  // source of truth (the commit always rebuilds through the CAD worker). ----
+  const livePrev = useRef({ next: null as { d: number; solid: Float32Array | null } | null, running: false, gen: 0 });
 
-  function previewDirectOp(dist: number) {
+  function previewDirectOp(dist: number, solid?: Float32Array | null) {
     setLiveDragMm(dist); // keep the quick-edit mm box in sync (pre-existing behaviour)
     const f = selectedFeature;
     if (!f || !result || result.source.kind !== "code" || !sel || activeKind !== "replicad") return;
     const lp = livePrev.current;
-    lp.next = dist;
+    lp.next = { d: dist, solid: solid ?? null };
     if (lp.running) return;
     lp.running = true;
     const gen = lp.gen;
     // Snapshot the drag's inputs once — they are fixed for the drag's duration.
+    const baseGeom = result.geometry;
     const src = result.source;
     const rc0 = result.recenter ?? [0, 0, 0];
     const p = f.at ?? [f.cx, f.cy, f.cz];
@@ -1123,10 +1128,31 @@ export default function App() {
     void (async () => {
       try {
         while (lp.next !== null && lp.gen === gen) {
-          const d = lp.next;
+          const { d, solid: prism } = lp.next;
           lp.next = null;
           const size = type === "extrude" ? d : Math.abs(d);
           if (Math.abs(size) < 0.05) continue;
+
+          // Fast path: Manifold boolean of the prism against the committed display mesh.
+          // Same display coords in and out — no recenter drift correction needed.
+          if (prism && type === "extrude") {
+            try {
+              if (await previewSetBase(baseGeom)) {
+                const pos = await previewBoolean(prism, d);
+                if (lp.gen !== gen) break;
+                if (pos) {
+                  const g = new THREE.BufferGeometry();
+                  g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+                  g.computeVertexNormals(); // soup → flat per-face normals, the CAD look
+                  g.userData.preview = true; // viewer skips per-tick frills (edge overlay)
+                  setGeometry(g);
+                  continue;
+                }
+              }
+            } catch { /* fall through to the OCCT preview */ }
+            if (lp.gen !== gen) break;
+          }
+
           try {
             const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), { type, at, size }], preview: true });
             if (lp.gen !== gen) break; // committed/cancelled while building — drop it

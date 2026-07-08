@@ -291,6 +291,8 @@ interface Props {
     pickFaces: (faces: PickedFeature[]) => void;
     askAi: () => void;
     directOp: (type: PointOp["type"], size: number) => void;
+    pushArrow: { center: [number, number, number]; normal: [number, number, number] } | null;
+    pushPull: (distance: number) => void;
     clear: () => void;
   };
   facesCtl: {
@@ -635,6 +637,8 @@ export function Workspace(p: Props) {
                 measureMode={p.measureCtl.mode}
                 measurePending={p.measureCtl.pending}
                 measurements={p.measureCtl.items}
+                pushArrow={p.featureCtl.pushArrow}
+                onPushPull={p.featureCtl.pushPull}
                 onPickFaces={p.featureCtl.pickFaces}
                 onPickPoint={p.pinCtl.pick}
                 onPickFeature={p.featureCtl.pick}
@@ -1264,7 +1268,7 @@ function DirectOpBar({ kind, busy, onApply }: { kind: SelectKind; busy: boolean;
         <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(chamfer, Math.abs(size))} title={`Chamfer the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Chamfer</button>
         {face && <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("extrude", size)} title={`Push this face out (+) or in (−) by ${size} mm — no tokens`}>Extrude</button>}
       </div>
-      {face && <p className="fine">Extrude: positive pushes the face out, negative pulls it in.</p>}
+      {face && <p className="fine">Extrude: positive pushes the face out, negative pulls it in — or drag the blue arrow on the face.</p>}
     </div>
   );
 }

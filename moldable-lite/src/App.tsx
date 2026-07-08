@@ -1723,6 +1723,13 @@ export default function App() {
           pickFaces,
           askAi: askAiFeature,
           directOp: applyDirectOp,
+          // Drag-to-extrude handle: only on a FLAT selected face of a CAD model.
+          pushArrow:
+            selectMode && selectKind === "face" && activeKind === "replicad" &&
+            selectedFeature?.kind === "face" && !selectedFeature.curved
+              ? { center: [selectedFeature.cx, selectedFeature.cy, selectedFeature.cz], normal: [selectedFeature.nx ?? 0, selectedFeature.ny ?? 0, selectedFeature.nz ?? 1] }
+              : null,
+          pushPull: (dist: number) => applyDirectOp("extrude", dist),
           clear: () => setSelectedFeature(null),
         }}
         facesCtl={{

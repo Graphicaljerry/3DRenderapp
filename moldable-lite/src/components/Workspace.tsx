@@ -293,6 +293,8 @@ interface Props {
     directOp: (type: PointOp["type"], size: number) => void;
     pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null;
     pushPull: (distance: number) => void;
+    pushLive: (distance: number) => void; // live drag value → mirrored into the quick-edit mm box
+    liveMm: number | null;
     clear: () => void;
   };
   facesCtl: {
@@ -640,6 +642,7 @@ export function Workspace(p: Props) {
                 measurements={p.measureCtl.items}
                 pushArrow={p.featureCtl.pushArrow}
                 onPushPull={p.featureCtl.pushPull}
+                onPushPullLive={p.featureCtl.pushLive}
                 onPickFaces={p.featureCtl.pickFaces}
                 onPickPoint={p.pinCtl.pick}
                 onPickFeature={p.featureCtl.pick}
@@ -695,6 +698,7 @@ export function Workspace(p: Props) {
                       kind={p.featureCtl.selected.kind}
                       busy={p.status === "generating"}
                       onApply={p.featureCtl.directOp}
+                      liveSize={p.featureCtl.liveMm}
                     />
                   )}
                   <textarea
@@ -1249,8 +1253,11 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
 
 // Free, instant geometry ops on the picked edge/corner/face — computed locally by
 // replicad, no AI call. Faces also get Extrude (push out / pull in).
-function DirectOpBar({ kind, busy, onApply }: { kind: SelectKind; busy: boolean; onApply: (type: PointOp["type"], size: number) => void }) {
+function DirectOpBar({ kind, busy, onApply, liveSize }: { kind: SelectKind; busy: boolean; onApply: (type: PointOp["type"], size: number) => void; liveSize?: number | null }) {
   const [size, setSize] = useState(2);
+  // Dragging the on-model arrow mirrors its live value into the box, so the number
+  // visibly follows the drag (and is ready to fine-tune or re-apply).
+  useEffect(() => { if (liveSize != null) setSize(liveSize); }, [liveSize]);
   const face = kind === "face";
   const what = kind === "vertex" ? "corner" : kind === "face" ? "face" : "edge";
   const round: PointOp["type"] = face ? "face-fillet" : "fillet";

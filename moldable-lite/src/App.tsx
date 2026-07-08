@@ -283,6 +283,7 @@ export default function App() {
   const [measureMode, setMeasureMode] = useState(false);
   const [measurePending, setMeasurePending] = useState<[number, number, number] | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
+  const [liveDragMm, setLiveDragMm] = useState<number | null>(null); // arrow-drag value mirrored into the quick-edit box
   const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
   const [selectedFaces, setSelectedFaces] = useState<PickedFeature[]>([]); // box/marquee multi-select
   const [facesText, setFacesText] = useState("");
@@ -1727,7 +1728,7 @@ export default function App() {
           selected: selectedFeature,
           text: faceText,
           setText: setFaceText,
-          pick: pickFeature,
+          pick: (f: PickedFeature) => { setLiveDragMm(null); pickFeature(f); },
           pickFaces,
           askAi: askAiFeature,
           directOp: applyDirectOp,
@@ -1750,7 +1751,9 @@ export default function App() {
             if (f?.kind === "face") applyDirectOp("extrude", dist);
             else applyDirectOp("fillet", Math.abs(dist));
           },
-          clear: () => setSelectedFeature(null),
+          pushLive: setLiveDragMm,
+          liveMm: liveDragMm,
+          clear: () => { setLiveDragMm(null); setSelectedFeature(null); },
         }}
         facesCtl={{
           faces: selectedFaces,

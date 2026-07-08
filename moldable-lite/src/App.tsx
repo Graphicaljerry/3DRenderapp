@@ -1088,17 +1088,25 @@ export default function App() {
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") return;
     const src = result.source;
     const rc = result.recenter ?? [0, 0, 0];
-    const c = commit.center;
-    const center: [number, number, number] = [c[0] + rc[0], c[1] + rc[1], c[2] + rc[2]];
-    const op: CadOp =
-      commit.kind === "rotate"
+    // translate.delta is a pure vector — recenter-invariant. rotate/scale pivot about a picked
+    // centre, which is in display coords → map it back to engine coords (+recenter).
+    let op: CadOp;
+    if (commit.kind === "translate") {
+      op = { type: "translate", delta: commit.delta };
+    } else {
+      const c = commit.center;
+      const center: [number, number, number] = [c[0] + rc[0], c[1] + rc[1], c[2] + rc[2]];
+      op = commit.kind === "rotate"
         ? { type: "rotate", axis: commit.axis, angleDeg: commit.angleDeg, center }
         : { type: "scale", factor: commit.factor, center };
+    }
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
       const label =
-        commit.kind === "rotate"
+        commit.kind === "translate"
+          ? "Moved the part"
+          : commit.kind === "rotate"
           ? `Rotated ${Math.round(commit.angleDeg)}°`
           : `Scaled to ${Math.round(commit.factor * 100)}%`;
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `transform ${commit.kind}`);
@@ -1723,13 +1731,25 @@ export default function App() {
           pickFaces,
           askAi: askAiFeature,
           directOp: applyDirectOp,
-          // Drag-to-extrude handle: only on a FLAT selected face of a CAD model.
-          pushArrow:
-            selectMode && selectKind === "face" && activeKind === "replicad" &&
-            selectedFeature?.kind === "face" && !selectedFeature.curved
-              ? { center: [selectedFeature.cx, selectedFeature.cy, selectedFeature.cz], normal: [selectedFeature.nx ?? 0, selectedFeature.ny ?? 0, selectedFeature.nz ?? 1] }
-              : null,
-          pushPull: (dist: number) => applyDirectOp("extrude", dist),
+          // Drag handle: a flat face gets a drag-to-extrude arrow; an edge/corner gets a
+          // drag-to-round arrow (pointing radially outward so dragging out grows the radius).
+          pushArrow: (() => {
+            const f = selectedFeature;
+            if (!(selectMode && activeKind === "replicad" && f)) return null;
+            if (selectKind === "face" && f.kind === "face" && !f.curved)
+              return { center: [f.cx, f.cy, f.cz] as [number, number, number], normal: [f.nx ?? 0, f.ny ?? 0, f.nz ?? 1] as [number, number, number], kind: "extrude" as const };
+            if ((selectKind === "edge" && f.kind === "edge") || (selectKind === "vertex" && f.kind === "vertex")) {
+              const rad = Math.hypot(f.cx, f.cy);
+              const dir: [number, number, number] = rad > 1e-3 ? [f.cx / rad, f.cy / rad, 0] : [0, 0, 1];
+              return { center: [f.cx, f.cy, f.cz] as [number, number, number], normal: dir, kind: "fillet" as const };
+            }
+            return null;
+          })(),
+          pushPull: (dist: number) => {
+            const f = selectedFeature;
+            if (f?.kind === "face") applyDirectOp("extrude", dist);
+            else applyDirectOp("fillet", Math.abs(dist));
+          },
           clear: () => setSelectedFeature(null),
         }}
         facesCtl={{

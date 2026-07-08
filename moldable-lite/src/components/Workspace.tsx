@@ -291,7 +291,7 @@ interface Props {
     pickFaces: (faces: PickedFeature[]) => void;
     askAi: () => void;
     directOp: (type: PointOp["type"], size: number) => void;
-    pushArrow: { center: [number, number, number]; normal: [number, number, number] } | null;
+    pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null;
     pushPull: (distance: number) => void;
     clear: () => void;
   };
@@ -573,13 +573,14 @@ export function Workspace(p: Props) {
                   className={`ghost sm${p.transformCtl.mode !== "off" ? " on" : ""}`}
                   aria-pressed={p.transformCtl.mode !== "off"}
                   disabled={p.transformCtl.busy}
-                  title="Transform tool: rotate the whole part (great for print orientation) or scale it — drag the gizmo, no AI, no tokens"
-                  onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "rotate" : "off")}
+                  title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
+                  onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
                 >
                   Transform
                 </button>
                 {p.transformCtl.mode !== "off" && (
                   <div className="seg sm mode-seg">
+                    <button className={p.transformCtl.mode === "move" ? "on" : ""} title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}>Move</button>
                     <button className={p.transformCtl.mode === "rotate" ? "on" : ""} title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}>Rotate</button>
                     <button className={p.transformCtl.mode === "scale" ? "on" : ""} title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}>Scale</button>
                   </div>
@@ -1269,6 +1270,7 @@ function DirectOpBar({ kind, busy, onApply }: { kind: SelectKind; busy: boolean;
         {face && <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("extrude", size)} title={`Push this face out (+) or in (−) by ${size} mm — no tokens`}>Extrude</button>}
       </div>
       {face && <p className="fine">Extrude: positive pushes the face out, negative pulls it in — or drag the blue arrow on the face.</p>}
+      {kind === "edge" && <p className="fine">Or drag the blue arrow to round this edge live.</p>}
     </div>
   );
 }

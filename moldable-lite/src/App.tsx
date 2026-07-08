@@ -50,7 +50,12 @@ function scheduleIdle(fn: () => void): void {
   else setTimeout(fn, 32);
 }
 
-export type ChatMessage = { id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode };
+export type ChatMessage = {
+  id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode;
+  model?: string; // which AI produced this reply (shown small under the bubble)
+  thinking?: string; // the model's reasoning stream, kept collapsed for the curious
+  sources?: { url: string; title?: string }[]; // web pages a research lookup used
+};
 export type Mode = "precise" | "generative";
 
 export type SettingsPane = "ai" | "mesh" | "printer" | "appearance" | "sync";
@@ -79,8 +84,9 @@ function loadLlm(): LlmSettings {
     if (raw) {
       const v = JSON.parse(raw) as LlmSettings;
       if (LLM_PRESETS.some((p) => p.id === v.provider)) {
-        // Heal the never-valid OpenRouter default that shipped briefly — it 400s.
-        if (v.provider === "openrouter" && v.model === "google/gemini-3-flash") v.model = "google/gemini-2.5-flash";
+        // OpenRouter always starts in Auto: the router picks the best model per request
+        // (and each reply says which one it used). A hand-picked model lasts the session.
+        if (v.provider === "openrouter") v.model = AUTO_MODEL;
         return v;
       }
     }
@@ -270,6 +276,7 @@ export default function App() {
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
   const [status, setStatus] = useState<"idle" | "generating">("idle");
   const [streamingText, setStreamingText] = useState("");
+  const [streamingThink, setStreamingThink] = useState(""); // live model reasoning (chat shows it while generating)
   const [codeBuffer, setCodeBuffer] = useState("");
   const [cadDefaults, setCadDefaults] = useState<CadParams | null>(null);
   const [paramValues, setParamValues] = useState<CadParams>({});
@@ -1367,6 +1374,7 @@ export default function App() {
     const visionThumb = visionImage ? await blobToDataURL(visionImage.blob) : undefined;
     setInput("");
     setStreamingText("");
+    setStreamingThink("");
     setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? "Recreate this part" : ""), image: visionThumb, mode: "precise" }]);
     const placeholderId = mid();
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
@@ -1378,6 +1386,7 @@ export default function App() {
     // Gemini's free search grounding or Claude's web-search tool; best-effort —
     // if neither key is set or the lookup fails, generation continues as before.
     let researched: string | null = null;
+    let researchSources: { url: string; title?: string }[] = [];
     // Web research is gated by the composer's Web toggle:
     //   On   → always look up the web before building
     //   Auto → smart: only when the request names a real-world product
@@ -1404,12 +1413,15 @@ export default function App() {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
     } else if (wantWeb) {
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
-      researched = await researchDimensions(p, researchKeys);
+      const rr = await researchDimensions(p, researchKeys);
+      researched = rr?.text ?? null;
+      researchSources = rr?.sources ?? [];
       if (researched) {
-        // Show the found measurements as their own note, above the working placeholder.
+        // Show the found measurements as their own note, above the working placeholder —
+        // with the pages the lookup actually used, so the numbers can be checked.
         setMessages((m) => {
           const idx = m.findIndex((x) => x.id === placeholderId);
-          const note = { id: mid(), role: "assistant" as const, text: `Measurements found online:\n${researched}` };
+          const note = { id: mid(), role: "assistant" as const, text: `Measurements found online:\n${researched}`, sources: researchSources };
           return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
         });
       }
@@ -1440,6 +1452,7 @@ export default function App() {
     // Cap the rolling context so long sessions don't slow down / blow the window.
     let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
+    let lastThink = ""; // final reasoning text, attached to the reply for later reading
     let ok = false;
     let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
 
@@ -1463,7 +1476,7 @@ export default function App() {
         // to earlier turns ("make it match what I said before"). The edit-block savings are on
         // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
         const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full) }, effectiveProxy);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
         finalRaw = raw;
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {
@@ -1471,7 +1484,7 @@ export default function App() {
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
           const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           applyResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -1479,13 +1492,13 @@ export default function App() {
       } catch {
         /* fall through to the reliable full-regenerate loop */
       }
-      if (ok) { setStatus("idle"); setStreamingText(""); return; }
+      if (ok) { setStatus("idle"); setStreamingText(""); setStreamingThink(""); return; }
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
     }
 
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full) }, effectiveProxy);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
         finalRaw = raw;
         try {
           let bi: BuildInput;
@@ -1503,7 +1516,7 @@ export default function App() {
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           applyResult(res, name, summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
           if (visionImage) clearImage();
           ok = true;
           break;
@@ -1790,6 +1803,7 @@ export default function App() {
         setTab={setTab}
         codeText={codeBuffer}
         streamingText={streamingText}
+        streamingThink={streamingThink}
         onRerun={rerun}
         cadDefaults={cadDefaults}
         paramValues={paramValues}

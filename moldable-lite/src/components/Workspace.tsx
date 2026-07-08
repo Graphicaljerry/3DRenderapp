@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement } from "./Viewer";
+import { Markdown } from "./Markdown";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
@@ -314,6 +315,7 @@ interface Props {
   setTab: (t: "3d" | "code" | "params" | "print" | "history") => void;
   codeText: string;
   streamingText: string;
+  streamingThink: string; // live model reasoning while generating
   onRerun: (edited: string) => void;
   cadDefaults: CadParams | null;
   paramValues: CadParams;
@@ -521,7 +523,7 @@ export function Workspace(p: Props) {
             <span className="chat-title">Chat</span>
             <button className="ghost sm" title="Hide chat" onClick={() => setChatOpen(false)}>Hide ‹</button>
           </div>
-          <Messages messages={p.messages} onChip={p.onSend} onExample={p.onExample} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
+          <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
             brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} />
 
           <div className="composer-wrap">
@@ -1132,8 +1134,8 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel }: {
-  messages: ChatMessage[]; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
+function Messages({ messages, thinking, onChip, onExample, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel }: {
+  messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
 }) {
@@ -1202,8 +1204,32 @@ function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume
             <>
               <div className={`bubble ${m.streaming ? "muted" : ""}`}>
                 {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
-                {m.text && <span>{m.text}</span>}
+                {m.text && (m.role === "assistant" && !m.error ? <Markdown text={m.text} /> : <span>{m.text}</span>)}
+                {/* Live reasoning stream while this reply is being generated. */}
+                {m.streaming && thinking && (
+                  <div className="think-live">
+                    <span className="think-title"><span className="spinner sm" /> Thinking</span>
+                    <ThinkScroll text={thinking} />
+                  </div>
+                )}
               </div>
+              {/* Finished reply: reasoning kept, collapsed; sources; which model wrote it. */}
+              {!m.streaming && m.thinking && (
+                <details className="think-done">
+                  <summary>Thought process</summary>
+                  <div className="think-body">{m.thinking}</div>
+                </details>
+              )}
+              {!!m.sources?.length && (
+                <div className="src-row">
+                  {m.sources.map((sc, i) => (
+                    <a key={i} className="src-chip" href={sc.url} target="_blank" rel="noopener noreferrer" title={sc.title ?? sc.url}>
+                      {hostOf(sc.url)}
+                    </a>
+                  ))}
+                </div>
+              )}
+              {m.role === "assistant" && !m.streaming && m.model && <span className="msg-model">{m.model}</span>}
               {/* Retry / edit any typed prompt — including one sent with a photo, so
                   a failed generation can be re-run (the attached photo, if still in
                   the composer, rides along). */}
@@ -1225,6 +1251,24 @@ function Messages({ messages, onChip, onExample, onStartGuided, resume, onResume
       <div ref={endRef} />
     </div>
   );
+}
+
+/** Domain label for a source chip ("support.apple.com" → "apple.com"). */
+function hostOf(url: string): string {
+  try {
+    const h = new URL(url).hostname.replace(/^www\./, "");
+    const parts = h.split(".");
+    return parts.length > 2 ? parts.slice(-2).join(".") : h;
+  } catch {
+    return url.slice(0, 24);
+  }
+}
+
+/** The live reasoning text, auto-pinned to its newest line as it streams. */
+function ThinkScroll({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [text]);
+  return <div ref={ref} className="think-body live">{text}</div>;
 }
 
 /** Live elapsed-time pill while the AI/kernel is working. */

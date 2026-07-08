@@ -145,13 +145,13 @@ function buildShape(code: string, params: Record<string, number> | undefined, op
   return s;
 }
 
-/** Centre on XY and drop min-z to 0 — the same normalize the display does, so an exported
- *  STL/STEP sits on the bed matching the viewer (matters after a gizmo rotate reorients it). */
+/** Drop min-z to 0 (sit on the bed), preserving XY — matches the display's Z-only recentre so an
+ *  exported STL/STEP sits where the viewer shows it (matters after a gizmo rotate or move). */
 function dropToBed(shape: any): any {
   try {
     const bb = shape.boundingBox;
-    const [min, max] = bb.bounds as [number[], number[]];
-    return shape.translate([-(min[0] + max[0]) / 2, -(min[1] + max[1]) / 2, -min[2]]);
+    const [min] = bb.bounds as [number[], number[]];
+    return shape.translate([0, 0, -min[2]]);
   } catch {
     return shape; // unusual bbox API? export as-authored
   }

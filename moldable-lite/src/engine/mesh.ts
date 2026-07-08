@@ -11,12 +11,13 @@ export function facesToGeometry(faces: FaceMesh): BufferGeometry {
   const bb = g.boundingBox;
   // Recentre for display, but record the offset so picked points (which are in these
   // display coords) can be mapped back to replicad's shape coords for direct ops.
+  // Drop to the bed (min-z → 0) but PRESERVE the part's XY position, so a gizmo Move that
+  // shifts the part in X/Y actually sticks (an XY re-centre would silently undo it). Parts are
+  // authored ~around the origin, so this keeps them centred until the user moves them.
   let recenter: [number, number, number] = [0, 0, 0];
   if (bb) {
-    const cx = (bb.min.x + bb.max.x) / 2;
-    const cy = (bb.min.y + bb.max.y) / 2;
-    recenter = [cx, cy, bb.min.z];
-    g.translate(-cx, -cy, -bb.min.z);
+    recenter = [0, 0, bb.min.z];
+    g.translate(0, 0, -bb.min.z);
   }
   g.userData.recenter = recenter;
   g.computeBoundingBox();

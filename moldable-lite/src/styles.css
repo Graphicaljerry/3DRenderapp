@@ -317,6 +317,20 @@ button { font-family: inherit; cursor: pointer; }
 .bedchip:hover { color: var(--ink); border-color: var(--accent); }
 .bedchip svg { color: var(--accent-d); flex: 0 0 auto; }
 @container (max-width: 680px) { .bedchip-name { display: none; } }
+/* Objects/layers list — everything on the canvas, selectable. */
+.layers-panel { position: absolute; top: 10px; left: 10px; z-index: 9; width: min(240px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.lp-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 7px; color: var(--ink); }
+.lp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; border-radius: 7px; background: none; color: var(--ink2); text-align: left; font-size: 12.5px; }
+.lp-row:not(.static):hover { background: var(--surf); color: var(--ink); }
+.lp-row.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
+.lp-row:disabled { opacity: .45; cursor: default; }
+.lp-row svg { flex: 0 0 auto; color: var(--accent-d); }
+.lp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-sub { font-size: 10.5px; color: var(--subt); white-space: nowrap; }
+.lp-dot { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 auto; }
+.lp-dot.pin { width: 16px; height: 16px; border-radius: 999px; background: var(--accent-w); color: var(--accent-d); font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+.lp-empty { padding: 8px; color: var(--subt); font-size: 12px; }
+
 /* Tools & gestures cheat sheet (the ? button) — tooltips don't exist on touch. */
 .help-sheet { position: absolute; top: 10px; right: 10px; z-index: 9; width: min(360px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink2); animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--ink); }

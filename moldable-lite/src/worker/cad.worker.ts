@@ -221,11 +221,12 @@ const api: CadWorkerApi = {
     return true;
   },
 
-  /** Load a STEP file as a live solid; it becomes main()'s third argument. */
-  async importShape(file: Blob): Promise<{ ok: boolean; error?: string }> {
+  /** Load a STEP (exact B-rep) or STL (mesh → faceted B-rep) file as a live solid;
+   *  it becomes main()'s third argument. */
+  async importShape(file: Blob, kind: "step" | "stl" = "step"): Promise<{ ok: boolean; error?: string }> {
     try {
       await ensureOC();
-      const shape = await (replicad as any).importSTEP(file);
+      const shape = kind === "stl" ? await (replicad as any).importSTL(file) : await (replicad as any).importSTEP(file);
       // Normalize to our convention: centred on XY, sitting on the bed (z=0).
       try {
         const bb = shape.boundingBox;

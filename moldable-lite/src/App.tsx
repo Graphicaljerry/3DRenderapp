@@ -271,6 +271,7 @@ export default function App() {
   const [splitPieces, setSplitPieces] = useState<SplitPiece[] | null>(null);
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
@@ -881,38 +882,53 @@ export default function App() {
       return;
     }
 
-    if (/\.(step|stp)$/i.test(f.name)) {
+    // STEP imports as an exact editable solid. STL is a mesh, but OCCT can convert it to a
+    // faceted B-rep solid — good enough for AI edits (holes, cuts, resize, booleans); smooth
+    // fillets won't work on facets. If the conversion fails (huge/organic/broken meshes),
+    // the file falls through to the plain mesh pipeline below with a note.
+    const asCad = /\.(step|stp)$/i.test(f.name) ? "step" : /\.stl$/i.test(f.name) && sel?.kind === "replicad" && sel.engine.setImport ? "stl" : null;
+    if (/\.(step|stp)$/i.test(f.name) || asCad === "stl") {
       if (!sel) {
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The CAD engine is still starting — try the import again in a few seconds." }]);
         return;
       }
-      if (sel.kind !== "replicad" || !sel.engine.setImport) {
+      if (asCad === "step" && (sel.kind !== "replicad" || !sel.engine.setImport)) {
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: "STEP import needs the OpenCascade engine, which failed to boot on this device (the app fell back to the primitive engine).", error: true }]);
         return;
       }
       setStatus("generating");
       try {
-        await sel.engine.setImport(f);
+        await sel.engine.setImport!(f, asCad ?? "step");
         importFileRef.current = f;
         const res = await sel.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
-        const cleanName = f.name.replace(/\.(step|stp)$/i, "");
+        const cleanName = f.name.replace(/\.(step|stp|stl)$/i, "");
         applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
         seedHistory("replicad", IMPORT_PASSTHROUGH, undefined);
         setMode("precise");
+        const caveat = asCad === "stl"
+          ? " (converted from a mesh — flat facets, so cuts, holes, resize and booleans work; smooth fillets may not)"
+          : "";
         setMessages((m) => [
           ...m,
           {
             id: mid(),
             role: "assistant",
-            text: `Imported ${f.name} as an editable CAD solid (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “fillet all edges 2 mm”, “cut a 20 mm slot through the middle” — or edit the code in Source. Exports (including STEP) stay editable.`,
+            text: `Imported ${f.name} as an editable CAD solid${caveat} (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
           },
         ]);
-      } catch (err: any) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
-      } finally {
         setStatus("idle");
+        return;
+      } catch (err: any) {
+        setStatus("idle");
+        if (asCad !== "stl") {
+          setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
+          return;
+        }
+        // STL that OCCT couldn't solidify → import it as a plain mesh instead (below).
+        try { await sel.engine.setImport!(null); } catch { /* worker may have respawned */ }
+        importFileRef.current = null;
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "That STL couldn't be converted to an editable solid — importing it as a plain mesh instead (measure, repair, resize, export still work)." }]);
       }
-      return;
     }
 
     setStatus("generating");
@@ -1790,6 +1806,8 @@ export default function App() {
         geometry={geometry}
         dims={dims}
         report={report}
+        modelSelected={modelSelected || transformMode !== "off"}
+        onModelSelect={setModelSelected}
         printer={printer}
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}

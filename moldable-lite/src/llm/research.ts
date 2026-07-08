@@ -55,7 +55,14 @@ function timeoutSignal(ms: number): AbortSignal {
   return c.signal;
 }
 
-async function viaGemini(request: string, apiKey: string, preferred: string): Promise<string | null> {
+export interface ResearchResult { text: string; sources: { url: string; title?: string }[] }
+
+function dedupeSources(list: { url: string; title?: string }[]): { url: string; title?: string }[] {
+  const seen = new Set<string>();
+  return list.filter((x) => x.url && !seen.has(x.url) && seen.add(x.url)).slice(0, 6);
+}
+
+async function viaGemini(request: string, apiKey: string, preferred: string): Promise<ResearchResult | null> {
   // Reuse the model id the compat layer already resolved against this key.
   let model = "";
   try {
@@ -74,10 +81,15 @@ async function viaGemini(request: string, apiKey: string, preferred: string): Pr
   if (!res.ok) throw new Error(`Gemini research HTTP ${res.status}`);
   const j: any = await res.json();
   const text = (j?.candidates?.[0]?.content?.parts ?? []).map((part: any) => part?.text ?? "").join("");
-  return clean(text);
+  const t = clean(text);
+  if (!t) return null;
+  // Gemini grounding metadata carries the pages the answer actually used.
+  const chunks: any[] = j?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+  const sources = dedupeSources(chunks.map((c) => ({ url: c?.web?.uri ?? "", title: c?.web?.title })));
+  return { text: t, sources };
 }
 
-async function viaAnthropic(request: string, apiKey: string): Promise<string | null> {
+async function viaAnthropic(request: string, apiKey: string): Promise<ResearchResult | null> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -96,16 +108,23 @@ async function viaAnthropic(request: string, apiKey: string): Promise<string | n
   });
   if (!res.ok) throw new Error(`Claude research HTTP ${res.status}`);
   const j: any = await res.json();
-  const text = (j?.content ?? [])
-    .filter((b: any) => b.type === "text")
-    .map((b: any) => b.text)
-    .join("");
-  return clean(text);
+  const blocks: any[] = j?.content ?? [];
+  const text = blocks.filter((b) => b.type === "text").map((b) => b.text).join("");
+  const t = clean(text);
+  if (!t) return null;
+  // web_search tool results ride along in the content blocks — collect their pages.
+  const sources = dedupeSources(
+    blocks
+      .filter((b) => b.type === "web_search_tool_result")
+      .flatMap((b) => (Array.isArray(b.content) ? b.content : []))
+      .map((r: any) => ({ url: r?.url ?? "", title: r?.title })),
+  );
+  return { text: t, sources };
 }
 
 // OpenRouter's built-in web plugin — lets OpenRouter users (one key, many models)
 // get the same grounded lookup without a separate Gemini/Anthropic key.
-async function viaOpenRouter(request: string, apiKey: string, model: string): Promise<string | null> {
+async function viaOpenRouter(request: string, apiKey: string, model: string): Promise<ResearchResult | null> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -124,8 +143,13 @@ async function viaOpenRouter(request: string, apiKey: string, model: string): Pr
   });
   if (!res.ok) throw new Error(`OpenRouter research HTTP ${res.status}`);
   const j: any = await res.json();
-  const text = j?.choices?.[0]?.message?.content;
-  return clean(typeof text === "string" ? text : "");
+  const msg = j?.choices?.[0]?.message;
+  const t = clean(typeof msg?.content === "string" ? msg.content : "");
+  if (!t) return null;
+  // The web plugin annotates citations OpenAI-style.
+  const anns: any[] = Array.isArray(msg?.annotations) ? msg.annotations : [];
+  const sources = dedupeSources(anns.map((a) => ({ url: a?.url_citation?.url ?? "", title: a?.url_citation?.title })));
+  return { text: t, sources };
 }
 
 export interface ResearchKeys {
@@ -141,8 +165,8 @@ export function canResearch(keys: ResearchKeys): boolean {
   return !!(keys.geminiKey || keys.anthropicKey || keys.openrouterKey);
 }
 
-/** Look up the product's real dimensions online. Plain-text spec sheet, or null. */
-export async function researchDimensions(request: string, keys: ResearchKeys): Promise<string | null> {
+/** Look up the product's real dimensions online. Spec sheet + the pages used, or null. */
+export async function researchDimensions(request: string, keys: ResearchKeys): Promise<ResearchResult | null> {
   if (keys.geminiKey) {
     try {
       const r = await viaGemini(request, keys.geminiKey, keys.geminiModel ?? "");

@@ -76,6 +76,7 @@ async function parseSSE(res: Response, h: StreamHandlers): Promise<string> {
   const dec = new TextDecoder();
   let buf = "";
   let full = "";
+  let think = "";
   const frame = (f: string) => {
     for (const line of f.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -83,10 +84,18 @@ async function parseSSE(res: Response, h: StreamHandlers): Promise<string> {
       if (!data || data === "[DONE]") continue;
       try {
         const j: any = JSON.parse(data);
-        const t = j.choices?.[0]?.delta?.content ?? "";
+        const d = j.choices?.[0]?.delta;
+        const t = d?.content ?? "";
         if (t) {
           full += t;
           h.onToken?.(t, full);
+        }
+        // Reasoning models stream their thinking separately (OpenRouter: `reasoning`;
+        // some compat providers: `reasoning_content`) — surface it live.
+        const rt = d?.reasoning ?? d?.reasoning_content ?? "";
+        if (typeof rt === "string" && rt) {
+          think += rt;
+          h.onThinking?.(rt, think);
         }
       } catch {
         /* ignore keep-alives */

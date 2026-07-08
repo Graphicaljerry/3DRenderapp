@@ -41,6 +41,8 @@ export interface LlmRequest {
 
 export interface StreamHandlers {
   onToken?: (chunk: string, full: string) => void;
+  /** Reasoning/"thinking" stream, when the model emits one (shown live in the chat). */
+  onThinking?: (chunk: string, full: string) => void;
   signal?: AbortSignal;
 }
 
@@ -85,6 +87,7 @@ export async function streamMessage(r: LlmRequest, h: StreamHandlers = {}): Prom
   const dec = new TextDecoder();
   let buf = "";
   let full = "";
+  let think = "";
 
   const handleFrame = (frame: string) => {
     const data = frame
@@ -103,6 +106,10 @@ export async function streamMessage(r: LlmRequest, h: StreamHandlers = {}): Prom
       const t = evt.delta.text || "";
       full += t;
       h.onToken?.(t, full);
+    } else if (evt.type === "content_block_delta" && evt.delta?.type === "thinking_delta") {
+      const t = evt.delta.thinking || "";
+      think += t;
+      h.onThinking?.(t, think);
     } else if (evt.type === "error") {
       throw new Error(`stream error: ${evt.error?.type} — ${evt.error?.message}`);
     }

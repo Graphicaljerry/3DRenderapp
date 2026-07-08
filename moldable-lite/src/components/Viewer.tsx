@@ -55,12 +55,14 @@ interface Props {
   measureMode: boolean; // click two points to measure the distance between them
   measurePending: [number, number, number] | null; // the first clicked point, awaiting the second
   measurements: Measurement[]; // committed point-to-point measurements to render
+  pushArrow: { center: [number, number, number]; normal: [number, number, number] } | null; // flat selected face → drag-to-extrude handle
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[]) => void;
   onSelectPin: (id: string) => void;
   onTransformCommit: (c: TransformCommit) => void;
   onMeasurePoint: (p: [number, number, number]) => void;
+  onPushPull: (distance: number) => void;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -125,13 +127,16 @@ interface Internals {
   pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
   transforming: boolean; // a gizmo drag is in progress (freezes orbit + select picking)
   measures: THREE.Group; // point-to-point measurement lines + labels
+  pushArrow: THREE.Group; // drag-to-extrude handle on a selected flat face (shaft + cone + grab)
+  pushGrab: THREE.Mesh; // invisible fat cylinder used to raycast/grab the arrow
+  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number } | null; // active push-pull drag
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -167,6 +172,19 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
     const measures = new THREE.Group(); // point-to-point measurement annotations
     scene.add(measures);
+
+    // Push-pull handle: an arrow (shaft + cone) drawn along a selected flat face's normal;
+    // drag it to extrude the face. Local +Y is the normal; oriented/positioned per prop.
+    const pushArrow = new THREE.Group();
+    const pushMat = new THREE.MeshBasicMaterial({ color: 0x2563eb, depthTest: false, transparent: true, opacity: 0.95 });
+    const pushShaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), pushMat);
+    const pushCone = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 16), pushMat);
+    const pushGrab = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), new THREE.MeshBasicMaterial({ visible: false }));
+    pushArrow.add(pushShaft, pushCone, pushGrab);
+    pushArrow.visible = false;
+    pushArrow.renderOrder = 6;
+    pushShaft.renderOrder = pushCone.renderOrder = 6;
+    scene.add(pushArrow);
 
     const material = new THREE.MeshStandardMaterial({ color: "#c7ccd3", metalness: 0.05, roughness: 0.75 });
 
@@ -238,7 +256,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const s = st.current;
       const vpH = el.clientHeight || 1;
       const tan = Math.tan((camera.fov * Math.PI) / 180 / 2);
-      for (const grp of [s?.dims, s?.pins, s?.measures]) {
+      for (const grp of [s?.dims, s?.pins, s?.measures, s?.pushArrow]) {
         if (!grp) continue;
         for (const o of grp.children) {
           if (!(o as THREE.Sprite).isSprite || !o.userData.dimLabel) continue;
@@ -322,6 +340,30 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const onDown = (e: PointerEvent) => {
       downAt = { x: e.clientX, y: e.clientY };
       const s2 = st.current;
+      // Push-pull: grabbing the face arrow starts a normal-constrained drag (extrude).
+      if (s2 && s2.pushArrow.visible && cb.current.selectMode && cb.current.selectKind === "face" && s2.mesh) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+        rc.setFromCamera(ndc, camera);
+        s2.pushArrow.updateMatrixWorld(true);
+        if (rc.intersectObject(s2.pushGrab, false)[0]) {
+          const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number };
+          const center = new THREE.Vector3(...ud.center);
+          const n = new THREE.Vector3(...ud.normal).normalize();
+          const camDir = camera.getWorldDirection(new THREE.Vector3());
+          const planeN = camDir.clone().projectOnPlane(n).negate();
+          if (planeN.lengthSq() < 1e-6) { downAt = null; return; } // looking straight down the normal → skip
+          planeN.normalize();
+          const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(planeN, center);
+          const hit0 = new THREE.Vector3();
+          const base = rc.ray.intersectPlane(plane, hit0) ? hit0.sub(center).dot(n) : 0; // so the drag starts at 0
+          s2.pushDrag = { start: center, n, plane, base };
+          controls.enabled = false;
+          renderer.domElement.setPointerCapture?.(e.pointerId);
+          downAt = null;
+          return;
+        }
+      }
       if (s2 && s2.mesh && e.shiftKey && boxArmable()) {
         const rect = renderer.domElement.getBoundingClientRect();
         const div = document.createElement("div");
@@ -336,6 +378,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const d = downAt;
       downAt = null;
       const s2 = st.current;
+      // End a push-pull drag → commit the extrude distance as one op.
+      if (s2?.pushDrag) {
+        renderer.domElement.releasePointerCapture?.(e.pointerId);
+        controls.enabled = true;
+        const ud = s2.pushArrow.userData as { dist: number };
+        const dist = ud.dist ?? 0;
+        s2.pushDrag = null;
+        ud.dist = 0;
+        if (Math.abs(dist) > 1e-2) cb.current.onPushPull(dist);
+        return;
+      }
       if (s2?.box) {
         const { sx, sy } = s2.box;
         cancelBox();
@@ -358,6 +411,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
+      // Push-pull drag: project the pointer onto the drag plane and read the along-normal distance.
+      if (s2?.pushDrag) {
+        const rect = renderer.domElement.getBoundingClientRect();
+        const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+        rc.setFromCamera(ndc, camera);
+        const hit = new THREE.Vector3();
+        if (rc.ray.intersectPlane(s2.pushDrag.plane, hit)) {
+          let dist = hit.sub(s2.pushDrag.start).dot(s2.pushDrag.n) - s2.pushDrag.base;
+          dist = Math.round(dist * 2) / 2; // snap to 0.5 mm
+          const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number };
+          ud.dist = dist;
+          layoutPushArrow(s2, ud.center, ud.normal, dist, cb.current.units);
+        }
+        return;
+      }
       // Growing a marquee: resize the box div and skip hover work.
       if (s2?.box) {
         const rect = renderer.domElement.getBoundingClientRect();
@@ -421,7 +489,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, pushDrag: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -561,6 +629,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
     if (measurePending) addDot(measurePending);
   }, [measurements, measurePending, units, geometry]);
+
+  // Show/position the push-pull arrow on the selected flat face (null → hide).
+  useEffect(() => {
+    const s = st.current;
+    if (!s || s.pushDrag) return; // don't disturb an active drag
+    if (!pushArrow) { s.pushArrow.visible = false; return; }
+    s.pushArrow.userData.center = pushArrow.center;
+    s.pushArrow.userData.normal = pushArrow.normal;
+    s.pushArrow.userData.dist = 0;
+    layoutPushArrow(s, pushArrow.center, pushArrow.normal, 0, units);
+  }, [pushArrow, units, geometry]);
 
   useEffect(() => {
     if (st.current) updateDims(st.current, showDims, units);
@@ -1224,6 +1303,45 @@ function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
     const axis: [number, number, number] = vlen > 1e-8 ? [q.x / vlen, q.y / vlen, q.z / vlen] : [0, 0, 1];
     emit({ kind: "rotate", axis, angleDeg: (angle * 180) / Math.PI, center });
   }
+}
+
+// ---- Push-pull handle (drag a flat face along its normal to extrude) ----
+
+function modelSizeOf(s: Internals): number {
+  if (!s.mesh) return 40;
+  s.mesh.geometry.computeBoundingBox();
+  const sz = s.mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+  return Math.max(sz.x, sz.y, sz.z) || 40;
+}
+
+/** Position/scale the arrow along the face normal for a given (signed) extrude distance.
+ *  dist 0 draws the resting handle; during a drag it grows/flips to show magnitude + sign. */
+function layoutPushArrow(s: Internals, center: [number, number, number], normal: [number, number, number], dist: number, units: "mm" | "in") {
+  const g = s.pushArrow;
+  const size = modelSizeOf(s);
+  const dir = new THREE.Vector3(...normal).normalize();
+  const sign = dist >= 0 ? 1 : -1;
+  const L = Math.max(size * 0.18, Math.abs(dist));
+  const rS = Math.max(0.3, size * 0.006);
+  g.position.set(center[0], center[1], center[2]);
+  g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.multiplyScalar(sign));
+  const [shaft, cone, grab] = g.children as THREE.Mesh[];
+  shaft.position.set(0, L * 0.4, 0); shaft.scale.set(rS, L * 0.8, rS);
+  cone.position.set(0, L * 0.9, 0); cone.scale.set(rS * 2.6, L * 0.22, rS * 2.6);
+  // Generous invisible grab target so the thin arrow is easy to click.
+  const grabR = Math.max(rS * 8, size * 0.06);
+  grab.position.set(0, L * 0.55, 0); grab.scale.set(grabR, L * 1.3, grabR);
+  s.pushArrow.updateMatrixWorld(true);
+  // Live distance label while dragging (child index 3); removed at rest.
+  const old = g.children[3];
+  if (old) { g.remove(old); const m = (old as THREE.Sprite).material as THREE.SpriteMaterial; m.map?.dispose(); m.dispose(); }
+  if (Math.abs(dist) > 1e-3) {
+    const label = makeLabel(`${dist >= 0 ? "+" : "−"}${fmtDist(Math.abs(dist), units)}`, { fg: "#1d4ed8", bg: "rgba(255,255,255,0.95)", border: "#2563eb" });
+    label.position.set(0, L + size * 0.06, 0);
+    label.userData.dimLabel = true; label.userData.baseH = size * 0.05;
+    g.add(label);
+  }
+  g.visible = true;
 }
 
 function frameToObject(s: Internals) {

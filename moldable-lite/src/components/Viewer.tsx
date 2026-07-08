@@ -123,7 +123,7 @@ interface Internals {
   tri: TriData | null;
   lockedHit: { faceIndex: number; point: THREE.Vector3 } | null; // click-locked feature
   selCache: { key: string; info: FeatureInfo; region: Uint8Array | null } | null; // hover perf guard
-  box: { sx: number; sy: number; div: HTMLDivElement } | null; // in-progress marquee
+  box: { sx: number; sy: number; div: HTMLDivElement; pointerId: number } | null; // in-progress marquee (scoped to its pointer)
   ro: ResizeObserver;
   tc: TransformControls; // whole-body move/rotate/scale gizmo
   pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
@@ -132,7 +132,7 @@ interface Internals {
   pushArrow: THREE.Group; // drag-to-extrude handle on a selected flat face (shaft + cone + grab)
   pushGrab: THREE.Mesh; // invisible fat cylinder used to raycast/grab the arrow
   ghost: THREE.Mesh; // translucent live preview of the extruded volume during a push-pull drag
-  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number } | null; // active push-pull drag
+  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number } | null; // active push-pull drag (scoped to its pointer)
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
@@ -337,6 +337,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const boxArmable = () => cb.current.selectMode && cb.current.selectKind !== "point";
     const onShiftKey = (e: KeyboardEvent) => {
       if (e.key !== "Shift") return;
+      // A custom drag owns OrbitControls (it's disabled for the drag's duration). Never let a
+      // stray Shift press/release re-enable orbit mid-drag — that let a gizmo/push-pull drag
+      // resume orbiting on release. The drag itself restores controls when it ends.
+      const s2 = st.current;
+      if (s2 && (s2.pushDrag || s2.transforming)) return;
       const armed = e.type === "keydown" && boxArmable();
       controls.enabled = !armed;
       renderer.domElement.style.cursor = armed ? "crosshair" : "";
@@ -345,13 +350,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const cancelBox = () => {
       const s2 = st.current;
       if (!s2?.box) return;
+      try { renderer.domElement.releasePointerCapture?.(s2.box.pointerId); } catch { /* capture already lost */ }
       s2.box.div.remove();
       s2.box = null;
     };
     let downAt: { x: number; y: number } | null = null;
     const onDown = (e: PointerEvent) => {
-      downAt = { x: e.clientX, y: e.clientY };
       const s2 = st.current;
+      // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
+      // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
+      if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
+      downAt = { x: e.clientX, y: e.clientY };
       // Push-pull: grabbing the face arrow starts a normal-constrained drag (extrude).
       if (s2 && s2.pushArrow.visible && cb.current.selectMode && cb.current.selectKind !== "point" && s2.mesh) {
         const rect = renderer.domElement.getBoundingClientRect();
@@ -378,7 +387,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const capAttr = isExtrude ? (s2.highlight.geometry.getAttribute("position") as THREE.BufferAttribute | undefined) : undefined;
           const cap = capAttr ? (capAttr.array as Float32Array).slice() : new Float32Array();
           const bnd = cap.length ? faceBoundary(cap) : new Float32Array();
-          s2.pushDrag = { start: center, n, plane, base, cap, bnd, size: modelSizeOf(s2) };
+          s2.pushDrag = { start: center, n, plane, base, cap, bnd, size: modelSizeOf(s2), pointerId: e.pointerId };
           controls.enabled = false;
           // Pen/touch: without preventDefault Safari treats the drag as a scroll gesture and
           // starves us of pointermove events — the classic "Apple Pencil barely drags" failure.
@@ -395,13 +404,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         div.style.left = `${e.clientX - rect.left}px`;
         div.style.top = `${e.clientY - rect.top}px`;
         el.appendChild(div);
-        s2.box = { sx: e.clientX, sy: e.clientY, div };
+        s2.box = { sx: e.clientX, sy: e.clientY, div, pointerId: e.pointerId };
+        // Capture the pointer so a marquee released outside the canvas still lands its pointerup
+        // here (and no second touch can grow/commit this box).
+        try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* capture unsupported */ }
       }
     };
     const onUp = (e: PointerEvent) => {
+      const s2 = st.current;
+      // Only the pointer that OWNS an active drag may end it — ignore a second touch's up
+      // (an iPad palm resting while the Pencil drags) so it can't commit a stray value.
+      if (s2?.pushDrag && e.pointerId !== s2.pushDrag.pointerId) return;
+      if (s2?.box && e.pointerId !== s2.box.pointerId) return;
       const d = downAt;
       downAt = null;
-      const s2 = st.current;
       // End a push-pull drag → commit the extrude distance as one op.
       if (s2?.pushDrag) {
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* capture already lost */ }
@@ -441,6 +457,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const s2 = st.current;
       // Push-pull drag: project the pointer onto the drag plane and read the along-normal distance.
       if (s2?.pushDrag) {
+        if (e.pointerId !== s2.pushDrag.pointerId) return; // only the grabbing pointer drives the drag
         e.preventDefault(); // keep Safari from reinterpreting a pen/touch drag mid-gesture
         const rect = renderer.domElement.getBoundingClientRect();
         const ndc = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
@@ -475,6 +492,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
       // Growing a marquee: resize the box div and skip hover work.
       if (s2?.box) {
+        if (e.pointerId !== s2.box.pointerId) return; // only the pointer that opened the box grows it
         const rect = renderer.domElement.getBoundingClientRect();
         const x0 = Math.min(s2.box.sx, e.clientX) - rect.left, y0 = Math.min(s2.box.sy, e.clientY) - rect.top;
         s2.box.div.style.left = `${x0}px`;
@@ -523,8 +541,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // Safari fires pointercancel for system gestures (palm rejection, Scribble); without this
     // a pen drag can die mid-way and leave the drag armed with orbit frozen.
     const onCancelPtr = (e: PointerEvent) => {
-      downAt = null;
       const s2 = st.current;
+      // A cancel from a pointer that doesn't own the active drag (a palm's palm-rejection while
+      // the Pencil drags) must leave the owning drag untouched.
+      if (s2?.pushDrag && e.pointerId !== s2.pushDrag.pointerId) return;
+      if (s2?.box && e.pointerId !== s2.box.pointerId) return;
+      downAt = null;
       if (s2?.pushDrag) {
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* already lost */ }
         controls.enabled = true;

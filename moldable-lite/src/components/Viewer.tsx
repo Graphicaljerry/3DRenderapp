@@ -1496,12 +1496,14 @@ function layoutPushArrow(s: Internals, center: [number, number, number], normal:
   const dir = new THREE.Vector3(...normal).normalize();
   const sign = dist >= 0 ? 1 : -1;
   const L = Math.max(size * 0.18, Math.abs(dist));
-  const rS = Math.max(0.3, size * 0.006);
+  // Slim, Shapr-style handle: a hairline shaft with a small crisp tip. Capped so it
+  // never turns into a fat teardrop on large parts (the old size*0.006 did at ~150 mm).
+  const rS = Math.min(0.65, Math.max(0.22, size * 0.0032));
   g.position.set(center[0], center[1], center[2]);
   g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.multiplyScalar(sign));
   const [shaft, cone, grab] = g.children as THREE.Mesh[];
-  shaft.position.set(0, L * 0.4, 0); shaft.scale.set(rS, L * 0.8, rS);
-  cone.position.set(0, L * 0.9, 0); cone.scale.set(rS * 2.6, L * 0.22, rS * 2.6);
+  shaft.position.set(0, L * 0.42, 0); shaft.scale.set(rS, L * 0.84, rS);
+  cone.position.set(0, L * 0.92, 0); cone.scale.set(rS * 3.4, L * 0.16, rS * 3.4);
   // Generous invisible grab target so the thin arrow is easy to click.
   const grabR = Math.max(rS * 8, size * 0.06);
   grab.position.set(0, L * 0.55, 0); grab.scale.set(grabR, L * 1.3, grabR);

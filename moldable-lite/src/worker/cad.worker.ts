@@ -42,12 +42,36 @@ let importedShape: any = null;
 // tolerance is a few× the mesh deviation, still far below the wall spacing on real parts.
 const PICK_TOL = 0.25;
 
+/** Run a finder, treating replicad's throw-on-no/ambiguous-match as "not found". */
+function tryFind(f: () => any): any {
+  try { return f() ?? null; } catch { return null; }
+}
+
+/** Largest size (mm) at which `attempt` succeeds, found by bisection below the size that
+ *  failed. OCCT gives no analytic bound for a feasible fillet/chamfer radius — the fillet
+ *  surface must fit the neighbouring faces — so probing is the only honest answer. ~8
+ *  probes resolve to ~2% and run only on the failure path, never on a clean apply. */
+function probeMaxSize(failedSize: number, attempt: (size: number) => any): number | null {
+  let lo = 0; // largest size known to work
+  let hi = failedSize; // smallest size known to fail
+  for (let i = 0; i < 8 && hi - lo > Math.max(0.05, failedSize * 0.02); i++) {
+    const mid = (lo + hi) / 2;
+    try { attempt(mid); lo = mid; } catch { hi = mid; }
+  }
+  // Snap DOWN to a friendly 0.1 mm step, and shave a hair off the boundary — a size that
+  // barely succeeded in the probe can still fail inside a longer op chain.
+  const max = Math.floor(lo * 0.98 * 10) / 10;
+  return max >= 0.1 ? max : null;
+}
+
 /** Apply ONE direct op to a shape — all local, no AI.
  *  edge/corner: fillet/chamfer every edge through the point.
  *  face-fillet/chamfer: round/bevel all edges bounding the face at the point.
  *  extrude: push the face out (+) or in (−) by the distance. */
 function applyOneOp(shape: any, op: WorkerOp): any {
   const R: any = replicad;
+  // The size-attempt closure for this op, if it has a size that can be probed for a max.
+  let attempt: ((size: number) => any) | null = null;
   try {
     // Whole-body rigid transforms (gizmo). Cheap gp_Trsf, no re-triangulation.
     if (op.type === "translate") return shape.translate(op.delta);
@@ -55,24 +79,33 @@ function applyOneOp(shape: any, op: WorkerOp): any {
     if (op.type === "scale") return shape.scale(op.factor, op.center); // uniform only
     if (op.type === "fillet" || op.type === "chamfer") {
       const filter = (e: any) => e.withinDistance(PICK_TOL, op.at);
-      return op.type === "fillet" ? shape.fillet(op.size, filter) : shape.chamfer(op.size, filter);
+      attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
+      return attempt(op.size);
     }
-    // Faces: exact hit first (flat faces land dead-on); fall back to nearest within tolerance
-    // so a point on a curved face still resolves. unique:true keeps it to a single face.
-    const findFace = () =>
-      new R.FaceFinder().containsPoint(op.at).find(shape, { unique: true }) ||
-      new R.FaceFinder().withinDistance(PICK_TOL, op.at).find(shape, { unique: true });
-    const face = findFace();
+    // Faces: exact hit first (flat faces land dead-on). containsPoint works at nanometre
+    // tolerance, and replicad's unique:true THROWS (rather than returning null) when it
+    // misses — so each lookup is wrapped, or the tolerant fallbacks would never run and
+    // every curved-face op would die with "Finder has not found a unique solution".
+    const face =
+      tryFind(() => new R.FaceFinder().containsPoint(op.at).find(shape, { unique: true })) ??
+      tryFind(() => new R.FaceFinder().withinDistance(PICK_TOL, op.at).find(shape, { unique: true })) ??
+      tryFind(() => new R.FaceFinder().withinDistance(PICK_TOL, op.at).find(shape)[0]); // several this close → take the hit
     if (!face) throw new Error("couldn't resolve the face at that point");
     if (op.type === "extrude") {
       // Extrude the face (holes preserved) along its outward normal by the distance;
       // positive fuses (push out), negative cuts (pull in).
-      const vec = face.normalAt(op.at).normalized().multiply(op.size);
-      const prism = R.basicFaceExtrusion(face, vec);
-      return op.size >= 0 ? shape.fuse(prism) : shape.cut(prism);
+      const extrude = (size: number) => {
+        const vec = face.normalAt(op.at).normalized().multiply(size);
+        const prism = R.basicFaceExtrusion(face, vec);
+        return size >= 0 ? shape.fuse(prism) : shape.cut(prism);
+      };
+      // A cut deeper than the part can't work; probing for the max recess still can.
+      if (op.size < 0) attempt = (size) => extrude(-size);
+      return extrude(op.size);
     }
     const inFace = (e: any) => e.inPlane(R.makePlaneFromFace(face));
-    return op.type === "face-fillet" ? shape.fillet(op.size, inFace) : shape.chamfer(op.size, inFace);
+    attempt = (size) => (op.type === "face-fillet" ? shape.fillet(size, inFace) : shape.chamfer(size, inFace));
+    return attempt(op.size);
   } catch (e: any) {
     // OCCT failures often surface as a bare exception pointer ("11389816") — meaningless
     // to users. Translate those to plain language; keep real messages verbatim.
@@ -85,6 +118,13 @@ function applyOneOp(shape: any, op: WorkerOp): any {
       case "scale": label = `Scale ×${op.factor}`; break;
       case "extrude": label = `Extrude of ${op.size} mm`; break;
       default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
+    }
+    // Sized op that OCCT rejected → find the real limit so the app can say it (and
+    // auto-apply it) instead of the old shrug "try a smaller amount".
+    const sized = attempt && Math.abs(op.type === "extrude" ? (op as any).size : (op as any).size) > 0;
+    if (sized) {
+      const max = probeMaxSize(Math.abs((op as any).size), attempt!);
+      if (max) throw new Error(`${label} doesn't fit here — the most this spot allows is about ${max} mm. (max=${max})`);
     }
     throw new Error(`${label} didn't apply here — try a smaller amount or a different spot. (${detail})`);
   }

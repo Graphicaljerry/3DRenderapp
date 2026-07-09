@@ -279,6 +279,47 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     tc.addEventListener("dragging-changed", onDragChange);
     tcR.addEventListener("dragging-changed", onDragChange);
+
+    // ---- Gizmo arbitration: with arrows AND rings shown together, both controls raycast
+    // the SAME pointer event — near the centre both could grab a drag at once (translate +
+    // rotate simultaneously). Standard editor practice: raycast both pick zones, nearest
+    // handle wins EXCLUSIVELY, with the primary (translate) winning near-ties. Runs in the
+    // capture phase so the winner is decided before either control sees the event. ----
+    const rcG = new THREE.Raycaster();
+    const pickerOf = (t: TransformControls): THREE.Object3D | null => {
+      const root: any = t.getHelper();
+      const gz = root?.children?.find((c: any) => c.isTransformControlsGizmo);
+      return gz?.picker?.[t.getMode()] ?? null;
+    };
+    const arbitrate = (e: PointerEvent) => {
+      const s = st.current;
+      if (!s || s.transforming) return;
+      // Only needed when BOTH gizmos are attached (combined mode).
+      if (!(s.tc as any).object || !(s.tcR as any).object) {
+        s.tc.enabled = true;
+        s.tcR.enabled = true;
+        return;
+      }
+      const rect = renderer.domElement.getBoundingClientRect();
+      rcG.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+      const pt = pickerOf(s.tc), pr = pickerOf(s.tcR);
+      const dT = pt ? rcG.intersectObject(pt, true)[0]?.distance ?? Infinity : Infinity;
+      const dR = pr ? rcG.intersectObject(pr, true)[0]?.distance ?? Infinity : Infinity;
+      if (dT === Infinity && dR === Infinity) {
+        // Off both gizmos — leave both armed so whichever is reached first still works.
+        s.tc.enabled = true;
+        s.tcR.enabled = true;
+        return;
+      }
+      // Primary-handle rule: translate wins ties and near-ties (within 2 mm of ray depth).
+      const translateWins = dT <= dR + 2;
+      s.tc.enabled = translateWins;
+      s.tcR.enabled = !translateWins;
+      if (translateWins) (s.tcR as any).axis = null; // drop the loser's hover highlight
+      else (s.tc as any).axis = null;
+    };
+    renderer.domElement.addEventListener("pointermove", arbitrate, true);
+    renderer.domElement.addEventListener("pointerdown", arbitrate, true);
     // Keep the scale PREVIEW uniform (replicad scale is uniform only) so what you drag is what
     // you get — collapse any per-axis handle drag to a single factor live.
     tc.addEventListener("objectChange", () => {
@@ -892,6 +933,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.removeEventListener("pointermove", onMove);
       renderer.domElement.removeEventListener("pointerleave", onLeave);
       renderer.domElement.removeEventListener("pointercancel", onCancelPtr);
+      renderer.domElement.removeEventListener("pointermove", arbitrate, true);
+      renderer.domElement.removeEventListener("pointerdown", arbitrate, true);
       window.removeEventListener("keydown", onShiftKey);
       window.removeEventListener("keyup", onShiftKey);
       controls.dispose();

@@ -337,6 +337,12 @@ button { font-family: inherit; cursor: pointer; }
 .ins-unit { font-size: 10.5px; color: var(--subt); width: 20px; }
 .ins-note { font-size: 10.5px; line-height: 1.45; color: var(--subt); margin-top: 6px; }
 
+/* Material picker: the toolbar dot mirrors the chosen colour; swatch grid inside. */
+.mat-dot { width: 15px; height: 15px; border-radius: 999px; border: 1.5px solid var(--bord-strong); flex: 0 0 auto; }
+.mat-swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 2px 0 8px; }
+.mat-swatch { height: 26px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; }
+.mat-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
+
 /* Snapping popover (magnet button). */
 .snap-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 10; width: 252px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 10px 12px; animation: panel-in .18s cubic-bezier(.23,1,.32,1); }
 .snap-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; font-size: 12px; color: var(--ink2); }

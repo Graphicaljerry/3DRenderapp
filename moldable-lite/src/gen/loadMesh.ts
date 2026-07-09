@@ -6,6 +6,7 @@ import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js
 export interface MeshLoad {
   geometry: THREE.BufferGeometry;
   dims: { x: number; y: number; z: number };
+  texture?: THREE.Texture; // the GLB's baked color texture, when it ships one
 }
 
 /**
@@ -55,20 +56,29 @@ export async function glbToGeometry(glb: Blob): Promise<MeshLoad> {
     gltf.scene.updateMatrixWorld(true);
 
     const parts: THREE.BufferGeometry[] = [];
+    let texture: THREE.Texture | undefined;
     gltf.scene.traverse((o: THREE.Object3D) => {
       const mesh = o as THREE.Mesh;
       if ((mesh as any).isMesh && mesh.geometry) {
         let g = mesh.geometry.clone();
         g.applyMatrix4(mesh.matrixWorld);
         if (g.index) g = g.toNonIndexed();
-        // keep only position so unrelated attribute sets can be merged safely
+        // AI meshes usually ship painted: keep the first baked color map + its UVs.
+        const mat = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial | undefined;
+        if (!texture && mat?.map && g.getAttribute("uv")) texture = mat.map;
+        // keep position (+uv, for the texture) so unrelated attribute sets merge safely
         for (const name of Object.keys(g.attributes)) {
-          if (name !== "position") g.deleteAttribute(name);
+          if (name !== "position" && name !== "uv") g.deleteAttribute(name);
         }
         parts.push(g);
       }
     });
     if (parts.length === 0) throw new Error("The generated file contained no 3D mesh.");
+    // Mixed uv presence breaks merging — and makes the texture meaningless. Drop both.
+    if (parts.some((g) => !g.getAttribute("uv"))) {
+      texture = undefined;
+      for (const g of parts) g.deleteAttribute("uv");
+    }
 
     let geo = parts.length === 1 ? parts[0] : mergeGeometries(parts, false);
     if (!geo) throw new Error("Couldn't merge the generated mesh.");
@@ -92,7 +102,8 @@ export async function glbToGeometry(glb: Blob): Promise<MeshLoad> {
     size = new THREE.Vector3();
     geo.boundingBox!.getSize(size);
     const r = (n: number) => Math.round(n * 10) / 10;
-    return { geometry: geo, dims: { x: r(size.x), y: r(size.y), z: r(size.z) } };
+    if (texture) texture.colorSpace = THREE.SRGBColorSpace;
+    return { geometry: geo, dims: { x: r(size.x), y: r(size.y), z: r(size.z) }, texture };
   } finally {
     URL.revokeObjectURL(url);
   }

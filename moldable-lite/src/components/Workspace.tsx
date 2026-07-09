@@ -10,7 +10,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -170,6 +170,79 @@ function MicButton({ value, onChange }: { value: string; onChange: (t: string) =
     >
       <IconMic />
     </button>
+  );
+}
+
+/** Display material: filament colour + finish. Visual only — prints don't change. */
+function MaterialMenu({ appearance, setAppearance }: { appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void }) {
+  const [open, setOpen] = useState(false);
+  const COLORS = ["#c7ccd3", "#f4f4f2", "#2b2b2e", "#d94040", "#f28c28", "#ecc94b", "#48a860", "#3b82f6", "#8b5cf6", "#14b8a6"];
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button className="ghost sm iconbtn has-modes" aria-label="Material" aria-expanded={open} title="Display material — filament colour & finish (visual only)" onClick={() => setOpen((v) => !v)}>
+        <span className="mat-dot" style={{ background: appearance.color }} />
+      </button>
+      {open && (
+        <div className="snap-menu" role="menu">
+          <div className="mat-swatches">
+            {COLORS.map((c) => (
+              <button key={c} className={`mat-swatch${appearance.color === c ? " on" : ""}`} style={{ background: c }} aria-label={c} onClick={() => setAppearance({ ...appearance, color: c })} />
+            ))}
+          </div>
+          <div className="snap-row"><span>Finish</span>
+            <div className="seg sm">
+              {(["matte", "satin", "glossy", "metal"] as const).map((f) => (
+                <button key={f} className={appearance.finish === f ? "on" : ""} onClick={() => setAppearance({ ...appearance, finish: f })}>{f[0].toUpperCase() + f.slice(1)}</button>
+              ))}
+            </div>
+          </div>
+          <div className="ins-note">Visualization only — STL carries no colour; 3MF keeps it for multi-colour printers.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Physical surface texture: knurl / honeycomb / noise as REAL printable geometry. */
+function SurfaceMenu({ disabled, isCad, onApply }: { disabled: boolean; isCad: boolean; onApply: (pattern: "knurl" | "honeycomb" | "noise", scale: number, depth: number) => void }) {
+  const [open, setOpen] = useState(false);
+  const [pattern, setPattern] = useState<"knurl" | "honeycomb" | "noise">("knurl");
+  const [scale, setScale] = useState(3);
+  const [depth, setDepth] = useState(0.4);
+  const [raised, setRaised] = useState(true);
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button className="ghost sm iconbtn has-modes" aria-label="Surface texture" aria-expanded={open} title="Surface texture — knurl/honeycomb/noise as real printable geometry" onClick={() => setOpen((v) => !v)}>
+        <IconTexturize />
+      </button>
+      {open && (
+        <div className="snap-menu" role="menu">
+          <div className="snap-row"><span>Pattern</span>
+            <div className="seg sm">
+              {(["knurl", "honeycomb", "noise"] as const).map((pp) => (
+                <button key={pp} className={pattern === pp ? "on" : ""} onClick={() => setPattern(pp)}>{pp === "honeycomb" ? "Hex" : pp[0].toUpperCase() + pp.slice(1)}</button>
+              ))}
+            </div>
+          </div>
+          <div className="snap-row"><span>Cell size</span>
+            <div className="seg sm">{[2, 3, 5, 8].map((v) => <button key={v} className={scale === v ? "on" : ""} onClick={() => setScale(v)}>{v}mm</button>)}</div>
+          </div>
+          <div className="snap-row"><span>Depth</span>
+            <div className="seg sm">{[0.2, 0.4, 0.8, 1.5].map((v) => <button key={v} className={depth === v ? "on" : ""} onClick={() => setDepth(v)}>{v}</button>)}</div>
+          </div>
+          <div className="snap-row"><span>Direction</span>
+            <div className="seg sm">
+              <button className={raised ? "on" : ""} onClick={() => setRaised(true)}>Raised</button>
+              <button className={!raised ? "on" : ""} onClick={() => setRaised(false)}>Engraved</button>
+            </div>
+          </div>
+          <button className="primary sm" style={{ width: "100%", marginTop: 8 }} disabled={disabled} onClick={() => { setOpen(false); onApply(pattern, scale, raised ? depth : -depth); }}>
+            Apply to model
+          </button>
+          <div className="ins-note">{isCad ? "Real geometry — the model becomes a mesh (CAD version stays in History)." : "Real geometry, applied to the mesh."}</div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -385,6 +458,10 @@ interface Props {
   onRemoveAttachment: () => void;
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
+  appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
+  setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void;
+  texture: THREE.Texture | null;
+  onApplySurface: (pattern: "knurl" | "honeycomb" | "noise", scale: number, depth: number) => void;
   printer: PrinterDefaults;
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
@@ -792,6 +869,8 @@ export function Workspace(p: Props) {
                     <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                   </div>
                 )}
+                <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
+                <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
                 <SnapMenu snap={p.snap} setSnap={p.setSnap} />
                 <button
                   className={`ghost sm iconbtn${p.measureCtl.mode ? " on" : ""}`}
@@ -873,6 +952,8 @@ export function Workspace(p: Props) {
                 attachSelected={p.attachSelected}
                 onAttachSelect={p.onAttachSelect}
                 snap={p.snap}
+                appearance={p.appearance}
+                texture={p.texture}
                 transformMode={p.transformCtl.mode}
                 measureMode={p.measureCtl.mode}
                 measurePending={p.measureCtl.pending}

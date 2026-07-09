@@ -141,6 +141,9 @@ interface Internals {
   pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number; live?: boolean } | null; // active push-pull drag; live = a real boolean preview replaced the ghost
   arrowHot: boolean; // pointer is over (or dragging) the push-pull arrow — drawn yellow
   selBox: THREE.Group | null; // selection chrome: bounding box + corner anchor dots
+  axScene: THREE.Scene; // corner orientation gizmo (Blender-style): its own tiny scene…
+  axCam: THREE.OrthographicCamera; // …rendered through an ortho cam into a corner viewport
+  axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
@@ -268,6 +271,79 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s.pivot.scale.set(f, f, f);
     });
 
+    // ---- Corner orientation gizmo (Blender/Spline-style): drag it to orbit, click a
+    // ball to snap to that side. Rendered as a second tiny scene in a corner viewport. ----
+    const AX_PX = 92; // gizmo viewport size (CSS px), bottom-right corner
+    const axScene = new THREE.Scene();
+    const axCam = new THREE.OrthographicCamera(-1.9, 1.9, 1.9, -1.9, 0.1, 10);
+    axCam.position.set(0, 0, 5);
+    const axGroup = new THREE.Group();
+    axScene.add(axGroup);
+    const axBalls: THREE.Mesh[] = [];
+    const AXES: { dir: [number, number, number]; color: number; label?: string }[] = [
+      { dir: [1, 0, 0], color: 0xef4444, label: "X" },
+      { dir: [0, 1, 0], color: 0x22c55e, label: "Y" },
+      { dir: [0, 0, 1], color: 0x3b82f6, label: "Z" },
+      { dir: [-1, 0, 0], color: 0xef4444 },
+      { dir: [0, -1, 0], color: 0x22c55e },
+      { dir: [0, 0, -1], color: 0x3b82f6 },
+    ];
+    for (const ax of AXES) {
+      const pos = new THREE.Vector3(...ax.dir).multiplyScalar(1.15);
+      if (ax.label) {
+        const line = new THREE.Line(
+          new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), pos]),
+          new THREE.LineBasicMaterial({ color: ax.color, transparent: true, opacity: 0.85 }),
+        );
+        axGroup.add(line);
+      }
+      const ball = new THREE.Mesh(
+        new THREE.SphereGeometry(ax.label ? 0.3 : 0.22, 14, 10),
+        new THREE.MeshBasicMaterial({ color: ax.color, transparent: true, opacity: ax.label ? 0.95 : 0.4 }),
+      );
+      ball.position.copy(pos);
+      ball.userData.dir = ax.dir;
+      axGroup.add(ball);
+      axBalls.push(ball);
+      if (ax.label) {
+        const spr = makeLabel(ax.label, { fg: "#ffffff", bg: "rgba(0,0,0,0)", border: "rgba(0,0,0,0)" });
+        spr.scale.set(0.62, 0.62, 1);
+        spr.position.copy(pos);
+        spr.renderOrder = 2;
+        axGroup.add(spr);
+      }
+    }
+
+    // Canvas-relative hit test for the gizmo's corner box.
+    const inAxes = (e: { clientX: number; clientY: number }) => {
+      const r = renderer.domElement.getBoundingClientRect();
+      const x = e.clientX - r.left, y = e.clientY - r.top;
+      return x > r.width - AX_PX - 8 && x < r.width - 8 && y > r.height - AX_PX - 8 && y < r.height - 8;
+    };
+    const axPick = (e: { clientX: number; clientY: number }) => {
+      const r = renderer.domElement.getBoundingClientRect();
+      const nx = ((e.clientX - r.left - (r.width - AX_PX - 8)) / AX_PX) * 2 - 1;
+      const ny = -(((e.clientY - r.top - (r.height - AX_PX - 8)) / AX_PX) * 2 - 1);
+      rcAx.setFromCamera(new THREE.Vector2(nx, ny), axCam);
+      return rcAx.intersectObjects(axBalls, false)[0]?.object as THREE.Mesh | undefined;
+    };
+    const rcAx = new THREE.Raycaster();
+    // Drag-to-orbit state: the gizmo owns its pointer just like every other drag.
+    let axDrag: { pointerId: number; x: number; y: number; moved: boolean } | null = null;
+    const orbitBy = (dx: number, dy: number) => {
+      const offset = camera.position.clone().sub(controls.target);
+      offset.applyAxisAngle(new THREE.Vector3(0, 0, 1), -dx * 0.011); // azimuth about world Z
+      const right = new THREE.Vector3().crossVectors(offset, new THREE.Vector3(0, 0, 1)).normalize().negate();
+      const angleToZ = offset.angleTo(new THREE.Vector3(0, 0, 1));
+      const dPolar = -dy * 0.011;
+      // Clamp so the camera never crosses the poles (keeps Z-up orbiting stable).
+      const clamped = Math.min(Math.PI - 0.05, Math.max(0.05, angleToZ + dPolar)) - angleToZ;
+      offset.applyAxisAngle(right, clamped);
+      camera.position.copy(controls.target).add(offset);
+      camera.lookAt(controls.target);
+      controls.update();
+    };
+
     let raf = 0;
     let frame = 0;
     const animate = () => {
@@ -295,6 +371,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
       }
       renderer.render(scene, camera);
+      // Corner orientation gizmo: counter-rotate so it mirrors the world axes on screen.
+      axGroup.quaternion.copy(camera.quaternion).invert();
+      const cw = el.clientWidth, ch = el.clientHeight;
+      renderer.autoClear = false;
+      renderer.clearDepth();
+      renderer.setViewport(cw - AX_PX - 8, 8, AX_PX, AX_PX);
+      renderer.setScissor(cw - AX_PX - 8, 8, AX_PX, AX_PX);
+      renderer.setScissorTest(true);
+      renderer.render(axScene, axCam);
+      renderer.setScissorTest(false);
+      renderer.setViewport(0, 0, cw, ch);
+      renderer.autoClear = true;
       raf = requestAnimationFrame(animate);
     };
     raf = requestAnimationFrame(animate);
@@ -385,6 +473,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
+      if (axDrag) return;
+      // The corner orientation gizmo owns its pointer: drag orbits, click snaps a view.
+      if (inAxes(e)) {
+        axDrag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+        controls.enabled = false;
+        e.preventDefault();
+        try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+        return;
+      }
       downAt = { x: e.clientX, y: e.clientY };
       // Push-pull: grabbing the face arrow starts a normal-constrained drag (extrude).
       if (s2 && s2.pushArrow.visible && cb.current.selectMode && cb.current.selectKind !== "point" && s2.mesh) {
@@ -439,6 +536,19 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onUp = (e: PointerEvent) => {
       const s2 = st.current;
+      if (axDrag) {
+        if (e.pointerId !== axDrag.pointerId) return;
+        const wasClick = !axDrag.moved;
+        axDrag = null;
+        controls.enabled = true;
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
+        if (wasClick) {
+          const ball = axPick(e);
+          const dir = ball?.userData.dir as [number, number, number] | undefined;
+          if (dir && s2) snapToDir(s2, dir);
+        }
+        return;
+      }
       // Only the pointer that OWNS an active drag may end it — ignore a second touch's up
       // (an iPad palm resting while the Pencil drags) so it can't commit a stray value.
       if (s2?.pushDrag && e.pointerId !== s2.pushDrag.pointerId) return;
@@ -484,6 +594,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
+      // Orientation-gizmo drag: orbit the camera about the target (world Z stays up).
+      if (axDrag) {
+        if (e.pointerId !== axDrag.pointerId) return;
+        e.preventDefault();
+        const dx = e.clientX - axDrag.x, dy = e.clientY - axDrag.y;
+        if (Math.abs(dx) + Math.abs(dy) > 3) axDrag.moved = true;
+        orbitBy(dx, dy);
+        axDrag.x = e.clientX;
+        axDrag.y = e.clientY;
+        return;
+      }
+      // Hovering the gizmo: highlight the ball under the pointer, quiet everything else.
+      if (s2 && !s2.pushDrag && !s2.box && inAxes(e)) {
+        const hit = axPick(e);
+        for (const b of axBalls) b.scale.setScalar(b === hit ? 1.3 : 1);
+        renderer.domElement.style.cursor = hit ? "pointer" : "grab";
+        return;
+      }
       // Push-pull drag: project the pointer onto the drag plane and read the along-normal distance.
       if (s2?.pushDrag) {
         if (e.pointerId !== s2.pushDrag.pointerId) return; // only the grabbing pointer drives the drag
@@ -592,6 +720,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // a pen drag can die mid-way and leave the drag armed with orbit frozen.
     const onCancelPtr = (e: PointerEvent) => {
       const s2 = st.current;
+      if (axDrag && e.pointerId === axDrag.pointerId) {
+        axDrag = null;
+        controls.enabled = true;
+        return;
+      }
       // A cancel from a pointer that doesn't own the active drag (a palm's palm-rejection while
       // the Pencil drags) must leave the owning drag untouched.
       if (s2?.pushDrag && e.pointerId !== s2.pushDrag.pointerId) return;
@@ -634,7 +767,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, axScene, axCam, axBalls };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -647,6 +780,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       window.removeEventListener("keydown", onShiftKey);
       window.removeEventListener("keyup", onShiftKey);
       controls.dispose();
+      axScene.traverse((o) => {
+        const m = o as THREE.Mesh & THREE.Sprite;
+        (m.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
+        const mat = m.material as (THREE.Material & { map?: THREE.Texture }) | undefined;
+        mat?.map?.dispose?.();
+        mat?.dispose?.();
+      });
       tc.detach();
       // three r169's TransformControls.dispose() calls this.traverse(), which the class no
       // longer has (it stopped extending Object3D; fixed upstream in later releases). Calling
@@ -782,6 +922,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s.selBox = null;
     }
     if (!modelSelected || !s.mesh) return;
+    // Selecting also arms the gizmo, which re-parents the mesh into a pivot group in this
+    // same commit — setFromObject() doesn't refresh ancestor matrices, so without this the
+    // box measures against the pivot's stale identity matrix and lands half off the part.
+    s.mesh.updateWorldMatrix(true, true);
     const box = new THREE.Box3().setFromObject(s.mesh);
     const group = new THREE.Group();
     const helper = new THREE.Box3Helper(box, new THREE.Color(0x14b8a6));
@@ -1710,6 +1854,23 @@ function frameToObject(s: Internals) {
   const dist = r / Math.sin((s.camera.fov * Math.PI) / 180 / 2);
   const dirv = new THREE.Vector3(1, -1.3, 0.9).normalize();
   s.camera.position.copy(center.clone().add(dirv.multiplyScalar(dist * 1.15)));
+  s.camera.near = dist / 100;
+  s.camera.far = dist * 100;
+  s.camera.updateProjectionMatrix();
+  s.controls.target.copy(center);
+  s.controls.update();
+}
+
+/** Snap the camera along an arbitrary world axis (the orientation gizmo's click). */
+function snapToDir(s: Internals, dir: [number, number, number]) {
+  const box = s.mesh ? new THREE.Box3().setFromObject(s.mesh) : null;
+  const center = box ? box.getBoundingSphere(new THREE.Sphere()).center : s.controls.target.clone();
+  const r = box ? Math.max(box.getBoundingSphere(new THREE.Sphere()).radius, 1) : 60;
+  const dist = (r / Math.sin((s.camera.fov * Math.PI) / 180 / 2)) * 1.15;
+  const d = new THREE.Vector3(...dir);
+  if (Math.abs(d.z) > 0.99) d.y = d.z > 0 ? -0.002 : 0.002; // dodge the Z-up pole for OrbitControls
+  d.normalize();
+  s.camera.position.copy(center.clone().add(d.multiplyScalar(dist)));
   s.camera.near = dist / 100;
   s.camera.far = dist * 100;
   s.camera.updateProjectionMatrix();

@@ -451,11 +451,11 @@ interface Props {
   modelSelected: boolean;
   onModelSelect: (sel: boolean) => void;
   onScaleTo: (axis: "x" | "y" | "z", target: number) => void; // uniform-scale the part so `axis` hits target mm
-  attachment: { geometry: THREE.BufferGeometry; name: string } | null;
-  attachSelected: boolean;
-  onAttachSelect: (sel: boolean) => void;
-  onMergeAttachment: () => void;
-  onRemoveAttachment: () => void;
+  attachments: { id: string; geometry: THREE.BufferGeometry; name: string }[];
+  selAttachIds: string[];
+  onAttachSelect: (id: string | null, additive?: boolean) => void;
+  onMergeAttachments: (ids?: string[]) => void;
+  onRemoveAttachment: (id: string) => void;
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
@@ -955,8 +955,8 @@ export function Workspace(p: Props) {
                 boxSelectionActive={p.facesCtl.faces.length > 0}
                 modelSelected={p.modelSelected}
                 onModelSelect={p.onModelSelect}
-                attachment={p.attachment?.geometry ?? null}
-                attachSelected={p.attachSelected}
+                attachments={p.attachments}
+                selAttachIds={p.selAttachIds}
                 onAttachSelect={p.onAttachSelect}
                 snap={p.snap}
                 appearance={p.appearance}
@@ -1002,13 +1002,21 @@ export function Workspace(p: Props) {
                       <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
                     </div>
                   ))}
-                  {p.attachment && (
-                    <div className={`lp-row${p.attachSelected ? " on" : ""}`} style={{ cursor: "pointer" }} onClick={() => p.onAttachSelect(!p.attachSelected)} title="A free-floating object — position it, then Merge to make it part of the model">
-                      <span className="lp-dot" style={{ background: "#7fc4b9" }} />
-                      <span className="lp-name">{p.attachment.name}</span>
-                      <button className="ghost sm" style={{ padding: "2px 8px", fontSize: 10.5 }} title="Fuse it into the model (becomes one printable solid)" onClick={(e) => { e.stopPropagation(); p.onMergeAttachment(); }}>Merge</button>
-                      <button className="x" aria-label="Remove attachment" onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(); }}><IconX /></button>
-                    </div>
+                  {p.attachments.map((a) => {
+                    const on = p.selAttachIds.includes(a.id);
+                    return (
+                      <div key={a.id} className={`lp-row${on ? " on" : ""}`} style={{ cursor: "pointer" }} title="A free-floating object — click to select (shift/checkbox adds to a group), then move together or Merge" onClick={(e) => p.onAttachSelect(a.id, e.shiftKey)}>
+                        <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
+                        <span className="lp-dot" style={{ background: "#7fc4b9" }} />
+                        <span className="lp-name">{a.name}</span>
+                        <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
+                      </div>
+                    );
+                  })}
+                  {p.attachments.length > 0 && (
+                    <button className="primary sm" style={{ width: "100%", marginTop: 6 }} title="Fuse into ONE printable solid (Undo brings the pieces back)" onClick={() => p.onMergeAttachments(p.selAttachIds.length > 1 ? p.selAttachIds : undefined)}>
+                      {p.selAttachIds.length > 1 ? `Merge selected (${p.selAttachIds.length})` : "Merge all into model"}
+                    </button>
                   )}
                   {p.pins.map((pin, i) => (
                     <button key={pin.id} className={`lp-row${p.pinCtl.active?.pin.id === pin.id ? " on" : ""}`} title="Select this point marker" onClick={() => p.pinCtl.select(pin.id)}>

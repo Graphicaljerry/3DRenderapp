@@ -280,8 +280,22 @@ export default function App() {
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
-  const [attachObj, setAttachObj] = useState<{ geometry: THREE.BufferGeometry; name: string } | null>(null); // free-floating second object (logo, badge…)
-  const [attachSelected, setAttachSelected] = useState(false);
+  const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string }[]>([]); // free-floating objects (logos, badges, parts…)
+  const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
+  const attachSelected = selAttachIds.length > 0;
+  const addAttachment = (geometry: THREE.BufferGeometry, name: string) => {
+    const id = mid();
+    setAttachments((a) => [...a, { id, geometry, name }]);
+    selectAttach(id);
+  };
+  const removeAttachment = (id: string) => {
+    setAttachments((a) => a.filter((x) => x.id !== id));
+    setSelAttachIds((sids) => {
+      const next = sids.filter((x) => x !== id);
+      if (!next.length) setTransformMode("off");
+      return next;
+    });
+  };
   const [appearance, setAppearanceState] = useState<{ color: string; finish: "matte" | "satin" | "glossy" | "metal" }>(() => {
     try { return { color: "#c7ccd3", finish: "matte", ...JSON.parse(localStorage.getItem("moldable_appearance") ?? "{}") }; } catch { return { color: "#c7ccd3", finish: "matte" }; }
   });
@@ -864,8 +878,7 @@ export default function App() {
         // A free-floating object ON the current model: position with the gizmo/anchors,
         // then Merge in the Objects panel fuses it into one printable solid.
         const { geometry: g, dims: d } = extrudeSvg(svgDraft.text, { sizeMm: prm.sizeMm, heightMm: prm.heightMm });
-        setAttachObj({ geometry: g, name: svgDraft.name });
-        selectAttach(true);
+        addAttachment(g, svgDraft.name);
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added **${svgDraft.name}** (${d.x} × ${d.y} × ${d.z} mm) as a movable object on the model. Drag the arrows/rings to place it, corner dots to size it, then press **Merge** in the Objects panel (layers icon) to make it part of the case. Merging produces a mesh — do CAD edits first.` }]);
         URL.revokeObjectURL(svgDraft.url);
         setSvgDraft(null);
@@ -911,8 +924,7 @@ export default function App() {
       try {
         const { geometry: g, dims: d } = await loadAnyMesh(f);
         const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
-        setAttachObj({ geometry: g, name: cleanName });
-        selectAttach(true);
+        addAttachment(g, cleanName);
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added **${cleanName}** (${d.x} × ${d.y} × ${d.z} mm) as a new object on the canvas — it's in the Objects panel. Position it with the gizmo, **Merge** to fuse it into the model, or ✕ to remove. (To open it on its own instead, start a + New chat first.)` }]);
       } catch (err: any) {
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that mesh file: " + String(err?.message ?? err), error: true }]);
@@ -1248,21 +1260,24 @@ export default function App() {
 
   /** Select/deselect the whole part: bounding box + anchors AND the move gizmo, Spline-style —
    *  selecting an object IS having transform handles on it. Other tools stand down. */
-  function selectAttach(sel: boolean) {
-    setAttachSelected(sel);
-    if (sel) setModelSelected(false);
-    setTransformMode(sel ? "move" : modelSelected && !sel ? "move" : "off");
-    if (sel) {
-      setSelectMode(false);
-      setMeasureMode(false);
-      setSelectedFeature(null);
-      setSelectedFaces([]);
+  function selectAttach(id: string | null, additive = false) {
+    if (!id) {
+      setSelAttachIds([]);
+      setTransformMode("off");
+      return;
     }
+    setSelAttachIds((sids) => (additive ? (sids.includes(id) ? sids.filter((x) => x !== id) : [...sids, id]) : [id]));
+    setModelSelected(false);
+    setTransformMode("move");
+    setSelectMode(false);
+    setMeasureMode(false);
+    setSelectedFeature(null);
+    setSelectedFaces([]);
   }
 
   function selectModel(sel: boolean) {
     setModelSelected(sel);
-    if (sel) setAttachSelected(false);
+    if (sel) setSelAttachIds([]);
     setTransformMode(sel ? "move" : "off");
     if (sel) {
       setSelectMode(false);
@@ -1295,8 +1310,7 @@ export default function App() {
       const svgText = /<svg[\s\S]*?<\/svg>/i.exec(raw)?.[0];
       if (!svgText) throw new Error("the model didn't return a usable SVG — try rephrasing (e.g. \"a minimalist apple silhouette logo\")");
       const { geometry: g, dims: d } = extrudeSvg(svgText, { sizeMm: 25, heightMm: 0.8 });
-      setAttachObj({ geometry: g, name: request.match(/\b([a-z0-9-]+)\s+(?:logo|emblem|badge|icon|symbol)/i)?.[1] ?? "logo" });
-      selectAttach(true);
+      addAttachment(g, request.match(/\b([a-z0-9-]+)\s+(?:logo|emblem|badge|icon|symbol)/i)?.[1] ?? "logo");
       setMessages((m) => m.map((x) => (x.id === ph ? { ...x, streaming: false, model: shortModelName(effLlm.model), text: `Drew it and placed it on the model as a new object (${d.x} × ${d.y} mm, 0.8 mm raised). Drag the arrows to position it on the back, corner dots to resize, then **Merge** in the Objects panel to make it part of the case. Not right? ✕ removes it — ask again with more detail.` } : x)));
     } catch (err: any) {
       setMessages((m) => m.map((x) => (x.id === ph ? { ...x, streaming: false, error: true, text: `Couldn't draw that logo: ${String(err?.message ?? err)}` } : x)));
@@ -1305,37 +1319,45 @@ export default function App() {
     }
   }
 
-  /** Fuse the attachment into the model via the Manifold worker → one printable mesh. */
-  async function mergeAttachment() {
-    if (!attachObj || !geometry || !result) return;
-    const baked = viewer.current?.bakeAttachment();
-    if (!baked) return;
+  /** Fuse attachments into the model via the Manifold worker → one printable mesh.
+   *  `ids` = which objects to merge (undefined = all of them), unioned one at a time. */
+  async function mergeAttachments(ids?: string[]) {
+    const targets = attachments.filter((a) => !ids || ids.includes(a.id));
+    if (!targets.length || !geometry || !result) return;
     setStatus("generating");
     try {
-      if (!(await previewSetBase(geometry))) throw new Error("this model's mesh couldn't be welded for a boolean");
-      const pos = await previewBoolean(baked, 1);
-      if (!pos) throw new Error("the union failed — try moving the object so it overlaps the model");
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      g.computeVertexNormals();
-      g.computeBoundingBox();
-      const sz = g.boundingBox!.getSize(new THREE.Vector3());
+      let baseGeom = geometry;
+      let g: THREE.BufferGeometry | null = null;
+      for (const t of targets) {
+        const baked = viewer.current?.bakeAttachment(t.id);
+        if (!baked) throw new Error(`couldn't read ${t.name}'s placement`);
+        if (!(await previewSetBase(baseGeom))) throw new Error("this model's mesh couldn't be welded for a boolean");
+        const pos = await previewBoolean(baked, 1);
+        if (!pos) throw new Error(`the union with ${t.name} failed — try moving it so it overlaps`);
+        g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        baseGeom = g;
+      }
+      g!.computeVertexNormals();
+      g!.computeBoundingBox();
+      const sz = g!.boundingBox!.getSize(new THREE.Vector3());
       const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
-      const name = `${project?.name ?? "Model"} + ${attachObj.name}`;
+      const names = targets.map((t) => t.name).join(" + ");
       const res: EngineResult = {
         kind: "generative",
-        geometry: g,
+        geometry: g!,
         dims,
-        source: { kind: "gen", provider: "merge", model: attachObj.name },
+        source: { kind: "gen", provider: "merge", model: names },
         supportsStep: false,
-        glb: geometryToSTL(g),
+        glb: geometryToSTL(g!),
       };
-      applyResult(res, name, `Merged ${attachObj.name} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${attachObj.name}`);
-      setAttachObj(null);
-      setAttachSelected(false);
+      applyResult(res, `${project?.name ?? "Model"} + ${names}`, `Merged ${names} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${names}`);
+      const mergedIds = new Set(targets.map((t) => t.id));
+      setAttachments((a) => a.filter((x) => !mergedIds.has(x.id)));
+      setSelAttachIds([]);
       setTransformMode("off");
       setModelSelected(false);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Merged **${attachObj.name}** into the model — one printable solid now (mesh: STL/3MF export; STEP needs the pre-merge version in History). Undo brings the separate pieces back.` }]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Merged **${names}** into the model — one printable solid now (mesh: STL/3MF; STEP needs the pre-merge version in History). Undo brings the pieces back.` }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't merge: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
@@ -2053,11 +2075,11 @@ export default function App() {
         modelSelected={(modelSelected || transformMode !== "off") && !attachSelected}
         onModelSelect={selectModel}
         onScaleTo={scaleToDim}
-        attachment={attachObj}
-        attachSelected={attachSelected}
+        attachments={attachments}
+        selAttachIds={selAttachIds}
         onAttachSelect={selectAttach}
-        onMergeAttachment={() => { void mergeAttachment(); }}
-        onRemoveAttachment={() => { setAttachObj(null); setAttachSelected(false); setTransformMode("off"); }}
+        onMergeAttachments={(ids?: string[]) => { void mergeAttachments(ids); }}
+        onRemoveAttachment={removeAttachment}
         snap={snap}
         setSnap={setSnap}
         appearance={appearance}

@@ -346,8 +346,12 @@ button { font-family: inherit; cursor: pointer; }
 .viewer.drop { outline: 2px dashed var(--accent); outline-offset: -3px; border-radius: 12px; }
 
 /* Snapping popover (magnet button). */
-.snap-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 10; width: 252px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 10px 12px; animation: panel-in .18s cubic-bezier(.23,1,.32,1); }
-.snap-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0; font-size: 12px; color: var(--ink2); }
+.snap-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 10; width: 284px; max-width: calc(100vw - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 10px 12px; animation: panel-in .18s cubic-bezier(.23,1,.32,1); }
+/* Rows wrap when a segment is wider than the popover (iPad: Matte/Satin/Glossy/Metal),
+   and the segment itself can wrap its buttons rather than overflow the panel. */
+.snap-row { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; margin: 6px 0; font-size: 12px; color: var(--ink2); flex-wrap: wrap; }
+.snap-row .seg { flex-wrap: wrap; max-width: 100%; }
+.snap-row .seg button { padding: 4px 8px; }
 
 /* Objects/layers list — everything on the canvas, selectable. */
 .layers-panel { position: absolute; top: 10px; left: 10px; z-index: 9; width: min(240px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
@@ -359,6 +363,7 @@ button { font-family: inherit; cursor: pointer; }
 .lp-row svg { flex: 0 0 auto; color: var(--accent-d); }
 .lp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lp-sub { font-size: 10.5px; color: var(--subt); white-space: nowrap; }
+.lp-check { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
 .lp-dot { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 auto; }
 .lp-dot.pin { width: 16px; height: 16px; border-radius: 999px; background: var(--accent-w); color: var(--accent-d); font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
 .lp-empty { padding: 8px; color: var(--subt); font-size: 12px; }

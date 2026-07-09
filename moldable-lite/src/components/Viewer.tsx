@@ -19,8 +19,8 @@ export interface ViewerHandle {
   resetView: () => void;
   /** Snap the camera to a standard view, framed on the model. */
   setView: (v: "top" | "front" | "right" | "iso") => void;
-  /** The attachment's triangles with its current transform baked in (for Merge). */
-  bakeAttachment: () => Float32Array | null;
+  /** An attachment's triangles with its current transform baked in (for Merge). */
+  bakeAttachment: (id: string) => Float32Array | null;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -63,9 +63,9 @@ interface Props {
   pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round
   modelSelected: boolean; // draw a bounding box around the whole part
   onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
-  attachment: THREE.BufferGeometry | null; // a second, free-floating object (e.g. an SVG logo)
-  attachSelected: boolean; // gizmo + box target the attachment instead of the model
-  onAttachSelect: (sel: boolean) => void;
+  attachments: { id: string; geometry: THREE.BufferGeometry }[]; // free-floating objects
+  selAttachIds: string[]; // which of them are selected (>1 → group transform)
+  onAttachSelect: (id: string | null, additive?: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
@@ -141,7 +141,9 @@ interface Internals {
   ro: ResizeObserver;
   tc: TransformControls; // whole-body move/rotate/scale gizmo (translate in combined mode)
   tcR: TransformControls; // rotation rings shown ALONGSIDE tc in combined mode
-  attach: THREE.Mesh | null; // the free-floating attachment object
+  attachMap: Map<string, THREE.Mesh>; // id → free-floating attachment mesh
+  attachGroup: THREE.Group | null; // temp pivot when several attachments are selected
+  selAttach: string[] | null; // current attachment selection (for enterTransform)
   pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
   transforming: boolean; // a gizmo drag is in progress (freezes orbit + select picking)
   measures: THREE.Group; // point-to-point measurement lines + labels
@@ -156,7 +158,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachment, attachSelected, onAttachSelect, snap, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
@@ -404,9 +406,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // Preview through the gizmo's pivot (selection always arms it); the box chrome
       // follows via a scale-about-centre transform on the group. Attachment target:
       // scale the object itself — its transform IS its state (no parametric commit).
-      if (s2.attach && s2.tc.object === s2.attach) {
-        const base = (s2.attach.userData.baseScale as number) ?? 1;
-        s2.attach.scale.setScalar(base * f);
+      const obj = s2.tc.object as THREE.Object3D | undefined;
+      if (obj && obj !== s2.pivot) {
+        const base = (obj.userData.baseScale as number) ?? 1;
+        obj.scale.setScalar(base * f);
       } else if (s2.pivot) s2.pivot.scale.set(f, f, f);
       if (s2.selBox) {
         const c = s2.selBox.userData.center as THREE.Vector3;
@@ -475,7 +478,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // (pin mode). A plain click with neither mode on does nothing — pins only ever
     // drop while Pin mode is active, so they can't scatter across the model. ----
     const rc = new THREE.Raycaster();
-    const handleTap = (e: { clientX: number; clientY: number }) => {
+    const handleTap = (e: { clientX: number; clientY: number; shiftKey?: boolean }) => {
       const s2 = st.current;
       if (!s2) return;
       const rect = renderer.domElement.getBoundingClientRect();
@@ -488,11 +491,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         // Gizmo owns the pointer — except taps: on the attachment/model → retarget the
         // selection; on empty space → deselect everything.
         if (!s2.transforming) {
-          const onAttach = s2.attach && rc.intersectObject(s2.attach, false)[0];
+          const hitA = rc.intersectObjects([...s2.attachMap.values()], false)[0];
           const onModel = s2.mesh && rc.intersectObject(s2.mesh, false)[0];
-          if (onAttach) cb.current.onAttachSelect(true);
-          else if (onModel) cb.current.onModelSelect(true);
-          else { cb.current.onModelSelect(false); cb.current.onAttachSelect(false); }
+          if (hitA) {
+            const id = [...s2.attachMap.entries()].find(([, m]) => m === hitA.object)?.[0] ?? null;
+            cb.current.onAttachSelect(id, !!e.shiftKey);
+          } else if (onModel) cb.current.onModelSelect(true);
+          else { cb.current.onModelSelect(false); cb.current.onAttachSelect(null); }
         }
         return;
       }
@@ -514,8 +519,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // No tool active → a tap on the part selects the WHOLE model (bounding box);
       // a tap on empty space deselects. Tools take over below when armed.
       if (!cb.current.selectMode) {
-        if (s2.attach && rc.intersectObject(s2.attach, false)[0]) cb.current.onAttachSelect(true);
-        else if (s2.mesh) cb.current.onModelSelect(!!rc.intersectObject(s2.mesh, false)[0]);
+        const hitA = rc.intersectObjects([...s2.attachMap.values()], false)[0];
+        if (hitA) {
+          const id = [...s2.attachMap.entries()].find(([, m]) => m === hitA.object)?.[0] ?? null;
+          cb.current.onAttachSelect(id, !!e.shiftKey);
+        } else if (s2.mesh) cb.current.onModelSelect(!!rc.intersectObject(s2.mesh, false)[0]);
         return;
       }
       if (!s2.mesh) return; // nothing picks unless the Select tool is on
@@ -584,7 +592,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const d0 = Math.hypot(e.clientX - centerPx.x, e.clientY - centerPx.y);
           if (d0 > 12) {
             anchorDrag = { pointerId: e.pointerId, centerPx, center, d0, f: 1 };
-            if (s2.attach && s2.tc.object === s2.attach) s2.attach.userData.baseScale = s2.attach.scale.x;
+            const gObj = s2.tc.object as THREE.Object3D | undefined;
+            if (gObj && gObj !== s2.pivot) gObj.userData.baseScale = gObj.scale.x;
             controls.enabled = false;
             e.preventDefault();
             try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
@@ -665,10 +674,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         anchorDrag = null;
         controls.enabled = true;
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
-        if (s2 && s2.attach && s2.tc.object === s2.attach) {
-          // Attachment: the scale stays baked on the object — nothing parametric to commit.
-          const base = (s2.attach.userData.baseScale as number) ?? 1;
-          s2.attach.scale.setScalar(base * f);
+        const upObj = s2?.tc.object as THREE.Object3D | undefined;
+        if (s2 && upObj && upObj !== s2.pivot) {
+          // Attachment (mesh or group pivot): the scale stays baked on the object.
+          const base = (upObj.userData.baseScale as number) ?? 1;
+          upObj.scale.setScalar(base * f);
         } else if (s2) {
           applyAnchorScale(s2, 1); // rest the preview — the rebuilt solid replaces it
           if (Math.abs(f - 1) > 0.011) cb.current.onTransformCommit({ kind: "scale", factor: f, center: [center.x, center.y, center.z] });
@@ -923,7 +933,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, axScene, axCam, axBalls, tcR, attach: null };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -1069,39 +1079,47 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const s = st.current;
     if (!s) return;
+    s.selAttach = selAttachIds;
     if (transformMode === "off") {
       exitTransform(s);
       updateDims(s, showDims, units); // restore dimension lines hidden during transform
     } else {
-      enterTransform(s, transformMode, attachSelected ? "attach" : "model");
+      enterTransform(s, transformMode, selAttachIds.length ? "attach" : "model");
     }
-  }, [transformMode, attachSelected, attachment]);
+  }, [transformMode, selAttachIds, attachments]);
 
-  // The free-floating attachment object (e.g. an SVG logo): its transform lives on the
-  // mesh itself — the gizmo drives it directly, and Merge bakes it in.
+  // Free-floating attachment objects: transforms live on the meshes themselves — the
+  // gizmo drives them directly, and Merge bakes them in. Synced by id so existing
+  // objects KEEP their placement when the list changes.
   useEffect(() => {
     const s = st.current;
     if (!s) return;
-    if (s.attach) {
-      s.tc.detach();
-      s.tcR.detach();
-      s.scene.remove(s.attach);
-      (s.attach.material as THREE.Material).dispose();
-      s.attach = null;
+    const wanted = new Set(attachments.map((a) => a.id));
+    for (const [id, m] of [...s.attachMap]) {
+      if (!wanted.has(id)) {
+        if (s.tc.object === m) s.tc.detach();
+        if (s.tcR.object === m) s.tcR.detach();
+        m.removeFromParent();
+        (m.material as THREE.Material).dispose();
+        s.attachMap.delete(id);
+      }
     }
-    if (!attachment) return;
-    const m = new THREE.Mesh(attachment, new THREE.MeshStandardMaterial({ color: "#7fc4b9", metalness: 0.1, roughness: 0.6 }));
-    // Start resting on top of the model (or the bed) at its centre, ready to be placed.
-    attachment.computeBoundingBox();
-    let z = 0;
-    if (s.mesh) {
-      s.mesh.geometry.computeBoundingBox();
-      z = s.mesh.geometry.boundingBox!.max.z;
+    for (const a of attachments) {
+      if (s.attachMap.has(a.id)) continue;
+      const m = new THREE.Mesh(a.geometry, new THREE.MeshStandardMaterial({ color: "#7fc4b9", metalness: 0.1, roughness: 0.6 }));
+      // Start resting on top of the model (or the bed) at its centre, ready to be placed —
+      // stagger extras a little so stacked drops don't hide each other.
+      a.geometry.computeBoundingBox();
+      let z = 0;
+      if (s.mesh) {
+        s.mesh.geometry.computeBoundingBox();
+        z = s.mesh.geometry.boundingBox!.max.z;
+      }
+      m.position.set(s.attachMap.size * 8, 0, z - (a.geometry.boundingBox!.min.z ?? 0) + 0.01);
+      s.scene.add(m);
+      s.attachMap.set(a.id, m);
     }
-    m.position.set(0, 0, z - (attachment.boundingBox!.min.z ?? 0) + 0.01);
-    s.scene.add(m);
-    s.attach = m;
-  }, [attachment]);
+  }, [attachments]);
 
   // Bounding box around the selected whole part (layers panel / idle-mode tap / transform).
   useEffect(() => {
@@ -1116,13 +1134,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       });
       s.selBox = null;
     }
-    const target = attachSelected ? s.attach : modelSelected ? s.mesh : null;
-    if (!target) return;
+    const selMeshes = selAttachIds.map((id) => s.attachMap.get(id)).filter((m): m is THREE.Mesh => !!m);
+    const target: THREE.Object3D | null = selMeshes.length ? null : modelSelected && s.mesh ? s.mesh : null;
+    if (!target && !selMeshes.length) return;
     // Selecting also arms the gizmo, which re-parents the mesh into a pivot group in this
     // same commit — setFromObject() doesn't refresh ancestor matrices, so without this the
     // box measures against the pivot's stale identity matrix and lands half off the part.
-    target.updateWorldMatrix(true, true);
-    const box = new THREE.Box3().setFromObject(target);
+    const box = new THREE.Box3();
+    for (const t of target ? [target] : selMeshes) {
+      t.updateWorldMatrix(true, true);
+      box.expandByObject(t);
+    }
     const group = new THREE.Group();
     const helper = new THREE.Box3Helper(box, new THREE.Color(0x14b8a6));
     (helper.material as THREE.LineBasicMaterial).transparent = true;
@@ -1144,7 +1166,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     group.userData.center = box.getCenter(new THREE.Vector3());
     s.scene.add(group);
     s.selBox = group;
-  }, [modelSelected, attachSelected, attachment, geometry]);
+  }, [modelSelected, selAttachIds, attachments, geometry]);
 
   // Render point-to-point measurements (lines + distance labels) and the pending anchor.
   useEffect(() => {
@@ -1317,14 +1339,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     setView(v) {
       if (st.current) snapView(st.current, v);
     },
-    bakeAttachment() {
+    bakeAttachment(id) {
       const s = st.current;
-      if (!s?.attach) return null;
-      s.attach.updateWorldMatrix(true, false);
-      const g = (s.attach.geometry as THREE.BufferGeometry).index
-        ? (s.attach.geometry as THREE.BufferGeometry).toNonIndexed()
-        : (s.attach.geometry as THREE.BufferGeometry).clone();
-      g.applyMatrix4(s.attach.matrixWorld);
+      const m = s?.attachMap.get(id);
+      if (!s || !m) return null;
+      m.updateWorldMatrix(true, false);
+      const g = (m.geometry as THREE.BufferGeometry).index
+        ? (m.geometry as THREE.BufferGeometry).toNonIndexed()
+        : (m.geometry as THREE.BufferGeometry).clone();
+      g.applyMatrix4(m.matrixWorld);
       const pos = (g.getAttribute("position").array as Float32Array).slice();
       g.dispose();
       return pos;
@@ -1844,10 +1867,31 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
   if (target === "attach") {
     s.tc.detach();
     s.tcR.detach();
-    if (!s.attach) return;
+    releaseAttachGroup(s);
+    const sel = s.selAttach ?? [];
+    const meshes = sel.map((id) => s.attachMap.get(id)).filter((m): m is THREE.Mesh => !!m);
+    if (!meshes.length) return;
+    let handle: THREE.Object3D;
+    if (meshes.length === 1) {
+      handle = meshes[0];
+    } else {
+      // GROUP: a temp pivot at the selection's combined centre; Object3D.attach() preserves
+      // each mesh's world transform in and (on release) back out.
+      const box = new THREE.Box3();
+      for (const m of meshes) {
+        m.updateWorldMatrix(true, false);
+        box.expandByObject(m);
+      }
+      const pivot = new THREE.Group();
+      pivot.position.copy(box.getCenter(new THREE.Vector3()));
+      s.scene.add(pivot);
+      for (const m of meshes) pivot.attach(m);
+      s.attachGroup = pivot;
+      handle = pivot;
+    }
     s.tc.setMode("translate");
-    s.tc.attach(s.attach);
-    s.tcR.attach(s.attach); // combined: arrows + rings together
+    s.tc.attach(handle);
+    s.tcR.attach(handle); // combined: arrows + rings together
     if (s.dims) s.dims.visible = false;
     return;
   }
@@ -1871,10 +1915,21 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
   if (s.dims) s.dims.visible = false; // dimension lines don't follow the pivot — hide while transforming
 }
 
+/** Dissolve the multi-select pivot, baking each member's world transform back onto it. */
+function releaseAttachGroup(s: Internals) {
+  const g = s.attachGroup;
+  if (!g) return;
+  g.updateWorldMatrix(true, true);
+  for (const child of [...g.children]) s.scene.attach(child);
+  s.scene.remove(g);
+  s.attachGroup = null;
+}
+
 /** Detach the gizmo and put the mesh back under content with an identity transform. */
 function exitTransform(s: Internals) {
   s.tc.detach();
   s.tcR.detach();
+  releaseAttachGroup(s);
   const pivot = s.pivot;
   if (pivot) {
     if (s.mesh && s.mesh.parent === pivot) {

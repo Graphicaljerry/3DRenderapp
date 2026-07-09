@@ -330,6 +330,25 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const rcAx = new THREE.Raycaster();
     // Drag-to-orbit state: the gizmo owns its pointer just like every other drag.
     let axDrag: { pointerId: number; x: number; y: number; moved: boolean } | null = null;
+    // Corner-anchor drag: pull a bounding-box dot to scale the part uniformly about its
+    // centre (Spline-style). Live preview via the transform pivot; one scale op on release.
+    let anchorDrag: { pointerId: number; centerPx: THREE.Vector2; center: THREE.Vector3; d0: number; f: number } | null = null;
+    const anchorsOf = (s2: Internals) => (s2.selBox ? (s2.selBox.children.filter((o) => (o as THREE.Mesh).userData.anchor) as THREE.Mesh[]) : []);
+    const pxOf = (v: THREE.Vector3) => {
+      const r = renderer.domElement.getBoundingClientRect();
+      const nd = v.clone().project(camera);
+      return new THREE.Vector2((nd.x * 0.5 + 0.5) * r.width + r.left, (-nd.y * 0.5 + 0.5) * r.height + r.top);
+    };
+    const applyAnchorScale = (s2: Internals, f: number) => {
+      // Preview through the gizmo's pivot (selection always arms it); the box chrome
+      // follows via a scale-about-centre transform on the group.
+      if (s2.pivot) s2.pivot.scale.set(f, f, f);
+      if (s2.selBox) {
+        const c = s2.selBox.userData.center as THREE.Vector3;
+        s2.selBox.scale.setScalar(f);
+        s2.selBox.position.copy(c).multiplyScalar(1 - f);
+      }
+    };
     const orbitBy = (dx: number, dy: number) => {
       const offset = camera.position.clone().sub(controls.target);
       offset.applyAxisAngle(new THREE.Vector3(0, 0, 1), -dx * 0.011); // azimuth about world Z
@@ -473,7 +492,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
-      if (axDrag) return;
+      if (axDrag || anchorDrag) return;
       // The corner orientation gizmo owns its pointer: drag orbits, click snaps a view.
       if (inAxes(e)) {
         axDrag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
@@ -481,6 +500,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         e.preventDefault();
         try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
         return;
+      }
+      // Bounding-box corner anchors: grab one to scale the part (uniform) about its centre.
+      if (s2?.selBox && !anchorDrag) {
+        const rect0 = renderer.domElement.getBoundingClientRect();
+        rc.setFromCamera(new THREE.Vector2(((e.clientX - rect0.left) / rect0.width) * 2 - 1, -((e.clientY - rect0.top) / rect0.height) * 2 + 1), camera);
+        if (rc.intersectObjects(anchorsOf(s2), false)[0]) {
+          const center = (s2.selBox.userData.center as THREE.Vector3).clone();
+          const centerPx = pxOf(center);
+          const d0 = Math.hypot(e.clientX - centerPx.x, e.clientY - centerPx.y);
+          if (d0 > 12) {
+            anchorDrag = { pointerId: e.pointerId, centerPx, center, d0, f: 1 };
+            controls.enabled = false;
+            e.preventDefault();
+            try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+            return;
+          }
+        }
       }
       downAt = { x: e.clientX, y: e.clientY };
       // Push-pull: grabbing the face arrow starts a normal-constrained drag (extrude).
@@ -549,6 +585,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
         return;
       }
+      if (anchorDrag) {
+        if (e.pointerId !== anchorDrag.pointerId) return;
+        const { f, center } = anchorDrag;
+        anchorDrag = null;
+        controls.enabled = true;
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
+        if (s2) applyAnchorScale(s2, 1); // rest the preview — the rebuilt solid replaces it
+        if (Math.abs(f - 1) > 0.011) cb.current.onTransformCommit({ kind: "scale", factor: f, center: [center.x, center.y, center.z] });
+        return;
+      }
       // Only the pointer that OWNS an active drag may end it — ignore a second touch's up
       // (an iPad palm resting while the Pencil drags) so it can't commit a stray value.
       if (s2?.pushDrag && e.pointerId !== s2.pushDrag.pointerId) return;
@@ -603,6 +649,19 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         orbitBy(dx, dy);
         axDrag.x = e.clientX;
         axDrag.y = e.clientY;
+        return;
+      }
+      // Anchor drag: pointer distance from the part's screen centre sets the scale factor.
+      if (anchorDrag) {
+        if (e.pointerId !== anchorDrag.pointerId) return;
+        e.preventDefault();
+        const d = Math.hypot(e.clientX - anchorDrag.centerPx.x, e.clientY - anchorDrag.centerPx.y);
+        let f = d / anchorDrag.d0;
+        f = Math.max(0.05, Math.round(f / 0.05) * 0.05); // same 5% snap as the gizmo
+        if (f !== anchorDrag.f && s2) {
+          anchorDrag.f = f;
+          applyAnchorScale(s2, f);
+        }
         return;
       }
       // Hovering the gizmo: highlight the ball under the pointer, quiet everything else.
@@ -663,6 +722,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         return;
       }
       if (!s2 || downAt) return; // don't fight an orbit drag
+      // Anchor hover works IN transform mode (that's when the box shows): resize cursor + grow.
+      if (s2.selBox && !s2.transforming) {
+        const r0 = renderer.domElement.getBoundingClientRect();
+        rc.setFromCamera(new THREE.Vector2(((e.clientX - r0.left) / r0.width) * 2 - 1, -((e.clientY - r0.top) / r0.height) * 2 + 1), camera);
+        const hit = rc.intersectObjects(anchorsOf(s2), false)[0]?.object as THREE.Mesh | undefined;
+        for (const b of anchorsOf(s2)) b.scale.setScalar(b === hit ? 1.35 : 1);
+        if (hit) {
+          renderer.domElement.style.cursor = "nwse-resize";
+          return;
+        }
+      }
       if (cb.current.transformMode !== "off" || s2.transforming) return; // gizmo mode: no hover-pick
       const rect = renderer.domElement.getBoundingClientRect();
       const ndc = new THREE.Vector2(
@@ -723,6 +793,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (axDrag && e.pointerId === axDrag.pointerId) {
         axDrag = null;
         controls.enabled = true;
+        return;
+      }
+      if (anchorDrag && e.pointerId === anchorDrag.pointerId) {
+        anchorDrag = null;
+        controls.enabled = true;
+        if (s2) applyAnchorScale(s2, 1);
         return;
       }
       // A cancel from a pointer that doesn't own the active drag (a palm's palm-rejection while
@@ -939,11 +1015,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const dotGeo = new THREE.SphereGeometry(r, 10, 8);
     const dotMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false });
     for (const fx of [box.min.x, box.max.x]) for (const fy of [box.min.y, box.max.y]) for (const fz of [box.min.z, box.max.z]) {
-      const d = new THREE.Mesh(dotGeo, dotMat);
+      const d = new THREE.Mesh(dotGeo, dotMat.clone());
       d.position.set(fx, fy, fz);
       d.renderOrder = 5;
+      d.userData.anchor = true; // draggable: corner-drag = uniform scale
       group.add(d);
     }
+    group.userData.center = box.getCenter(new THREE.Vector3());
     s.scene.add(group);
     s.selBox = group;
   }, [modelSelected, geometry]);

@@ -10,7 +10,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -170,6 +170,38 @@ function MicButton({ value, onChange }: { value: string; onChange: (t: string) =
     >
       <IconMic />
     </button>
+  );
+}
+
+/** Gizmo snapping options: grid steps for Move, angle steps for Rotate. */
+function SnapMenu({ snap, setSnap }: { snap: { move: number; rotate: number }; setSnap: (s: { move: number; rotate: number }) => void }) {
+  const [open, setOpen] = useState(false);
+  const active = snap.move > 0 || snap.rotate > 0;
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button className={`ghost sm iconbtn has-modes${active ? " on" : ""}`} aria-label="Snapping" aria-expanded={open} title="Snapping — grid steps for Move, angle steps for Rotate" onClick={() => setOpen((v) => !v)}>
+        <IconMagnet />
+      </button>
+      {open && (
+        <div className="snap-menu" role="menu">
+          <div className="snap-row"><span>Move</span>
+            <div className="seg sm">
+              {[0, 0.5, 1, 5].map((v) => (
+                <button key={v} className={snap.move === v ? "on" : ""} onClick={() => setSnap({ ...snap, move: v })}>{v === 0 ? "Free" : `${v}mm`}</button>
+              ))}
+            </div>
+          </div>
+          <div className="snap-row"><span>Rotate</span>
+            <div className="seg sm">
+              {[0, 5, 15, 45].map((v) => (
+                <button key={v} className={snap.rotate === v ? "on" : ""} onClick={() => setSnap({ ...snap, rotate: v })}>{v === 0 ? "Free" : `${v}°`}</button>
+              ))}
+            </div>
+          </div>
+          <div className="ins-note">Scale snaps to 5%. Snap-to-object is on the roadmap.</div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -346,6 +378,13 @@ interface Props {
   modelSelected: boolean;
   onModelSelect: (sel: boolean) => void;
   onScaleTo: (axis: "x" | "y" | "z", target: number) => void; // uniform-scale the part so `axis` hits target mm
+  attachment: { geometry: THREE.BufferGeometry; name: string } | null;
+  attachSelected: boolean;
+  onAttachSelect: (sel: boolean) => void;
+  onMergeAttachment: () => void;
+  onRemoveAttachment: () => void;
+  snap: { move: number; rotate: number };
+  setSnap: (s: { move: number; rotate: number }) => void;
   printer: PrinterDefaults;
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
@@ -753,6 +792,7 @@ export function Workspace(p: Props) {
                     <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                   </div>
                 )}
+                <SnapMenu snap={p.snap} setSnap={p.setSnap} />
                 <button
                   className={`ghost sm iconbtn${p.measureCtl.mode ? " on" : ""}`}
                   aria-pressed={p.measureCtl.mode}
@@ -829,6 +869,10 @@ export function Workspace(p: Props) {
                 boxSelectionActive={p.facesCtl.faces.length > 0}
                 modelSelected={p.modelSelected}
                 onModelSelect={p.onModelSelect}
+                attachment={p.attachment?.geometry ?? null}
+                attachSelected={p.attachSelected}
+                onAttachSelect={p.onAttachSelect}
+                snap={p.snap}
                 transformMode={p.transformCtl.mode}
                 measureMode={p.measureCtl.mode}
                 measurePending={p.measureCtl.pending}
@@ -870,6 +914,14 @@ export function Workspace(p: Props) {
                       <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
                     </div>
                   ))}
+                  {p.attachment && (
+                    <div className={`lp-row${p.attachSelected ? " on" : ""}`} style={{ cursor: "pointer" }} onClick={() => p.onAttachSelect(!p.attachSelected)} title="A free-floating object — position it, then Merge to make it part of the model">
+                      <span className="lp-dot" style={{ background: "#7fc4b9" }} />
+                      <span className="lp-name">{p.attachment.name}</span>
+                      <button className="ghost sm" style={{ padding: "2px 8px", fontSize: 10.5 }} title="Fuse it into the model (becomes one printable solid)" onClick={(e) => { e.stopPropagation(); p.onMergeAttachment(); }}>Merge</button>
+                      <button className="x" aria-label="Remove attachment" onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(); }}><IconX /></button>
+                    </div>
+                  )}
                   {p.pins.map((pin, i) => (
                     <button key={pin.id} className={`lp-row${p.pinCtl.active?.pin.id === pin.id ? " on" : ""}`} title="Select this point marker" onClick={() => p.pinCtl.select(pin.id)}>
                       <span className="lp-dot pin">{i + 1}</span><span className="lp-name">{pin.text ? pin.text.slice(0, 26) : `Point ${i + 1}`}</span>

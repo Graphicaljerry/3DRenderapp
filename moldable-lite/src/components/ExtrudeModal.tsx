@@ -2,15 +2,16 @@ import { useState } from "react";
 import { IconX } from "./icons";
 import { svgInfo } from "../svg/extrude";
 
-export type SvgMode = "extrude" | "revolve" | "emboss";
+export type SvgMode = "extrude" | "revolve" | "emboss" | "attach";
 export interface SvgParams { sizeMm: number; heightMm: number; baseMm: number; reliefMm: number; recessed: boolean }
 
 // Drop an SVG → turn it into a solid three ways: straight extrude, revolve
 // (lathe a profile), or emboss (art on a base plate). No AI call.
 export function ExtrudeModal({
-  svgText, svgUrl, name, onCreate, onClose,
+  svgText, svgUrl, name, hasModel, onCreate, onClose,
 }: {
   svgText: string; svgUrl: string; name: string;
+  hasModel: boolean; // a model is on the canvas → offer "Add to model" (attachment)
   onCreate: (mode: SvgMode, params: SvgParams) => void;
   onClose: () => void;
 }) {
@@ -33,7 +34,7 @@ export function ExtrudeModal({
     <label>{label}<span className="ex-field"><input type="number" min={min} step={step} value={v} onChange={(e) => set(+e.target.value)} /> mm</span></label>
   );
 
-  const preview = mode === "extrude"
+  const preview = mode === "extrude" || mode === "attach"
     ? `≈ ${r1(xMm)} × ${r1(yMm)} × ${r1(heightMm)} mm · holes kept`
     : mode === "revolve"
       ? `≈ ${r1(sizeMm)} mm tall, revolved around the left edge`
@@ -48,8 +49,8 @@ export function ExtrudeModal({
         </div>
 
         <div className="measure-steps">
-          {(["extrude", "revolve", "emboss"] as SvgMode[]).map((m) => (
-            <button key={m} className={mode === m ? "on" : ""} onClick={() => setMode(m)}>{m[0].toUpperCase() + m.slice(1)}</button>
+          {(["extrude", "revolve", "emboss", ...(hasModel ? (["attach"] as SvgMode[]) : [])] as SvgMode[]).map((m) => (
+            <button key={m} className={mode === m ? "on" : ""} title={m === "attach" ? "Extrude the SVG and place it ON the current model as a movable object — position it, then Merge" : undefined} onClick={() => setMode(m)}>{m === "attach" ? "Add to model" : m[0].toUpperCase() + m.slice(1)}</button>
           ))}
         </div>
 
@@ -63,7 +64,7 @@ export function ExtrudeModal({
               {mode === "revolve"
                 ? num(sizeMm, setSizeMm, 1, 1, "Height")
                 : num(sizeMm, setSizeMm, 1, 1, "Longest side")}
-              {mode === "extrude" && num(heightMm, setHeightMm, 0.2, 0.2, "Thickness")}
+              {(mode === "extrude" || mode === "attach") && num(heightMm, setHeightMm, 0.2, 0.2, "Thickness")}
               {mode === "emboss" && num(baseMm, setBaseMm, 0.4, 0.2, "Base")}
               {mode === "emboss" && num(reliefMm, setReliefMm, 0.2, 0.2, "Relief")}
             </div>

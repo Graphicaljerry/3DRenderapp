@@ -19,6 +19,8 @@ export interface ViewerHandle {
   resetView: () => void;
   /** Snap the camera to a standard view, framed on the model. */
   setView: (v: "top" | "front" | "right" | "iso") => void;
+  /** The attachment's triangles with its current transform baked in (for Merge). */
+  bakeAttachment: () => Float32Array | null;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -61,6 +63,10 @@ interface Props {
   pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round
   modelSelected: boolean; // draw a bounding box around the whole part
   onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
+  attachment: THREE.BufferGeometry | null; // a second, free-floating object (e.g. an SVG logo)
+  attachSelected: boolean; // gizmo + box target the attachment instead of the model
+  onAttachSelect: (sel: boolean) => void;
+  snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[]) => void;
@@ -131,7 +137,9 @@ interface Internals {
   selCache: { key: string; info: FeatureInfo; region: Uint8Array | null } | null; // hover perf guard
   box: { sx: number; sy: number; div: HTMLDivElement; pointerId: number } | null; // in-progress marquee (scoped to its pointer)
   ro: ResizeObserver;
-  tc: TransformControls; // whole-body move/rotate/scale gizmo
+  tc: TransformControls; // whole-body move/rotate/scale gizmo (translate in combined mode)
+  tcR: TransformControls; // rotation rings shown ALONGSIDE tc in combined mode
+  attach: THREE.Mesh | null; // the free-floating attachment object
   pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
   transforming: boolean; // a gizmo drag is in progress (freezes orbit + select picking)
   measures: THREE.Group; // point-to-point measurement lines + labels
@@ -146,11 +154,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachment, attachSelected, onAttachSelect, snap, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -252,13 +260,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     tc.setRotationSnap(THREE.MathUtils.degToRad(15));
     tc.setScaleSnap(0.05);
     scene.add(tc.getHelper());
-    tc.addEventListener("dragging-changed", (e: any) => {
+    // Rotation rings that live NEXT TO the translate arrows in combined mode, so moving
+    // and rotating never needs a mode switch (scale is the bounding-box anchors).
+    const tcR = new TransformControls(camera, renderer.domElement);
+    tcR.setSpace("world");
+    tcR.setSize(1.05);
+    tcR.setMode("rotate");
+    tcR.setRotationSnap(THREE.MathUtils.degToRad(15));
+    scene.add(tcR.getHelper());
+    const onDragChange = (e: any) => {
       const s = st.current;
       if (!s) return;
       controls.enabled = !e.value;
       s.transforming = e.value;
       if (!e.value) commitTransform(s, cb.current.onTransformCommit); // released → emit one op
-    });
+    };
+    tc.addEventListener("dragging-changed", onDragChange);
+    tcR.addEventListener("dragging-changed", onDragChange);
     // Keep the scale PREVIEW uniform (replicad scale is uniform only) so what you drag is what
     // you get — collapse any per-axis handle drag to a single factor live.
     tc.addEventListener("objectChange", () => {
@@ -341,8 +359,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const applyAnchorScale = (s2: Internals, f: number) => {
       // Preview through the gizmo's pivot (selection always arms it); the box chrome
-      // follows via a scale-about-centre transform on the group.
-      if (s2.pivot) s2.pivot.scale.set(f, f, f);
+      // follows via a scale-about-centre transform on the group. Attachment target:
+      // scale the object itself — its transform IS its state (no parametric commit).
+      if (s2.attach && s2.tc.object === s2.attach) {
+        const base = (s2.attach.userData.baseScale as number) ?? 1;
+        s2.attach.scale.setScalar(base * f);
+      } else if (s2.pivot) s2.pivot.scale.set(f, f, f);
       if (s2.selBox) {
         const c = s2.selBox.userData.center as THREE.Vector3;
         s2.selBox.scale.setScalar(f);
@@ -420,8 +442,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       );
       rc.setFromCamera(ndc, camera);
       if (cb.current.transformMode !== "off" || s2.transforming) {
-        // Gizmo owns the pointer — except a tap on empty space, which deselects the part.
-        if (!s2.transforming && s2.mesh && !rc.intersectObject(s2.mesh, false)[0]) cb.current.onModelSelect(false);
+        // Gizmo owns the pointer — except taps: on the attachment/model → retarget the
+        // selection; on empty space → deselect everything.
+        if (!s2.transforming) {
+          const onAttach = s2.attach && rc.intersectObject(s2.attach, false)[0];
+          const onModel = s2.mesh && rc.intersectObject(s2.mesh, false)[0];
+          if (onAttach) cb.current.onAttachSelect(true);
+          else if (onModel) cb.current.onModelSelect(true);
+          else { cb.current.onModelSelect(false); cb.current.onAttachSelect(false); }
+        }
         return;
       }
       if (s2.pins && !cb.current.measureMode) {
@@ -442,7 +471,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // No tool active → a tap on the part selects the WHOLE model (bounding box);
       // a tap on empty space deselects. Tools take over below when armed.
       if (!cb.current.selectMode) {
-        if (s2.mesh) cb.current.onModelSelect(!!rc.intersectObject(s2.mesh, false)[0]);
+        if (s2.attach && rc.intersectObject(s2.attach, false)[0]) cb.current.onAttachSelect(true);
+        else if (s2.mesh) cb.current.onModelSelect(!!rc.intersectObject(s2.mesh, false)[0]);
         return;
       }
       if (!s2.mesh) return; // nothing picks unless the Select tool is on
@@ -511,6 +541,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const d0 = Math.hypot(e.clientX - centerPx.x, e.clientY - centerPx.y);
           if (d0 > 12) {
             anchorDrag = { pointerId: e.pointerId, centerPx, center, d0, f: 1 };
+            if (s2.attach && s2.tc.object === s2.attach) s2.attach.userData.baseScale = s2.attach.scale.x;
             controls.enabled = false;
             e.preventDefault();
             try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
@@ -591,8 +622,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         anchorDrag = null;
         controls.enabled = true;
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
-        if (s2) applyAnchorScale(s2, 1); // rest the preview — the rebuilt solid replaces it
-        if (Math.abs(f - 1) > 0.011) cb.current.onTransformCommit({ kind: "scale", factor: f, center: [center.x, center.y, center.z] });
+        if (s2 && s2.attach && s2.tc.object === s2.attach) {
+          // Attachment: the scale stays baked on the object — nothing parametric to commit.
+          const base = (s2.attach.userData.baseScale as number) ?? 1;
+          s2.attach.scale.setScalar(base * f);
+        } else if (s2) {
+          applyAnchorScale(s2, 1); // rest the preview — the rebuilt solid replaces it
+          if (Math.abs(f - 1) > 0.011) cb.current.onTransformCommit({ kind: "scale", factor: f, center: [center.x, center.y, center.z] });
+        }
         return;
       }
       // Only the pointer that OWNS an active drag may end it — ignore a second touch's up
@@ -843,7 +880,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, axScene, axCam, axBalls };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, axScene, axCam, axBalls, tcR, attach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -869,6 +906,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // it throws and takes the whole app down on unmount — which StrictMode's dev
       // mount→cleanup→mount cycle hits on EVERY load. Do the same work by hand instead:
       // drop the pointer listeners, then dispose the gizmo helper's GPU resources.
+      tcR.detach();
+      tcR.disconnect();
+      const tcRHelper = tcR.getHelper();
+      scene.remove(tcRHelper);
+      tcRHelper.traverse((child) => {
+        const c = child as THREE.Mesh;
+        (c.geometry as THREE.BufferGeometry | undefined)?.dispose?.();
+        const m = c.material as THREE.Material | THREE.Material[] | undefined;
+        if (Array.isArray(m)) m.forEach((x) => x.dispose());
+        else m?.dispose?.();
+      });
       tc.disconnect();
       const tcHelper = tc.getHelper();
       scene.remove(tcHelper);
@@ -972,7 +1020,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (cb.current.transformMode !== "off") enterTransform(s, cb.current.transformMode); // re-arm gizmo on the new mesh
   }, [geometry]);
 
-  // Toggle the transform gizmo on/off and switch rotate↔scale.
+  // Toggle the transform gizmo on/off, switch rotate↔scale, and retarget to the attachment.
   useEffect(() => {
     const s = st.current;
     if (!s) return;
@@ -980,9 +1028,35 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       exitTransform(s);
       updateDims(s, showDims, units); // restore dimension lines hidden during transform
     } else {
-      enterTransform(s, transformMode);
+      enterTransform(s, transformMode, attachSelected ? "attach" : "model");
     }
-  }, [transformMode]);
+  }, [transformMode, attachSelected, attachment]);
+
+  // The free-floating attachment object (e.g. an SVG logo): its transform lives on the
+  // mesh itself — the gizmo drives it directly, and Merge bakes it in.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (s.attach) {
+      s.tc.detach();
+      s.tcR.detach();
+      s.scene.remove(s.attach);
+      (s.attach.material as THREE.Material).dispose();
+      s.attach = null;
+    }
+    if (!attachment) return;
+    const m = new THREE.Mesh(attachment, new THREE.MeshStandardMaterial({ color: "#7fc4b9", metalness: 0.1, roughness: 0.6 }));
+    // Start resting on top of the model (or the bed) at its centre, ready to be placed.
+    attachment.computeBoundingBox();
+    let z = 0;
+    if (s.mesh) {
+      s.mesh.geometry.computeBoundingBox();
+      z = s.mesh.geometry.boundingBox!.max.z;
+    }
+    m.position.set(0, 0, z - (attachment.boundingBox!.min.z ?? 0) + 0.01);
+    s.scene.add(m);
+    s.attach = m;
+  }, [attachment]);
 
   // Bounding box around the selected whole part (layers panel / idle-mode tap / transform).
   useEffect(() => {
@@ -997,12 +1071,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       });
       s.selBox = null;
     }
-    if (!modelSelected || !s.mesh) return;
+    const target = attachSelected ? s.attach : modelSelected ? s.mesh : null;
+    if (!target) return;
     // Selecting also arms the gizmo, which re-parents the mesh into a pivot group in this
     // same commit — setFromObject() doesn't refresh ancestor matrices, so without this the
     // box measures against the pivot's stale identity matrix and lands half off the part.
-    s.mesh.updateWorldMatrix(true, true);
-    const box = new THREE.Box3().setFromObject(s.mesh);
+    target.updateWorldMatrix(true, true);
+    const box = new THREE.Box3().setFromObject(target);
     const group = new THREE.Group();
     const helper = new THREE.Box3Helper(box, new THREE.Color(0x14b8a6));
     (helper.material as THREE.LineBasicMaterial).transparent = true;
@@ -1024,7 +1099,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     group.userData.center = box.getCenter(new THREE.Vector3());
     s.scene.add(group);
     s.selBox = group;
-  }, [modelSelected, geometry]);
+  }, [modelSelected, attachSelected, attachment, geometry]);
 
   // Render point-to-point measurements (lines + distance labels) and the pending anchor.
   useEffect(() => {
@@ -1165,12 +1240,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.scene.add(g);
   }, [pins, selectedPin, hovered]);
 
+  // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    s.tc.setTranslationSnap(snap.move > 0 ? snap.move : null);
+    s.tc.setRotationSnap(snap.rotate > 0 ? THREE.MathUtils.degToRad(snap.rotate) : null);
+    s.tcR.setRotationSnap(snap.rotate > 0 ? THREE.MathUtils.degToRad(snap.rotate) : null);
+  }, [snap.move, snap.rotate]);
+
   useImperativeHandle(ref, () => ({
     resetView() {
       if (st.current) frameToObject(st.current);
     },
     setView(v) {
       if (st.current) snapView(st.current, v);
+    },
+    bakeAttachment() {
+      const s = st.current;
+      if (!s?.attach) return null;
+      s.attach.updateWorldMatrix(true, false);
+      const g = (s.attach.geometry as THREE.BufferGeometry).index
+        ? (s.attach.geometry as THREE.BufferGeometry).toNonIndexed()
+        : (s.attach.geometry as THREE.BufferGeometry).clone();
+      g.applyMatrix4(s.attach.matrixWorld);
+      const pos = (g.getAttribute("position").array as Float32Array).slice();
+      g.dispose();
+      return pos;
     },
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;
@@ -1680,9 +1776,21 @@ function faceLabel(n: THREE.Vector3): string {
 // pivot's transform, emit ONE parametric op, and let the worker rebuild replace the preview.
 
 /** Attach the gizmo: build a pivot at the model centre, reparent the mesh under it. */
-function enterTransform(s: Internals, mode: "move" | "rotate" | "scale") {
-  if (!s.mesh) { s.tc.detach(); return; }
+function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target: "model" | "attach" = "model") {
   if (s.pivot) exitTransform(s); // tear down any prior pivot first
+  // Attachment target: the gizmo drives the free-floating object DIRECTLY — its transform
+  // just lives on the mesh (nothing parametric to commit; merge bakes it later).
+  if (target === "attach") {
+    s.tc.detach();
+    s.tcR.detach();
+    if (!s.attach) return;
+    s.tc.setMode("translate");
+    s.tc.attach(s.attach);
+    s.tcR.attach(s.attach); // combined: arrows + rings together
+    if (s.dims) s.dims.visible = false;
+    return;
+  }
+  if (!s.mesh) { s.tc.detach(); s.tcR.detach(); return; }
   s.mesh.geometry.computeBoundingBox();
   const center = s.mesh.geometry.boundingBox!.getCenter(new THREE.Vector3()); // mesh sits at content origin
   const pivot = new THREE.Group();
@@ -1695,12 +1803,17 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale") {
   s.pivot = pivot;
   s.tc.setMode(mode === "move" ? "translate" : mode === "scale" ? "scale" : "rotate");
   s.tc.attach(pivot);
+  // Combined handles in the default "move" mode: rotate rings ride along, so move OR
+  // rotate is one grab away with zero mode switching (scale = the box anchors).
+  if (mode === "move") s.tcR.attach(pivot);
+  else s.tcR.detach();
   if (s.dims) s.dims.visible = false; // dimension lines don't follow the pivot — hide while transforming
 }
 
 /** Detach the gizmo and put the mesh back under content with an identity transform. */
 function exitTransform(s: Internals) {
   s.tc.detach();
+  s.tcR.detach();
   const pivot = s.pivot;
   if (pivot) {
     if (s.mesh && s.mesh.parent === pivot) {
@@ -1718,18 +1831,19 @@ function exitTransform(s: Internals) {
 /** Read the pivot's net transform and emit one rotate/scale op (display coords; App adds recenter). */
 function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
   const pivot = s.pivot;
-  if (!pivot) return;
-  const mode = s.tc.getMode();
-  if (mode === "translate") {
-    const c0 = (pivot.userData.center0 as THREE.Vector3) ?? pivot.position;
-    const d = pivot.position.clone().sub(c0);
-    if (d.lengthSq() < 1e-6) return; // no meaningful move
+  if (!pivot) return; // attachment drags have no pivot — their transform stays on the object
+  // Two gizmos (arrows + rings) share this commit, so detect WHAT actually changed —
+  // a drag is one gesture, so exactly one of position/rotation/scale moved.
+  const c0 = (pivot.userData.center0 as THREE.Vector3) ?? pivot.position;
+  const d = pivot.position.clone().sub(c0);
+  if (d.lengthSq() >= 1e-6) {
     emit({ kind: "translate", delta: [d.x, d.y, d.z] });
     return;
   }
-  const c0 = (pivot.userData.center0 as THREE.Vector3) ?? pivot.position;
   const center: [number, number, number] = [c0.x, c0.y, c0.z];
-  if (mode === "scale") {
+  const qlen = Math.hypot(pivot.quaternion.x, pivot.quaternion.y, pivot.quaternion.z);
+  const rotAngle = 2 * Math.atan2(qlen, pivot.quaternion.w);
+  if (rotAngle < 1e-4) {
     // replicad scale is UNIFORM only, so map any handle (even a per-axis one) to a single factor:
     // take the component that moved most from 1, and clamp positive (never flip/degenerate).
     const comps = [pivot.scale.x, pivot.scale.y, pivot.scale.z];
@@ -1744,8 +1858,7 @@ function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
   } else {
     const q = pivot.quaternion.clone().normalize();
     const vlen = Math.hypot(q.x, q.y, q.z);
-    const angle = 2 * Math.atan2(vlen, q.w); // radians, signed with axis
-    if (angle < 1e-4) return;
+    const angle = rotAngle; // radians, signed with axis
     const axis: [number, number, number] = vlen > 1e-8 ? [q.x / vlen, q.y / vlen, q.z / vlen] : [0, 0, 1];
     emit({ kind: "rotate", axis, angleDeg: (angle * 180) / Math.PI, center });
   }

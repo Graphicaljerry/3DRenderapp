@@ -280,6 +280,12 @@ export default function App() {
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
+  const [attachObj, setAttachObj] = useState<{ geometry: THREE.BufferGeometry; name: string } | null>(null); // free-floating second object (logo, badge…)
+  const [attachSelected, setAttachSelected] = useState(false);
+  const [snap, setSnapState] = useState<{ move: number; rotate: number }>(() => {
+    try { return { move: 0, rotate: 15, ...JSON.parse(localStorage.getItem("moldable_snap") ?? "{}") }; } catch { return { move: 0, rotate: 15 }; }
+  });
+  const setSnap = (v: { move: number; rotate: number }) => { setSnapState(v); try { localStorage.setItem("moldable_snap", JSON.stringify(v)); } catch { /* private mode */ } };
   const modeTouched = useRef(false); // user clicked the Precise/Generative switch themselves
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
@@ -850,6 +856,17 @@ export default function App() {
   function createFromSvg(mode: SvgMode, prm: SvgParams) {
     if (!svgDraft) return;
     try {
+      if (mode === "attach") {
+        // A free-floating object ON the current model: position with the gizmo/anchors,
+        // then Merge in the Objects panel fuses it into one printable solid.
+        const { geometry: g, dims: d } = extrudeSvg(svgDraft.text, { sizeMm: prm.sizeMm, heightMm: prm.heightMm });
+        setAttachObj({ geometry: g, name: svgDraft.name });
+        selectAttach(true);
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added **${svgDraft.name}** (${d.x} × ${d.y} × ${d.z} mm) as a movable object on the model. Drag the arrows/rings to place it, corner dots to size it, then press **Merge** in the Objects panel (layers icon) to make it part of the case. Merging produces a mesh — do CAD edits first.` }]);
+        URL.revokeObjectURL(svgDraft.url);
+        setSvgDraft(null);
+        return;
+      }
       const out =
         mode === "revolve" ? revolveSvg(svgDraft.text, { sizeMm: prm.sizeMm })
         : mode === "emboss" ? embossSvg(svgDraft.text, { sizeMm: prm.sizeMm, baseMm: prm.baseMm, reliefMm: prm.reliefMm, recessed: prm.recessed })
@@ -1208,8 +1225,21 @@ export default function App() {
 
   /** Select/deselect the whole part: bounding box + anchors AND the move gizmo, Spline-style —
    *  selecting an object IS having transform handles on it. Other tools stand down. */
+  function selectAttach(sel: boolean) {
+    setAttachSelected(sel);
+    if (sel) setModelSelected(false);
+    setTransformMode(sel ? "move" : modelSelected && !sel ? "move" : "off");
+    if (sel) {
+      setSelectMode(false);
+      setMeasureMode(false);
+      setSelectedFeature(null);
+      setSelectedFaces([]);
+    }
+  }
+
   function selectModel(sel: boolean) {
     setModelSelected(sel);
+    if (sel) setAttachSelected(false);
     setTransformMode(sel ? "move" : "off");
     if (sel) {
       setSelectMode(false);
@@ -1218,6 +1248,44 @@ export default function App() {
       setPinText("");
       setSelectedFeature(null);
       setSelectedFaces([]);
+    }
+  }
+
+  /** Fuse the attachment into the model via the Manifold worker → one printable mesh. */
+  async function mergeAttachment() {
+    if (!attachObj || !geometry || !result) return;
+    const baked = viewer.current?.bakeAttachment();
+    if (!baked) return;
+    setStatus("generating");
+    try {
+      if (!(await previewSetBase(geometry))) throw new Error("this model's mesh couldn't be welded for a boolean");
+      const pos = await previewBoolean(baked, 1);
+      if (!pos) throw new Error("the union failed — try moving the object so it overlaps the model");
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      g.computeBoundingBox();
+      const sz = g.boundingBox!.getSize(new THREE.Vector3());
+      const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
+      const name = `${project?.name ?? "Model"} + ${attachObj.name}`;
+      const res: EngineResult = {
+        kind: "generative",
+        geometry: g,
+        dims,
+        source: { kind: "gen", provider: "merge", model: attachObj.name },
+        supportsStep: false,
+        glb: geometryToSTL(g),
+      };
+      applyResult(res, name, `Merged ${attachObj.name} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${attachObj.name}`);
+      setAttachObj(null);
+      setAttachSelected(false);
+      setTransformMode("off");
+      setModelSelected(false);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Merged **${attachObj.name}** into the model — one printable solid now (mesh: STL/3MF export; STEP needs the pre-merge version in History). Undo brings the separate pieces back.` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't merge: ${String(err?.message ?? err)}`, error: true }]);
+    } finally {
+      setStatus("idle");
     }
   }
 
@@ -1884,9 +1952,16 @@ export default function App() {
         geometry={geometry}
         dims={dims}
         report={report}
-        modelSelected={modelSelected || transformMode !== "off"}
+        modelSelected={(modelSelected || transformMode !== "off") && !attachSelected}
         onModelSelect={selectModel}
         onScaleTo={scaleToDim}
+        attachment={attachObj}
+        attachSelected={attachSelected}
+        onAttachSelect={selectAttach}
+        onMergeAttachment={() => { void mergeAttachment(); }}
+        onRemoveAttachment={() => { setAttachObj(null); setAttachSelected(false); setTransformMode("off"); }}
+        snap={snap}
+        setSnap={setSnap}
         printer={printer}
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}
@@ -2048,6 +2123,7 @@ export default function App() {
           svgText={svgDraft.text}
           svgUrl={svgDraft.url}
           name={svgDraft.name}
+          hasModel={!!geometry}
           onCreate={createFromSvg}
           onClose={() => { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }}
         />

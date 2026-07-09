@@ -58,6 +58,7 @@ export interface EngineResult {
   source: BuildInput;
   supportsStep: boolean;
   glb?: Blob; // present for generative results (for persistence + re-render)
+  texture?: THREE.Texture; // baked color texture (AI meshes ship painted) — display only
   recenter?: [number, number, number]; // display was shifted by this from the engine's own coords
 }
 

@@ -199,6 +199,13 @@ export const IconHistory = ({ size = 14 }: { size?: number }) => (
   </svg>
 );
 
+export const IconTexturize = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
+    <path d="M7 12l2.5-2.5L12 12l2.5-2.5L17 12M7 16.5 9.5 14l2.5 2.5L14.5 14 17 16.5" />
+  </svg>
+);
+
 export const IconMagnet = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <path d="M5 4v7a7 7 0 0 0 14 0V4" />

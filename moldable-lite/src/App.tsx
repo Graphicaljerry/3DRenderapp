@@ -9,7 +9,7 @@ import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClien
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, displaceMesh } from "./engine/previewEngine";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
@@ -282,6 +282,10 @@ export default function App() {
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
   const [attachObj, setAttachObj] = useState<{ geometry: THREE.BufferGeometry; name: string } | null>(null); // free-floating second object (logo, badge…)
   const [attachSelected, setAttachSelected] = useState(false);
+  const [appearance, setAppearanceState] = useState<{ color: string; finish: "matte" | "satin" | "glossy" | "metal" }>(() => {
+    try { return { color: "#c7ccd3", finish: "matte", ...JSON.parse(localStorage.getItem("moldable_appearance") ?? "{}") }; } catch { return { color: "#c7ccd3", finish: "matte" }; }
+  });
+  const setAppearance = (v: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => { setAppearanceState(v); try { localStorage.setItem("moldable_appearance", JSON.stringify(v)); } catch { /* private */ } };
   const [snap, setSnapState] = useState<{ move: number; rotate: number }>(() => {
     try { return { move: 0, rotate: 15, ...JSON.parse(localStorage.getItem("moldable_snap") ?? "{}") }; } catch { return { move: 0, rotate: 15 }; }
   });
@@ -847,8 +851,8 @@ export default function App() {
   }
 
   async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>) {
-    const { geometry: g, dims: d } = await loadAnyMesh(glb);
-    applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb });
+    const { geometry: g, dims: d, texture } = await loadAnyMesh(glb);
+    applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb, texture });
   }
 
   /** Turn the dropped SVG into a solid — extrude, revolve, or emboss. Persisted
@@ -959,7 +963,7 @@ export default function App() {
 
     setStatus("generating");
     try {
-      const { geometry: g, dims: d } = await loadAnyMesh(f);
+      const { geometry: g, dims: d, texture } = await loadAnyMesh(f);
       const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
       const res: EngineResult = {
         kind: "generative",
@@ -968,6 +972,7 @@ export default function App() {
         source: { kind: "gen", provider: "import", model: f.name },
         supportsStep: false,
         glb: f,
+        texture,
       };
       applyResult(res, cleanName, `Imported ${f.name} — ${d.x} × ${d.y} × ${d.z} mm`, `import ${f.name}`);
       setMessages((m) => [
@@ -1284,6 +1289,41 @@ export default function App() {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Merged **${attachObj.name}** into the model — one printable solid now (mesh: STL/3MF export; STEP needs the pre-merge version in History). Undo brings the separate pieces back.` }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't merge: ${String(err?.message ?? err)}`, error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Physical surface texture: subdivide + displace the current model's mesh (any kind).
+   *  CAD models become meshes here — precision-edit first, texture last (History keeps both). */
+  async function applySurfaceTexture(pattern: "knurl" | "honeycomb" | "noise", scale: number, depth: number) {
+    if (!geometry || !result) return;
+    setStatus("generating");
+    try {
+      const src = geometry.index ? geometry.toNonIndexed() : geometry;
+      const positions = new Float32Array(src.getAttribute("position").array as Float32Array);
+      if (src !== geometry) src.dispose();
+      const pos = await displaceMesh(positions, { pattern, scale, depth });
+      if (!pos) throw new Error("this mesh couldn't be welded into a closed solid");
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      g.computeVertexNormals();
+      g.computeBoundingBox();
+      const sz = g.boundingBox!.getSize(new THREE.Vector3());
+      const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
+      const res: EngineResult = {
+        kind: "generative",
+        geometry: g,
+        dims,
+        source: { kind: "gen", provider: "texture", model: pattern },
+        supportsStep: false,
+        glb: geometryToSTL(g),
+      };
+      const wasCad = activeKind === "replicad";
+      applyResult(res, project?.name ?? deriveName("Textured part"), `${pattern} surface texture (${depth} mm) — ${dims.x} × ${dims.y} × ${dims.z} mm`, `texture ${pattern}`);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Applied a **${pattern}** surface texture (${depth} mm ${depth >= 0 ? "raised" : "engraved"}, ${scale} mm cells) — it's real printable geometry now.${wasCad ? " The model became a mesh (STL/3MF; the parametric CAD version stays in History/Undo)." : ""}` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't texture this model: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -1962,6 +2002,10 @@ export default function App() {
         onRemoveAttachment={() => { setAttachObj(null); setAttachSelected(false); setTransformMode("off"); }}
         snap={snap}
         setSnap={setSnap}
+        appearance={appearance}
+        setAppearance={setAppearance}
+        texture={result?.texture ?? null}
+        onApplySurface={(pat, sc, d) => { void applySurfaceTexture(pat, sc, d); }}
         printer={printer}
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}

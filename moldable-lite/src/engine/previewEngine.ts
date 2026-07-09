@@ -44,3 +44,9 @@ export async function previewBoolean(prism: Float32Array, dist: number): Promise
   const r = await ensure().preview(prism, dist >= 0 ? "add" : "cut");
   return r.ok ? r.positions : null;
 }
+
+/** Physical surface texture: subdivide + displace the mesh in the preview worker. */
+export async function displaceMesh(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<Float32Array | null> {
+  const r = await ensure().displace(positions, opts);
+  return r.ok ? r.positions : null;
+}

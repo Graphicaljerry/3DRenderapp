@@ -40,7 +40,7 @@ export class GenerativeEngine implements Engine {
       },
       this.onProgress,
     );
-    const { geometry, dims } = await glbToGeometry(glb);
+    const { geometry, dims, texture } = await glbToGeometry(glb);
     return {
       kind: "generative",
       geometry,
@@ -49,6 +49,7 @@ export class GenerativeEngine implements Engine {
       source: { kind: "gen", prompt: input.prompt, provider: input.provider, model: input.model },
       supportsStep: false,
       glb,
+      texture,
     };
   }
 

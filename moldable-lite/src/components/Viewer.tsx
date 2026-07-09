@@ -67,6 +67,8 @@ interface Props {
   attachSelected: boolean; // gizmo + box target the attachment instead of the model
   onAttachSelect: (sel: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
+  appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
+  texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[]) => void;
@@ -154,7 +156,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachment, attachSelected, onAttachSelect, snap, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachment, attachSelected, onAttachSelect, snap, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
@@ -1157,6 +1159,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
+
+  // Display material: filament colour + finish, and the baked texture when the model
+  // ships painted (AI meshes). Split-piece vertex colours always win over both.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    const m = s.material;
+    const FINISH: Record<string, [number, number]> = { matte: [0.85, 0], satin: [0.55, 0.02], glossy: [0.25, 0.05], metal: [0.35, 0.9] };
+    const [rough, metal] = FINISH[appearance.finish] ?? FINISH.matte;
+    m.roughness = rough;
+    m.metalness = metal;
+    const hasUv = !!geometry?.getAttribute("uv");
+    m.map = texture && hasUv ? texture : null;
+    if (!m.vertexColors) m.color.set(m.map ? "#ffffff" : appearance.color);
+    m.needsUpdate = true;
+  }, [appearance.color, appearance.finish, texture, geometry]);
 
   // Leaving select mode clears the highlight + locked feature.
   useEffect(() => {

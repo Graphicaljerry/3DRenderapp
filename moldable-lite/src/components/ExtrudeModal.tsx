@@ -8,15 +8,16 @@ export interface SvgParams { sizeMm: number; heightMm: number; baseMm: number; r
 // Drop an SVG → turn it into a solid three ways: straight extrude, revolve
 // (lathe a profile), or emboss (art on a base plate). No AI call.
 export function ExtrudeModal({
-  svgText, svgUrl, name, hasModel, onCreate, onClose,
+  svgText, svgUrl, name, hasModel, initialMode, onCreate, onClose,
 }: {
   svgText: string; svgUrl: string; name: string;
   hasModel: boolean; // a model is on the canvas → offer "Add to model" (attachment)
+  initialMode?: SvgMode; // preselected mode (attach when a model exists)
   onCreate: (mode: SvgMode, params: SvgParams) => void;
   onClose: () => void;
 }) {
   const info = svgInfo(svgText);
-  const [mode, setMode] = useState<SvgMode>("extrude");
+  const [mode, setMode] = useState<SvgMode>(initialMode ?? "extrude");
   const [sizeMm, setSizeMm] = useState(50);
   const [heightMm, setHeightMm] = useState(3);
   const [baseMm, setBaseMm] = useState(2);

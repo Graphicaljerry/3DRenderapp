@@ -317,6 +317,12 @@ button { font-family: inherit; cursor: pointer; }
 .bedchip:hover { color: var(--ink); border-color: var(--accent); }
 .bedchip svg { color: var(--accent-d); flex: 0 0 auto; }
 @container (max-width: 680px) { .bedchip-name { display: none; } }
+/* Buttons that unfold a set of sub-modes (Select → Face/Edge/Corner/Point, Transform →
+   Move/Rotate/Scale) carry a Photoshop-style corner tick so the flyout is discoverable. */
+.has-modes { position: relative; }
+.has-modes::after { content: ""; position: absolute; right: 2.5px; bottom: 2.5px; border: 3px solid transparent; border-right-color: currentColor; border-bottom-color: currentColor; opacity: .4; border-radius: 1px; }
+.has-modes.on::after { opacity: .8; }
+
 /* Standard-view snaps, floated at the bottom centre of the canvas (Spline-style). */
 .view-snaps { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; display: flex; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 .view-snaps button { border: none; background: none; padding: 4px 11px; font-size: 11.5px; font-weight: 600; color: var(--mut); border-radius: 999px; }

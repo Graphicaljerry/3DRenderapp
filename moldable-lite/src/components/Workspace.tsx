@@ -719,13 +719,13 @@ export function Workspace(p: Props) {
                   <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
                 </div>
                 <button
-                  className={`ghost sm iconbtn${p.featureCtl.mode ? " on" : ""}`}
+                  className={`ghost sm iconbtn has-modes${p.featureCtl.mode ? " on" : ""}`}
                   aria-pressed={p.featureCtl.mode}
                   aria-label="Select"
                   title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
                   onClick={p.featureCtl.toggleMode}
                 >
-                  <IconPointer />
+                  <IconPointer /><span className="btn-label">Select</span>
                 </button>
                 {p.featureCtl.mode && (
                   <div className="seg sm mode-seg">
@@ -737,7 +737,7 @@ export function Workspace(p: Props) {
                   </div>
                 )}
                 <button
-                  className={`ghost sm iconbtn${p.transformCtl.mode !== "off" ? " on" : ""}`}
+                  className={`ghost sm iconbtn has-modes${p.transformCtl.mode !== "off" ? " on" : ""}`}
                   aria-pressed={p.transformCtl.mode !== "off"}
                   aria-label="Transform"
                   disabled={p.transformCtl.busy}

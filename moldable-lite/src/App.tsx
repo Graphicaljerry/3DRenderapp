@@ -904,6 +904,24 @@ export default function App() {
   async function importModelFile(f: File) {
     if (status === "generating") return;
 
+    // A model is already on the canvas → a dropped mesh becomes a NEW OBJECT next to it
+    // (Objects panel: position, Merge, or remove) instead of silently replacing the work.
+    if (geometry && /\.(glb|gltf|stl)$/i.test(f.name)) {
+      setStatus("generating");
+      try {
+        const { geometry: g, dims: d } = await loadAnyMesh(f);
+        const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
+        setAttachObj({ geometry: g, name: cleanName });
+        selectAttach(true);
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added **${cleanName}** (${d.x} × ${d.y} × ${d.z} mm) as a new object on the canvas — it's in the Objects panel. Position it with the gizmo, **Merge** to fuse it into the model, or ✕ to remove. (To open it on its own instead, start a + New chat first.)` }]);
+      } catch (err: any) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that mesh file: " + String(err?.message ?? err), error: true }]);
+      } finally {
+        setStatus("idle");
+      }
+      return;
+    }
+
     if (/\.shapr$/i.test(f.name)) {
       setMessages((m) => [
         ...m,
@@ -1256,6 +1274,37 @@ export default function App() {
     }
   }
 
+  /** "Put an Apple logo on the back": ask the AI to DRAW the emblem as clean SVG paths,
+   *  extrude it, and drop it on the model as a movable attachment — position, then Merge. */
+  async function aiLogoToAttachment(request: string) {
+    const ph = mid();
+    setMessages((m) => [...m, { id: mid(), role: "user", text: request }, { id: ph, role: "assistant", text: "Drawing the logo as clean vector paths…", streaming: true }]);
+    setStatus("generating");
+    try {
+      let effLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
+      if (effLlm.provider === "openrouter" && effLlm.model === AUTO_MODEL) {
+        const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: request, isEdit: true });
+        if (pick) effLlm = { ...effLlm, model: pick.model.id };
+      }
+      const system = [
+        "You draw clean, single-colour vector emblems for 3D printing.",
+        "Return ONLY one <svg> element and nothing else: viewBox=\"0 0 100 100\", solid filled paths (fill=\"black\"), no strokes, no <text>, no gradients, no clip-paths.",
+        "Closed, non-self-intersecting paths; the shape centred and filling most of the viewBox.",
+      ].join(" ");
+      const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, [{ role: "user", content: `Draw: ${request}` }], {}, effectiveProxy);
+      const svgText = /<svg[\s\S]*?<\/svg>/i.exec(raw)?.[0];
+      if (!svgText) throw new Error("the model didn't return a usable SVG — try rephrasing (e.g. \"a minimalist apple silhouette logo\")");
+      const { geometry: g, dims: d } = extrudeSvg(svgText, { sizeMm: 25, heightMm: 0.8 });
+      setAttachObj({ geometry: g, name: request.match(/\b([a-z0-9-]+)\s+(?:logo|emblem|badge|icon|symbol)/i)?.[1] ?? "logo" });
+      selectAttach(true);
+      setMessages((m) => m.map((x) => (x.id === ph ? { ...x, streaming: false, model: shortModelName(effLlm.model), text: `Drew it and placed it on the model as a new object (${d.x} × ${d.y} mm, 0.8 mm raised). Drag the arrows to position it on the back, corner dots to resize, then **Merge** in the Objects panel to make it part of the case. Not right? ✕ removes it — ask again with more detail.` } : x)));
+    } catch (err: any) {
+      setMessages((m) => m.map((x) => (x.id === ph ? { ...x, streaming: false, error: true, text: `Couldn't draw that logo: ${String(err?.message ?? err)}` } : x)));
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   /** Fuse the attachment into the model via the Manifold worker → one printable mesh. */
   async function mergeAttachment() {
     if (!attachObj || !geometry || !result) return;
@@ -1414,6 +1463,15 @@ export default function App() {
     const p = promptText.trim();
     if (status === "generating") return;
     if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
+    // "Add a <thing> logo/emblem" while a model exists → the AI DRAWS it as SVG and it
+    // lands as a movable attachment — far cleaner than regenerating the whole part.
+    if (p && result && geometry && (forceMode ?? mode) === "precise"
+      && /\b(logo|emblem|badge|crest|icon|silhouette|symbol)\b/i.test(p)
+      && llmReady(llm.provider === "anthropic" ? { ...llm, model } : llm, { anthropic: key, ...llmKeys })) {
+      await aiLogoToAttachment(p);
+      return;
+    }
+
     // Fresh chat + the user never touched the engine switch → route by what the words
     // describe. Organic/sculptural things are beyond CAD's reach and belong on the mesh
     // engine; dimensioned functional parts belong in CAD. One notice, one tap to override.
@@ -2168,6 +2226,7 @@ export default function App() {
           svgUrl={svgDraft.url}
           name={svgDraft.name}
           hasModel={!!geometry}
+          initialMode={geometry ? "attach" : "extrude"}
           onCreate={createFromSvg}
           onClose={() => { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }}
         />

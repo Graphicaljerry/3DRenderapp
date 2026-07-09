@@ -558,6 +558,7 @@ interface Props {
 export function Workspace(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [dragOverCanvas, setDragOverCanvas] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
   const [chatOpen, setChatOpen] = useState(true);
   // Resizable chat column: drag the divider to trade chat width for 3D-viewer room
@@ -603,7 +604,8 @@ export function Workspace(p: Props) {
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/") || /\.(glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
+    setDragOverCanvas(false);
+    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
     if (f) p.onPickImage(f);
   }
 
@@ -815,7 +817,12 @@ export function Workspace(p: Props) {
           />
         )}
 
-        <section className={`viewer${p.tab === "params" ? " params-docked" : ""}`}>
+        <section
+          className={`viewer${p.tab === "params" ? " params-docked" : ""}${dragOverCanvas ? " drop" : ""}`}
+          onDragOver={(e) => { e.preventDefault(); setDragOverCanvas(true); }}
+          onDragLeave={() => setDragOverCanvas(false)}
+          onDrop={onDrop}
+        >
           <div className="viewer-head">
             <div className="tabs">
               {(["3d", "code", "params", "print", "history"] as const).map((t) => {

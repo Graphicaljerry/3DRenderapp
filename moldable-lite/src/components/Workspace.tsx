@@ -10,6 +10,8 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
+import { TemplateStrip } from "./TemplatesModal";
+import type { Template } from "../cad/templates";
 import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPlay } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
@@ -443,6 +445,8 @@ interface Props {
   onSend: (p: string, forceMode?: Mode) => void;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
   onExample: () => void;
+  onTemplate: (t: Template) => void;
+  onOpenTemplates: () => void;
   resume: string | null;
   onResume: () => void;
   geometry: THREE.BufferGeometry | null;
@@ -629,6 +633,7 @@ export function Workspace(p: Props) {
         </div>
         <div className="topbar-right">
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
+          <button className="ghost" onClick={p.onOpenTemplates}>Templates</button>
           <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
           <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
           <button className="ghost profile" onClick={p.onToggleTheme} title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle dark mode">
@@ -693,7 +698,7 @@ export function Workspace(p: Props) {
             <span className="chat-title">Chat</span>
             <button className="ghost sm" title="Hide chat" onClick={() => setChatOpen(false)}>Hide ‹</button>
           </div>
-          <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
+          <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
             brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} />
 
           <div className="composer-wrap">
@@ -1394,8 +1399,8 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel }: {
-  messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel }: {
+  messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
 }) {
@@ -1404,7 +1409,8 @@ function Messages({ messages, thinking, onChip, onExample, onStartGuided, resume
   const [editText, setEditText] = useState("");
   const lastText = messages[messages.length - 1]?.text;
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" });
+    // No messages = the empty state (templates + suggestions): stay scrolled to its top.
+    if (messages.length) endRef.current?.scrollIntoView({ block: "end" });
   }, [messages.length, lastText]);
 
   const busy = status === "generating";
@@ -1424,6 +1430,7 @@ function Messages({ messages, thinking, onChip, onExample, onStartGuided, resume
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
           <p className="empty-sub">Type a description, attach a photo, or drop an SVG to extrude — plus 3D files: .step imports as editable CAD, .glb/.stl as a mesh.</p>
+          <TemplateStrip onPick={onTemplate} onMore={onOpenTemplates} busy={busy} />
           <button className="guided-cta" onClick={onStartGuided}>
             <span className="gc-title">Fix a broken part</span>
             <span className="gc-sub">Photo → a dimension-accurate replacement that fits</span>

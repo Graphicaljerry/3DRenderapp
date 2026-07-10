@@ -67,6 +67,9 @@ interface Props {
   selAttachIds: string[]; // which of them are selected (>1 → group transform)
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
+  visiblePlate: number; // 0 = all; otherwise only objects on this build plate render
+  plateFor: (key: string) => number; // which plate an object ("model" or attachment id) is on
+  showcase: boolean; // presentation mode: clean stage, studio light, slow turntable
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   onPickPoint: (p: PickedPoint) => void;
@@ -158,7 +161,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
@@ -1224,6 +1227,30 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
+
+  // Build-plate filter: only the active plate's objects render (0 = everything).
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (s.mesh) s.mesh.visible = visiblePlate === 0 || plateFor("model") === visiblePlate;
+    for (const [id, m] of s.attachMap) m.visible = visiblePlate === 0 || plateFor(id) === visiblePlate;
+  }, [visiblePlate, plateFor, attachments, geometry]);
+
+  // Showcase: hide the workshop chrome, warm up the light, spin the turntable.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    s.grid.visible = !showcase;
+    if (s.dims) s.dims.visible = !showcase && showDims;
+    if (s.pins) s.pins.visible = !showcase;
+    s.measures.visible = !showcase;
+    s.controls.autoRotate = showcase;
+    s.controls.autoRotateSpeed = 1.4;
+    const hemi = s.scene.children.find((o) => (o as THREE.HemisphereLight).isHemisphereLight) as THREE.HemisphereLight | undefined;
+    const dir = s.scene.children.find((o) => (o as THREE.DirectionalLight).isDirectionalLight) as THREE.DirectionalLight | undefined;
+    if (hemi) hemi.intensity = showcase ? 1.35 : 1.05;
+    if (dir) dir.intensity = showcase ? 2.1 : 1.4;
+  }, [showcase, showDims]);
 
   // Display material: filament colour + finish, and the baked texture when the model
   // ships painted (AI meshes). Split-piece vertex colours always win over both.

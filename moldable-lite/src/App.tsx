@@ -5,7 +5,7 @@ import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
 import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
-import { geometryToSTL, geometryTo3MF, zipModelFiles } from "./print/exportClient";
+import { geometryToSTL, geometryTo3MF, geometriesTo3MF, zipModelFiles } from "./print/exportClient";
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
@@ -282,6 +282,33 @@ export default function App() {
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
   const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string }[]>([]); // free-floating objects (logos, badges, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
+  // Build plates: every object (the model = "model", attachments by id) lives on a plate.
+  const [plateOf, setPlateOf] = useState<Record<string, number>>({});
+  const [activePlate, setActivePlate] = useState<number | 0>(0); // 0 = show all plates
+  const [showcase, setShowcase] = useState(false); // presentation mode: clean stage + turntable
+  const plateFor = (key: string) => plateOf[key] ?? 1;
+  const cyclePlate = (key: string) => setPlateOf((m) => ({ ...m, [key]: (plateFor(key) % 3) + 1 }));
+  /** One 3MF per non-empty plate — real named <object>s, positioned as placed. */
+  function exportPlates() {
+    if (!geometry) return;
+    const plates = new Map<number, { geometry: THREE.BufferGeometry; name: string }[]>();
+    const put = (n: number, part: { geometry: THREE.BufferGeometry; name: string }) => {
+      if (!plates.has(n)) plates.set(n, []);
+      plates.get(n)!.push(part);
+    };
+    put(plateFor("model"), { geometry, name: project?.name ?? "model" });
+    for (const a of attachments) {
+      const baked = viewer.current?.bakeAttachment(a.id);
+      if (!baked) continue;
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(baked, 3));
+      put(plateFor(a.id), { geometry: g, name: a.name });
+    }
+    for (const [n, parts] of [...plates.entries()].sort((x, y) => x[0] - y[0])) {
+      downloadBlob(geometriesTo3MF(parts), safeFileName(`${project?.name ?? "model"}-plate-${n}`, "3mf"));
+    }
+    setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as 3MF — each part is a separate named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.` }]);
+  }
   const attachSelected = selAttachIds.length > 0;
   const addAttachment = (geometry: THREE.BufferGeometry, name: string) => {
     const id = mid();
@@ -2082,6 +2109,13 @@ export default function App() {
         onRemoveAttachment={removeAttachment}
         snap={snap}
         setSnap={setSnap}
+        plateFor={plateFor}
+        cyclePlate={cyclePlate}
+        activePlate={activePlate}
+        setActivePlate={setActivePlate}
+        onExportPlates={exportPlates}
+        showcase={showcase}
+        setShowcase={setShowcase}
         appearance={appearance}
         setAppearance={setAppearance}
         texture={result?.texture ?? null}

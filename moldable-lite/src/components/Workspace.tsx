@@ -10,7 +10,7 @@ import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/simplify";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPlay } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -458,6 +458,13 @@ interface Props {
   onRemoveAttachment: (id: string) => void;
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
+  plateFor: (key: string) => number;
+  cyclePlate: (key: string) => void;
+  activePlate: number; // 0 = all
+  setActivePlate: (n: number) => void;
+  onExportPlates: () => void;
+  showcase: boolean;
+  setShowcase: (v: boolean) => void;
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
   setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void;
   texture: THREE.Texture | null;
@@ -929,6 +936,9 @@ export function Workspace(p: Props) {
                 <button className="ghost sm iconbtn" aria-label="Reset view" title="Re-frame the model in the viewport" onClick={() => p.viewerRef.current?.resetView()}>
                   <IconFrame /><span className="btn-label">Reset view</span>
                 </button>
+                <button className={`ghost sm iconbtn${p.showcase ? " on" : ""}`} aria-pressed={p.showcase} aria-label="Showcase" title="Showcase mode — clean stage, studio light, slow turntable (Shapr3D-style visualization)" onClick={() => p.setShowcase(!p.showcase)}>
+                  <IconPlay />
+                </button>
                 <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select the model, pins and measurements" onClick={() => setShowLayers((v) => !v)}>
                   <IconLayers />
                 </button>
@@ -957,6 +967,9 @@ export function Workspace(p: Props) {
                 onModelSelect={p.onModelSelect}
                 attachments={p.attachments}
                 selAttachIds={p.selAttachIds}
+                visiblePlate={p.activePlate}
+                plateFor={p.plateFor}
+                showcase={p.showcase}
                 onAttachSelect={p.onAttachSelect}
                 snap={p.snap}
                 appearance={p.appearance}
@@ -992,10 +1005,17 @@ export function Workspace(p: Props) {
               {showLayers && (p.tab === "3d" || p.tab === "params") && (
                 <div className="layers-panel" role="region" aria-label="Objects on the canvas">
                   <div className="lp-head"><b>Objects</b><button className="x" aria-label="Close objects" onClick={() => setShowLayers(false)}><IconX /></button></div>
-                  <button className={`lp-row${p.modelSelected ? " on" : ""}`} disabled={!p.geometry} title="Select the whole part (shows its bounding box)" onClick={() => p.onModelSelect(!p.modelSelected)}>
+                  <div className="lp-plates">
+                    {[0, 1, 2, 3].map((n) => (
+                      <button key={n} className={p.activePlate === n ? "on" : ""} title={n === 0 ? "Show every plate" : `Show only plate ${n}`} onClick={() => p.setActivePlate(n)}>{n === 0 ? "All" : `P${n}`}</button>
+                    ))}
+                    <button className="lp-export" title="One 3MF per plate — separate named objects for Bambu/Orca" onClick={p.onExportPlates} disabled={!p.geometry}>Export plates</button>
+                  </div>
+                  <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box)" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
                     <IconCube /><span className="lp-name">Model</span>
+                    {p.geometry && <button className="lp-plate" title="Which build plate this prints on — tap to cycle" onClick={(e) => { e.stopPropagation(); p.cyclePlate("model"); }}>P{p.plateFor("model")}</button>}
                     {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
-                  </button>
+                  </div>
                   {(p.splitCtl.pieces ?? []).map((pc, i) => (
                     <div key={`pc${i}`} className="lp-row static">
                       <span className="lp-dot" style={{ background: pc.color }} /><span className="lp-name">Piece {i + 1}</span>
@@ -1009,6 +1029,7 @@ export function Workspace(p: Props) {
                         <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
                         <span className="lp-dot" style={{ background: "#7fc4b9" }} />
                         <span className="lp-name">{a.name}</span>
+                        <button className="lp-plate" title="Which build plate this prints on — tap to cycle" onClick={(e) => { e.stopPropagation(); p.cyclePlate(a.id); }}>P{p.plateFor(a.id)}</button>
                         <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
                       </div>
                     );

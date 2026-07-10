@@ -206,6 +206,13 @@ export const IconTexturize = ({ size = 15 }: { size?: number }) => (
   </svg>
 );
 
+export const IconPlay = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <circle cx="12" cy="12" r="9.2" />
+    <path d="M10 8.6v6.8l5.6-3.4Z" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const IconMagnet = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <path d="M5 4v7a7 7 0 0 0 14 0V4" />

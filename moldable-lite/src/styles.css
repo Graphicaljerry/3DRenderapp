@@ -213,8 +213,11 @@ button { font-family: inherit; cursor: pointer; }
 .msg.assistant .bubble { background: var(--accent-w); }
 .msg.err .bubble { background: #fbeaea; color: #a23a3a; }
 .bubble.muted { color: var(--mut); }
-.composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); }
-.composer input { flex: 1; height: 40px; padding: 0 12px; border: 1px solid var(--bord); border-radius: 10px; font-size: 13px; }
+.composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); min-width: 0; }
+/* min-width:0 lets the input shrink below its intrinsic width — without it the Send
+   button gets pushed out of the panel on narrow chat widths. Buttons never shrink. */
+.composer input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--bord); border-radius: 10px; font-size: 13px; }
+.composer > button { flex: 0 0 auto; }
 .send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
 /* Dictation mic — quiet next to Send; pulses while listening. */
 .mic { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
@@ -363,6 +366,13 @@ button { font-family: inherit; cursor: pointer; }
 .lp-row svg { flex: 0 0 auto; color: var(--accent-d); }
 .lp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lp-sub { font-size: 10.5px; color: var(--subt); white-space: nowrap; }
+.lp-plates { display: flex; gap: 3px; align-items: center; padding: 2px 4px 8px; border-bottom: 1px solid var(--bord-subtle); margin-bottom: 4px; }
+.lp-plates button { border: 1px solid var(--bord); background: var(--bg); color: var(--mut); border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
+.lp-plates button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); border-color: var(--accent); }
+.lp-plates .lp-export { margin-left: auto; color: var(--accent-d); }
+.lp-plates .lp-export:disabled { opacity: .4; }
+.lp-plate { border: 1px solid var(--bord); background: var(--surf); color: var(--mut); border-radius: 999px; padding: 1.5px 7px; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
+.lp-plate:hover { color: var(--accent-d); border-color: var(--accent); }
 .lp-check { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
 .lp-dot { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 auto; }
 .lp-dot.pin { width: 16px; height: 16px; border-radius: 999px; background: var(--accent-w); color: var(--accent-d); font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }

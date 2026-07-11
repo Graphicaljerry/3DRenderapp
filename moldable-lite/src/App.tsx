@@ -5,7 +5,7 @@ import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
 import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
 import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
-import { geometryToSTL, geometryTo3MF, geometriesTo3MF, zipModelFiles } from "./print/exportClient";
+import { geometryToSTL, geometryTo3MF, geometriesTo3MF, platesToProject3MF, zipModelFiles } from "./print/exportClient";
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
@@ -285,31 +285,67 @@ export default function App() {
   const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string }[]>([]); // free-floating objects (logos, badges, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
   // Build plates: every object (the model = "model", attachments by id) lives on a plate.
+  // Bambu-Studio-style: any number of plates, assignment via menu, saved with the project.
   const [plateOf, setPlateOf] = useState<Record<string, number>>({});
+  const [plateCount, setPlateCount] = useState(1);
   const [activePlate, setActivePlate] = useState<number | 0>(0); // 0 = show all plates
   const [showcase, setShowcase] = useState(false); // presentation mode: clean stage + turntable
-  const plateFor = (key: string) => plateOf[key] ?? 1;
-  const cyclePlate = (key: string) => setPlateOf((m) => ({ ...m, [key]: (plateFor(key) % 3) + 1 }));
-  /** One 3MF per non-empty plate — real named <object>s, positioned as placed. */
-  function exportPlates() {
-    if (!geometry) return;
-    const plates = new Map<number, { geometry: THREE.BufferGeometry; name: string }[]>();
-    const put = (n: number, part: { geometry: THREE.BufferGeometry; name: string }) => {
-      if (!plates.has(n)) plates.set(n, []);
-      plates.get(n)!.push(part);
-    };
-    put(plateFor("model"), { geometry, name: project?.name ?? "model" });
+  const plateFor = (key: string) => Math.min(plateOf[key] ?? 1, plateCount);
+  // No upper clamp here: "move to a plate I just added" arrives before plateCount's
+  // re-render, so the raw value is stored and plateFor() clamps on read instead.
+  const assignPlate = (key: string, n: number) => setPlateOf((m) => ({ ...m, [key]: Math.max(1, n) }));
+  /** Add an empty plate; returns its number so callers can assign onto it directly. */
+  const addPlate = () => {
+    const n = Math.min(plateCount + 1, 36); // Bambu Studio's own plate cap
+    setPlateCount(n);
+    return n;
+  };
+  /** Remove plate n: its objects join the plate before it; higher plates slide down. */
+  const removePlate = (n: number) => {
+    if (plateCount <= 1) return;
+    setPlateOf((m) => {
+      const next: Record<string, number> = {};
+      for (const [k, v] of Object.entries(m)) next[k] = v === n ? Math.max(1, n - 1) : v > n ? v - 1 : v;
+      return next;
+    });
+    setPlateCount((c) => c - 1);
+    setActivePlate((a) => (a === 0 ? 0 : a === n ? 0 : a > n ? a - 1 : a));
+  };
+  /** Everything on the canvas, with its plate — the shared input for both plate exports. */
+  function collectPlateParts(): { geometry: THREE.BufferGeometry; name: string; plate: number }[] | null {
+    if (!geometry) return null;
+    const parts = [{ geometry, name: project?.name ?? "model", plate: plateFor("model") }];
     for (const a of attachments) {
       const baked = viewer.current?.bakeAttachment(a.id);
       if (!baked) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(baked, 3));
-      put(plateFor(a.id), { geometry: g, name: a.name });
+      parts.push({ geometry: g, name: a.name, plate: plateFor(a.id) });
+    }
+    return parts;
+  }
+  /** One 3MF per non-empty plate — real named <object>s, positioned as placed. */
+  function exportPlates() {
+    const all = collectPlateParts();
+    if (!all) return;
+    const plates = new Map<number, { geometry: THREE.BufferGeometry; name: string }[]>();
+    for (const part of all) {
+      if (!plates.has(part.plate)) plates.set(part.plate, []);
+      plates.get(part.plate)!.push(part);
     }
     for (const [n, parts] of [...plates.entries()].sort((x, y) => x[0] - y[0])) {
       downloadBlob(geometriesTo3MF(parts), safeFileName(`${project?.name ?? "model"}-plate-${n}`, "3mf"));
     }
-    setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as 3MF — each part is a separate named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.` }]);
+    setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.` }]);
+  }
+  /** ONE project 3MF with every plate laid out — Bambu Studio / OrcaSlicer open it with
+      the plates intact (each part named, grouped and positioned on its plate). */
+  function exportPlatesProject() {
+    const all = collectPlateParts();
+    if (!all) return;
+    downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }), safeFileName(`${project?.name ?? "model"}-plates`, "3mf"));
+    const used = new Set(all.map((p) => p.plate)).size;
+    setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.` }]);
   }
   const attachSelected = selAttachIds.length > 0;
   const addAttachment = (geometry: THREE.BufferGeometry, name: string) => {
@@ -464,6 +500,22 @@ export default function App() {
     }, 600);
     return () => clearTimeout(t);
   }, [messages, pins]);
+
+  // ---- build plates: save layout with the project (same debounced pattern as chat) ----
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const pr = projectRef.current;
+      if (!pr) return;
+      const cur = pr.plates ?? { count: 1, of: {} };
+      if (cur.count === plateCount && JSON.stringify(cur.of) === JSON.stringify(plateOf)) return;
+      const next = { ...pr, plates: { count: plateCount, of: plateOf }, updatedAt: Date.now() };
+      projectRef.current = next;
+      setProject(next);
+      void putProject(next);
+      scheduleSync();
+    }, 600);
+    return () => clearTimeout(t);
+  }, [plateOf, plateCount]);
 
   // ---- library thumbnail: refresh the saved preview whenever the model settles ----
   // Debounced so a slider drag (many rebuilds/sec) writes at most one thumb, and
@@ -2043,6 +2095,9 @@ export default function App() {
     setProject(p);
     setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error, image: c.image })));
     setPins(p.pins ?? []);
+    setPlateOf(p.plates?.of ?? {});
+    setPlateCount(p.plates?.count ?? 1);
+    setActivePlate(0);
     setActivePinId(null);
     setGuided(false); // guided is a per-session intent — don't leak it into another project
     setMode(p.engine === "generative" ? "generative" : "precise");
@@ -2057,6 +2112,9 @@ export default function App() {
     localStorage.removeItem("moldable_last_project");
     projectRef.current = null;
     setPins([]);
+    setPlateOf({});
+    setPlateCount(1);
+    setActivePlate(0);
     setActivePinId(null);
     setSelectMode(false);
     setSelectedFeature(null);
@@ -2155,10 +2213,16 @@ export default function App() {
         snap={snap}
         setSnap={setSnap}
         plateFor={plateFor}
-        cyclePlate={cyclePlate}
+        plateCtl={{
+          count: plateCount,
+          assign: assignPlate,
+          add: addPlate,
+          remove: removePlate,
+          exportEach: exportPlates,
+          exportProject: exportPlatesProject,
+        }}
         activePlate={activePlate}
         setActivePlate={setActivePlate}
-        onExportPlates={exportPlates}
         showcase={showcase}
         setShowcase={setShowcase}
         appearance={appearance}

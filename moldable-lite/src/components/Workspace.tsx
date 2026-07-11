@@ -44,6 +44,97 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
   { f: "obj", label: "OBJ", desc: "Mesh (reference)" },
 ];
 
+/** Pick which build plate an object prints on — a menu, not a blind cycle. */
+function PlateMenu({ value, count, onPick, onNewPlate }: { value: number; count: number; onPick: (n: number) => void; onNewPlate: () => void }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="pmenu-wrap" onClick={(e) => e.stopPropagation()}>
+      <button className="lp-plate" title="Which build plate this prints on — click to choose" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+        P{value} ▾
+      </button>
+      {open && (
+        <div className="pmenu" role="menu" onMouseLeave={() => setOpen(false)}>
+          {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+            <button key={n} role="menuitem" className={`pmenu-item${n === value ? " on" : ""}`} onClick={() => { setOpen(false); onPick(n); }}>
+              Plate {n}{n === value ? " ✓" : ""}
+            </button>
+          ))}
+          <div className="pmenu-sep" />
+          <button role="menuitem" className="pmenu-item" onClick={() => { setOpen(false); onNewPlate(); }}>+ New plate</button>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** The two ways plates leave the app: one project file with plates, or one file per plate. */
+function PlateExportMenu({ exportEach, exportProject, disabled, compact }: { exportEach: () => void; exportProject: () => void; disabled: boolean; compact?: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className={`pmenu-wrap${compact ? " lp-export-wrap" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <button className={compact ? "lp-export" : "pb-export"} disabled={disabled} aria-haspopup="menu" aria-expanded={open} title="Export your plate layout for the slicer" onClick={() => setOpen((v) => !v)}>
+        Export ▾
+      </button>
+      {open && (
+        <div className="pmenu up" role="menu" onMouseLeave={() => setOpen(false)}>
+          <button role="menuitem" className="pmenu-item" onClick={() => { setOpen(false); exportProject(); }}>
+            <b>One project .3mf</b>
+            <span>All plates in one file — Bambu Studio / OrcaSlicer</span>
+          </button>
+          <button role="menuitem" className="pmenu-item" onClick={() => { setOpen(false); exportEach(); }}>
+            <b>One .3mf per plate</b>
+            <span>Separate file for each plate — any slicer</span>
+          </button>
+        </div>
+      )}
+    </span>
+  );
+}
+
+/** Bambu-style plate tabs over the 3D view: see what prints where, focus one plate,
+    add/remove plates, and export the layout — all in one glance. */
+function PlateBar({ count, active, setActive, counts, onAdd, onRemove, exportEach, exportProject }: {
+  count: number;
+  active: number;
+  setActive: (n: number) => void;
+  counts: Map<number, number>;
+  onAdd: () => void;
+  onRemove: (n: number) => void;
+  exportEach: () => void;
+  exportProject: () => void;
+}) {
+  return (
+    <div className="plate-bar" role="group" aria-label="Build plates">
+      <span className="pb-label">Plates</span>
+      <button className={`pb-tab${active === 0 ? " on" : ""}`} title="Show every plate" onClick={() => setActive(0)}>All</button>
+      {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+        <button
+          key={n}
+          className={`pb-tab${active === n ? " on" : ""}`}
+          title={`Show only plate ${n} — ${counts.get(n) ?? 0} object${(counts.get(n) ?? 0) === 1 ? "" : "s"}`}
+          onClick={() => setActive(n)}
+        >
+          {n}
+          <span className={`pb-count${counts.get(n) ? "" : " zero"}`}>{counts.get(n) ?? 0}</span>
+          {active === n && count > 1 && (
+            <span
+              className="pb-x"
+              role="button"
+              aria-label={`Remove plate ${n}`}
+              title="Remove this plate — its objects join the previous plate"
+              onClick={(e) => { e.stopPropagation(); onRemove(n); }}
+            >
+              <IconX size={9} />
+            </span>
+          )}
+        </button>
+      ))}
+      <button className="pb-add" title="Add a build plate" onClick={onAdd}>+</button>
+      <PlateExportMenu exportEach={exportEach} exportProject={exportProject} disabled={false} />
+    </div>
+  );
+}
+
 /** The project name beside the logo — click to rename; Enter/blur saves, Esc cancels. */
 function ProjectTitle({ name, onRename }: { name: string; onRename: (n: string) => void }) {
   const [editing, setEditing] = useState(false);
@@ -463,10 +554,16 @@ interface Props {
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
   plateFor: (key: string) => number;
-  cyclePlate: (key: string) => void;
+  plateCtl: {
+    count: number;
+    assign: (key: string, n: number) => void;
+    add: () => number; // returns the new plate's number
+    remove: (n: number) => void;
+    exportEach: () => void;
+    exportProject: () => void;
+  };
   activePlate: number; // 0 = all
   setActivePlate: (n: number) => void;
-  onExportPlates: () => void;
   showcase: boolean;
   setShowcase: (v: boolean) => void;
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
@@ -611,6 +708,12 @@ export function Workspace(p: Props) {
 
   const enginePill =
     p.activeKind === "replicad" ? "Engine · replicad" : p.activeKind === "generative" ? `Engine · ${p.genLabel}` : "Engine · primitive";
+
+  // How many objects sit on each plate — feeds the plate tabs' badges.
+  const plateCounts = new Map<number, number>();
+  const bumpPlate = (n: number) => plateCounts.set(n, (plateCounts.get(n) ?? 0) + 1);
+  if (p.geometry) bumpPlate(p.plateFor("model"));
+  for (const a of p.attachments) bumpPlate(p.plateFor(a.id));
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -994,6 +1097,18 @@ export function Workspace(p: Props) {
                 onMeasurePoint={p.measureCtl.point}
               />
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
+              {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (p.attachments.length > 0 || p.plateCtl.count > 1) && (
+                <PlateBar
+                  count={p.plateCtl.count}
+                  active={p.activePlate}
+                  setActive={p.setActivePlate}
+                  counts={plateCounts}
+                  onAdd={() => p.plateCtl.add()}
+                  onRemove={p.plateCtl.remove}
+                  exportEach={p.plateCtl.exportEach}
+                  exportProject={p.plateCtl.exportProject}
+                />
+              )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && (
                 <div className="view-snaps" role="group" aria-label="View angles">
                   {(["top", "front", "right", "iso"] as const).map((v) => (
@@ -1011,14 +1126,15 @@ export function Workspace(p: Props) {
                 <div className="layers-panel" role="region" aria-label="Objects on the canvas">
                   <div className="lp-head"><b>Objects</b><button className="x" aria-label="Close objects" onClick={() => setShowLayers(false)}><IconX /></button></div>
                   <div className="lp-plates">
-                    {[0, 1, 2, 3].map((n) => (
+                    {[0, ...Array.from({ length: p.plateCtl.count }, (_, i) => i + 1)].map((n) => (
                       <button key={n} className={p.activePlate === n ? "on" : ""} title={n === 0 ? "Show every plate" : `Show only plate ${n}`} onClick={() => p.setActivePlate(n)}>{n === 0 ? "All" : `P${n}`}</button>
                     ))}
-                    <button className="lp-export" title="One 3MF per plate — separate named objects for Bambu/Orca" onClick={p.onExportPlates} disabled={!p.geometry}>Export plates</button>
+                    <button className="lp-add" title="Add a build plate" onClick={() => p.plateCtl.add()}>+</button>
+                    <PlateExportMenu compact exportEach={p.plateCtl.exportEach} exportProject={p.plateCtl.exportProject} disabled={!p.geometry} />
                   </div>
                   <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box)" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
                     <IconCube /><span className="lp-name">Model</span>
-                    {p.geometry && <button className="lp-plate" title="Which build plate this prints on — tap to cycle" onClick={(e) => { e.stopPropagation(); p.cyclePlate("model"); }}>P{p.plateFor("model")}</button>}
+                    {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
                     {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
                   </div>
                   {(p.splitCtl.pieces ?? []).map((pc, i) => (
@@ -1034,7 +1150,7 @@ export function Workspace(p: Props) {
                         <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
                         <span className="lp-dot" style={{ background: "#7fc4b9" }} />
                         <span className="lp-name">{a.name}</span>
-                        <button className="lp-plate" title="Which build plate this prints on — tap to cycle" onClick={(e) => { e.stopPropagation(); p.cyclePlate(a.id); }}>P{p.plateFor(a.id)}</button>
+                        <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
                         <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
                       </div>
                     );

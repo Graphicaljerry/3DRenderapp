@@ -373,6 +373,35 @@ button { font-family: inherit; cursor: pointer; }
 .lp-plates .lp-export:disabled { opacity: .4; }
 .lp-plate { border: 1px solid var(--bord); background: var(--surf); color: var(--mut); border-radius: 999px; padding: 1.5px 7px; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
 .lp-plate:hover { color: var(--accent-d); border-color: var(--accent); }
+.lp-plates .lp-add { padding: 3px 7px; }
+.lp-plates .lp-export-wrap { margin-left: auto; }
+.lp-export { border: none; background: none; color: var(--accent-d); font-size: 11px; font-weight: 600; }
+.lp-export:disabled { opacity: .4; }
+
+/* ---------- build plates: Bambu-style tabs over the 3D view + assignment menus ---------- */
+.plate-bar { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.pb-label { font-size: 10.5px; font-weight: 700; color: var(--subt); text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 0 6px; }
+.pb-tab { position: relative; display: inline-flex; align-items: center; gap: 4px; border: none; background: none; padding: 4px 9px; font-size: 11.5px; font-weight: 600; color: var(--mut); border-radius: 999px; }
+.pb-tab:hover { background: var(--surf); color: var(--ink); }
+.pb-tab.on { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); }
+.pb-count { min-width: 14px; padding: 0 3px; border-radius: 999px; background: var(--surf); border: 1px solid var(--bord); font-size: 9px; font-weight: 700; color: var(--mut); text-align: center; line-height: 13px; }
+.pb-count.zero { opacity: .5; }
+.pb-x { display: inline-grid; place-items: center; width: 14px; height: 14px; border-radius: 50%; color: var(--subt); }
+.pb-x:hover { background: var(--bord); color: var(--ink); }
+.pb-add { border: none; background: none; padding: 4px 9px; font-size: 13px; font-weight: 700; color: var(--mut); border-radius: 999px; }
+.pb-add:hover { background: var(--surf); color: var(--accent-d); }
+.pb-export { border: none; background: none; padding: 4px 10px; font-size: 11.5px; font-weight: 600; color: var(--accent-d); border-radius: 999px; }
+.pb-export:hover { background: var(--surf); }
+/* small anchored menu shared by plate pickers + plate export */
+.pmenu-wrap { position: relative; display: inline-flex; }
+.pmenu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 168px; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
+.pmenu.up { top: auto; bottom: calc(100% + 4px); }
+.pmenu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: none; background: none; border-radius: 7px; padding: 6px 9px; font-size: 12px; color: var(--ink); }
+.pmenu-item b { font-size: 12px; font-weight: 600; }
+.pmenu-item span { font-size: 10.5px; color: var(--subt); }
+.pmenu-item:hover { background: var(--surf); }
+.pmenu-item.on { color: var(--accent-d); font-weight: 600; }
+.pmenu-sep { height: 1px; background: var(--bord-subtle); margin: 3px 4px; }
 .lp-check { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
 .lp-dot { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 auto; }
 .lp-dot.pin { width: 16px; height: 16px; border-radius: 999px; background: var(--accent-w); color: var(--accent-d); font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }

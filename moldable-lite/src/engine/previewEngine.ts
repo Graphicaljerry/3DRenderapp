@@ -45,6 +45,14 @@ export async function previewBoolean(prism: Float32Array, dist: number): Promise
   return r.ok ? r.positions : null;
 }
 
+/** Fit check: the interference volume (triangle soup) between `tool` and the base —
+ *  empty when they don't overlap. Null → Manifold couldn't weld one of the meshes. */
+export async function previewIntersect(tool: Float32Array): Promise<Float32Array | null> {
+  if (!baseFor) return null;
+  const r = await ensure().preview(tool, "intersect");
+  return r.ok ? r.positions : null;
+}
+
 /** Physical surface texture: subdivide + displace the mesh in the preview worker. */
 export async function displaceMesh(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<Float32Array | null> {
   const r = await ensure().displace(positions, opts);

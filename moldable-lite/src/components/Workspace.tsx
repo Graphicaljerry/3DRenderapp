@@ -598,6 +598,10 @@ interface Props {
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   onMergeAttachments: (ids?: string[]) => void;
   onRemoveAttachment: (id: string) => void;
+  partCount: number; // disconnected solids inside the model mesh (1 = a single part)
+  onSeparateParts: () => void;
+  onCheckFit: (ids: string[]) => void;
+  onDropToPlate: (ids: string[]) => void;
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
   plateFor: (key: string) => number;
@@ -1202,6 +1206,26 @@ export function Workspace(p: Props) {
                       </div>
                     );
                   })}
+                  {p.geometry && p.partCount > 1 && (
+                    <button
+                      className="ghost sm"
+                      style={{ width: "100%", marginTop: 6 }}
+                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge or Undo to regroup"
+                      onClick={p.onSeparateParts}
+                    >
+                      Separate {p.partCount} parts
+                    </button>
+                  )}
+                  {p.selAttachIds.length > 0 && (
+                    <div className="lp-fitrow">
+                      <button className="ghost sm" title="Does it fit here? Computes the real overlap between the selected part(s) and the model — zero overlap means no collision at this position" onClick={() => p.onCheckFit(p.selAttachIds)}>
+                        Check fit
+                      </button>
+                      <button className="ghost sm" title="Settle the selected part(s) back down onto the build plate (keeps position and rotation)" onClick={() => p.onDropToPlate(p.selAttachIds)}>
+                        Drop to plate
+                      </button>
+                    </div>
+                  )}
                   {p.attachments.length > 0 && (
                     <button className="primary sm" style={{ width: "100%", marginTop: 6 }} title="Fuse into ONE printable solid (Undo brings the pieces back)" onClick={() => p.onMergeAttachments(p.selAttachIds.length > 1 ? p.selAttachIds : undefined)}>
                       {p.selAttachIds.length > 1 ? `Merge selected (${p.selAttachIds.length})` : "Merge all into model"}

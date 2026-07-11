@@ -51,6 +51,8 @@ for the full engineering notes:
 - **Export menu** — STL · 3MF · STEP · OBJ (STEP gated to the replicad engine).
 - **Settings** — Anthropic key + model + printer defaults (bed size, overhang threshold).
 - **Zero-spend example** — "Try the built-in example" builds an L-bracket with no API call.
+- **Template gallery** — photo cards of 10 common parts (phone stand, cable clip, wall hook,
+  box with lid…): one tap builds a fully parametric model, no AI call, no key.
 
 ## Run
 

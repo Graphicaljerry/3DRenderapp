@@ -439,6 +439,28 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .lib-meta { font-size: 11px; color: var(--subt); margin-top: 3px; }
 .lib-actions { display: flex; gap: 6px; border-top: 1px solid var(--bord); padding-top: 8px; }
 
+/* ---------- template gallery (photo cards → one-tap parametric parts) ---------- */
+.tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
+.tpl-card { display: block; width: 100%; text-align: left; background: none; border: 1px solid var(--bord); border-radius: 12px; padding: 10px; cursor: pointer; transition: border-color .15s ease, box-shadow .16s ease, transform .16s cubic-bezier(.23,1,.32,1); }
+.tpl-card:hover { border-color: var(--bord-strong); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+.tpl-card:hover .tpl-name { color: var(--accent-d); }
+.tpl-card:disabled { opacity: .55; cursor: default; transform: none; box-shadow: none; }
+.tpl-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tpl-thumb { aspect-ratio: 4 / 3; border-radius: 9px; overflow: hidden; background: var(--surf); border: 1px solid var(--bord-subtle); margin-bottom: 8px; display: grid; place-items: center; }
+.tpl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s cubic-bezier(.23,1,.32,1); }
+.tpl-card:hover .tpl-thumb img { transform: scale(1.04); }
+.tpl-thumb-empty { color: var(--subt); opacity: .6; }
+.tpl-name { display: block; font-size: 13px; font-weight: 600; color: var(--ink); transition: color .15s ease; }
+.tpl-blurb { display: block; font-size: 11px; color: var(--subt); margin-top: 2px; }
+/* empty-chat teaser strip */
+.tpl-strip { margin-bottom: 14px; }
+.tpl-strip-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; text-align: left; }
+.tpl-card.sm { padding: 8px; border-radius: 10px; }
+.tpl-card.sm .tpl-thumb { margin-bottom: 6px; }
+.tpl-card.sm .tpl-name { font-size: 12px; }
+.tpl-more { display: block; width: 100%; margin-top: 8px; padding: 8px 10px; background: none; border: 1px dashed var(--bord-strong); border-radius: 10px; color: var(--ink2); font-size: 12px; font-weight: 500; cursor: pointer; transition: border-color .15s ease, color .15s ease; }
+.tpl-more:hover { border-color: var(--accent); color: var(--accent-d); }
+
 /* ---------- composer: mode switch + image upload ---------- */
 .composer-wrap { border-top: 1px solid var(--bord); }
 .modebar { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 0; }
@@ -692,6 +714,7 @@ details.guide { margin-top: 10px; }
 }
 @media (max-width: 480px) {
   .lib-grid { grid-template-columns: 1fr; }
+  .tpl-grid { grid-template-columns: repeat(2, 1fr); }
   .row3 { grid-template-columns: 1fr; }
 }
 /* Desktop: when the Parameters panel is docked (right, ~312px), open the export

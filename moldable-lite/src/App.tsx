@@ -27,6 +27,8 @@ import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
 import { extractParams, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
+import { TemplatesModal } from "./components/TemplatesModal";
+import type { Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
@@ -411,6 +413,7 @@ export default function App() {
   const [input, setInput] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
   const [showMeasure, setShowMeasure] = useState(false);
   const [svgDraft, setSvgDraft] = useState<{ text: string; url: string; name: string } | null>(null);
   const viewer = useRef<ViewerHandle>(null);
@@ -1872,6 +1875,46 @@ export default function App() {
     setMode("generative");
   }
 
+  /** One tap on a gallery card: build the canned parametric program — no AI, no key.
+      Always lands in a FRESH project (startNew), so it never buries the user's work. */
+  async function loadTemplate(t: Template) {
+    if (status === "generating") return;
+    setShowTemplates(false);
+    setEntered(true);
+    if (projectRef.current || messages.length) startNew();
+    setMode("precise");
+    let s = sel;
+    if (!s) {
+      setBooting(true);
+      s = await getEngineSelection(); // same memoized boot as the effect — no double kernel
+      setSel(s);
+      setBooting(false);
+    }
+    if (s.kind !== "replicad") {
+      setMessages([{ id: mid(), role: "assistant", text: "Templates need the full CAD kernel, which couldn't load in this browser — try reloading the page.", error: true }]);
+      return;
+    }
+    setStatus("generating");
+    try {
+      const res = await s.engine.build({ kind: "code", code: t.code });
+      applyResultNoCommit(res);
+      // Commit into a NEW project directly (the closure's `project` is stale after startNew).
+      const snap = appendVersion(newProject(t.name, res.kind), {
+        engine: res.kind,
+        summary: t.summary,
+        code: t.code,
+        dims: res.dims,
+      });
+      projectRef.current = snap; // the chat-sync effect must append to THIS project, not spawn a shell
+      persist(snap);
+      setMessages([{ id: mid(), role: "assistant", text: t.summary }]);
+    } catch (err: any) {
+      setMessages([{ id: mid(), role: "assistant", text: `Couldn't build the ${t.name} template: ` + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   async function loadExample() {
     setEntered(true);
     setGuided(false); // the example is an ordinary part, not a guided replacement
@@ -2036,7 +2079,7 @@ export default function App() {
   const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");
 
   if (!entered) {
-    return <KeyCard model={model} onContinue={saveKey} onExample={loadExample} onFree={enterFree} />;
+    return <KeyCard model={model} onContinue={saveKey} onExample={loadExample} onTemplates={() => { setEntered(true); setShowTemplates(true); }} onFree={enterFree} />;
   }
 
   return (
@@ -2094,6 +2137,8 @@ export default function App() {
         onSend={send}
         onRetryModel={retryWithModel}
         onExample={loadExample}
+        onTemplate={(t) => void loadTemplate(t)}
+        onOpenTemplates={() => setShowTemplates(true)}
         resume={project ? null : resume?.name ?? null}
         onResume={() => void resumeLast()}
         geometry={geometry}
@@ -2268,6 +2313,7 @@ export default function App() {
         />
       )}
       {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} />}
+      {showTemplates && <TemplatesModal onPick={(t) => void loadTemplate(t)} onClose={() => setShowTemplates(false)} busy={status === "generating"} />}
       {showMeasure && image && (
         <MeasureModal
           key={image.url} /* remount (reset scale/measures) if the reference image changes */
@@ -2313,7 +2359,7 @@ function CubeMark({ size = 22 }: { size?: number }) {
   );
 }
 
-function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onContinue: (k: string, m: string) => void; onExample: () => void; onFree: () => void }) {
+function KeyCard({ model, onContinue, onExample, onTemplates, onFree }: { model: string; onContinue: (k: string, m: string) => void; onExample: () => void; onTemplates: () => void; onFree: () => void }) {
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
   const [email, setEmail] = useState("");
@@ -2401,6 +2447,7 @@ function KeyCard({ model, onContinue, onExample, onFree }: { model: string; onCo
           <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
           <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
         </details>
+        <button className="link" onClick={onTemplates}>Or start from a template — phone stand, hooks, boxes… no key needed →</button>
         <button className="link" onClick={onExample}>Or view the built-in example model →</button>
       </div>
     </div>

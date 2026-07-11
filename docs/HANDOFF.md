@@ -1,9 +1,19 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-10 (PRs #43–#74 merged). New session? Read this first, then
-`docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for architecture.*
+*Updated 2026-07-10 (PRs #43–#75 merged + template gallery). New session? Read this
+first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for architecture.*
 
 ## What the app can do now (beyond the README basics)
+
+- **Template gallery**: photo cards of 10 common parts (phone stand, cable clip, wall
+  hook, box with lid, desk hook, plant pot, coaster, bag clip, cable winder, spacer) —
+  one tap builds a parametric replicad model, no AI call, no key. Reachable from the
+  entry card, the empty chat (4-card strip), and a topbar button. `src/cad/templates.ts`
+  holds the programs (kernel conventions documented at the top of that file); each tap
+  lands in a fresh project. Card thumbnails are REAL app renders committed at
+  `src/assets/templates/*.webp` — regenerate by driving the UI with Playwright and
+  saving each new project's auto-captured `thumb` (load template → poll
+  `listProjects()` for the thumb → decode the data URL).
 
 - **Dual-kernel live editing**: OCCT (replicad) is the source of truth; Manifold (WASM
   worker) powers live extrude previews, Merge, and surface-texture displacement.
@@ -33,11 +43,10 @@
 
 ## Agreed priority order for what's next
 
-1. **Template gallery** — photo cards of common parts (phone stand, cable clip, hook, box
-   with lid…), one tap → parametric model, no API key. Biggest onboarding win.
+1. ~~**Template gallery**~~ — shipped (see above).
 2. **PWA/offline** — manifest + service worker; installable on iPad.
 3. **Bundle/first-load** — lazy-boot OCCT after first paint; code-split LLM providers
-   (main bundle ~1.26 MB + 10.8 MB WASM today).
+   (main bundle ~1.37 MB + 10.8 MB WASM today).
 4. **Print profiles** — per-project printer + filament presets feeding clearances.
 5. **Share links** — public viewable model page (showcase-style turntable).
 6. **Failure analytics** — opt-in local event log of failed ops/builds.

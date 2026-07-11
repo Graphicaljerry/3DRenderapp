@@ -37,6 +37,11 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   placed one bed-stride apart — archive verified structurally, NOT yet opened in a real
   Bambu Studio install; awaiting user confirmation) or the always-safe one-3MF-per-plate.
   Showcase mode (clean stage + turntable).
+- **Fit testing**: "Separate N parts" in the Objects panel ungroups a model's disconnected
+  solids (largest-by-bbox stays the model, rest become movable objects — committed as a
+  mesh version, Undo restores CAD); "Check fit" boolean-intersects a selected part against
+  the model via the Manifold worker and reports the overlap volume; "Drop to plate"
+  settles a floating part (bbox min z → 0). Box-with-lid template teaches the flow.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

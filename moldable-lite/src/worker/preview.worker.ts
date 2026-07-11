@@ -78,8 +78,9 @@ export interface PreviewApi {
   /** Load the committed model (display coords). Call once per commit, not per tick. */
   setBase(positions: Float32Array, indices: Uint32Array | null): Promise<{ ok: boolean; error?: string }>;
   /** One drag tick: boolean the closed prism against the base. Returns a triangle soup
-   *  (positions only) in the same display coords. */
-  preview(prism: Float32Array, op: "add" | "cut"): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
+   *  (positions only) in the same display coords. "intersect" powers the fit check:
+   *  the returned soup is the interference volume between the tool and the base. */
+  preview(prism: Float32Array, op: "add" | "cut" | "intersect"): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
   /** Physical surface texture: weld → subdivide until edges suit the pattern scale →
    *  displace along vertex normals. Returns a closed triangle soup. */
   displace(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
@@ -193,7 +194,7 @@ const api: PreviewApi = {
       const wasm = await ensureManifold();
       if (!base) return { ok: false, error: "no base loaded" };
       const tool = toManifold(wasm, prism);
-      const out = op === "add" ? base.add(tool) : base.subtract(tool);
+      const out = op === "add" ? base.add(tool) : op === "intersect" ? base.intersect(tool) : base.subtract(tool);
       tool.delete();
       const mesh = out.getMesh();
       out.delete();

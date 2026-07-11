@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement } from "./Viewer";
 import { Markdown } from "./Markdown";
 import type { Pin } from "../store/types";
@@ -44,24 +45,65 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
   { f: "obj", label: "OBJ", desc: "Mesh (reference)" },
 ];
 
+/** A dropdown that can never be clipped or buried: portaled to <body>, fixed-position,
+    anchored to its trigger, flipped above when there's no room below, clamped to the
+    viewport, and closed by outside-click / Esc / scroll / resize. */
+function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [h, setH] = useState(0);
+  useLayoutEffect(() => setH(ref.current?.offsetHeight ?? 0), []);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onScroll = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    // Defer, so the click that opened the menu doesn't instantly close it.
+    const t = setTimeout(() => {
+      document.addEventListener("mousedown", onDown);
+      document.addEventListener("keydown", onKey);
+      document.addEventListener("scroll", onScroll, true);
+      window.addEventListener("resize", onClose);
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onClose);
+    };
+  }, [onClose]);
+  const vw = window.innerWidth;
+  const left = Math.max(8, Math.min(anchor.right - width, vw - width - 8));
+  const openUp = anchor.bottom + h + 8 > window.innerHeight && anchor.top - h - 8 > 0;
+  const top = openUp ? anchor.top - h - 4 : anchor.bottom + 4;
+  return createPortal(
+    <div ref={ref} className="pmenu" role="menu" style={{ left, top, width, visibility: h ? "visible" : "hidden" }}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
 /** Pick which build plate an object prints on — a menu, not a blind cycle. */
 function PlateMenu({ value, count, onPick, onNewPlate }: { value: number; count: number; onPick: (n: number) => void; onNewPlate: () => void }) {
-  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const close = () => setAnchor(null);
   return (
-    <span className="pmenu-wrap" onClick={(e) => e.stopPropagation()}>
-      <button className="lp-plate" title="Which build plate this prints on — click to choose" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+    <span onClick={(e) => e.stopPropagation()}>
+      <button ref={btn} className="lp-plate" title="Which build plate this prints on — click to choose" aria-haspopup="menu" aria-expanded={!!anchor}
+        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
         P{value} ▾
       </button>
-      {open && (
-        <div className="pmenu" role="menu" onMouseLeave={() => setOpen(false)}>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={close} width={150}>
           {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-            <button key={n} role="menuitem" className={`pmenu-item${n === value ? " on" : ""}`} onClick={() => { setOpen(false); onPick(n); }}>
+            <button key={n} role="menuitem" className={`pmenu-item${n === value ? " on" : ""}`} onClick={() => { close(); onPick(n); }}>
               Plate {n}{n === value ? " ✓" : ""}
             </button>
           ))}
           <div className="pmenu-sep" />
-          <button role="menuitem" className="pmenu-item" onClick={() => { setOpen(false); onNewPlate(); }}>+ New plate</button>
-        </div>
+          <button role="menuitem" className="pmenu-item" onClick={() => { close(); onNewPlate(); }}>+ New plate</button>
+        </AnchoredMenu>
       )}
     </span>
   );
@@ -69,23 +111,26 @@ function PlateMenu({ value, count, onPick, onNewPlate }: { value: number; count:
 
 /** The two ways plates leave the app: one project file with plates, or one file per plate. */
 function PlateExportMenu({ exportEach, exportProject, disabled, compact }: { exportEach: () => void; exportProject: () => void; disabled: boolean; compact?: boolean }) {
-  const [open, setOpen] = useState(false);
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const close = () => setAnchor(null);
   return (
-    <span className={`pmenu-wrap${compact ? " lp-export-wrap" : ""}`} onClick={(e) => e.stopPropagation()}>
-      <button className={compact ? "lp-export" : "pb-export"} disabled={disabled} aria-haspopup="menu" aria-expanded={open} title="Export your plate layout for the slicer" onClick={() => setOpen((v) => !v)}>
+    <span className={compact ? "lp-export-wrap" : undefined} onClick={(e) => e.stopPropagation()}>
+      <button ref={btn} className={compact ? "lp-export" : "pb-export"} disabled={disabled} aria-haspopup="menu" aria-expanded={!!anchor}
+        title="Export your plate layout for the slicer" onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
         Export ▾
       </button>
-      {open && (
-        <div className="pmenu up" role="menu" onMouseLeave={() => setOpen(false)}>
-          <button role="menuitem" className="pmenu-item" onClick={() => { setOpen(false); exportProject(); }}>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={close} width={230}>
+          <button role="menuitem" className="pmenu-item" onClick={() => { close(); exportProject(); }}>
             <b>One project .3mf</b>
             <span>All plates in one file — Bambu Studio / OrcaSlicer</span>
           </button>
-          <button role="menuitem" className="pmenu-item" onClick={() => { setOpen(false); exportEach(); }}>
+          <button role="menuitem" className="pmenu-item" onClick={() => { close(); exportEach(); }}>
             <b>One .3mf per plate</b>
             <span>Separate file for each plate — any slicer</span>
           </button>
-        </div>
+        </AnchoredMenu>
       )}
     </span>
   );
@@ -106,29 +151,31 @@ function PlateBar({ count, active, setActive, counts, onAdd, onRemove, exportEac
   return (
     <div className="plate-bar" role="group" aria-label="Build plates">
       <span className="pb-label">Plates</span>
-      <button className={`pb-tab${active === 0 ? " on" : ""}`} title="Show every plate" onClick={() => setActive(0)}>All</button>
-      {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-        <button
-          key={n}
-          className={`pb-tab${active === n ? " on" : ""}`}
-          title={`Show only plate ${n} — ${counts.get(n) ?? 0} object${(counts.get(n) ?? 0) === 1 ? "" : "s"}`}
-          onClick={() => setActive(n)}
-        >
-          {n}
-          <span className={`pb-count${counts.get(n) ? "" : " zero"}`}>{counts.get(n) ?? 0}</span>
-          {active === n && count > 1 && (
-            <span
-              className="pb-x"
-              role="button"
-              aria-label={`Remove plate ${n}`}
-              title="Remove this plate — its objects join the previous plate"
-              onClick={(e) => { e.stopPropagation(); onRemove(n); }}
-            >
-              <IconX size={9} />
-            </span>
-          )}
-        </button>
-      ))}
+      <div className="pb-tabs">
+        <button className={`pb-tab${active === 0 ? " on" : ""}`} title="Show every plate" onClick={() => setActive(0)}>All</button>
+        {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
+          <button
+            key={n}
+            className={`pb-tab${active === n ? " on" : ""}`}
+            title={`Show only plate ${n} — ${counts.get(n) ?? 0} object${(counts.get(n) ?? 0) === 1 ? "" : "s"}`}
+            onClick={() => setActive(n)}
+          >
+            {n}
+            <span className={`pb-count${counts.get(n) ? "" : " zero"}`}>{counts.get(n) ?? 0}</span>
+            {active === n && count > 1 && (
+              <span
+                className="pb-x"
+                role="button"
+                aria-label={`Remove plate ${n}`}
+                title="Remove this plate — its objects join the previous plate"
+                onClick={(e) => { e.stopPropagation(); onRemove(n); }}
+              >
+                <IconX size={9} />
+              </span>
+            )}
+          </button>
+        ))}
+      </div>
       <button className="pb-add" title="Add a build plate" onClick={onAdd}>+</button>
       <PlateExportMenu exportEach={exportEach} exportProject={exportProject} disabled={false} />
     </div>
@@ -551,6 +598,10 @@ interface Props {
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   onMergeAttachments: (ids?: string[]) => void;
   onRemoveAttachment: (id: string) => void;
+  partCount: number; // disconnected solids inside the model mesh (1 = a single part)
+  onSeparateParts: () => void;
+  onCheckFit: (ids: string[]) => void;
+  onDropToPlate: (ids: string[]) => void;
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
   plateFor: (key: string) => number;
@@ -1155,6 +1206,26 @@ export function Workspace(p: Props) {
                       </div>
                     );
                   })}
+                  {p.geometry && p.partCount > 1 && (
+                    <button
+                      className="ghost sm"
+                      style={{ width: "100%", marginTop: 6 }}
+                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge or Undo to regroup"
+                      onClick={p.onSeparateParts}
+                    >
+                      Separate {p.partCount} parts
+                    </button>
+                  )}
+                  {p.selAttachIds.length > 0 && (
+                    <div className="lp-fitrow">
+                      <button className="ghost sm" title="Does it fit here? Computes the real overlap between the selected part(s) and the model — zero overlap means no collision at this position" onClick={() => p.onCheckFit(p.selAttachIds)}>
+                        Check fit
+                      </button>
+                      <button className="ghost sm" title="Settle the selected part(s) back down onto the build plate (keeps position and rotation)" onClick={() => p.onDropToPlate(p.selAttachIds)}>
+                        Drop to plate
+                      </button>
+                    </div>
+                  )}
                   {p.attachments.length > 0 && (
                     <button className="primary sm" style={{ width: "100%", marginTop: 6 }} title="Fuse into ONE printable solid (Undo brings the pieces back)" onClick={() => p.onMergeAttachments(p.selAttachIds.length > 1 ? p.selAttachIds : undefined)}>
                       {p.selAttachIds.length > 1 ? `Merge selected (${p.selAttachIds.length})` : "Merge all into model"}

@@ -9,7 +9,8 @@ import { geometryToSTL, geometryTo3MF, geometriesTo3MF, platesToProject3MF, zipM
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean, displaceMesh } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, previewIntersect, displaceMesh } from "./engine/previewEngine";
+import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
@@ -347,6 +348,78 @@ export default function App() {
     const used = new Set(all.map((p) => p.plate)).size;
     setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.` }]);
   }
+  const [partCount, setPartCount] = useState(1); // disconnected solids in the model mesh
+  /** "Ungroup": split the model's disconnected solids so each moves on its own — the
+      biggest stays as the model, the rest become free objects with the move/rotate
+      gizmo. The pre-split model stays one Undo away (a version is committed). */
+  function separateParts() {
+    if (!geometry || !result || status === "generating") return;
+    const pieces = splitConnectedParts(geometry);
+    if (pieces.length < 2) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model is already one connected part — nothing to separate." }]);
+      return;
+    }
+    const [main, ...rest] = pieces;
+    const sz = main.boundingBox!.getSize(new THREE.Vector3());
+    const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
+    const res: EngineResult = {
+      kind: "generative",
+      geometry: main,
+      dims,
+      source: { kind: "gen", provider: "separate", model: `${pieces.length} parts` },
+      supportsStep: false,
+      glb: geometryToSTL(main),
+    };
+    applyResult(res, project?.name ?? "Model", `Separated into ${pieces.length} parts`, "separate parts");
+    rest.forEach((g, i) => addAttachment(g, `Part ${i + 2}`));
+    setMessages((m) => [...m, {
+      id: mid(), role: "assistant",
+      text: `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check fit** in the Objects panel — it computes the real overlap between the solids. **Drop to plate** settles a part back onto the bed, and **Merge all into model** or Undo puts everything back together. (The separated model is a mesh — export STL/3MF; for STEP or sliders, Undo to the pre-split version.)`,
+    }]);
+  }
+
+  /** Dry-fit check: boolean-intersect each selected part against the model. Zero overlap
+      = no interference at this position; any volume = they collide by that much. */
+  async function checkFit(ids: string[]) {
+    if (!geometry || status === "generating" || !ids.length) return;
+    setStatus("generating");
+    try {
+      if (!(await previewSetBase(geometry))) throw new Error("this model's mesh couldn't be welded for a boolean check");
+      const lines: string[] = [];
+      for (const id of ids) {
+        const a = attachments.find((x) => x.id === id);
+        if (!a) continue;
+        const baked = viewer.current?.bakeAttachment(id);
+        if (!baked) throw new Error(`couldn't read ${a.name}'s placement`);
+        const inter = await previewIntersect(baked);
+        if (!inter) throw new Error(`${a.name}'s mesh couldn't be welded for a boolean check`);
+        const overlap = meshVolume(inter);
+        const partVol = meshVolume(baked);
+        // Tessellated curves graze each other where surfaces mate — ignore crumbs.
+        if (overlap < Math.max(1, partVol * 0.001)) {
+          lines.push(`✓ **${a.name}** doesn't intersect the model here — no interference at this position.`);
+        } else {
+          const pct = Math.round((overlap / partVol) * 100);
+          const shown = overlap >= 1000 ? `${(overlap / 1000).toFixed(1)} cm³` : `${overlap.toFixed(1)} mm³`;
+          lines.push(`✗ **${a.name}** overlaps the model by **${shown}**${pct > 0 ? ` (~${pct}% of the part)` : ""} — they collide at this position. Move it and re-check.`);
+        }
+      }
+      if (lines.length) {
+        lines.push("A clean pass means no collision at this exact position — how snug it prints still comes from the clearance designed between the mating faces.");
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: lines.join("\n\n") }]);
+      }
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Fit check failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Bring floating parts back down: bbox min z → 0, keeping x/y and rotation. */
+  function dropToPlate(ids: string[]) {
+    for (const id of ids) viewer.current?.dropAttachment(id);
+  }
+
   const attachSelected = selAttachIds.length > 0;
   const addAttachment = (geometry: THREE.BufferGeometry, name: string) => {
     const id = mid();
@@ -760,7 +833,12 @@ export default function App() {
     // of edits only keeps the latest report. Old report stays on screen for the ~1 frame gap.
     const geo = res.geometry;
     const job = ++reportJob.current;
-    scheduleIdle(() => { if (reportJob.current === job) setReport(computeReport(geo)); });
+    scheduleIdle(() => {
+      if (reportJob.current !== job) return;
+      setReport(computeReport(geo));
+      // Disconnected solids (e.g. a box printed beside its lid) unlock "Separate parts".
+      try { setPartCount(connectedPartCount(geo)); } catch { setPartCount(1); }
+    });
     if (res.source.kind === "code") {
       const defs = extractParams(res.source.code);
       setCadDefaults(defs);
@@ -2210,6 +2288,10 @@ export default function App() {
         onAttachSelect={selectAttach}
         onMergeAttachments={(ids?: string[]) => { void mergeAttachments(ids); }}
         onRemoveAttachment={removeAttachment}
+        partCount={partCount}
+        onSeparateParts={separateParts}
+        onCheckFit={(ids) => void checkFit(ids)}
+        onDropToPlate={dropToPlate}
         snap={snap}
         setSnap={setSnap}
         plateFor={plateFor}

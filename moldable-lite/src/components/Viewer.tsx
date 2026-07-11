@@ -21,6 +21,8 @@ export interface ViewerHandle {
   setView: (v: "top" | "front" | "right" | "iso") => void;
   /** An attachment's triangles with its current transform baked in (for Merge). */
   bakeAttachment: (id: string) => Float32Array | null;
+  /** Settle a floating attachment back onto the build plate (bbox min z → 0). */
+  dropAttachment: (id: string) => void;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -1378,6 +1380,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const pos = (g.getAttribute("position").array as Float32Array).slice();
       g.dispose();
       return pos;
+    },
+    dropAttachment(id) {
+      const s = st.current;
+      const m = s?.attachMap.get(id);
+      if (!s || !m) return;
+      m.updateWorldMatrix(true, false);
+      const bb = new THREE.Box3().setFromObject(m);
+      if (!isFinite(bb.min.z)) return;
+      m.position.z -= bb.min.z;
+      m.updateWorldMatrix(true, false);
     },
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;

@@ -132,7 +132,7 @@ function main(replicad, params) {
     name: "Box with lid",
     blurb: "Rounded box + friction-fit lid",
     summary:
-      "A 60 × 40 × 30 mm inside-dimension box with a friction-fit lid (printed beside it). clearance sets how snug the lid plug fits — 0.2 mm is a good FDM default.",
+      "A 60 × 40 × 30 mm inside-dimension box with a friction-fit lid (printed beside it). clearance sets how snug the lid plug fits — 0.2 mm is a good FDM default. Want to try the lid on? Open the Objects panel and tap **Separate 2 parts** — then move the lid onto the box and tap **Check fit**.",
     code: `const defaultParams = { innerWidth: 60, innerDepth: 40, innerHeight: 30, wall: 2, lidThickness: 2.5, plugHeight: 5, clearance: 0.2, cornerRadius: 4 };
 function main(replicad, params) {
   const p = { ...defaultParams, ...params };

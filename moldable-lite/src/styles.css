@@ -366,7 +366,7 @@ button { font-family: inherit; cursor: pointer; }
 .lp-row svg { flex: 0 0 auto; color: var(--accent-d); }
 .lp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lp-sub { font-size: 10.5px; color: var(--subt); white-space: nowrap; }
-.lp-plates { display: flex; gap: 3px; align-items: center; padding: 2px 4px 8px; border-bottom: 1px solid var(--bord-subtle); margin-bottom: 4px; }
+.lp-plates { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 2px 4px 8px; border-bottom: 1px solid var(--bord-subtle); margin-bottom: 4px; }
 .lp-plates button { border: 1px solid var(--bord); background: var(--bg); color: var(--mut); border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; }
 .lp-plates button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); border-color: var(--accent); }
 .lp-plates .lp-export { margin-left: auto; color: var(--accent-d); }
@@ -374,12 +374,17 @@ button { font-family: inherit; cursor: pointer; }
 .lp-plate { border: 1px solid var(--bord); background: var(--surf); color: var(--mut); border-radius: 999px; padding: 1.5px 7px; font-size: 10px; font-weight: 700; flex: 0 0 auto; }
 .lp-plate:hover { color: var(--accent-d); border-color: var(--accent); }
 .lp-plates .lp-add { padding: 3px 7px; }
+.lp-fitrow { display: flex; gap: 6px; margin-top: 6px; }
+.lp-fitrow button { flex: 1; }
 .lp-plates .lp-export-wrap { margin-left: auto; }
 .lp-export { border: none; background: none; color: var(--accent-d); font-size: 11px; font-weight: 600; }
 .lp-export:disabled { opacity: .4; }
 
 /* ---------- build plates: Bambu-style tabs over the 3D view + assignment menus ---------- */
-.plate-bar { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.plate-bar { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; max-width: min(46%, calc(100% - 24px)); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.pb-tabs { display: flex; align-items: center; gap: 3px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.pb-tabs::-webkit-scrollbar { display: none; }
+.pb-tab { flex: 0 0 auto; }
 .pb-label { font-size: 10.5px; font-weight: 700; color: var(--subt); text-transform: uppercase; letter-spacing: .04em; padding: 0 4px 0 6px; }
 .pb-tab { position: relative; display: inline-flex; align-items: center; gap: 4px; border: none; background: none; padding: 4px 9px; font-size: 11.5px; font-weight: 600; color: var(--mut); border-radius: 999px; }
 .pb-tab:hover { background: var(--surf); color: var(--ink); }
@@ -392,10 +397,9 @@ button { font-family: inherit; cursor: pointer; }
 .pb-add:hover { background: var(--surf); color: var(--accent-d); }
 .pb-export { border: none; background: none; padding: 4px 10px; font-size: 11.5px; font-weight: 600; color: var(--accent-d); border-radius: 999px; }
 .pb-export:hover { background: var(--surf); }
-/* small anchored menu shared by plate pickers + plate export */
-.pmenu-wrap { position: relative; display: inline-flex; }
-.pmenu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 30; min-width: 168px; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
-.pmenu.up { top: auto; bottom: calc(100% + 4px); }
+/* small anchored menu shared by plate pickers + plate export — portaled to <body> and
+   fixed-positioned by AnchoredMenu, so scroll containers can never clip or bury it */
+.pmenu { position: fixed; z-index: 80; max-height: min(46vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
 .pmenu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: none; background: none; border-radius: 7px; padding: 6px 9px; font-size: 12px; color: var(--ink); }
 .pmenu-item b { font-size: 12px; font-weight: 600; }
 .pmenu-item span { font-size: 10.5px; color: var(--subt); }
@@ -745,6 +749,11 @@ details.guide { margin-top: 10px; }
   .lib-grid { grid-template-columns: 1fr; }
   .tpl-grid { grid-template-columns: repeat(2, 1fr); }
   .row3 { grid-template-columns: 1fr; }
+}
+/* Narrow viewers (iPad portrait, phones): the plate bar can't share the bottom row with
+   the view-angle buttons — stack it just above them, centred, full available width. */
+@media (max-width: 900px) {
+  .plate-bar { left: 50%; transform: translateX(-50%); bottom: 52px; max-width: calc(100% - 24px); }
 }
 /* Desktop: when the Parameters panel is docked (right, ~312px), open the export
    menu clear of it instead of stacking the two floating cards. */

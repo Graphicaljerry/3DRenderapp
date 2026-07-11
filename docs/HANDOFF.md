@@ -47,6 +47,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   (worker `grow` op — bbox scaling FAILS on non-convex steps) and carves it from the
   model with 0.2 mm clearance; "Drop to plate" settles a floating part. History
   nav/restore/new-commit all dissolve lingering sandbox parts.
+- **Scene UX**: right-click context menu (model/part/empty — rename, duplicate, copy/paste,
+  delete, fit tools, plate assignment, zoom); everything renames in place (objects +
+  model via Objects panel double-click, plates via plate-tab double-click; plate names
+  persist and export as `plater_name`); separated parts render as an indented group
+  under the model; middle-/right-drag pans; in-canvas zoom cluster (+ / fit / −);
+  display toggles (dimensions, wireframe, stats, units, showcase, reset) consolidated
+  into one View ▾ menu — toolbar carries tools, not switches.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

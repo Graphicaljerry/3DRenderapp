@@ -64,6 +64,7 @@ export function platesToProject3MF(
   parts: { geometry: THREE.BufferGeometry; name: string; plate: number }[],
   plateCount: number,
   bed: { x: number; y: number },
+  plateNames?: Record<number, string>,
 ): Blob {
   const stride = bed.x * 1.2;
   // Per-plate group bounds → one shared translation per plate (relative layout survives).
@@ -120,8 +121,9 @@ export function platesToProject3MF(
   // Every plate the user created is declared — empty ones included, so the layout round-trips.
   const plateBlocks: string[] = [];
   for (let n = 1; n <= Math.max(plateCount, ...parts.map((x) => x.plate)); n++) {
+    const label = (plateNames?.[n] ?? "").replace(/[<>&"]/g, "_");
     plateBlocks.push(
-      `  <plate>\n    <metadata key="plater_id" value="${n}"/>\n    <metadata key="plater_name" value=""/>\n    <metadata key="locked" value="false"/>\n${(instancesByPlate.get(n) ?? []).join("\n")}\n  </plate>`,
+      `  <plate>\n    <metadata key="plater_id" value="${n}"/>\n    <metadata key="plater_name" value="${label}"/>\n    <metadata key="locked" value="false"/>\n${(instancesByPlate.get(n) ?? []).join("\n")}\n  </plate>`,
     );
   }
   const modelSettings = `<?xml version="1.0" encoding="UTF-8"?>

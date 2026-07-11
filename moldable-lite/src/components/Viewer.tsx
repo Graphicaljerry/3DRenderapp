@@ -23,6 +23,8 @@ export interface ViewerHandle {
   bakeAttachment: (id: string) => Float32Array | null;
   /** Settle a floating attachment back onto the build plate (bbox min z → 0). */
   dropAttachment: (id: string) => void;
+  /** Dolly toward (factor > 1) or away from (factor < 1) the orbit target. */
+  zoomBy: (factor: number) => void;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -30,6 +32,13 @@ export interface ViewerHandle {
 export interface PickedPoint {
   x: number; y: number; z: number;
   nx: number; ny: number; nz: number;
+}
+
+/** A right-click on the canvas: where (screen px) and what's under the cursor. */
+export interface ContextHit {
+  x: number;
+  y: number;
+  target: { kind: "model" } | { kind: "attachment"; id: string } | { kind: "empty" };
 }
 /** A selected model feature — a face, edge or vertex — with everything an edit needs. */
 export interface PickedFeature {
@@ -84,6 +93,7 @@ interface Props {
   // Fires as the drag moves (snapped). `solid` is the closed prism (display coords) for the
   // Manifold boolean live preview — present only for extrude drags with a captured cap.
   onPushPullLive: (distance: number, solid?: Float32Array | null) => void;
+  onContext: (hit: ContextHit) => void; // right-click (without dragging) → quick-action menu
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -163,11 +173,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -188,6 +198,32 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, 0, 15);
+    // Middle-drag pans (CAD convention — wheel still zooms); right-drag pans too.
+    controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+
+    // Right-CLICK (no drag) → quick-action context menu on whatever is under the cursor.
+    // Right-DRAG stays a pan: suppress the menu once the pointer moved past a few px.
+    let rmbDown: { x: number; y: number } | null = null;
+    const onCtxDown = (e: PointerEvent) => { if (e.button === 2) rmbDown = { x: e.clientX, y: e.clientY }; };
+    const onCtxMenu = (e: MouseEvent) => {
+      e.preventDefault(); // never the browser menu over the canvas
+      if (rmbDown && Math.hypot(e.clientX - rmbDown.x, e.clientY - rmbDown.y) > 5) return;
+      const s2 = st.current;
+      if (!s2) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const rcC = new THREE.Raycaster();
+      rcC.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+      const hitA = rcC.intersectObjects([...s2.attachMap.values()], false)[0];
+      const id = hitA ? [...s2.attachMap.entries()].find(([, m]) => m === hitA.object)?.[0] : undefined;
+      const onModel = !hitA && s2.mesh?.visible && s2.mesh && rcC.intersectObject(s2.mesh, false)[0];
+      cb.current.onContext({
+        x: e.clientX,
+        y: e.clientY,
+        target: id ? { kind: "attachment", id } : onModel ? { kind: "model" } : { kind: "empty" },
+      });
+    };
+    renderer.domElement.addEventListener("pointerdown", onCtxDown);
+    renderer.domElement.addEventListener("contextmenu", onCtxMenu);
 
     scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0a8, 1.05));
     const dir = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -943,6 +979,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      renderer.domElement.removeEventListener("pointerdown", onCtxDown);
+      renderer.domElement.removeEventListener("contextmenu", onCtxMenu);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);
@@ -1380,6 +1418,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const pos = (g.getAttribute("position").array as Float32Array).slice();
       g.dispose();
       return pos;
+    },
+    zoomBy(factor) {
+      const s = st.current;
+      if (!s) return;
+      const v = s.camera.position.clone().sub(s.controls.target).divideScalar(Math.max(0.1, factor));
+      s.camera.position.copy(s.controls.target.clone().add(v));
+      s.controls.update();
     },
     dropAttachment(id) {
       const s = st.current;

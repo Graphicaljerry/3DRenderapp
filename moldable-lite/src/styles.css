@@ -376,6 +376,21 @@ button { font-family: inherit; cursor: pointer; }
 .lp-plates .lp-add { padding: 3px 7px; }
 .lp-fitrow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .lp-fitrow button { flex: 1 1 45%; white-space: nowrap; }
+/* grouped (separated-from-model) rows + inline renaming */
+.lp-group { font-size: 10px; color: var(--subt); padding: 6px 4px 2px; }
+.lp-row.sub { padding-left: 10px; }
+.lp-tie { color: var(--subt); font-size: 10px; flex: 0 0 auto; }
+.name-edit { flex: 1 1 auto; min-width: 40px; width: 100%; height: 22px; padding: 0 6px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg); color: var(--ink); font-size: 12px; }
+/* section heading inside a pmenu (context menu plate list) */
+.pmenu-head { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--subt); padding: 4px 9px 2px; }
+.pmenu-item:disabled { opacity: .45; }
+/* in-canvas zoom cluster: right edge, above the orientation gizmo */
+.zoom-ctl { position: absolute; right: 12px; bottom: 118px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
+.zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
+/* plate tab labels + inline rename */
+.pb-name { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--ink2); }
+.pb-edit { width: 96px; height: 22px; padding: 0 8px; border: 1px solid var(--accent); border-radius: 999px; background: var(--bg); color: var(--ink); font-size: 11.5px; }
 .lp-plates .lp-export-wrap { margin-left: auto; }
 .lp-export { border: none; background: none; color: var(--accent-d); font-size: 11px; font-weight: 600; }
 .lp-export:disabled { opacity: .4; }

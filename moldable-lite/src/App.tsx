@@ -289,6 +289,13 @@ export default function App() {
   // Bambu-Studio-style: any number of plates, assignment via menu, saved with the project.
   const [plateOf, setPlateOf] = useState<Record<string, number>>({});
   const [plateCount, setPlateCount] = useState(1);
+  const [plateNames, setPlateNames] = useState<Record<number, string>>({});
+  const renamePlate = (n: number, name: string) => setPlateNames((m) => {
+    const next = { ...m };
+    if (name.trim()) next[n] = name.trim().slice(0, 24);
+    else delete next[n];
+    return next;
+  });
   const [activePlate, setActivePlate] = useState<number | 0>(0); // 0 = show all plates
   const [showcase, setShowcase] = useState(false); // presentation mode: clean stage + turntable
   const plateFor = (key: string) => Math.min(plateOf[key] ?? 1, plateCount);
@@ -307,6 +314,15 @@ export default function App() {
     setPlateOf((m) => {
       const next: Record<string, number> = {};
       for (const [k, v] of Object.entries(m)) next[k] = v === n ? Math.max(1, n - 1) : v > n ? v - 1 : v;
+      return next;
+    });
+    setPlateNames((m) => {
+      const next: Record<number, string> = {};
+      for (const [k, v] of Object.entries(m)) {
+        const num = Number(k);
+        if (num === n) continue;
+        next[num > n ? num - 1 : num] = v;
+      }
       return next;
     });
     setPlateCount((c) => c - 1);
@@ -344,7 +360,7 @@ export default function App() {
   function exportPlatesProject() {
     const all = collectPlateParts();
     if (!all) return;
-    downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }), safeFileName(`${project?.name ?? "model"}-plates`, "3mf"));
+    downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }, plateNames), safeFileName(`${project?.name ?? "model"}-plates`, "3mf"));
     const used = new Set(all.map((p) => p.plate)).size;
     setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.` }]);
   }
@@ -515,6 +531,46 @@ export default function App() {
     selectAttach(id);
     return id;
   };
+  const renameAttachment = (id: string, name: string) => {
+    const v = name.trim();
+    if (v) setAttachments((a) => a.map((x) => (x.id === id ? { ...x, name: v } : x)));
+  };
+
+  // ---- canvas clipboard: copy / paste / duplicate objects (right-click menu) ----
+  const clipRef = useRef<{ pos: Float32Array; name: string } | null>(null);
+  const [clipName, setClipName] = useState<string | null>(null); // re-render hook for "Paste"
+  /** Snapshot an object's CURRENT world shape (model or attachment) for paste. */
+  function copyObject(target: { kind: "model" } | { kind: "attachment"; id: string }): { pos: Float32Array; name: string } | null {
+    if (target.kind === "model") {
+      if (!geometry) return null;
+      const g = geometry.index ? geometry.toNonIndexed() : geometry;
+      const pos = (g.getAttribute("position").array as Float32Array).slice();
+      if (g !== geometry) g.dispose();
+      const snap = { pos, name: project?.name ?? "Model" };
+      clipRef.current = snap;
+      setClipName(snap.name);
+      return snap;
+    }
+    const a = attachments.find((x) => x.id === target.id);
+    const baked = viewer.current?.bakeAttachment(target.id);
+    if (!a || !baked) return null;
+    const snap = { pos: baked, name: a.name };
+    clipRef.current = snap;
+    setClipName(snap.name);
+    return snap;
+  }
+  /** Paste the clipboard as a new free object, nudged +10 mm so it's visibly a copy. */
+  function pasteObject(clip?: { pos: Float32Array; name: string } | null) {
+    const c = clip ?? clipRef.current;
+    if (!c) return;
+    const pos = c.pos.slice();
+    for (let i = 0; i < pos.length; i += 3) pos[i] += 10;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    addAttachment(g, `${c.name} copy`);
+  }
+  const duplicateObject = (target: { kind: "model" } | { kind: "attachment"; id: string }) => pasteObject(copyObject(target));
   const removeAttachment = (id: string) => {
     setAttachments((a) => a.filter((x) => x.id !== id));
     setSelAttachIds((sids) => {
@@ -669,15 +725,15 @@ export default function App() {
       const pr = projectRef.current;
       if (!pr) return;
       const cur = pr.plates ?? { count: 1, of: {} };
-      if (cur.count === plateCount && JSON.stringify(cur.of) === JSON.stringify(plateOf)) return;
-      const next = { ...pr, plates: { count: plateCount, of: plateOf }, updatedAt: Date.now() };
+      if (cur.count === plateCount && JSON.stringify(cur.of) === JSON.stringify(plateOf) && JSON.stringify(cur.names ?? {}) === JSON.stringify(plateNames)) return;
+      const next = { ...pr, plates: { count: plateCount, of: plateOf, names: plateNames }, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
       void putProject(next);
       scheduleSync();
     }, 600);
     return () => clearTimeout(t);
-  }, [plateOf, plateCount]);
+  }, [plateOf, plateCount, plateNames]);
 
   // ---- library thumbnail: refresh the saved preview whenever the model settles ----
   // Debounced so a slider drag (many rebuilds/sec) writes at most one thumb, and
@@ -2276,6 +2332,7 @@ export default function App() {
     setPins(p.pins ?? []);
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);
+    setPlateNames(p.plates?.names ?? {});
     setActivePlate(0);
     separatedRef.current = null;
     setSeparated(false);
@@ -2297,6 +2354,7 @@ export default function App() {
     setPins([]);
     setPlateOf({});
     setPlateCount(1);
+    setPlateNames({});
     setActivePlate(0);
     separatedRef.current = null;
     setSeparated(false);
@@ -2399,16 +2457,27 @@ export default function App() {
         onRemoveAttachment={removeAttachment}
         partCount={partCount}
         separated={separated}
+        separatedIds={separatedRef.current?.ids ?? []}
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onCheckFit={(ids) => void checkFit(ids)}
         onMakeFit={(ids) => void makeItFit(ids)}
         onDropToPlate={dropToPlate}
+        onRenameAttachment={renameAttachment}
+        clipboardCtl={{
+          canPaste: !!clipName,
+          pasteName: clipName,
+          copy: (t) => void copyObject(t),
+          paste: () => pasteObject(),
+          duplicate: duplicateObject,
+        }}
         snap={snap}
         setSnap={setSnap}
         plateFor={plateFor}
         plateCtl={{
           count: plateCount,
+          names: plateNames,
+          rename: renamePlate,
           assign: assignPlate,
           add: addPlate,
           remove: removePlate,

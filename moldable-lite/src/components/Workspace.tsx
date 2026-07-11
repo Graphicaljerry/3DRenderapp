@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
@@ -83,22 +83,109 @@ function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMR
   );
 }
 
+/** An object/plate label you can rename in place: double-click (or an external trigger)
+    swaps in an input; Enter/blur commits, Esc cancels. */
+function EditableName({ name, className, editing, onStartEdit, onRename, onDone }: {
+  name: string;
+  className?: string;
+  editing: boolean;
+  onStartEdit: () => void;
+  onRename: (v: string) => void;
+  onDone: () => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing) { setDraft(name); setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0); } }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!editing) {
+    return (
+      <span className={className} title={`${name} — double-click to rename`} onDoubleClick={(e) => { e.stopPropagation(); onStartEdit(); }}>
+        {name}
+      </span>
+    );
+  }
+  const commit = () => { const v = draft.trim(); if (v && v !== name) onRename(v); onDone(); };
+  return (
+    <input
+      ref={inputRef}
+      className="name-edit"
+      value={draft}
+      maxLength={40}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") commit();
+        else if (e.key === "Escape") onDone();
+      }}
+      aria-label="Rename"
+    />
+  );
+}
+
+/** One home for every display toggle — Dimensions, Wireframe, Stats, Units, Showcase —
+    so the toolbar carries tools, not switches. */
+function ViewMenu({ showDims, setShowDims, wireframe, setWireframe, stats, setStats, units, setUnits, showcase, setShowcase, onResetView }: {
+  showDims: boolean; setShowDims: (f: (d: boolean) => boolean) => void;
+  wireframe: boolean; setWireframe: (f: (w: boolean) => boolean) => void;
+  stats: boolean; setStats: (v: boolean) => void;
+  units: "mm" | "in"; setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
+  showcase: boolean; setShowcase: (v: boolean) => void;
+  onResetView: () => void;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const close = () => setAnchor(null);
+  const Row = ({ on, label, hint, onClick }: { on: boolean; label: string; hint?: string; onClick: () => void }) => (
+    <button role="menuitemcheckbox" aria-checked={on} className={`pmenu-item check${on ? " on" : ""}`} onClick={onClick}>
+      <b>{on ? "✓ " : ""}{label}</b>
+      {hint && <span>{hint}</span>}
+    </button>
+  );
+  return (
+    <span>
+      <button ref={btn} className="ghost sm iconbtn" aria-haspopup="menu" aria-expanded={!!anchor} title="View options — dimensions, wireframe, stats, units, showcase"
+        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
+        <IconWireframe /><span className="btn-label">View</span>
+      </button>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={close} width={210}>
+          <Row on={showDims} label="Dimensions" hint="Size lines around the model" onClick={() => setShowDims((d) => !d)} />
+          <Row on={wireframe} label="Wireframe" hint="See the mesh triangles" onClick={() => setWireframe((w) => !w)} />
+          <Row on={stats} label="Stats" hint="Triangles, volume, watertight" onClick={() => setStats(!stats)} />
+          <Row on={showcase} label="Showcase" hint="Clean stage + slow turntable" onClick={() => setShowcase(!showcase)} />
+          <div className="pmenu-sep" />
+          <button role="menuitem" className="pmenu-item" onClick={() => setUnits((u) => (u === "mm" ? "in" : "mm"))}>
+            <b>Units: {units === "mm" ? "millimetres" : "inches"}</b>
+            <span>Tap to switch to {units === "mm" ? "inches" : "millimetres"}</span>
+          </button>
+          <div className="pmenu-sep" />
+          <button role="menuitem" className="pmenu-item" onClick={() => { close(); onResetView(); }}>
+            <b>Reset view</b>
+            <span>Re-frame the model in the viewport</span>
+          </button>
+        </AnchoredMenu>
+      )}
+    </span>
+  );
+}
+
 /** Pick which build plate an object prints on — a menu, not a blind cycle. */
-function PlateMenu({ value, count, onPick, onNewPlate }: { value: number; count: number; onPick: (n: number) => void; onNewPlate: () => void }) {
+function PlateMenu({ value, count, names, onPick, onNewPlate }: { value: number; count: number; names?: Record<number, string>; onPick: (n: number) => void; onNewPlate: () => void }) {
   const btn = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const close = () => setAnchor(null);
   return (
     <span onClick={(e) => e.stopPropagation()}>
-      <button ref={btn} className="lp-plate" title="Which build plate this prints on — click to choose" aria-haspopup="menu" aria-expanded={!!anchor}
+      <button ref={btn} className="lp-plate" title={`Prints on plate ${value}${names?.[value] ? ` (${names[value]})` : ""} — click to choose`} aria-haspopup="menu" aria-expanded={!!anchor}
         onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
         P{value} ▾
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={close} width={150}>
+        <AnchoredMenu anchor={anchor} onClose={close} width={170}>
           {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
             <button key={n} role="menuitem" className={`pmenu-item${n === value ? " on" : ""}`} onClick={() => { close(); onPick(n); }}>
-              Plate {n}{n === value ? " ✓" : ""}
+              Plate {n}{names?.[n] ? ` · ${names[n]}` : ""}{n === value ? " ✓" : ""}
             </button>
           ))}
           <div className="pmenu-sep" />
@@ -137,44 +224,68 @@ function PlateExportMenu({ exportEach, exportProject, disabled, compact }: { exp
 }
 
 /** Bambu-style plate tabs over the 3D view: see what prints where, focus one plate,
-    add/remove plates, and export the layout — all in one glance. */
-function PlateBar({ count, active, setActive, counts, onAdd, onRemove, exportEach, exportProject }: {
+    add/remove/rename plates (double-click a tab), and export the layout. */
+function PlateBar({ count, names, active, setActive, counts, onAdd, onRemove, onRename, exportEach, exportProject }: {
   count: number;
+  names: Record<number, string>;
   active: number;
   setActive: (n: number) => void;
   counts: Map<number, number>;
   onAdd: () => void;
   onRemove: (n: number) => void;
+  onRename: (n: number, name: string) => void;
   exportEach: () => void;
   exportProject: () => void;
 }) {
+  const [editing, setEditing] = useState<number | null>(null);
+  const [draft, setDraft] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (editing !== null) setTimeout(() => { inputRef.current?.focus(); inputRef.current?.select(); }, 0); }, [editing]);
+  const commit = () => { if (editing !== null) onRename(editing, draft); setEditing(null); };
   return (
     <div className="plate-bar" role="group" aria-label="Build plates">
       <span className="pb-label">Plates</span>
       <div className="pb-tabs">
         <button className={`pb-tab${active === 0 ? " on" : ""}`} title="Show every plate" onClick={() => setActive(0)}>All</button>
-        {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
-          <button
-            key={n}
-            className={`pb-tab${active === n ? " on" : ""}`}
-            title={`Show only plate ${n} — ${counts.get(n) ?? 0} object${(counts.get(n) ?? 0) === 1 ? "" : "s"}`}
-            onClick={() => setActive(n)}
-          >
-            {n}
-            <span className={`pb-count${counts.get(n) ? "" : " zero"}`}>{counts.get(n) ?? 0}</span>
-            {active === n && count > 1 && (
-              <span
-                className="pb-x"
-                role="button"
-                aria-label={`Remove plate ${n}`}
-                title="Remove this plate — its objects join the previous plate"
-                onClick={(e) => { e.stopPropagation(); onRemove(n); }}
-              >
-                <IconX size={9} />
-              </span>
-            )}
-          </button>
-        ))}
+        {Array.from({ length: count }, (_, i) => i + 1).map((n) =>
+          editing === n ? (
+            <input
+              key={n}
+              ref={inputRef}
+              className="pb-edit"
+              value={draft}
+              placeholder={`Plate ${n}`}
+              maxLength={24}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={commit}
+              onKeyDown={(e) => { if (e.key === "Enter") commit(); else if (e.key === "Escape") setEditing(null); }}
+              aria-label={`Rename plate ${n}`}
+            />
+          ) : (
+            <button
+              key={n}
+              className={`pb-tab${active === n ? " on" : ""}`}
+              title={`Show only plate ${n}${names[n] ? ` (${names[n]})` : ""} — ${counts.get(n) ?? 0} object${(counts.get(n) ?? 0) === 1 ? "" : "s"} · double-click to rename`}
+              onClick={() => setActive(n)}
+              onDoubleClick={() => { setDraft(names[n] ?? ""); setEditing(n); }}
+            >
+              {n}
+              {names[n] && <span className="pb-name">{names[n]}</span>}
+              <span className={`pb-count${counts.get(n) ? "" : " zero"}`}>{counts.get(n) ?? 0}</span>
+              {active === n && count > 1 && (
+                <span
+                  className="pb-x"
+                  role="button"
+                  aria-label={`Remove plate ${n}`}
+                  title="Remove this plate — its objects join the previous plate"
+                  onClick={(e) => { e.stopPropagation(); onRemove(n); }}
+                >
+                  <IconX size={9} />
+                </span>
+              )}
+            </button>
+          ),
+        )}
       </div>
       <button className="pb-add" title="Add a build plate" onClick={onAdd}>+</button>
       <PlateExportMenu exportEach={exportEach} exportProject={exportProject} disabled={false} />
@@ -463,7 +574,9 @@ function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }
  *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
 function HelpSheet({ onClose }: { onClose: () => void }) {
   const rows: { icon: JSX.Element; text: string }[] = [
-    { icon: <IconCube />, text: "Orbit: drag rotates, pinch or scroll zooms, two-finger drag pans." },
+    { icon: <IconCube />, text: "Orbit: drag rotates, pinch or scroll zooms, middle- or right-drag (two fingers) pans." },
+    { icon: <IconPointer />, text: "Right-click the model, a part, or empty space for quick actions — rename, duplicate, fit tools, plates." },
+    { icon: <IconLayers />, text: "Objects panel: double-click any name (or a plate tab) to rename it." },
     { icon: <IconPointer />, text: "Select: pick Face, Edge, Corner or Point (keys 1–4), then tap the model to choose a spot to edit." },
     { icon: <IconEdgeSel />, text: "Drag the blue arrow to extrude a face or round an edge — the model updates live; type an exact mm in the quick-edit box instead if you prefer." },
     { icon: <IconCheck />, text: "If a size doesn't fit the geometry, Moldable applies the largest that does and tells you both numbers." },
@@ -600,16 +713,27 @@ interface Props {
   onRemoveAttachment: (id: string) => void;
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
   separated: boolean; // the dry-fit sandbox is open (model was split into parts)
+  separatedIds: string[]; // which objects came out of the split (shown grouped under the model)
   onSeparateParts: () => void;
   onRegroup: () => void;
   onCheckFit: (ids: string[]) => void;
   onMakeFit: (ids: string[]) => void;
   onDropToPlate: (ids: string[]) => void;
+  onRenameAttachment: (id: string, name: string) => void;
+  clipboardCtl: {
+    canPaste: boolean;
+    pasteName: string | null;
+    copy: (t: { kind: "model" } | { kind: "attachment"; id: string }) => void;
+    paste: () => void;
+    duplicate: (t: { kind: "model" } | { kind: "attachment"; id: string }) => void;
+  };
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
   plateFor: (key: string) => number;
   plateCtl: {
     count: number;
+    names: Record<number, string>; // user labels ("Lids", "Spares") — optional per plate
+    rename: (n: number, name: string) => void;
     assign: (key: string, n: number) => void;
     add: () => number; // returns the new plate's number
     remove: (n: number) => void;
@@ -737,6 +861,8 @@ export function Workspace(p: Props) {
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
   const [showLayers, setShowLayers] = useState(false); // objects/layers side list
+  const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
+  const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -1071,38 +1197,21 @@ export function Workspace(p: Props) {
                     Clear points ({p.pins.length})
                   </button>
                 )}
-                <button
-                  className={`ghost sm iconbtn${p.showDims ? " on" : ""}`}
-                  aria-pressed={p.showDims}
-                  aria-label="Dimensions"
-                  title={p.showDims ? "Hide the dimension lines" : "Show the dimension lines"}
-                  onClick={() => p.setShowDims((d) => !d)}
-                >
-                  <IconDims /><span className="btn-label">Dimensions</span>
-                </button>
-                <button className="ghost sm" title={`Units: ${p.units === "mm" ? "millimetres" : "inches"} — tap to switch`} onClick={() => p.setUnits((u) => (u === "mm" ? "in" : "mm"))}>
-                  {p.units === "mm" ? "mm" : "in"}
-                </button>
-                <button
-                  className={`ghost sm iconbtn${p.wireframe ? " on" : ""}`}
-                  aria-pressed={p.wireframe}
-                  aria-label="Wireframe"
-                  title={p.wireframe ? "Back to solid shading" : "Show the mesh as wireframe"}
-                  onClick={() => p.setWireframe((w) => !w)}
-                >
-                  <IconWireframe /><span className="btn-label">Wireframe</span>
-                </button>
-                <button className={`ghost sm iconbtn${showStats ? " on" : ""}`} aria-pressed={showStats} aria-label="Stats" title="Show mesh & print stats on the model" onClick={() => setShowStats((s) => !s)}>
-                  <IconStats /><span className="btn-label">Stats</span>
-                </button>
-                <button className="ghost sm iconbtn" aria-label="Reset view" title="Re-frame the model in the viewport" onClick={() => p.viewerRef.current?.resetView()}>
-                  <IconFrame /><span className="btn-label">Reset view</span>
-                </button>
-                <button className={`ghost sm iconbtn${p.showcase ? " on" : ""}`} aria-pressed={p.showcase} aria-label="Showcase" title="Showcase mode — clean stage, studio light, slow turntable (Shapr3D-style visualization)" onClick={() => p.setShowcase(!p.showcase)}>
-                  <IconPlay />
-                </button>
-                <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select the model, pins and measurements" onClick={() => setShowLayers((v) => !v)}>
-                  <IconLayers />
+                <ViewMenu
+                  showDims={p.showDims}
+                  setShowDims={p.setShowDims}
+                  wireframe={p.wireframe}
+                  setWireframe={p.setWireframe}
+                  stats={showStats}
+                  setStats={setShowStats}
+                  units={p.units}
+                  setUnits={p.setUnits}
+                  showcase={p.showcase}
+                  setShowcase={p.setShowcase}
+                  onResetView={() => p.viewerRef.current?.resetView()}
+                />
+                <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
+                  <IconLayers /><span className="btn-label">Objects</span>
                 </button>
                 <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
                   <IconHelp />
@@ -1149,16 +1258,95 @@ export function Workspace(p: Props) {
                 onSelectPin={p.pinCtl.select}
                 onTransformCommit={p.transformCtl.commit}
                 onMeasurePoint={p.measureCtl.point}
+                onContext={(h) => {
+                  // Right-click selects what it lands on (standard editor behavior), then opens the menu.
+                  if (h.target.kind === "attachment") p.onAttachSelect(h.target.id);
+                  else if (h.target.kind === "model") p.onModelSelect(true);
+                  setCtx(h);
+                }}
               />
+              {ctx && (() => {
+                const close = () => setCtx(null);
+                const anchor = { top: ctx.y, bottom: ctx.y, right: ctx.x + 200 } as DOMRect;
+                const t = ctx.target;
+                const Item = ({ label, hint, onClick, disabled }: { label: string; hint?: string; onClick: () => void; disabled?: boolean }) => (
+                  <button role="menuitem" className="pmenu-item" disabled={disabled} onClick={() => { close(); onClick(); }}>
+                    <b>{label}</b>
+                    {hint && <span>{hint}</span>}
+                  </button>
+                );
+                const plateItems = (key: string) => p.plateCtl.count > 1 || p.attachments.length > 0 ? (
+                  <>
+                    <div className="pmenu-sep" />
+                    <div className="pmenu-head">Print on plate</div>
+                    {Array.from({ length: p.plateCtl.count }, (_, i) => i + 1).map((n) => (
+                      <button key={n} role="menuitem" className={`pmenu-item${p.plateFor(key) === n ? " on" : ""}`} onClick={() => { close(); p.plateCtl.assign(key, n); }}>
+                        Plate {n}{p.plateCtl.names[n] ? ` · ${p.plateCtl.names[n]}` : ""}{p.plateFor(key) === n ? " ✓" : ""}
+                      </button>
+                    ))}
+                    <button role="menuitem" className="pmenu-item" onClick={() => { close(); p.plateCtl.assign(key, p.plateCtl.add()); }}>+ New plate</button>
+                  </>
+                ) : null;
+                return (
+                  <AnchoredMenu anchor={anchor} onClose={close} width={200}>
+                    {t.kind === "model" && p.geometry && (
+                      <>
+                        <Item label="Rename" onClick={() => { setShowLayers(true); setRenaming("model"); }} />
+                        <Item label="Duplicate" hint="A movable copy beside it" onClick={() => p.clipboardCtl.duplicate({ kind: "model" })} />
+                        <Item label="Copy" onClick={() => p.clipboardCtl.copy({ kind: "model" })} />
+                        <div className="pmenu-sep" />
+                        {p.separated ? (
+                          <Item label="Regroup parts" hint="Undo the split exactly" onClick={p.onRegroup} />
+                        ) : p.partCount > 1 ? (
+                          <Item label={`Separate ${p.partCount} parts`} hint="Move each solid on its own" onClick={p.onSeparateParts} />
+                        ) : null}
+                        {plateItems("model")}
+                        <div className="pmenu-sep" />
+                        <Item label="Zoom to fit" onClick={() => p.viewerRef.current?.resetView()} />
+                      </>
+                    )}
+                    {t.kind === "attachment" && (
+                      <>
+                        <Item label="Rename" onClick={() => { setShowLayers(true); setRenaming(t.id); }} />
+                        <Item label="Duplicate" onClick={() => p.clipboardCtl.duplicate({ kind: "attachment", id: t.id })} />
+                        <Item label="Copy" onClick={() => p.clipboardCtl.copy({ kind: "attachment", id: t.id })} />
+                        <Item label="Delete" onClick={() => p.onRemoveAttachment(t.id)} />
+                        <div className="pmenu-sep" />
+                        <Item label="Check fit" hint="Real overlap vs the model" onClick={() => p.onCheckFit([t.id])} />
+                        <Item label="Make it fit" hint="Carve its shape + clearance" onClick={() => p.onMakeFit([t.id])} />
+                        <Item label="Drop to plate" onClick={() => p.onDropToPlate([t.id])} />
+                        <Item label="Merge into model" hint="Fuse into one solid" onClick={() => p.onMergeAttachments([t.id])} />
+                        {plateItems(t.id)}
+                      </>
+                    )}
+                    {t.kind === "empty" && (
+                      <>
+                        {p.clipboardCtl.canPaste && <Item label={`Paste "${p.clipboardCtl.pasteName}"`} onClick={p.clipboardCtl.paste} />}
+                        {p.activePlate !== 0 && <Item label="Show all plates" onClick={() => p.setActivePlate(0)} />}
+                        <Item label="Reset view" hint="Re-frame the model" onClick={() => p.viewerRef.current?.resetView()} />
+                      </>
+                    )}
+                  </AnchoredMenu>
+                );
+              })()}
+              {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
+                <div className="zoom-ctl" role="group" aria-label="Zoom">
+                  <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>
+                  <button title="Zoom to fit — re-frame the model" aria-label="Zoom to fit" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
+                  <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
+                </div>
+              )}
               {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (p.attachments.length > 0 || p.plateCtl.count > 1) && (
                 <PlateBar
                   count={p.plateCtl.count}
+                  names={p.plateCtl.names}
                   active={p.activePlate}
                   setActive={p.setActivePlate}
                   counts={plateCounts}
                   onAdd={() => p.plateCtl.add()}
                   onRemove={p.plateCtl.remove}
+                  onRename={p.plateCtl.rename}
                   exportEach={p.plateCtl.exportEach}
                   exportProject={p.plateCtl.exportProject}
                 />
@@ -1186,29 +1374,43 @@ export function Workspace(p: Props) {
                     <button className="lp-add" title="Add a build plate" onClick={() => p.plateCtl.add()}>+</button>
                     <PlateExportMenu compact exportEach={p.plateCtl.exportEach} exportProject={p.plateCtl.exportProject} disabled={!p.geometry} />
                   </div>
-                  <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box)" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
-                    <IconCube /><span className="lp-name">Model</span>
-                    {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
+                  <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box) — double-click the name to rename" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
+                    <IconCube />
+                    <EditableName name={p.projectName} className="lp-name" editing={renaming === "model"} onStartEdit={() => setRenaming("model")} onRename={p.onRename} onDone={() => setRenaming(null)} />
+                    {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
                     {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
                   </div>
-                  {(p.splitCtl.pieces ?? []).map((pc, i) => (
-                    <div key={`pc${i}`} className="lp-row static">
-                      <span className="lp-dot" style={{ background: pc.color }} /><span className="lp-name">Piece {i + 1}</span>
-                      <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
-                    </div>
-                  ))}
-                  {p.attachments.map((a) => {
-                    const on = p.selAttachIds.includes(a.id);
+                  {(() => {
+                    const sepSet = new Set(p.separatedIds);
+                    const grouped = p.attachments.filter((a) => sepSet.has(a.id));
+                    const loose = p.attachments.filter((a) => !sepSet.has(a.id));
+                    const row = (a: { id: string; name: string }, sub: boolean) => {
+                      const on = p.selAttachIds.includes(a.id);
+                      return (
+                        <div key={a.id} className={`lp-row${on ? " on" : ""}${sub ? " sub" : ""}`} style={{ cursor: "pointer" }} title={`${a.name} — click to select, double-click the name to rename`} onClick={(e) => p.onAttachSelect(a.id, e.shiftKey)}>
+                          {sub && <span className="lp-tie" aria-hidden="true">└</span>}
+                          <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
+                          <span className="lp-dot" style={{ background: "#7fc4b9" }} />
+                          <EditableName name={a.name} className="lp-name" editing={renaming === a.id} onStartEdit={() => setRenaming(a.id)} onRename={(v) => p.onRenameAttachment(a.id, v)} onDone={() => setRenaming(null)} />
+                          <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
+                          <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
+                        </div>
+                      );
+                    };
                     return (
-                      <div key={a.id} className={`lp-row${on ? " on" : ""}`} style={{ cursor: "pointer" }} title="A free-floating object — click to select (shift/checkbox adds to a group), then move together or Merge" onClick={(e) => p.onAttachSelect(a.id, e.shiftKey)}>
-                        <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
-                        <span className="lp-dot" style={{ background: "#7fc4b9" }} />
-                        <span className="lp-name">{a.name}</span>
-                        <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
-                        <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
-                      </div>
+                      <>
+                        {grouped.length > 0 && <div className="lp-group">Separated from the model — Regroup or Merge rejoins them</div>}
+                        {grouped.map((a) => row(a, true))}
+                        {(p.splitCtl.pieces ?? []).map((pc, i) => (
+                          <div key={`pc${i}`} className="lp-row static">
+                            <span className="lp-dot" style={{ background: pc.color }} /><span className="lp-name">Piece {i + 1}</span>
+                            <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
+                          </div>
+                        ))}
+                        {loose.map((a) => row(a, false))}
+                      </>
                     );
-                  })}
+                  })()}
                   {p.geometry && (p.separated ? (
                     <button
                       className="ghost sm"

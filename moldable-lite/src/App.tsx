@@ -9,7 +9,7 @@ import { geometryToSTL, geometryTo3MF, geometriesTo3MF, platesToProject3MF, zipM
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean, previewIntersect, displaceMesh } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
@@ -349,11 +349,38 @@ export default function App() {
     setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.` }]);
   }
   const [partCount, setPartCount] = useState(1); // disconnected solids in the model mesh
+  // Dry-fit sandbox. Separating (and any "Make it fit" carve) deliberately does NOT
+  // touch version history: attachments live outside history, so a committed split made
+  // Undo resurrect the moved part at its old spot as a duplicate. Instead the split
+  // holds the pre-split result here, "Regroup parts" (or Undo) restores it exactly,
+  // and only Merge commits the assembled outcome as a real version.
+  const separatedRef = useRef<{ ids: string[]; result: EngineResult } | null>(null);
+  const [separated, setSeparated] = useState(false);
+  /** Remove the split's floating parts + forget the sandbox (no model restore) —
+      called before anything that rebuilds the model (undo/redo/restore/new commit). */
+  function dissolveSeparation() {
+    const s = separatedRef.current;
+    if (!s) return;
+    separatedRef.current = null;
+    setSeparated(false);
+    setAttachments((a) => a.filter((x) => !s.ids.includes(x.id)));
+    setSelAttachIds((ids) => ids.filter((x) => !s.ids.includes(x)));
+  }
+  /** Put the model back exactly as it was before "Separate parts". */
+  function regroupParts() {
+    const s = separatedRef.current;
+    if (!s) return;
+    dissolveSeparation();
+    applyResultNoCommit(s.result);
+    setTransformMode("off");
+    setModelSelected(false);
+  }
   /** "Ungroup": split the model's disconnected solids so each moves on its own — the
-      biggest stays as the model, the rest become free objects with the move/rotate
-      gizmo. The pre-split model stays one Undo away (a version is committed). */
+      biggest (by bounding box) stays as the model, the rest become free objects with
+      the move/rotate gizmo. A sandbox: Undo or "Regroup parts" restores the original;
+      Merge makes the new arrangement permanent. */
   function separateParts() {
-    if (!geometry || !result || status === "generating") return;
+    if (!geometry || !result || status === "generating" || separatedRef.current) return;
     const pieces = splitConnectedParts(geometry);
     if (pieces.length < 2) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model is already one connected part — nothing to separate." }]);
@@ -362,20 +389,81 @@ export default function App() {
     const [main, ...rest] = pieces;
     const sz = main.boundingBox!.getSize(new THREE.Vector3());
     const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
-    const res: EngineResult = {
+    const prior = result;
+    applyResultNoCommit({
       kind: "generative",
       geometry: main,
       dims,
       source: { kind: "gen", provider: "separate", model: `${pieces.length} parts` },
       supportsStep: false,
       glb: geometryToSTL(main),
-    };
-    applyResult(res, project?.name ?? "Model", `Separated into ${pieces.length} parts`, "separate parts");
-    rest.forEach((g, i) => addAttachment(g, `Part ${i + 2}`));
+    });
+    const ids = rest.map((g, i) => addAttachment(g, `Part ${i + 2}`));
+    separatedRef.current = { ids, result: prior };
+    setSeparated(true);
     setMessages((m) => [...m, {
       id: mid(), role: "assistant",
-      text: `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check fit** in the Objects panel — it computes the real overlap between the solids. **Drop to plate** settles a part back onto the bed, and **Merge all into model** or Undo puts everything back together. (The separated model is a mesh — export STL/3MF; for STEP or sliders, Undo to the pre-split version.)`,
+      text: `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check fit** — it computes the real overlap between the solids. If parts are meant to nest and they collide, **Make it fit** carves the needed room out of the model. **Undo** or **Regroup parts** puts everything back exactly as it was; **Merge all into model** makes the new arrangement permanent.`,
     }]);
+  }
+
+  /** For parts designed to go INTO each other: carve each selected part's shape — grown
+      by an FDM clearance — out of the model at its current position, so it can nest.
+      Inside the dry-fit sandbox this stays un-committed (Undo/Regroup restores);
+      standalone it commits a version like any other edit. */
+  async function makeItFit(ids: string[]) {
+    if (!geometry || !result || status === "generating" || !ids.length) return;
+    const CLEARANCE = 0.2; // mm per side — the usual FDM slip-fit allowance
+    setStatus("generating");
+    try {
+      let baseGeom = geometry;
+      let g: THREE.BufferGeometry | null = null;
+      const carvedNames: string[] = [];
+      for (const id of ids) {
+        const a = attachments.find((x) => x.id === id);
+        if (!a) continue;
+        const baked = viewer.current?.bakeAttachment(id);
+        if (!baked) throw new Error(`couldn't read ${a.name}'s placement`);
+        if (!(await previewSetBase(baseGeom))) throw new Error("this model's mesh couldn't be welded for a boolean");
+        const inter = await previewIntersect(baked);
+        if (!inter || meshVolume(inter) < 1) continue; // not touching the model — nothing to carve
+        const grown = await growMesh(baked, CLEARANCE); // true surface offset: every face moves outward
+        if (!grown) throw new Error(`${a.name}'s mesh couldn't be welded to grow the clearance`);
+        const pos = await previewBoolean(grown, -1); // cut the grown shape
+        if (!pos) throw new Error(`carving ${a.name}'s shape out of the model failed`);
+        g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        baseGeom = g;
+        carvedNames.push(a.name);
+      }
+      if (!g) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Nothing to carve — the selected part isn't overlapping the model. Move it to where it should nest (so they collide), then tap Make it fit." }]);
+        return;
+      }
+      g.computeVertexNormals();
+      g.computeBoundingBox();
+      const sz = g.boundingBox!.getSize(new THREE.Vector3());
+      const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
+      const names = carvedNames.join(" + ");
+      const res: EngineResult = {
+        kind: "generative",
+        geometry: g,
+        dims,
+        source: { kind: "gen", provider: "fit-cut", model: names },
+        supportsStep: false,
+        glb: geometryToSTL(g),
+      };
+      if (separatedRef.current) applyResultNoCommit(res); // sandbox: Undo/Regroup restores the original
+      else applyResult(res, project?.name ?? "Model", `Carved clearance for ${names}`, "make it fit");
+      setMessages((m) => [...m, {
+        id: mid(), role: "assistant",
+        text: `Carved **${names}**'s shape out of the model with **${CLEARANCE} mm clearance** per side — it can nest there now. Tap **Check fit** to confirm (it should pass), and slide the part in and out to eyeball it. ${separatedRef.current ? "**Merge all into model** makes this permanent; **Undo** / **Regroup parts** restores the original." : "Undo restores the un-carved model."}`,
+      }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Make it fit failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
   }
 
   /** Dry-fit check: boolean-intersect each selected part against the model. Zero overlap
@@ -401,7 +489,7 @@ export default function App() {
         } else {
           const pct = Math.round((overlap / partVol) * 100);
           const shown = overlap >= 1000 ? `${(overlap / 1000).toFixed(1)} cm³` : `${overlap.toFixed(1)} mm³`;
-          lines.push(`✗ **${a.name}** overlaps the model by **${shown}**${pct > 0 ? ` (~${pct}% of the part)` : ""} — they collide at this position. Move it and re-check.`);
+          lines.push(`✗ **${a.name}** overlaps the model by **${shown}**${pct > 0 ? ` (~${pct}% of the part)` : ""} — they collide at this position. If it's just misplaced, move it and re-check. If these parts are MEANT to nest (a lid into a box, a peg into a hole), tap **Make it fit** — it carves ${a.name}'s shape plus clearance out of the model right here.`);
         }
       }
       if (lines.length) {
@@ -421,10 +509,11 @@ export default function App() {
   }
 
   const attachSelected = selAttachIds.length > 0;
-  const addAttachment = (geometry: THREE.BufferGeometry, name: string) => {
+  const addAttachment = (geometry: THREE.BufferGeometry, name: string): string => {
     const id = mid();
     setAttachments((a) => [...a, { id, geometry, name }]);
     selectAttach(id);
+    return id;
   };
   const removeAttachment = (id: string) => {
     setAttachments((a) => a.filter((x) => x.id !== id));
@@ -797,6 +886,7 @@ export default function App() {
   }
 
   function applyResult(res: EngineResult, name: string, summary: string, promptText: string) {
+    dissolveSeparation(); // a committed result replaces the model — the dry-fit sandbox's floating parts must not linger
     applyResultNoCommit(res);
 
     const base = project ?? newProject(name, res.kind);
@@ -1511,6 +1601,11 @@ export default function App() {
         supportsStep: false,
         glb: geometryToSTL(g!),
       };
+      // The merged arrangement is committed for real — the dry-fit sandbox (if any) is
+      // over. Forget it WITHOUT dissolving, so any not-yet-merged separated parts
+      // survive as ordinary objects instead of vanishing with the sandbox.
+      separatedRef.current = null;
+      setSeparated(false);
       applyResult(res, `${project?.name ?? "Model"} + ${names}`, `Merged ${names} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${names}`);
       const mergedIds = new Set(targets.map((t) => t.id));
       setAttachments((a) => a.filter((x) => !mergedIds.has(x.id)));
@@ -2109,6 +2204,7 @@ export default function App() {
 
   async function restoreTo(versionId: string) {
     if (!project) return;
+    dissolveSeparation(); // restoring rebuilds the model — drop the sandbox's floating parts
     const next = restoreVersion(project, versionId);
     persist(next);
     try {
@@ -2122,7 +2218,8 @@ export default function App() {
   // Undo/redo step HEAD back/forward over the append-only version history, without
   // appending — so a redo stays available until the next real edit.
   const hIdx = project ? headIndex(project) : -1;
-  const canUndo = !!project && hIdx > 0;
+  // While the dry-fit sandbox is open, Undo means "regroup" — that's the last action.
+  const canUndo = separated || (!!project && hIdx > 0);
   const canRedo = !!project && hIdx >= 0 && hIdx < project.versions.length - 1;
   const [navBusy, setNavBusy] = useState(false);
   async function stepHead(dir: -1 | 1) {
@@ -2131,6 +2228,7 @@ export default function App() {
     const target = project.versions[i + dir];
     if (!target) return;
     setNavBusy(true);
+    dissolveSeparation(); // the rebuild below replaces the model — floating split parts must not linger
     const next = navigateHead(project, target.id);
     persist(next);
     setActivePinId(null);
@@ -2143,7 +2241,10 @@ export default function App() {
       setNavBusy(false);
     }
   }
-  const undo = () => stepHead(-1);
+  const undo = () => {
+    if (separatedRef.current) regroupParts(); // un-separate first; history stays untouched
+    else void stepHead(-1);
+  };
   const redo = () => stepHead(1);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -2176,6 +2277,10 @@ export default function App() {
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);
     setActivePlate(0);
+    separatedRef.current = null;
+    setSeparated(false);
+    setAttachments([]);
+    setSelAttachIds([]);
     setActivePinId(null);
     setGuided(false); // guided is a per-session intent — don't leak it into another project
     setMode(p.engine === "generative" ? "generative" : "precise");
@@ -2193,6 +2298,10 @@ export default function App() {
     setPlateOf({});
     setPlateCount(1);
     setActivePlate(0);
+    separatedRef.current = null;
+    setSeparated(false);
+    setAttachments([]);
+    setSelAttachIds([]);
     setActivePinId(null);
     setSelectMode(false);
     setSelectedFeature(null);
@@ -2289,8 +2398,11 @@ export default function App() {
         onMergeAttachments={(ids?: string[]) => { void mergeAttachments(ids); }}
         onRemoveAttachment={removeAttachment}
         partCount={partCount}
+        separated={separated}
         onSeparateParts={separateParts}
+        onRegroup={regroupParts}
         onCheckFit={(ids) => void checkFit(ids)}
+        onMakeFit={(ids) => void makeItFit(ids)}
         onDropToPlate={dropToPlate}
         snap={snap}
         setSnap={setSnap}

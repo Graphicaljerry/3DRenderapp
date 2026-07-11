@@ -53,6 +53,13 @@ export async function previewIntersect(tool: Float32Array): Promise<Float32Array
   return r.ok ? r.positions : null;
 }
 
+/** Uniform outward offset (~delta mm along vertex normals) — the clearance-growing
+ *  step of "Make it fit". Null → the mesh couldn't be welded into a solid. */
+export async function growMesh(positions: Float32Array, delta: number): Promise<Float32Array | null> {
+  const r = await ensure().grow(positions, delta);
+  return r.ok ? r.positions : null;
+}
+
 /** Physical surface texture: subdivide + displace the mesh in the preview worker. */
 export async function displaceMesh(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<Float32Array | null> {
   const r = await ensure().displace(positions, opts);

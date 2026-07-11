@@ -599,8 +599,11 @@ interface Props {
   onMergeAttachments: (ids?: string[]) => void;
   onRemoveAttachment: (id: string) => void;
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
+  separated: boolean; // the dry-fit sandbox is open (model was split into parts)
   onSeparateParts: () => void;
+  onRegroup: () => void;
   onCheckFit: (ids: string[]) => void;
+  onMakeFit: (ids: string[]) => void;
   onDropToPlate: (ids: string[]) => void;
   snap: { move: number; rotate: number };
   setSnap: (s: { move: number; rotate: number }) => void;
@@ -1206,20 +1209,32 @@ export function Workspace(p: Props) {
                       </div>
                     );
                   })}
-                  {p.geometry && p.partCount > 1 && (
+                  {p.geometry && (p.separated ? (
                     <button
                       className="ghost sm"
                       style={{ width: "100%", marginTop: 6 }}
-                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge or Undo to regroup"
+                      title="Put the model back exactly as it was before separating (same as Undo while parts are separated)"
+                      onClick={p.onRegroup}
+                    >
+                      Regroup parts
+                    </button>
+                  ) : p.partCount > 1 ? (
+                    <button
+                      className="ghost sm"
+                      style={{ width: "100%", marginTop: 6 }}
+                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge to keep it or Undo to regroup"
                       onClick={p.onSeparateParts}
                     >
                       Separate {p.partCount} parts
                     </button>
-                  )}
+                  ) : null)}
                   {p.selAttachIds.length > 0 && (
                     <div className="lp-fitrow">
                       <button className="ghost sm" title="Does it fit here? Computes the real overlap between the selected part(s) and the model — zero overlap means no collision at this position" onClick={() => p.onCheckFit(p.selAttachIds)}>
                         Check fit
+                      </button>
+                      <button className="ghost sm" title="For parts that nest into each other: carve the selected part's shape (+0.2 mm clearance) out of the model at its current position, so it can slot in" onClick={() => p.onMakeFit(p.selAttachIds)}>
+                        Make it fit
                       </button>
                       <button className="ghost sm" title="Settle the selected part(s) back down onto the build plate (keeps position and rotation)" onClick={() => p.onDropToPlate(p.selAttachIds)}>
                         Drop to plate

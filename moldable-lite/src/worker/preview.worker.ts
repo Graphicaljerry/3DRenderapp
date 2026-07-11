@@ -84,6 +84,10 @@ export interface PreviewApi {
   /** Physical surface texture: weld → subdivide until edges suit the pattern scale →
    *  displace along vertex normals. Returns a closed triangle soup. */
   displace(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
+  /** Uniform outward surface offset (~delta mm): weld, then displace every vertex along
+   *  its area-weighted normal. Correct on non-convex shapes (interior steps move OUT,
+   *  where bbox scaling would pull them in) — powers "Make it fit" clearance. */
+  grow(positions: Float32Array, delta: number): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
 }
 
 const MAX_TRIS = 700_000; // displacement subdivision budget
@@ -160,6 +164,44 @@ const api: PreviewApi = {
         verts[i] += nx * d; verts[i + 1] += ny * d; verts[i + 2] += nz * d;
       }
       // Expand back to a soup for the app's standard pipeline.
+      const soup = new Float32Array(tris.length * 3);
+      for (let i = 0; i < tris.length; i++) {
+        const v = tris[i] * 3;
+        soup[i * 3] = verts[v]; soup[i * 3 + 1] = verts[v + 1]; soup[i * 3 + 2] = verts[v + 2];
+      }
+      return transfer({ ok: true, positions: soup }, [soup.buffer]);
+    } catch (e: any) {
+      return { ok: false, error: String(e?.message ?? e) };
+    }
+  },
+
+  async grow(positions, delta) {
+    try {
+      const wasm = await ensureManifold();
+      // Weld so shared vertices exist — vertex normals then average across faces.
+      const man = toManifold(wasm, positions);
+      const mesh = man.getMesh();
+      man.delete();
+      const np: number = mesh.numProp ?? 3;
+      const vpRaw: Float32Array = mesh.vertProperties;
+      const tris: Uint32Array = mesh.triVerts.slice();
+      const nVert = vpRaw.length / np;
+      const verts = new Float32Array(nVert * 3);
+      for (let i = 0; i < nVert; i++) { verts[i * 3] = vpRaw[i * np]; verts[i * 3 + 1] = vpRaw[i * np + 1]; verts[i * 3 + 2] = vpRaw[i * np + 2]; }
+      const nrm = new Float32Array(verts.length);
+      for (let t = 0; t < tris.length; t += 3) {
+        const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+        const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
+        const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
+        const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+        for (const i of [a, b, c]) { nrm[i] += cx; nrm[i + 1] += cy; nrm[i + 2] += cz; }
+      }
+      for (let i = 0; i < verts.length; i += 3) {
+        const l = Math.hypot(nrm[i], nrm[i + 1], nrm[i + 2]) || 1;
+        verts[i] += (nrm[i] / l) * delta;
+        verts[i + 1] += (nrm[i + 1] / l) * delta;
+        verts[i + 2] += (nrm[i + 2] / l) * delta;
+      }
       const soup = new Float32Array(tris.length * 3);
       for (let i = 0; i < tris.length; i++) {
         const v = tris[i] * 3;

@@ -30,8 +30,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   + research source chips.
 - **Materials & textures**: colour/finish picker; AI meshes keep their baked textures;
   physical surface textures (knurl/hex/noise) as real displaced geometry.
-- **Build plates**: P1/P2/P3 badges per object, plate filter, one 3MF per plate with named
-  separate objects (Bambu/Orca-friendly). Showcase mode (clean stage + turntable).
+- **Build plates**: Bambu-Studio-style. A plate bar over the viewer (tabs with object
+  counts, focus one plate, add/remove — up to 36), per-object "P2 ▾" plate menus in the
+  Objects panel, layout persisted with the project. Export ▾ offers ONE project 3MF in the
+  Bambu/Orca dialect (`Metadata/model_settings.config` plates + assemble + parts physically
+  placed one bed-stride apart — archive verified structurally, NOT yet opened in a real
+  Bambu Studio install; awaiting user confirmation) or the always-safe one-3MF-per-plate.
+  Showcase mode (clean stage + turntable).
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions
@@ -53,5 +58,4 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
 
 Also queued (user-requested): texture LIBRARY (more procedural patterns + grayscale
 height-map upload), full lighting controls (draggable key light, environment presets),
-snap-to-object magnetism, per-axis scale for mesh models, Bambu single-file multi-plate
-project export (proprietary; per-plate 3MF shipped instead).
+snap-to-object magnetism, per-axis scale for mesh models.

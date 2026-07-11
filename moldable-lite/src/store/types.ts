@@ -55,6 +55,7 @@ export interface Project {
   importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
   thumb?: string; // small rendered preview of the current model (webp/png data URL), refreshed on each change
   pins?: Pin[]; // spatial notes / AI-edit markers on the model
+  plates?: { count: number; of: Record<string, number> }; // build plates: how many + which object prints where
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest

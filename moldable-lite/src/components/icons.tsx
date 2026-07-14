@@ -93,6 +93,14 @@ export const IconTransform = ({ size = 15 }: { size?: number }) => (
     <path d="m8.5 5.5 3.5-3.5 3.5 3.5M8.5 18.5 12 22l3.5-3.5M5.5 8.5 2 12l3.5 3.5M18.5 8.5 22 12l-3.5 3.5" />
   </svg>
 );
+/** Mark tool: a pen circling a region. */
+export const IconMarker = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4.5 14.5a7.5 5.5 0 0 1 10-5" strokeDasharray="2.6 2.6" />
+    <path d="M4.5 14.5a7.5 5.5 0 0 0 9.5 5.3" strokeDasharray="2.6 2.6" />
+    <path d="M17.5 5.5a1.9 1.9 0 0 1 2.7 2.7L12 16.4l-3.6.9.9-3.6Z" />
+  </svg>
+);
 export const IconRuler = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <path d="M3.5 16.5 16.5 3.5 20.5 7.5 7.5 20.5Z" />

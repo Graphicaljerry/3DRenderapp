@@ -54,6 +54,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   under the model; middle-/right-drag pans; in-canvas zoom cluster (+ / fit / −);
   display toggles (dimensions, wireframe, stats, units, showcase, reset) consolidated
   into one View ▾ menu — toolbar carries tools, not switches.
+- **Mark & ask ("circle it and ask")**: the Mark tool draws freehand on the viewport; on
+  release, the current camera view + the red stroke composite into ONE annotated
+  screenshot that lands in the composer (image.markup=true, camera azimuth/elevation
+  captured). send() then uses `markupAddendum` (NOT the photo/vision addendum): image +
+  full current program + "the marker is a pointer, the program is the source of truth,
+  change only what's circled" + a view-direction phrase. Viewer gained `captureView()`
+  (current-camera RT render) and `viewInfo()`.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

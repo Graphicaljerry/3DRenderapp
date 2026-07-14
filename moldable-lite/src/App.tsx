@@ -17,7 +17,7 @@ import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -618,7 +618,10 @@ export default function App() {
   // Guided "fix a broken part" flow + FDM fit tolerance (applies to mating features).
   const [guided, setGuided] = useState(false);
   const [fit, setFit] = useState<FitId>("snug");
-  const [image, setImage] = useState<{ blob: Blob; url: string } | null>(null);
+  // A composer image is either a real-world reference photo, or (markup=true) a marked
+  // screenshot of the CURRENT model — "circle it and ask". `view` remembers where the
+  // camera looked when the mark was drawn, so the AI can orient the screenshot.
+  const [image, setImage] = useState<{ blob: Blob; url: string; markup?: boolean; view?: { azimuthDeg: number; elevationDeg: number } | null } | null>(null);
   // Extra reference angles for multi-view mesh generation (front is `image`).
   type ViewSlot = "left" | "back" | "right";
   const [views, setViews] = useState<Partial<Record<ViewSlot, { blob: Blob; url: string }>>>({});
@@ -879,6 +882,14 @@ export default function App() {
     localStorage.setItem(GENENG_LS, JSON.stringify({ provider, model: gmodel }));
     setGenEng({ provider, model: gmodel });
     scheduleSync();
+  }
+
+  /** "Circle it and ask": the viewer hands us the annotated screenshot; it rides the
+      composer's image slot with markup=true so send() frames it as an edit pointer. */
+  function attachMarkup(blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null) {
+    if (image) URL.revokeObjectURL(image.url);
+    setImage({ blob, url: URL.createObjectURL(blob), markup: true, view });
+    setMode("precise"); // marked edits target the current CAD program
   }
 
   function pickImage(file: File) {
@@ -1965,10 +1976,14 @@ export default function App() {
     const kind = sel.kind;
     const visionImage = image; // capture before we clear it
     const visionThumb = visionImage ? await blobToDataURL(visionImage.blob) : undefined;
+    // "Circle it and ask": a marked screenshot of the CURRENT model edits the existing
+    // program (the marker is a pointer), unlike a photo which rebuilds from scratch.
+    const markupEdit = !!visionImage?.markup && kind === "replicad" && result?.source.kind === "code" && !!result.source.code;
+    const markupCode = markupEdit && result?.source.kind === "code" ? result.source.code ?? "" : "";
     setInput("");
     setStreamingText("");
     setStreamingThink("");
-    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? "Recreate this part" : ""), image: visionThumb, mode: "precise" }]);
+    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? (visionImage.markup ? "Change the marked region" : "Recreate this part") : ""), image: visionThumb, mode: "precise" }]);
     const placeholderId = mid();
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
@@ -2030,7 +2045,7 @@ export default function App() {
 
     const system =
       (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) +
-      (visionImage ? VISION_ADDENDUM : "") +
+      (visionImage ? (markupEdit ? markupAddendum(visionImage.view ? viewPhrase(visionImage.view) : "") : VISION_ADDENDUM) : "") +
       (guided ? REPLACEMENT_ADDENDUM : "") +
       (importFileRef.current ? IMPORT_ADDENDUM : "");
     const userMsg: ApiMsg = visionImage
@@ -2038,7 +2053,12 @@ export default function App() {
           role: "user",
           content: [
             { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
-            { type: "text", text: (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + extras },
+            {
+              type: "text",
+              text: markupEdit
+                ? `Here is the current replicad program:\n\`\`\`js\n${markupCode}\n\`\`\`\n\nThe screenshot shows this model as currently rendered; the red marker circles the region to change. Apply this change there: ${p || "improve the marked region"}${extras}`
+                : (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + extras,
+            },
           ],
         }
       : { role: "user", content: pWithFacts };
@@ -2426,7 +2446,9 @@ export default function App() {
         hasGenKey={(prov) => { const pr = getProvider(prov); return !pr?.needsKey || !!providerKeys[prov]; }}
         onPickEngine={pickEngine}
         imageUrl={image?.url ?? null}
+        imageMarkup={!!image?.markup}
         onPickImage={pickImage}
+        onMarkup={attachMarkup}
         onClearImage={clearImage}
         views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
         onPickView={pickView}
@@ -2669,6 +2691,15 @@ function friendlyNet(msg: string): string {
   return /^(typeerror:?\s*)?(failed to fetch|networkerror.*|load failed)\.?$/i.test(msg.trim())
     ? "Couldn't reach the AI provider from this browser — check your internet/VPN and any ad-blocker (allow the provider's domain for this site), then try again."
     : msg;
+}
+
+/** "…, seen from the front-right and above" — orients a marked screenshot for the AI. */
+function viewPhrase(v: { azimuthDeg: number; elevationDeg: number }): string {
+  const az = ((v.azimuthDeg % 360) + 360) % 360;
+  const names = ["front", "front-right", "right", "back-right", "back", "back-left", "left", "front-left"];
+  const horiz = names[Math.round(az / 45) % 8];
+  const vert = v.elevationDeg > 55 ? ", nearly top-down" : v.elevationDeg > 25 ? " and above" : v.elevationDeg < -10 ? " and below" : "";
+  return `, seen from the ${horiz}${vert}`;
 }
 
 function deriveName(prompt: string): string {

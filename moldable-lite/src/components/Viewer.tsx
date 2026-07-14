@@ -25,6 +25,12 @@ export interface ViewerHandle {
   dropAttachment: (id: string) => void;
   /** Dolly toward (factor > 1) or away from (factor < 1) the orbit target. */
   zoomBy: (factor: number) => void;
+  /** Screenshot the CURRENT camera view (what the user sees, minus UI overlays).
+   *  Feeds the "mark a region → ask the AI" flow. Null when nothing renders. */
+  captureView: () => string | null;
+  /** Where the camera looks from, for describing a screenshot to the AI:
+   *  azimuth 0° = front (−Y), counting clockwise; elevation above the bed plane. */
+  viewInfo: () => { azimuthDeg: number; elevationDeg: number } | null;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -1425,6 +1431,50 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const v = s.camera.position.clone().sub(s.controls.target).divideScalar(Math.max(0.1, factor));
       s.camera.position.copy(s.controls.target.clone().add(v));
       s.controls.update();
+    },
+    captureView() {
+      const s = st.current;
+      if (!s) return null;
+      const el = s.renderer.domElement;
+      const W = Math.min(1024, el.clientWidth || 1024);
+      const H = Math.round(W * ((el.clientHeight || 768) / (el.clientWidth || 1024)));
+      const cam = s.camera.clone();
+      cam.aspect = W / H;
+      cam.updateProjectionMatrix();
+      const target = new THREE.WebGLRenderTarget(W, H, { samples: 4 });
+      let url: string | null = null;
+      try {
+        s.renderer.setRenderTarget(target);
+        s.renderer.render(s.scene, cam);
+        const buf = new Uint8Array(W * H * 4);
+        s.renderer.readRenderTargetPixels(target, 0, 0, W, H, buf);
+        const cv = document.createElement("canvas");
+        cv.width = W;
+        cv.height = H;
+        const ctx2 = cv.getContext("2d")!;
+        const img = ctx2.createImageData(W, H);
+        for (let y = 0; y < H; y++) {
+          const src = (H - 1 - y) * W * 4;
+          img.data.set(buf.subarray(src, src + W * 4), y * W * 4);
+        }
+        ctx2.putImageData(img, 0, 0);
+        url = cv.toDataURL("image/png");
+      } catch {
+        url = null;
+      } finally {
+        s.renderer.setRenderTarget(null);
+        target.dispose();
+      }
+      return url;
+    },
+    viewInfo() {
+      const s = st.current;
+      if (!s) return null;
+      const v = s.camera.position.clone().sub(s.controls.target);
+      return {
+        azimuthDeg: Math.round((Math.atan2(v.x, -v.y) * 180) / Math.PI),
+        elevationDeg: Math.round((Math.atan2(v.z, Math.hypot(v.x, v.y)) * 180) / Math.PI),
+      };
     },
     dropAttachment(id) {
       const s = st.current;

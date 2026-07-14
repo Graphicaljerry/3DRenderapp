@@ -13,7 +13,7 @@ import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPlay } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPlay } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -80,6 +80,90 @@ function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMR
       {children}
     </div>,
     document.body,
+  );
+}
+
+/** "Circle it and ask": a freehand marker over the 3D view. Draw around a region;
+    on release the current camera view + your stroke become ONE annotated screenshot
+    handed to the chat composer, so the AI knows exactly where the change goes. */
+function MarkOverlay({ viewerRef, onDone, onCancel }: {
+  viewerRef: RefObject<ViewerHandle>;
+  onDone: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null) => void;
+  onCancel: () => void;
+}) {
+  const cvRef = useRef<HTMLCanvasElement>(null);
+  const pts = useRef<{ x: number; y: number }[]>([]);
+  const drawing = useRef(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+
+  const fit = () => {
+    const cv = cvRef.current!;
+    const r = cv.getBoundingClientRect();
+    if (cv.width !== Math.round(r.width) || cv.height !== Math.round(r.height)) {
+      cv.width = Math.round(r.width);
+      cv.height = Math.round(r.height);
+    }
+  };
+  const stroke = (c: CanvasRenderingContext2D, scale: number) => {
+    const P = pts.current;
+    if (P.length < 2) return;
+    c.strokeStyle = "#ff3b30";
+    c.lineWidth = Math.max(3, 3.5 * scale);
+    c.lineCap = "round";
+    c.lineJoin = "round";
+    c.beginPath();
+    c.moveTo(P[0].x * scale, P[0].y * scale);
+    for (let i = 1; i < P.length; i++) c.lineTo(P[i].x * scale, P[i].y * scale);
+    c.stroke();
+  };
+  const redraw = () => {
+    const cv = cvRef.current!;
+    const c = cv.getContext("2d")!;
+    c.clearRect(0, 0, cv.width, cv.height);
+    stroke(c, 1);
+  };
+  const at = (e: React.PointerEvent) => {
+    const r = cvRef.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  };
+  async function finish() {
+    const P = pts.current;
+    let minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9;
+    for (const q of P) { minX = Math.min(minX, q.x); minY = Math.min(minY, q.y); maxX = Math.max(maxX, q.x); maxY = Math.max(maxY, q.y); }
+    if (P.length < 6 || (maxX - minX < 14 && maxY - minY < 14)) { pts.current = []; redraw(); return; } // accidental click — keep drawing
+    const shot = viewerRef.current?.captureView();
+    const view = viewerRef.current?.viewInfo() ?? null;
+    if (!shot) { onCancel(); return; }
+    const img = new Image();
+    await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = shot; });
+    const out = document.createElement("canvas");
+    out.width = img.width;
+    out.height = img.height;
+    const c = out.getContext("2d")!;
+    c.drawImage(img, 0, 0);
+    stroke(c, img.width / cvRef.current!.width);
+    out.toBlob((b) => {
+      if (b) onDone(b, view);
+      else out.toBlob((b2) => (b2 ? onDone(b2, view) : onCancel()), "image/png");
+    }, "image/webp", 0.85);
+  }
+  return (
+    <div className="mark-overlay">
+      <canvas
+        ref={cvRef}
+        onPointerDown={(e) => { fit(); drawing.current = true; pts.current = [at(e)]; (e.target as Element).setPointerCapture(e.pointerId); }}
+        onPointerMove={(e) => { if (!drawing.current) return; pts.current.push(at(e)); redraw(); }}
+        onPointerUp={() => { if (!drawing.current) return; drawing.current = false; void finish(); }}
+      />
+      <div className="mark-hint">
+        Draw around the part you want to change — it attaches to the chat as a marked screenshot
+        <button className="ghost sm" onClick={onCancel}>Cancel</button>
+      </div>
+    </div>
   );
 }
 
@@ -583,6 +667,7 @@ function HelpSheet({ onClose }: { onClose: () => void }) {
     { icon: <IconFaceSel />, text: "Shift-drag (with Select on) box-selects many faces at once." },
     { icon: <IconTransform />, text: "Transform: move, rotate or scale the whole part — rotate is how you set print orientation." },
     { icon: <IconRuler />, text: "Measure: tap two points to read the distance between them." },
+    { icon: <IconMarker />, text: "Mark: draw around a part of the model — the marked screenshot attaches to the chat, so \"make this thicker\" needs no coordinates." },
     { icon: <IconUndo />, text: "Undo ⌘/Ctrl+Z · Redo ⇧⌘/Ctrl+Shift+Z. Every edit is a restorable version in History." },
     { icon: <IconPrinter />, text: "The bottom bar shows your printer's plate — tap it to switch printers or bed size." },
   ];
@@ -682,7 +767,9 @@ interface Props {
   hasGenKey: (provider: string) => boolean;
   onPickEngine: (provider: string, model: string) => void;
   imageUrl: string | null;
+  imageMarkup: boolean; // the composer image is a marked screenshot, not a photo
   onPickImage: (f: File) => void;
+  onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null) => void;
   onClearImage: () => void;
   views: Partial<Record<"left" | "back" | "right", string>>;
   onPickView: (slot: "left" | "back" | "right", f: File) => void;
@@ -863,6 +950,7 @@ export function Workspace(p: Props) {
   const [showLayers, setShowLayers] = useState(false); // objects/layers side list
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
+  const [markMode, setMarkMode] = useState(false); // "circle it and ask" draw overlay
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -1016,7 +1104,9 @@ export function Workspace(p: Props) {
                   ? p.guided
                     ? "Replacement part — clearance is added to fitted features"
                     : p.imageUrl
-                      ? "Photo → exact CAD replacement (vision)"
+                      ? p.imageMarkup
+                        ? "Marked screenshot → the change goes where you circled"
+                        : "Photo → exact CAD replacement (vision)"
                       : "Exact parts from text or a photo · STEP export"
                   : "Whole/organic objects from a photo or text"}
               </span>
@@ -1025,9 +1115,9 @@ export function Workspace(p: Props) {
 
             {p.imageUrl && (
               <div className="imgchip">
-                <img src={p.imageUrl} alt="reference" />
-                <span>reference image</span>
-                {p.mode === "precise" && (
+                <img src={p.imageUrl} alt={p.imageMarkup ? "marked screenshot" : "reference"} />
+                <span>{p.imageMarkup ? "marked screenshot — describe the change" : "reference image"}</span>
+                {p.mode === "precise" && !p.imageMarkup && (
                   <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
                 )}
                 <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
@@ -1188,6 +1278,16 @@ export function Workspace(p: Props) {
                     Clear ({p.measureCtl.items.length})
                   </button>
                 )}
+                <button
+                  className={`ghost sm iconbtn${markMode ? " on" : ""}`}
+                  aria-pressed={markMode}
+                  aria-label="Mark"
+                  disabled={!p.geometry || p.tab !== "3d"}
+                  title="Mark tool: draw around a part of the model — a marked screenshot attaches to the chat so the AI knows exactly where your change goes"
+                  onClick={() => setMarkMode((v) => !v)}
+                >
+                  <IconMarker /><span className="btn-label">Mark</span>
+                </button>
                 {p.pins.length > 0 && (
                   <button
                     className="ghost sm"
@@ -1265,6 +1365,17 @@ export function Workspace(p: Props) {
                   setCtx(h);
                 }}
               />
+              {p.tab === "3d" && markMode && (
+                <MarkOverlay
+                  viewerRef={p.viewerRef}
+                  onDone={(blob, view) => {
+                    setMarkMode(false);
+                    setChatOpen(true); // the marked screenshot lands in the composer — make sure it's visible
+                    p.onMarkup(blob, view);
+                  }}
+                  onCancel={() => setMarkMode(false)}
+                />
+              )}
               {ctx && (() => {
                 const close = () => setCtx(null);
                 const anchor = { top: ctx.y, bottom: ctx.y, right: ctx.x + 200 } as DOMRect;

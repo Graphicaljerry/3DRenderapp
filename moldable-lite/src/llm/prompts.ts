@@ -109,6 +109,19 @@ THE USER ATTACHED A PHOTO of a physical part to recreate or replace. Work like a
 5) Rebuild the part as clean, simple, printable geometry — capture function (holes, slots, mounting faces), not cosmetic detail. Add FDM tolerance (0.2–0.3 mm) at mating surfaces.
 6) If a critical dimension is unknowable from the photo, choose the nearest standard size and say so in the summary.`;
 
+// Appended when the user MARKED a region on a screenshot of the CURRENT model
+// ("circle it and ask"). Opposite framing from VISION_ADDENDUM: the screenshot is a
+// pointer into the existing program, never something to rebuild from.
+export function markupAddendum(viewHint: string): string {
+  return `
+
+THE USER ATTACHED A MARKED SCREENSHOT of the CURRENT model — a live render of the program you are editing, NOT a photo of a real part. The hand-drawn red marker circles the region to change${viewHint}.
+1) Match what's inside the marker to the feature(s) of the current program that create it (use the geometry the code builds — positions, sizes — to disambiguate).
+2) Apply the user's requested change to exactly those features; leave everything outside the marker unchanged.
+3) Do NOT rebuild the part from the screenshot — the program stays the source of truth. If the marked region is ambiguous, pick the most likely feature and say which one you chose in one short sentence.
+Return the FULL updated program.`;
+}
+
 // Appended when the project contains an imported STEP solid.
 export const IMPORT_ADDENDUM = `
 

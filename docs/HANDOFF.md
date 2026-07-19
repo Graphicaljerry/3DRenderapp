@@ -60,7 +60,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   captured). send() then uses `markupAddendum` (NOT the photo/vision addendum): image +
   full current program + "the marker is a pointer, the program is the source of truth,
   change only what's circled" + a view-direction phrase. Viewer gained `captureView()`
-  (current-camera RT render) and `viewInfo()`.
+  (current-camera RT render) and `viewInfo()`. PRECISION (after a real-use miss where
+  the AI tweaked fillets instead of removing a circled bar): the stroke interior is
+  grid-sampled and raycast (`probeRegion`) → the request carries the region's
+  program-frame bbox/centroid/normal in mm, the chip shows "covers ≈ W × D × H mm",
+  and the addendum spells out remove/flatten = DELETE the creating feature. Multi-face:
+  shift-CLICK adds faces to the marquee selection (dedup by centre) and the faces
+  panel has "Extrude all N" (batch PointOps, one rebuild).
 - **House AI (optional, DORMANT)**: infrastructure for the site owner to sponsor
   visitors with a server-side key — a "Built-in — free, no key" brain that only appears
   after `llm/house.ts` health-checks the owner's relay. Worker endpoints live in

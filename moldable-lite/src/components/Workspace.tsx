@@ -86,9 +86,11 @@ function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMR
 /** "Circle it and ask": a freehand marker over the 3D view. Draw around a region;
     on release the current camera view + your stroke become ONE annotated screenshot
     handed to the chat composer, so the AI knows exactly where the change goes. */
+export type MarkRegion = NonNullable<ReturnType<ViewerHandle["probeRegion"]>>;
+
 function MarkOverlay({ viewerRef, onDone, onCancel }: {
   viewerRef: RefObject<ViewerHandle>;
-  onDone: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null) => void;
+  onDone: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onCancel: () => void;
 }) {
   const cvRef = useRef<HTMLCanvasElement>(null);
@@ -138,6 +140,27 @@ function MarkOverlay({ viewerRef, onDone, onCancel }: {
     const shot = viewerRef.current?.captureView();
     const view = viewerRef.current?.viewInfo() ?? null;
     if (!shot) { onCancel(); return; }
+    // What did the circle actually land on? Sample a grid inside the stroke and raycast
+    // it into the scene — the resulting 3D extent rides along so the AI gets hard
+    // coordinates, not just pixels. (Even-odd point-in-polygon on the stroke path.)
+    const inPoly = (x: number, y: number) => {
+      let c = false;
+      for (let i = 0, j = P.length - 1; i < P.length; j = i++) {
+        if (P[i].y > y !== P[j].y > y && x < ((P[j].x - P[i].x) * (y - P[i].y)) / (P[j].y - P[i].y) + P[i].x) c = !c;
+      }
+      return c;
+    };
+    const rect = cvRef.current!.getBoundingClientRect();
+    const samples: { x: number; y: number }[] = [];
+    const N = 14;
+    for (let gy = 0; gy <= N; gy++) {
+      for (let gx = 0; gx <= N; gx++) {
+        const x = minX + ((maxX - minX) * gx) / N;
+        const y = minY + ((maxY - minY) * gy) / N;
+        if (inPoly(x, y)) samples.push({ x: rect.left + x, y: rect.top + y });
+      }
+    }
+    const region = samples.length ? viewerRef.current?.probeRegion(samples) ?? null : null;
     const img = new Image();
     await new Promise<void>((res, rej) => { img.onload = () => res(); img.onerror = rej; img.src = shot; });
     const out = document.createElement("canvas");
@@ -147,8 +170,8 @@ function MarkOverlay({ viewerRef, onDone, onCancel }: {
     c.drawImage(img, 0, 0);
     stroke(c, img.width / cvRef.current!.width);
     out.toBlob((b) => {
-      if (b) onDone(b, view);
-      else out.toBlob((b2) => (b2 ? onDone(b2, view) : onCancel()), "image/png");
+      if (b) onDone(b, view, region);
+      else out.toBlob((b2) => (b2 ? onDone(b2, view, region) : onCancel()), "image/png");
     }, "image/webp", 0.85);
   }
   return (
@@ -768,8 +791,9 @@ interface Props {
   onPickEngine: (provider: string, model: string) => void;
   imageUrl: string | null;
   imageMarkup: boolean; // the composer image is a marked screenshot, not a photo
+  imageNote: string | null; // e.g. "covers ≈ 54 × 4 × 30 mm" — what the circle landed on
   onPickImage: (f: File) => void;
-  onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null) => void;
+  onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
   views: Partial<Record<"left" | "back" | "right", string>>;
   onPickView: (slot: "left" | "back" | "right", f: File) => void;
@@ -909,6 +933,7 @@ interface Props {
     text: string;
     setText: (s: string) => void;
     askAi: () => void;
+    directOp: (size: number) => void; // extrude every selected face by size mm — local, no AI
     clear: () => void;
   };
   transformCtl: {
@@ -1116,7 +1141,7 @@ export function Workspace(p: Props) {
             {p.imageUrl && (
               <div className="imgchip">
                 <img src={p.imageUrl} alt={p.imageMarkup ? "marked screenshot" : "reference"} />
-                <span>{p.imageMarkup ? "marked screenshot — describe the change" : "reference image"}</span>
+                <span>{p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : "reference image"}</span>
                 {p.mode === "precise" && !p.imageMarkup && (
                   <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
                 )}
@@ -1162,7 +1187,9 @@ export function Workspace(p: Props) {
                   p.mode === "generative"
                     ? "Describe it, or upload / paste a photo…"
                     : p.imageUrl
-                      ? "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
+                      ? p.imageMarkup
+                        ? "What should change in the circled region? (e.g. flatten this, make it 3 mm thicker)…"
+                        : "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
                       : p.guided
                         ? "Upload a photo of the part, or describe it with any measurements…"
                         : "Describe a part, or a change…"
@@ -1368,10 +1395,10 @@ export function Workspace(p: Props) {
               {p.tab === "3d" && markMode && (
                 <MarkOverlay
                   viewerRef={p.viewerRef}
-                  onDone={(blob, view) => {
+                  onDone={(blob, view, region) => {
                     setMarkMode(false);
                     setChatOpen(true); // the marked screenshot lands in the composer — make sure it's visible
-                    p.onMarkup(blob, view);
+                    p.onMarkup(blob, view, region);
                   }}
                   onCancel={() => setMarkMode(false)}
                 />
@@ -1646,9 +1673,10 @@ export function Workspace(p: Props) {
               {p.facesCtl.faces.length > 0 && (
                 <div className="pin-panel">
                   <div className="pin-head">
-                    <span>{p.facesCtl.faces.length} {p.facesCtl.faces.length === 1 ? "face" : "faces"} selected</span>
+                    <span>{p.facesCtl.faces.length} {p.facesCtl.faces.length === 1 ? "face" : "faces"} selected · shift-click adds more</span>
                     <button className="x" aria-label="Clear selection" onClick={p.facesCtl.clear}><IconX /></button>
                   </div>
+                  <MultiFaceOpRow count={p.facesCtl.faces.length} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.facesCtl.directOp} />
                   <textarea
                     rows={2}
                     value={p.facesCtl.text}
@@ -1669,7 +1697,7 @@ export function Workspace(p: Props) {
                 </div>
               )}
               {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
-                <div className="box-hint">Shift-drag to box-select multiple faces</div>
+                <div className="box-hint">Shift-click faces to build a selection · shift-drag to box-select</div>
               )}
               {p.measureCtl.mode && (
                 <div className="box-hint">
@@ -2226,6 +2254,24 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
         </div>
       )}
       <button className="primary" disabled={disabled} onClick={() => setOpen((o) => !o)}>Export ▾</button>
+    </div>
+  );
+}
+
+/** Multi-face quick edit: one distance, applied to EVERY selected face — local, no AI. */
+function MultiFaceOpRow({ count, busy, isCad, onApply }: { count: number; busy: boolean; isCad: boolean; onApply: (size: number) => void }) {
+  const [size, setSize] = useState(2);
+  if (!isCad) return null;
+  return (
+    <div className="directop">
+      <span className="directop-label">Quick edit — free, no AI</span>
+      <div className="directop-row">
+        <input type="number" min={-50} max={50} step={0.2} value={size} onChange={(e) => setSize(Number(e.target.value) || 0)} aria-label="size in mm" />
+        <span className="fine">mm</span>
+        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(size)} title={`Push all ${count} faces out (+) or in (−) by ${size} mm — no tokens`}>
+          Extrude all {count}
+        </button>
+      </div>
     </div>
   );
 }

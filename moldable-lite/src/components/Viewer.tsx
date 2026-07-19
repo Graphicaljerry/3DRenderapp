@@ -31,6 +31,16 @@ export interface ViewerHandle {
   /** Where the camera looks from, for describing a screenshot to the AI:
    *  azimuth 0° = front (−Y), counting clockwise; elevation above the bed plane. */
   viewInfo: () => { azimuthDeg: number; elevationDeg: number } | null;
+  /** Raycast a set of screen points (client px) into the scene and return the 3D
+   *  extent of what they land on — turns a drawn marker region into hard display-space
+   *  coordinates the AI can act on. Null when nothing is hit. */
+  probeRegion: (points: { x: number; y: number }[]) => {
+    min: [number, number, number];
+    max: [number, number, number];
+    centroid: [number, number, number];
+    normal: [number, number, number];
+    hits: number;
+  } | null;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
 }
@@ -91,7 +101,7 @@ interface Props {
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
-  onPickFaces: (faces: PickedFeature[]) => void;
+  onPickFaces: (faces: PickedFeature[], additive?: boolean) => void; // additive = shift-click added to the set
   onSelectPin: (id: string) => void;
   onTransformCommit: (c: TransformCommit) => void;
   onMeasurePoint: (p: [number, number, number]) => void;
@@ -758,10 +768,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (s2?.box) {
         const { sx, sy } = s2.box;
         cancelBox();
-        // A real drag (not a stray shift-click) → select the faces inside the box.
+        // A real drag → select the faces inside the box. A shift-CLICK (no drag, face
+        // mode) ADDS the face under the cursor to the multi-selection instead.
         if (Math.hypot(e.clientX - sx, e.clientY - sy) > 4) {
           const faces = selectFacesInBox(s2, camera, renderer, sx, sy, e.clientX, e.clientY);
           cb.current.onPickFaces(faces);
+        } else if (cb.current.selectKind === "face") {
+          const added = addFaceToMultiSel(s2, camera, renderer, e.clientX, e.clientY);
+          if (added) cb.current.onPickFaces([added], true);
         }
         return;
       }
@@ -1476,6 +1490,41 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         elevationDeg: Math.round((Math.atan2(v.z, Math.hypot(v.x, v.y)) * 180) / Math.PI),
       };
     },
+    probeRegion(points) {
+      const s = st.current;
+      if (!s) return null;
+      const targets = [s.mesh, ...s.attachMap.values()].filter(Boolean) as THREE.Object3D[];
+      if (!targets.length) return null;
+      const rect = s.renderer.domElement.getBoundingClientRect();
+      const rc = new THREE.Raycaster();
+      const min = new THREE.Vector3(Infinity, Infinity, Infinity);
+      const max = new THREE.Vector3(-Infinity, -Infinity, -Infinity);
+      const cen = new THREE.Vector3();
+      const nrm = new THREE.Vector3();
+      let hits = 0;
+      for (const p of points) {
+        rc.setFromCamera(new THREE.Vector2(((p.x - rect.left) / rect.width) * 2 - 1, -((p.y - rect.top) / rect.height) * 2 + 1), s.camera);
+        const h = rc.intersectObjects(targets, false)[0];
+        if (!h) continue;
+        hits++;
+        min.min(h.point);
+        max.max(h.point);
+        cen.add(h.point);
+        if (h.face) nrm.add(h.face.normal.clone().transformDirection(h.object.matrixWorld));
+      }
+      if (!hits) return null;
+      cen.divideScalar(hits);
+      if (nrm.lengthSq() > 1e-6) nrm.normalize();
+      const r1 = (v: number) => Math.round(v * 10) / 10;
+      const r2 = (v: number) => Math.round(v * 100) / 100;
+      return {
+        min: [r1(min.x), r1(min.y), r1(min.z)],
+        max: [r1(max.x), r1(max.y), r1(max.z)],
+        centroid: [r1(cen.x), r1(cen.y), r1(cen.z)],
+        normal: [r2(nrm.x), r2(nrm.y), r2(nrm.z)],
+        hits,
+      };
+    },
     dropAttachment(id) {
       const s = st.current;
       const m = s?.attachMap.get(id);
@@ -1814,6 +1863,33 @@ function faceRegionInfo(tri: TriData, tris: number[], rep: number): { info: Feat
 /** Marquee face selection: every smooth face with a visible triangle whose centroid
  *  falls inside the screen rectangle. Highlights them in the multi-select overlay and
  *  returns one payload per distinct face. */
+/** Shift-click in face mode: pick the face under the cursor, merge its triangles into
+ *  the multi-select overlay, and return its payload for the app's selection set. */
+function addFaceToMultiSel(
+  s: Internals, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer,
+  clientX: number, clientY: number,
+): PickedFeature | null {
+  const tri = ensureTri(s), mesh = s.mesh;
+  if (!tri || !mesh) return null;
+  const rect = renderer.domElement.getBoundingClientRect();
+  const rc = new THREE.Raycaster();
+  rc.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const hit = rc.intersectObject(mesh, false)[0];
+  if (!hit || hit.faceIndex == null) return null;
+  const region = faceRegion(tri, hit.faceIndex);
+  const { info, positions } = faceRegionInfo(tri, region, hit.faceIndex);
+  const prev = s.multiHi.visible ? (s.multiHi.geometry.getAttribute("position")?.array as Float32Array | undefined) : undefined;
+  const merged = new Float32Array((prev?.length ?? 0) + positions.length);
+  if (prev) merged.set(prev, 0);
+  merged.set(positions, prev?.length ?? 0);
+  s.multiHi.geometry.dispose();
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(merged, 3));
+  s.multiHi.geometry = geo;
+  s.multiHi.visible = true;
+  return featureToPayload(info);
+}
+
 function selectFacesInBox(
   s: Internals, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer,
   sx: number, sy: number, ex: number, ey: number,

@@ -347,6 +347,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!s) return;
       controls.enabled = !e.value;
       s.transforming = e.value;
+      // The dims box can't follow a mid-drag pivot — hide it for the drag only. A model
+      // drag commits an op whose rebuild recreates the dims; a no-op release or an
+      // attachment drag (dims measure the model, which didn't move) restores it here.
+      if (s.dims) {
+        const moved = !!s.pivot && (s.pivot.position.lengthSq() > 1e-6 || Math.abs(s.pivot.scale.x - 1) > 1e-6 || Math.abs(s.pivot.quaternion.w - 1) > 1e-6);
+        s.dims.visible = e.value ? false : !moved && s.grid.visible; // grid.visible ⇔ not showcase
+      }
       if (!e.value) commitTransform(s, cb.current.onTransformCommit); // released → emit one op
     };
     tc.addEventListener("dragging-changed", onDragChange);
@@ -2291,7 +2298,6 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
     s.tc.setMode("translate");
     s.tc.attach(handle);
     s.tcR.attach(handle); // combined: arrows + rings together
-    if (s.dims) s.dims.visible = false;
     return;
   }
   if (!s.mesh) { s.tc.detach(); s.tcR.detach(); return; }
@@ -2311,7 +2317,6 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
   // rotate is one grab away with zero mode switching (scale = the box anchors).
   if (mode === "move") s.tcR.attach(pivot);
   else s.tcR.detach();
-  if (s.dims) s.dims.visible = false; // dimension lines don't follow the pivot — hide while transforming
 }
 
 /** Dissolve the multi-select pivot, baking each member's world transform back onto it. */

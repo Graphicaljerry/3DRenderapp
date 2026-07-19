@@ -232,8 +232,8 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
 
 /** One home for every display toggle — Dimensions, Wireframe, Stats, Units, Showcase —
     so the toolbar carries tools, not switches. */
-function ViewMenu({ showDims, setShowDims, wireframe, setWireframe, stats, setStats, units, setUnits, showcase, setShowcase, onResetView }: {
-  showDims: boolean; setShowDims: (f: (d: boolean) => boolean) => void;
+function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, stats, setStats, units, setUnits, showcase, setShowcase, onResetView }: {
+  dimsMode: "select" | "always" | "off"; setDimsMode: (m: "select" | "always" | "off") => void;
   wireframe: boolean; setWireframe: (f: (w: boolean) => boolean) => void;
   stats: boolean; setStats: (v: boolean) => void;
   units: "mm" | "in"; setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
@@ -256,8 +256,16 @@ function ViewMenu({ showDims, setShowDims, wireframe, setWireframe, stats, setSt
         <IconWireframe /><span className="btn-label">View</span>
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={close} width={210}>
-          <Row on={showDims} label="Dimensions" hint="Size lines around the model" onClick={() => setShowDims((d) => !d)} />
+        <AnchoredMenu anchor={anchor} onClose={close} width={230}>
+          <div className="pmenu-item pmenu-choice" role="none">
+            <b>Dimensions</b>
+            <span>Size lines + bounding box</span>
+            <div className="pmenu-opts" role="radiogroup" aria-label="When to show dimensions">
+              {([["select", "On select"], ["always", "Always"], ["off", "Off"]] as const).map(([m, l]) => (
+                <button key={m} role="radio" aria-checked={dimsMode === m} className={`pm-opt${dimsMode === m ? " on" : ""}`} onClick={() => setDimsMode(m)}>{l}</button>
+              ))}
+            </div>
+          </div>
           <Row on={wireframe} label="Wireframe" hint="See the mesh triangles" onClick={() => setWireframe((w) => !w)} />
           <Row on={stats} label="Stats" hint="Triangles, volume, watertight" onClick={() => setStats(!stats)} />
           <Row on={showcase} label="Showcase" hint="Clean stage + slow turntable" onClick={() => setShowcase(!showcase)} />
@@ -891,8 +899,9 @@ interface Props {
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
   setWireframe: (f: (w: boolean) => boolean) => void;
-  showDims: boolean;
-  setShowDims: (f: (d: boolean) => boolean) => void;
+  showDims: boolean; // resolved visibility for the viewer (App folds mode + selection)
+  dimsMode: "select" | "always" | "off";
+  setDimsMode: (m: "select" | "always" | "off") => void;
   units: "mm" | "in";
   setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   viewerRef: RefObject<ViewerHandle>;
@@ -1353,8 +1362,8 @@ export function Workspace(p: Props) {
                   </button>
                 )}
                 <ViewMenu
-                  showDims={p.showDims}
-                  setShowDims={p.setShowDims}
+                  dimsMode={p.dimsMode}
+                  setDimsMode={p.setDimsMode}
                   wireframe={p.wireframe}
                   setWireframe={p.setWireframe}
                   stats={showStats}

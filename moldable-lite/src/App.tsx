@@ -753,7 +753,17 @@ export default function App() {
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
-  const [showDims, setShowDims] = useState(true);
+  // Dimensions box: "select" (default) draws the size lines + gray bounding box only
+  // around a SELECTED object — click empty space and the canvas is clean again.
+  // "always" is the old permanent box; "off" never draws it.
+  const [dimsMode, setDimsModeState] = useState<"select" | "always" | "off">(() => {
+    const v = localStorage.getItem("moldable_dims");
+    return v === "always" || v === "off" ? v : "select";
+  });
+  const setDimsMode = (m: "select" | "always" | "off") => {
+    setDimsModeState(m);
+    localStorage.setItem("moldable_dims", m);
+  };
   const [theme, setThemeState] = useState<"light" | "dark">(() => {
     const saved = localStorage.getItem("moldable_theme");
     if (saved === "dark" || saved === "light") return saved;
@@ -2770,8 +2780,9 @@ export default function App() {
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}
         setWireframe={setWireframe}
-        showDims={showDims}
-        setShowDims={setShowDims}
+        showDims={dimsMode === "always" || (dimsMode === "select" && (modelSelected || transformMode !== "off") && !attachSelected)}
+        dimsMode={dimsMode}
+        setDimsMode={setDimsMode}
         units={units}
         setUnits={setUnits}
         viewerRef={viewer}

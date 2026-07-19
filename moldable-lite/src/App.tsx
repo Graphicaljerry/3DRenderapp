@@ -15,6 +15,7 @@ import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
+import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -179,6 +180,18 @@ export default function App() {
   const [genEng, setGenEng] = useState(loadGenEng);
   const [llm, setLlm] = useState<LlmSettings>(loadLlm);
   const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
+  // Optional "house AI": if the site owner's relay sponsors a key, visitors get a
+  // Built-in brain with zero setup. One health check at boot; null = feature off.
+  const [house, setHouse] = useState<HouseStatus | null>(null);
+  useEffect(() => {
+    void fetchHouseStatus().then((st) => {
+      if (!st) return;
+      setHouse(st);
+      // No usable brain configured? Adopt the sponsored one so the app just works —
+      // but never override a provider the user set up themselves.
+      setLlm((cur) => (llmReady(cur, { anthropic: localStorage.getItem(KEY_LS) ?? "", ...loadLlmKeys() }) ? cur : { provider: "house", model: st.models[0] ?? "" }));
+    });
+  }, []);
   const [accountEmail, setAccountEmail] = useState<string | null>(null);
   const [settingsPane, setSettingsPane] = useState<SettingsPane>("ai");
   const [userTint, setUserTint] = useState<string>(() => localStorage.getItem("moldable_user_tint") || DEFAULT_USER_TINT);
@@ -2438,7 +2451,7 @@ export default function App() {
         fit={fit}
         onFit={applyFit}
         brain={{ provider: llm.provider, model: llm.provider === "anthropic" ? model : llm.model }}
-        hasBrainKey={(prov) => (prov === "anthropic" ? !!key : !llmPreset(prov).needsKey || !!llmKeys[prov])}
+        hasBrainKey={(prov) => (prov === "anthropic" ? !!key : prov === "house" ? !!house : !llmPreset(prov).needsKey || !!llmKeys[prov])}
         onPickBrain={pickBrain}
         autoPick={autoPick}
         genProvider={genEng.provider}
@@ -3039,7 +3052,7 @@ function SettingsModal({
                 setLmodel(np === "anthropic" ? "" : llmPreset(np).defaultModel);
               }}
             >
-              {LLM_PRESETS.map((pr) => (
+              {LLM_PRESETS.filter((pr) => pr.id !== "house" || !!houseStatusNow()).map((pr) => (
                 <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}{pr.recommended ? " · recommended" : ""}</option>
               ))}
             </select>

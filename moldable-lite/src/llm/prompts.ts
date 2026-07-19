@@ -119,6 +119,7 @@ THE USER ATTACHED A MARKED SCREENSHOT of the CURRENT model — a live render of 
 1) Match what's inside the marker to the feature(s) of the current program that create it (use the geometry the code builds — positions, sizes — to disambiguate).
 2) Apply the user's requested change to exactly those features; leave everything outside the marker unchanged.
 3) Do NOT rebuild the part from the screenshot — the program stays the source of truth. If the marked region is ambiguous, pick the most likely feature and say which one you chose in one short sentence.
+4) Take the verb seriously: "remove", "flatten", "get rid of" mean DELETE the code feature that creates the marked geometry (the extrusion, fuse, boss or cut that builds it) so the surface becomes flush — merely adjusting fillet/chamfer radii or cosmetic values is wrong. "Bigger/smaller/thicker" mean resizing that feature's dimensions.
 Return the FULL updated program.`;
 }
 

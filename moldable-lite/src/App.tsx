@@ -633,8 +633,15 @@ export default function App() {
   const [fit, setFit] = useState<FitId>("snug");
   // A composer image is either a real-world reference photo, or (markup=true) a marked
   // screenshot of the CURRENT model — "circle it and ask". `view` remembers where the
-  // camera looked when the mark was drawn, so the AI can orient the screenshot.
-  const [image, setImage] = useState<{ blob: Blob; url: string; markup?: boolean; view?: { azimuthDeg: number; elevationDeg: number } | null } | null>(null);
+  // camera looked when the mark was drawn; `region` is the raycast 3D extent of what
+  // the circle actually landed on (display coords) — hard numbers for the AI.
+  const [image, setImage] = useState<{
+    blob: Blob;
+    url: string;
+    markup?: boolean;
+    view?: { azimuthDeg: number; elevationDeg: number } | null;
+    region?: { min: [number, number, number]; max: [number, number, number]; centroid: [number, number, number]; normal: [number, number, number]; hits: number } | null;
+  } | null>(null);
   // Extra reference angles for multi-view mesh generation (front is `image`).
   type ViewSlot = "left" | "back" | "right";
   const [views, setViews] = useState<Partial<Record<ViewSlot, { blob: Blob; url: string }>>>({});
@@ -899,9 +906,9 @@ export default function App() {
 
   /** "Circle it and ask": the viewer hands us the annotated screenshot; it rides the
       composer's image slot with markup=true so send() frames it as an edit pointer. */
-  function attachMarkup(blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null) {
+  function attachMarkup(blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: NonNullable<typeof image>["region"] = null) {
     if (image) URL.revokeObjectURL(image.url);
-    setImage({ blob, url: URL.createObjectURL(blob), markup: true, view });
+    setImage({ blob, url: URL.createObjectURL(blob), markup: true, view, region });
     setMode("precise"); // marked edits target the current CAD program
   }
 
@@ -1409,10 +1416,44 @@ export default function App() {
     setPinText("");
     setSelectedFaces([]);
   }
-  function pickFaces(faces: PickedFeature[]) {
-    setSelectedFaces(faces);
-    setFacesText("");
+  function pickFaces(faces: PickedFeature[], additive = false) {
+    setSelectedFaces((prev) => {
+      if (!additive) return faces;
+      // Shift-click adds to the set — dedup by centre so re-clicking a face is a no-op.
+      const keyOf = (f: PickedFeature) => `${f.cx}|${f.cy}|${f.cz}`;
+      const have = new Set(prev.map(keyOf));
+      return [...prev, ...faces.filter((f) => !have.has(keyOf(f)))];
+    });
+    if (!additive) setFacesText("");
     if (faces.length) { setSelectedFeature(null); setActivePinId(null); setPinText(""); }
+  }
+
+  /** Multi-face quick edit: extrude EVERY selected face by the same amount — one local
+      rebuild, no AI. Positive pushes out, negative pockets in. */
+  async function applyDirectOpFaces(size: number) {
+    if (!selectedFaces.length || !size) return;
+    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
+      return;
+    }
+    const src = result.source;
+    const rc = result.recenter ?? [0, 0, 0];
+    const ops: PointOp[] = selectedFaces.map((f) => {
+      const at = f.at ?? [f.cx, f.cy, f.cz];
+      return { type: "extrude", at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]], size };
+    });
+    const n = ops.length;
+    setSelectedFaces([]);
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops], preview: false });
+      applyResult(res, project?.name ?? "Model", `Extruded ${n} faces by ${size} mm`, `extrude ${n} faces ${size} mm`);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Extruded **${n} face${n > 1 ? "s" : ""}** by ${size} mm — free, no AI. Undo reverts all of them at once.` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't extrude all ${n} faces by ${size} mm — ${String(err?.message ?? err)}. Try a smaller amount, or apply faces one at a time.`, error: true }]);
+    } finally {
+      setStatus("idle");
+    }
   }
   function askAiFaces() {
     if (!selectedFaces.length || !facesText.trim()) return;
@@ -1993,6 +2034,18 @@ export default function App() {
     // program (the marker is a pointer), unlike a photo which rebuilds from scratch.
     const markupEdit = !!visionImage?.markup && kind === "replicad" && result?.source.kind === "code" && !!result.source.code;
     const markupCode = markupEdit && result?.source.kind === "code" ? result.source.code ?? "" : "";
+    // The circle was raycast into the scene when drawn — hand the AI the exact program-
+    // frame coordinates it covers, so "the marked region" isn't guesswork.
+    let markupRegionLine = "";
+    if (markupEdit && visionImage?.region) {
+      const rg = visionImage.region;
+      const rc0 = result?.recenter ?? [0, 0, 0];
+      const r1 = (v: number) => Math.round(v * 10) / 10;
+      const lo = rg.min.map((v, i) => r1(v + rc0[i]));
+      const hi = rg.max.map((v, i) => r1(v + rc0[i]));
+      const cc = rg.centroid.map((v, i) => r1(v + rc0[i]));
+      markupRegionLine = ` The marked region maps to these coordinates in the program's own frame (mm, Z-up): x ${lo[0]} to ${hi[0]}, y ${lo[1]} to ${hi[1]}, z ${lo[2]} to ${hi[2]} (centre ≈ ${cc.join(", ")}); the circled surface faces roughly (${rg.normal.join(", ")}). The feature(s) whose geometry lies in that box are the target.`;
+    }
     setInput("");
     setStreamingText("");
     setStreamingThink("");
@@ -2069,7 +2122,7 @@ export default function App() {
             {
               type: "text",
               text: markupEdit
-                ? `Here is the current replicad program:\n\`\`\`js\n${markupCode}\n\`\`\`\n\nThe screenshot shows this model as currently rendered; the red marker circles the region to change. Apply this change there: ${p || "improve the marked region"}${extras}`
+                ? `Here is the current replicad program:\n\`\`\`js\n${markupCode}\n\`\`\`\n\nThe screenshot shows this model as currently rendered; the red marker circles the region to change.${markupRegionLine}\nApply this change there: ${p || "improve the marked region"}${extras}`
                 : (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + extras,
             },
           ],
@@ -2460,6 +2513,7 @@ export default function App() {
         onPickEngine={pickEngine}
         imageUrl={image?.url ?? null}
         imageMarkup={!!image?.markup}
+        imageNote={image?.region ? `covers ≈ ${Math.max(0.1, Math.round((image.region.max[0] - image.region.min[0]) * 10) / 10)} × ${Math.max(0.1, Math.round((image.region.max[1] - image.region.min[1]) * 10) / 10)} × ${Math.max(0.1, Math.round((image.region.max[2] - image.region.min[2]) * 10) / 10)} mm` : null}
         onPickImage={pickImage}
         onMarkup={attachMarkup}
         onClearImage={clearImage}
@@ -2627,6 +2681,7 @@ export default function App() {
           text: facesText,
           setText: setFacesText,
           askAi: askAiFaces,
+          directOp: (size) => void applyDirectOpFaces(size),
           clear: () => setSelectedFaces([]),
         }}
         transformCtl={{

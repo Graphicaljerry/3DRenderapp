@@ -99,6 +99,14 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   lines light up per axis whenever the hole is aligned with the reference (the dashed
   at→ref line always shows). Reference picking still uses feature picks — `holePlace`
   is null while `draft.picking`.
+- **Dims box follows selection**: the gray bounding box + size lines are NOT permanent
+  any more. Default mode "On select": clean canvas until you click the object (box +
+  dims + teal selection chrome appear together), click empty space → clean again. View ▾
+  Dimensions is a 3-way radio (On select / Always / Off), persisted in
+  `localStorage.moldable_dims`. Implementation: App folds mode + selection into the
+  existing boolean `showDims` prop; Viewer no longer hides dims for the whole gizmo
+  session — only during an ACTUAL drag (onDragChange; a model drag stays hidden until
+  the op-commit rebuild recreates them, a no-op release or attachment drag restores).
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

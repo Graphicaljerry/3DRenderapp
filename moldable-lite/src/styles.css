@@ -449,6 +449,12 @@ button { font-family: inherit; cursor: pointer; }
 .pmenu-item:hover { background: var(--surf); }
 .pmenu-item.on { color: var(--accent-d); font-weight: 600; }
 .pmenu-sep { height: 1px; background: var(--bord-subtle); margin: 3px 4px; }
+/* Three-way choice inside a menu row (Dimensions: On select / Always / Off). */
+.pmenu-choice:hover { background: none; }
+.pmenu-opts { display: flex; gap: 3px; margin-top: 5px; width: 100%; }
+.pm-opt { flex: 1; padding: 4px 6px; border: 1px solid var(--bord); background: var(--bg); border-radius: 6px; font-size: 11px; color: var(--ink2); }
+.pm-opt:hover { background: var(--surf); color: var(--ink); }
+.pm-opt.on { background: color-mix(in srgb, var(--accent) 14%, transparent); border-color: var(--accent); color: var(--accent-d); font-weight: 600; }
 .lp-check { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
 .lp-dot { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 auto; }
 .lp-dot.pin { width: 16px; height: 16px; border-radius: 999px; background: var(--accent-w); color: var(--accent-d); font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }

@@ -1871,7 +1871,9 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: 
     },
     {
       label: "Other providers",
-      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic").map((pr) => {
+      // "house" (the site's sponsored built-in AI) is only offered once the relay's
+      // health check confirmed it — hasKey("house") carries that answer.
+      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic" && (pr.id !== "house" || hasKey("house"))).map((pr) => {
         const needs = pr.needsKey && !hasKey(pr.id);
         const base = pr.label.split(" — ")[0];
         // Surface the active model on the current provider so the picker trigger

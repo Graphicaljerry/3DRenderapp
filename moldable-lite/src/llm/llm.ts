@@ -5,6 +5,7 @@
 import { generate as generateAnthropic, MODELS, type ApiMsg, type StreamHandlers } from "./anthropic";
 import { generateCompat } from "./openaiCompat";
 import { modelSupportsReasoning } from "./openrouterModels";
+import { houseStatus, houseUrl } from "./house";
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 /** OpenRouter "thinking" effort — user-set in Settings, applied to reasoning-capable models. */
@@ -16,7 +17,7 @@ export function getReasoningEffort(): ReasoningEffort {
   return "medium";
 }
 
-export type LlmProviderId = "anthropic" | "gemini" | "openai" | "groq" | "openrouter" | "ollama" | "custom";
+export type LlmProviderId = "anthropic" | "gemini" | "openai" | "groq" | "openrouter" | "ollama" | "custom" | "house";
 
 export interface LlmSettings {
   provider: LlmProviderId;
@@ -107,6 +108,17 @@ export const LLM_PRESETS: LlmPreset[] = [
     keyHint: "any endpoint that serves …/v1/chat/completions",
     hint: "For self-hosted or niche providers with an OpenAI-style API.",
   },
+  {
+    // Only offered when the site owner's relay reports house mode enabled — the app
+    // health-checks at boot and hides this everywhere otherwise (see llm/house.ts).
+    id: "house",
+    label: "Built-in — free, no key (sponsored by this site)",
+    free: true,
+    needsKey: false,
+    defaultModel: "",
+    keyHint: "",
+    hint: "AI calls go through this site's own relay and key — nothing to sign up for. Fair-use daily limit per visitor.",
+  },
 ];
 
 export function llmPreset(id: LlmProviderId): LlmPreset {
@@ -117,6 +129,7 @@ export function llmPreset(id: LlmProviderId): LlmPreset {
 export function llmReady(s: LlmSettings, keys: Record<string, string | undefined>): boolean {
   const p = llmPreset(s.provider);
   if (s.provider === "custom") return !!s.baseUrl;
+  if (s.provider === "house") return !!houseStatus(); // only after a live health check
   if (!p.needsKey) return true;
   return !!keys[s.provider];
 }
@@ -132,6 +145,16 @@ export async function generateLlm(
 ): Promise<string> {
   if (s.provider === "anthropic") {
     return generateAnthropic({ apiKey: keys.anthropic ?? "", model: s.model, system, messages }, h);
+  }
+  if (s.provider === "house") {
+    // The site's sponsored relay: an OpenAI-compatible endpoint that injects the
+    // owner's key server-side and enforces its own model allowlist + daily cap.
+    const st = houseStatus();
+    if (!st) throw new Error("This site's built-in AI isn't available right now — add your own key in Settings, or try again later.");
+    return generateCompat(
+      { baseUrl: `${houseUrl()}/house/v1`, apiKey: "house", model: s.model || st.models[0] || "auto", system, messages },
+      h,
+    );
   }
   const p = llmPreset(s.provider);
   const baseUrl = s.provider === "custom" ? s.baseUrl ?? "" : p.baseUrl!;

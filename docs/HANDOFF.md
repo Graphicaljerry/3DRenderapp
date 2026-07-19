@@ -61,6 +61,15 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   full current program + "the marker is a pointer, the program is the source of truth,
   change only what's circled" + a view-direction phrase. Viewer gained `captureView()`
   (current-camera RT render) and `viewInfo()`.
+- **House AI (optional, DORMANT)**: infrastructure for the site owner to sponsor
+  visitors with a server-side key — a "Built-in — free, no key" brain that only appears
+  after `llm/house.ts` health-checks the owner's relay. Worker endpoints live in
+  `proxy/cloudflare-worker.js` (`/house/health`, `/house/v1/chat/completions`; secret
+  `HOUSE_KEY`, model allowlist, per-IP daily cap, KV optional). ENABLE = deploy worker +
+  `wrangler secret put HOUSE_KEY` + set `HOUSE_RELAY_URL` in `src/llm/house.ts` + push
+  (see proxy/DEPLOY.md "Sponsor your visitors"). Currently OFF — the user (Jerry) wants
+  it available but not enabled; don't flip it without their say-so. Testing override:
+  `localStorage.moldable_house_url`.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

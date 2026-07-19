@@ -1415,6 +1415,9 @@ export function Workspace(p: Props) {
                 onMeasurePoint={p.measureCtl.point}
                 diff={p.aiDiff}
                 holeGhost={p.holeCtl.draft ? { at: p.holeCtl.draft.at, normal: p.holeCtl.draft.normal, diameter: p.holeCtl.draft.diameter, depth: p.holeCtl.draft.depth, ref: p.holeCtl.draft.ref?.center ?? null } : null}
+                holePlace={p.holeCtl.draft && !p.holeCtl.draft.picking
+                  ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
+                  : null}
                 onContext={(h) => {
                   // Right-click selects what it lands on (standard editor behavior), then opens the menu.
                   if (h.target.kind === "attachment") p.onAttachSelect(h.target.id);
@@ -2387,7 +2390,7 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
         <button className="primary sm" disabled={busy || d.diameter <= 0} onClick={ctl.apply}>Drill hole</button>
         <button className="ghost sm" onClick={ctl.cancel}>Cancel</button>
       </div>
-      <p className="fine">The red ghost shows the drill. {AX[3 - axes[0] - axes[1]]} is locked — the hole sits on the picked face.</p>
+      <p className="fine">Hover the face to preview, click to set — guide lines light up solid when the hole lines up with the reference. {AX[3 - axes[0] - axes[1]]} is locked — the hole sits on the picked face.</p>
     </div>
   );
 }

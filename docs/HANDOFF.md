@@ -90,6 +90,15 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   axis; rim also yields its ⌀ from edge length/π), then editable ΔX/ΔY with "=" align
   buttons and an editable centre-to-centre spacing. Red drill ghost + dashed guide line
   in the viewer. Ops-chain = it survives slider rebuilds; drafts dissolve on any rebuild.
+  PLACEMENT BY POINTER: while the panel is open the ghost follows the cursor across the
+  face plane (imperative `layoutHoleGhost` — zero React re-renders on hover; hits are
+  accepted only when co-facing within dot > 0.98 AND co-planar within 0.8 mm, so the
+  ghost can't jump to a side wall) with the same magnet snap as the typed inputs plus a
+  pull onto the reference's axes; a CLICK commits the position (taps are intercepted
+  ahead of every pick, so a stray click can't deselect the draft), and SOLID teal guide
+  lines light up per axis whenever the hole is aligned with the reference (the dashed
+  at→ref line always shows). Reference picking still uses feature picks — `holePlace`
+  is null while `draft.picking`.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

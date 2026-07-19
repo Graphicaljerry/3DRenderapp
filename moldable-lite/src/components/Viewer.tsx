@@ -115,6 +115,10 @@ interface Props {
   /** Hole tool ghost: the drill shown in place before committing, plus an alignment
    *  guide line to the reference hole's centre when one is picked. */
   holeGhost: { at: [number, number, number]; normal: [number, number, number]; diameter: number; depth: number; ref: [number, number, number] | null } | null;
+  /** Hole tool interaction: while the panel is open (and not picking a reference),
+   *  the ghost FOLLOWS the cursor across the target plane — snapped to the magnet
+   *  increment and magnetized to the reference's axes — and a click sets it. */
+  holePlace: { active: boolean; snap: number; onPlace: (at: [number, number, number]) => void } | null;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -194,11 +198,15 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext, diff, holeGhost }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext });
   cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext };
+  // Hole-tool interaction state, read imperatively by the pointer handlers (the ghost
+  // follows the cursor at frame rate — no React re-render per mousemove).
+  const holeIx = useRef<{ ghost: Props["holeGhost"]; place: Props["holePlace"] }>({ ghost: holeGhost, place: holePlace });
+  holeIx.current = { ghost: holeGhost, place: holePlace };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
 
@@ -540,6 +548,48 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // (pin mode). A plain click with neither mode on does nothing — pins only ever
     // drop while Pin mode is active, so they can't scatter across the model. ----
     const rc = new THREE.Raycaster();
+    // ---- Hole hover-placement: while the hole panel is open (and not picking an
+    // alignment reference), the drill ghost follows the cursor across the target
+    // plane — snapped to the magnet increment and pulled onto the reference's axes —
+    // and a tap commits that position. Returns null off the plane. ----
+    const holeHover = (e: { clientX: number; clientY: number }): [number, number, number] | null => {
+      const s2 = st.current;
+      const g = holeIx.current.ghost, place = holeIx.current.place;
+      if (!s2?.mesh || !g || !place) return null;
+      const rect = renderer.domElement.getBoundingClientRect();
+      rc.setFromCamera(
+        new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1),
+        camera,
+      );
+      const n = new THREE.Vector3(...g.normal).normalize();
+      // Only hits on the SAME plane as the draft's face count: co-facing and within a
+      // whisker along the normal — the ghost must never jump to a side wall or the far face.
+      const anchor = new THREE.Vector3(...g.at);
+      let p: THREE.Vector3 | null = null;
+      for (const h of rc.intersectObject(s2.mesh, false)) {
+        if (!h.face) continue;
+        const wn = h.face.normal.clone().transformDirection(s2.mesh.matrixWorld);
+        if (wn.dot(n) < 0.98) continue;
+        if (Math.abs(h.point.clone().sub(anchor).dot(n)) > 0.8) continue;
+        p = h.point;
+        break;
+      }
+      if (!p) return null;
+      // Same rules as the typed inputs: magnet increment on the in-plane axes, then a
+      // pull onto the reference's axes when the cursor lands close to aligned.
+      const k = [Math.abs(g.normal[0]), Math.abs(g.normal[1]), Math.abs(g.normal[2])].indexOf(
+        Math.max(Math.abs(g.normal[0]), Math.abs(g.normal[1]), Math.abs(g.normal[2])),
+      );
+      const out: [number, number, number] = [g.at[0], g.at[1], g.at[2]];
+      const pull = Math.max(place.snap, 1);
+      for (const a of k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1]) {
+        let v = p.getComponent(a);
+        v = place.snap > 0 ? Math.round(v / place.snap) * place.snap : Math.round(v * 100) / 100;
+        if (g.ref && Math.abs(v - g.ref[a]) <= pull) v = g.ref[a];
+        out[a] = v;
+      }
+      return out;
+    };
     const handleTap = (e: { clientX: number; clientY: number; shiftKey?: boolean }) => {
       const s2 = st.current;
       if (!s2) return;
@@ -549,6 +599,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       rc.setFromCamera(ndc, camera);
+      // Hole placement owns the tap: a click on the target plane moves the hole there,
+      // and clicks anywhere else do nothing — the open panel must never lose its draft
+      // to a stray deselect underneath.
+      if (holeIx.current.place?.active) {
+        const at = holeHover(e);
+        if (at) holeIx.current.place.onPlace(at);
+        return;
+      }
       if (cb.current.transformMode !== "off" || s2.transforming) {
         // Gizmo owns the pointer — except taps: on the attachment/model → retarget the
         // selection; on empty space → deselect everything.
@@ -878,6 +936,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         return;
       }
       if (!s2 || downAt) return; // don't fight an orbit drag
+      // Hole hover-placement: slide the drill ghost (and its guide lines) along the
+      // target plane under the cursor. Purely imperative — the draft's position only
+      // commits on click, so hovering costs no React re-renders.
+      if (holeIx.current.place?.active) {
+        const at = holeHover(e);
+        if (at) layoutHoleGhost(at);
+        renderer.domElement.style.cursor = at ? "crosshair" : "";
+        return;
+      }
       // Anchor hover works IN transform mode (that's when the box shows): resize cursor + grow.
       if (s2.selBox && !s2.transforming) {
         const r0 = renderer.domElement.getBoundingClientRect();
@@ -941,7 +1008,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         renderer.domElement.style.cursor = "";
       }
     };
-    const onLeave = () => setHover(null);
+    const onLeave = () => {
+      setHover(null);
+      // Cursor left mid-hover: park the drill ghost back on the draft's committed spot.
+      const g = holeIx.current.ghost;
+      if (g && holeIx.current.place?.active) layoutHoleGhost(g.at);
+    };
     // Safari fires pointercancel for system gestures (palm rejection, Scribble); without this
     // a pen drag can die mid-way and leave the drag armed with orbit frozen.
     const onCancelPtr = (e: PointerEvent) => {
@@ -1441,50 +1513,91 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (diff.removed) mk(diff.removed, 0xef4444);
   }, [diff]);
 
-  // Hole tool ghost: a red drill cylinder in place + an entry ring + a dashed guide
-  // line to the reference hole while aligning.
-  const holeGhostObjs = useRef<THREE.Object3D[]>([]);
+  // Hole tool ghost: a red drill cylinder + entry ring, a dashed line to the reference,
+  // and SOLID alignment guides whenever an in-plane coordinate matches the reference —
+  // the "what is it aligning to" answer, drawn right on the model.
+  const holeGhostObjs = useRef<{ cyl?: THREE.Mesh; ring?: THREE.Mesh; extras: THREE.Object3D[] }>({ extras: [] });
+  const clearHoleExtras = () => {
+    for (const o of holeGhostObjs.current.extras) {
+      o.removeFromParent();
+      (o as THREE.Mesh).geometry?.dispose?.();
+      ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose?.();
+    }
+    holeGhostObjs.current.extras = [];
+  };
+  /** Position the ghost at `at` and rebuild the reference/alignment guide lines. */
+  const layoutHoleGhost = (at3: [number, number, number]) => {
+    const s = st.current;
+    const g = holeIx.current.ghost;
+    const { cyl, ring } = holeGhostObjs.current;
+    if (!s || !g || !cyl || !ring) return;
+    const n = new THREE.Vector3(...g.normal).normalize();
+    const at = new THREE.Vector3(...at3);
+    const L = g.depth > 0 ? g.depth : 60;
+    cyl.position.copy(at.clone().sub(n.clone().multiplyScalar(L / 2 - 0.5)));
+    ring.position.copy(at);
+    clearHoleExtras();
+    if (!g.ref) return;
+    const ref = new THREE.Vector3(...g.ref);
+    const dashed = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([at, ref]),
+      new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.4, depthTest: false }),
+    );
+    dashed.computeLineDistances();
+    dashed.renderOrder = 4;
+    s.scene.add(dashed);
+    holeGhostObjs.current.extras.push(dashed);
+    // Solid guides on aligned axes: same X → a line running along Y through both, etc.
+    const k = [Math.abs(g.normal[0]), Math.abs(g.normal[1]), Math.abs(g.normal[2])].indexOf(
+      Math.max(Math.abs(g.normal[0]), Math.abs(g.normal[1]), Math.abs(g.normal[2])),
+    );
+    const axes = k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1];
+    for (let i = 0; i < 2; i++) {
+      const a = axes[i], b = axes[1 - i];
+      if (Math.abs(at.getComponent(a) - ref.getComponent(a)) > 0.05) continue; // not aligned on this axis
+      const p1 = at.clone(), p2 = at.clone();
+      p1.setComponent(b, Math.min(at.getComponent(b), ref.getComponent(b)) - 12);
+      p2.setComponent(b, Math.max(at.getComponent(b), ref.getComponent(b)) + 12);
+      const guide = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([p1, p2]),
+        new THREE.LineBasicMaterial({ color: 0x14b8a6, depthTest: false }),
+      );
+      guide.renderOrder = 5;
+      s.scene.add(guide);
+      holeGhostObjs.current.extras.push(guide);
+    }
+  };
   useEffect(() => {
     const s = st.current;
     if (!s) return;
-    for (const o of holeGhostObjs.current) {
+    const cur = holeGhostObjs.current;
+    for (const o of [cur.cyl, cur.ring].filter(Boolean) as THREE.Mesh[]) {
       o.removeFromParent();
-      (o as THREE.Mesh).geometry?.dispose?.();
-      const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
-      mat?.dispose?.();
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
     }
-    holeGhostObjs.current = [];
+    cur.cyl = cur.ring = undefined;
+    clearHoleExtras();
     if (!holeGhost) return;
     const n = new THREE.Vector3(...holeGhost.normal).normalize();
-    const at = new THREE.Vector3(...holeGhost.at);
     const L = holeGhost.depth > 0 ? holeGhost.depth : 60; // visual length for "through"
     const cyl = new THREE.Mesh(
       new THREE.CylinderGeometry(holeGhost.diameter / 2, holeGhost.diameter / 2, L, 32),
       new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.45, depthTest: false }),
     );
     cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
-    cyl.position.copy(at.clone().sub(n.clone().multiplyScalar(L / 2 - 0.5)));
     cyl.renderOrder = 4;
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(holeGhost.diameter / 2, 0.35, 8, 40),
       new THREE.MeshBasicMaterial({ color: 0xef4444, depthTest: false }),
     );
     ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
-    ring.position.copy(at);
     ring.renderOrder = 4;
     s.scene.add(cyl, ring);
-    holeGhostObjs.current.push(cyl, ring);
-    if (holeGhost.ref) {
-      const line = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([at, new THREE.Vector3(...holeGhost.ref)]),
-        new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.4, depthTest: false }),
-      );
-      line.computeLineDistances();
-      line.renderOrder = 4;
-      s.scene.add(line);
-      holeGhostObjs.current.push(line);
-    }
-  }, [holeGhost]);
+    cur.cyl = cyl;
+    cur.ring = ring;
+    layoutHoleGhost(holeGhost.at);
+  }, [holeGhost]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
   useEffect(() => {

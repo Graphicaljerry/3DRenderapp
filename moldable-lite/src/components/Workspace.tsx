@@ -690,6 +690,7 @@ function HelpSheet({ onClose }: { onClose: () => void }) {
     { icon: <IconFaceSel />, text: "Shift-drag (with Select on) box-selects many faces at once." },
     { icon: <IconTransform />, text: "Transform: move, rotate or scale the whole part — rotate is how you set print orientation." },
     { icon: <IconRuler />, text: "Measure: tap two points to read the distance between them." },
+    { icon: <IconFaceSel />, text: "Drill holes: Select a face → Hole… — type exact offsets, snap to a magnet grid, or align with another hole (pick its rim, then zero a Δ or type the spacing)." },
     { icon: <IconMarker />, text: "Mark: draw around a part of the model — the marked screenshot attaches to the chat, so \"make this thicker\" needs no coordinates." },
     { icon: <IconUndo />, text: "Undo ⌘/Ctrl+Z · Redo ⇧⌘/Ctrl+Shift+Z. Every edit is a restorable version in History." },
     { icon: <IconPrinter />, text: "The bottom bar shows your printer's plate — tap it to switch printers or bed size." },
@@ -801,6 +802,24 @@ interface Props {
     setMode: (m: "ask" | "auto") => void;
   };
   aiDiff: { added: Float32Array | null; removed: Float32Array | null } | null;
+  holeCtl: {
+    draft: {
+      at: [number, number, number];
+      normal: [number, number, number];
+      diameter: number;
+      depth: number; // 0 = through
+      snap: number; // magnet increment, 0 = free
+      ref: { center: [number, number, number]; diameter?: number } | null;
+      picking: boolean;
+    } | null;
+    canStart: boolean; // a flat face on a CAD model is selected
+    axes: [number, number] | null; // the two editable in-plane axes (0=x 1=y 2=z)
+    start: () => void;
+    cancel: () => void;
+    patch: (p: Partial<NonNullable<Props["holeCtl"]["draft"]>>) => void;
+    setAxis: (axis: number, v: number) => void;
+    apply: () => void;
+  };
   onPickImage: (f: File) => void;
   onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
@@ -1395,6 +1414,7 @@ export function Workspace(p: Props) {
                 onTransformCommit={p.transformCtl.commit}
                 onMeasurePoint={p.measureCtl.point}
                 diff={p.aiDiff}
+                holeGhost={p.holeCtl.draft ? { at: p.holeCtl.draft.at, normal: p.holeCtl.draft.normal, diameter: p.holeCtl.draft.diameter, depth: p.holeCtl.draft.depth, ref: p.holeCtl.draft.ref?.center ?? null } : null}
                 onContext={(h) => {
                   // Right-click selects what it lands on (standard editor behavior), then opens the menu.
                   if (h.target.kind === "attachment") p.onAttachSelect(h.target.id);
@@ -1678,6 +1698,7 @@ export function Workspace(p: Props) {
                       busy={p.status === "generating"}
                       onApply={p.featureCtl.directOp}
                       liveSize={p.featureCtl.liveMm}
+                      onHole={p.holeCtl.canStart ? p.holeCtl.start : undefined}
                     />
                   )}
                   <textarea
@@ -1699,6 +1720,7 @@ export function Workspace(p: Props) {
                   {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
                 </div>
               )}
+              {p.holeCtl.draft && <HolePanel ctl={p.holeCtl} busy={p.status === "generating"} />}
               {p.facesCtl.faces.length > 0 && (
                 <div className="pin-panel">
                   <div className="pin-head">
@@ -2287,6 +2309,89 @@ function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled,
   );
 }
 
+/** Hole tool: exact placement (typed offsets + magnet snap) and alignment against an
+    existing hole — pick its rim/wall, then zero a delta or type the exact spacing. */
+function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
+  const d = ctl.draft!;
+  const axes = ctl.axes ?? [0, 1];
+  const AX = "XYZ";
+  const r1 = (v: number) => Math.round(v * 100) / 100;
+  const spacing = d.ref ? Math.hypot(d.at[axes[0]] - d.ref.center[axes[0]], d.at[axes[1]] - d.ref.center[axes[1]]) : 0;
+  const setSpacing = (target: number) => {
+    if (!d.ref || spacing < 0.01 || target <= 0) return;
+    const k = target / spacing;
+    ctl.setAxis(axes[0], d.ref.center[axes[0]] + (d.at[axes[0]] - d.ref.center[axes[0]]) * k);
+    ctl.setAxis(axes[1], d.ref.center[axes[1]] + (d.at[axes[1]] - d.ref.center[axes[1]]) * k);
+  };
+  return (
+    <div className="pin-panel hole-panel">
+      <div className="pin-head">
+        <span>Drill a hole — free, no AI</span>
+        <button className="x" aria-label="Cancel hole" onClick={ctl.cancel}><IconX /></button>
+      </div>
+      <div className="hp-row">
+        <label>⌀</label>
+        <input type="number" min={0.5} max={100} step={0.1} value={d.diameter} onChange={(e) => ctl.patch({ diameter: Math.max(0.5, Number(e.target.value) || 0) })} aria-label="Hole diameter (mm)" />
+        <span className="fine">mm</span>
+        <label className="hp-through">
+          <input type="checkbox" checked={d.depth === 0} onChange={(e) => ctl.patch({ depth: e.target.checked ? 0 : 5 })} /> through
+        </label>
+        {d.depth > 0 && (
+          <>
+            <input type="number" min={0.5} step={0.5} value={d.depth} onChange={(e) => ctl.patch({ depth: Math.max(0.5, Number(e.target.value) || 0) })} aria-label="Hole depth (mm)" />
+            <span className="fine">mm deep</span>
+          </>
+        )}
+      </div>
+      <div className="hp-row">
+        <label>at</label>
+        {axes.map((ax) => (
+          <span className="hp-axis" key={ax}>
+            <b>{AX[ax]}</b>
+            <input type="number" step={d.snap || 0.1} value={r1(d.at[ax])} onChange={(e) => ctl.setAxis(ax, Number(e.target.value) || 0)} aria-label={`Hole ${AX[ax]} position (mm)`} />
+          </span>
+        ))}
+        <select value={d.snap} onChange={(e) => ctl.patch({ snap: Number(e.target.value) })} title="Magnet: typed and aligned positions snap to this increment" aria-label="Magnet increment">
+          <option value={0}>free</option>
+          <option value={0.5}>0.5 mm</option>
+          <option value={1}>1 mm</option>
+          <option value={2.5}>2.5 mm</option>
+          <option value={5}>5 mm</option>
+        </select>
+      </div>
+      {!d.ref ? (
+        <button className={`ghost sm${d.picking ? " on" : ""}`} style={{ width: "100%" }} onClick={() => ctl.patch({ picking: !d.picking })}>
+          {d.picking ? "Now click the other hole (its rim or inner wall)…" : "Align with another hole…"}
+        </button>
+      ) : (
+        <div className="hp-ref">
+          <div className="fine">Reference hole{d.ref.diameter ? ` ⌀${d.ref.diameter} mm` : ""} · centre {axes.map((ax) => `${AX[ax]} ${r1(d.ref!.center[ax])}`).join(", ")}</div>
+          <div className="hp-row">
+            {axes.map((ax) => (
+              <span className="hp-axis" key={ax}>
+                <b>Δ{AX[ax]}</b>
+                <input type="number" step={d.snap || 0.1} value={r1(d.at[ax] - d.ref!.center[ax])} onChange={(e) => ctl.setAxis(ax, d.ref!.center[ax] + (Number(e.target.value) || 0))} aria-label={`Offset from reference in ${AX[ax]} (mm)`} />
+                <button className="ghost sm" title={`Align ${AX[ax]} with the reference hole (Δ${AX[ax]} = 0)`} onClick={() => ctl.setAxis(ax, d.ref!.center[ax])}>=</button>
+              </span>
+            ))}
+          </div>
+          <div className="hp-row">
+            <label>spacing</label>
+            <input type="number" min={0} step={d.snap || 0.1} value={r1(spacing)} onChange={(e) => setSpacing(Number(e.target.value) || 0)} aria-label="Centre-to-centre spacing (mm)" />
+            <span className="fine">mm centre-to-centre</span>
+            <button className="ghost sm" title="Forget the reference" onClick={() => ctl.patch({ ref: null })}>×</button>
+          </div>
+        </div>
+      )}
+      <div className="param-actions">
+        <button className="primary sm" disabled={busy || d.diameter <= 0} onClick={ctl.apply}>Drill hole</button>
+        <button className="ghost sm" onClick={ctl.cancel}>Cancel</button>
+      </div>
+      <p className="fine">The red ghost shows the drill. {AX[3 - axes[0] - axes[1]]} is locked — the hole sits on the picked face.</p>
+    </div>
+  );
+}
+
 /** Multi-face quick edit: one distance, applied to EVERY selected face — local, no AI. */
 function MultiFaceOpRow({ count, busy, isCad, onApply }: { count: number; busy: boolean; isCad: boolean; onApply: (size: number) => void }) {
   const [size, setSize] = useState(2);
@@ -2307,7 +2412,7 @@ function MultiFaceOpRow({ count, busy, isCad, onApply }: { count: number; busy: 
 
 // Free, instant geometry ops on the picked edge/corner/face — computed locally by
 // replicad, no AI call. Faces also get Extrude (push out / pull in).
-function DirectOpBar({ kind, busy, onApply, liveSize }: { kind: SelectKind; busy: boolean; onApply: (type: PointOp["type"], size: number) => void; liveSize?: number | null }) {
+function DirectOpBar({ kind, busy, onApply, liveSize, onHole }: { kind: SelectKind; busy: boolean; onApply: (type: PointOp["type"], size: number) => void; liveSize?: number | null; onHole?: () => void }) {
   const [size, setSize] = useState(2);
   // Dragging the on-model arrow mirrors its live value into the box, so the number
   // visibly follows the drag (and is ready to fine-tune or re-apply).
@@ -2329,6 +2434,7 @@ function DirectOpBar({ kind, busy, onApply, liveSize }: { kind: SelectKind; busy
         <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(round, Math.abs(size))} title={`Round the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Round</button>
         <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(chamfer, Math.abs(size))} title={`Chamfer the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Chamfer</button>
         {face && <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("extrude", size)} title={`Push this face out (+) or in (−) by ${size} mm — no tokens`}>Extrude</button>}
+        {face && onHole && <button className="ghost sm" disabled={busy} onClick={onHole} title="Drill a hole at this spot — with exact offsets, magnet snapping, and alignment to another hole">Hole…</button>}
       </div>
       {face && <p className="fine">Extrude: positive pushes the face out, negative pulls it in — or drag the blue arrow on the face.</p>}
       {kind === "edge" && <p className="fine">Or drag the blue arrow to round this edge live.</p>}

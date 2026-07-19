@@ -112,6 +112,9 @@ interface Props {
   onContext: (hit: ContextHit) => void; // right-click (without dragging) → quick-action menu
   /** AI change preview: ghost overlays for what the proposal adds (green) / removes (red). */
   diff: { added: Float32Array | null; removed: Float32Array | null } | null;
+  /** Hole tool ghost: the drill shown in place before committing, plus an alignment
+   *  guide line to the reference hole's centre when one is picked. */
+  holeGhost: { at: [number, number, number]; normal: [number, number, number]; diameter: number; depth: number; ref: [number, number, number] | null } | null;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -191,7 +194,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext, diff }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext, diff, holeGhost }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext });
@@ -1437,6 +1440,51 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (diff.added) mk(diff.added, 0x22c55e);
     if (diff.removed) mk(diff.removed, 0xef4444);
   }, [diff]);
+
+  // Hole tool ghost: a red drill cylinder in place + an entry ring + a dashed guide
+  // line to the reference hole while aligning.
+  const holeGhostObjs = useRef<THREE.Object3D[]>([]);
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    for (const o of holeGhostObjs.current) {
+      o.removeFromParent();
+      (o as THREE.Mesh).geometry?.dispose?.();
+      const mat = (o as THREE.Mesh).material as THREE.Material | undefined;
+      mat?.dispose?.();
+    }
+    holeGhostObjs.current = [];
+    if (!holeGhost) return;
+    const n = new THREE.Vector3(...holeGhost.normal).normalize();
+    const at = new THREE.Vector3(...holeGhost.at);
+    const L = holeGhost.depth > 0 ? holeGhost.depth : 60; // visual length for "through"
+    const cyl = new THREE.Mesh(
+      new THREE.CylinderGeometry(holeGhost.diameter / 2, holeGhost.diameter / 2, L, 32),
+      new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true, opacity: 0.45, depthTest: false }),
+    );
+    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    cyl.position.copy(at.clone().sub(n.clone().multiplyScalar(L / 2 - 0.5)));
+    cyl.renderOrder = 4;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(holeGhost.diameter / 2, 0.35, 8, 40),
+      new THREE.MeshBasicMaterial({ color: 0xef4444, depthTest: false }),
+    );
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    ring.position.copy(at);
+    ring.renderOrder = 4;
+    s.scene.add(cyl, ring);
+    holeGhostObjs.current.push(cyl, ring);
+    if (holeGhost.ref) {
+      const line = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([at, new THREE.Vector3(...holeGhost.ref)]),
+        new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.4, depthTest: false }),
+      );
+      line.computeLineDistances();
+      line.renderOrder = 4;
+      s.scene.add(line);
+      holeGhostObjs.current.push(line);
+    }
+  }, [holeGhost]);
 
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
   useEffect(() => {

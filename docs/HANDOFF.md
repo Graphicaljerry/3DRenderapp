@@ -83,6 +83,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   (`moldable_ai_apply`). Only Apply commits (`deliverResult` gates the 3 AI apply
   sites; `applyResultNoCommit` drops a stale pending; new send discards quietly).
   Direct manipulations (sliders/push-pull/transform/imports) never gate.
+- **Hole tool**: Select a flat face → "Hole…" — a new `HoleOp` in the ops chain (worker
+  cuts a cylinder along −normal from the picked point; depth 0 = through). Panel gives
+  ⌀/depth, typed in-plane offsets with a MAGNET increment (0.5/1/2.5/5/free), and
+  hole-to-hole alignment: pick a reference (closed-edge rim or curved wall → centroid =
+  axis; rim also yields its ⌀ from edge length/π), then editable ΔX/ΔY with "=" align
+  buttons and an editable centre-to-centre spacing. Red drill ghost + dashed guide line
+  in the viewer. Ops-chain = it survives slider rebuilds; drafts dissolve on any rebuild.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

@@ -17,6 +17,15 @@ export interface PointOp {
   at: Vec3;
   size: number; // fillet radius / chamfer size / extrude distance (signed: +out, -in), mm
 }
+/** Drill a round hole into a face: at a point ON the face, along −normal.
+ *  depth 0 = through everything; otherwise a flat-bottom pocket that deep. */
+export interface HoleOp {
+  type: "hole";
+  at: Vec3;
+  normal: Vec3; // face outward normal at the point (carried from the pick — no re-finding)
+  diameter: number;
+  depth: number;
+}
 /** Move the whole solid by a vector (engine coords; recenter-invariant). */
 export interface TranslateOp {
   type: "translate";
@@ -35,7 +44,7 @@ export interface ScaleOp {
   factor: number;
   center: Vec3;
 }
-export type CadOp = PointOp | TranslateOp | RotateOp | ScaleOp;
+export type CadOp = PointOp | HoleOp | TranslateOp | RotateOp | ScaleOp;
 
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.

@@ -388,6 +388,17 @@ button { font-family: inherit; cursor: pointer; }
 .zoom-ctl { position: absolute; right: 12px; bottom: 118px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 .zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
 .zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
+/* hole tool panel */
+.hole-panel .hp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 0; }
+.hole-panel .hp-row > label { font-size: 11px; font-weight: 700; color: var(--ink2); min-width: 18px; }
+.hole-panel input[type="number"] { width: 64px; padding: 4px 6px; border: 1px solid var(--bord); border-radius: 6px; font: inherit; font-size: 12px; background: var(--bg); color: var(--ink); }
+.hole-panel select { padding: 3px 6px; border: 1px solid var(--bord); border-radius: 6px; font-size: 11.5px; background: var(--bg); color: var(--ink); }
+.hp-axis { display: inline-flex; align-items: center; gap: 4px; }
+.hp-axis b { font-size: 11px; color: var(--accent-d); }
+.hp-through { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink2); }
+.hp-ref { border-top: 1px dashed var(--bord); margin-top: 6px; padding-top: 6px; }
+.hole-panel .ghost.on { border-color: var(--accent); color: var(--accent-d); }
+
 /* AI change preview: proposal held on canvas, Apply/Discard bar */
 .ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow); }
 .apb-text { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }

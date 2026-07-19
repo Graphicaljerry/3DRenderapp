@@ -84,6 +84,15 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
       return attempt(op.size);
     }
+    if (op.type === "hole") {
+      // Drill along −normal from 1 mm proud of the face (clean entry). depth 0 = through:
+      // longer than any printable part, so it exits the far side no matter the shape.
+      const n = op.normal;
+      const len = op.depth > 0 ? op.depth + 1 : 2000;
+      const start: [number, number, number] = [op.at[0] + n[0], op.at[1] + n[1], op.at[2] + n[2]];
+      const drill = R.makeCylinder(op.diameter / 2, len, start, [-n[0], -n[1], -n[2]]);
+      return shape.cut(drill);
+    }
     // Faces: exact hit first (flat faces land dead-on). containsPoint works at nanometre
     // tolerance, and replicad's unique:true THROWS (rather than returning null) when it
     // misses — so each lookup is wrapped, or the tolerant fallbacks would never run and
@@ -119,6 +128,7 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       case "rotate": label = `Rotate of ${op.angleDeg}°`; break;
       case "scale": label = `Scale ×${op.factor}`; break;
       case "extrude": label = `Extrude of ${op.size} mm`; break;
+      case "hole": label = `⌀${op.diameter} mm hole`; break;
       default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
     }
     // Sized op that OCCT rejected → find the real limit so the app can say it (and

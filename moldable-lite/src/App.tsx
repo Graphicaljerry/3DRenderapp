@@ -1084,6 +1084,7 @@ export default function App() {
     // Anything landing a real result supersedes a held AI proposal (undo/restore/
     // sliders/direct ops all come through here) — drop it so it can't linger.
     if (pendingRef.current && !applyingPending.current) setPending(null);
+    if (holeRef.current) setHoleDraft(null); // a rebuilt model invalidates the drill draft's coords
     setResult(res);
     setSplitPieces(null); // any new/changed model invalidates a prior split's pieces
     // Measurements are anchored to the display mesh's coords, which shift when the model
@@ -1497,12 +1498,90 @@ export default function App() {
   }
 
   function pickFeature(f: PickedFeature) {
+    // The hole tool is waiting for its alignment reference → this pick IS the reference
+    // (click another hole's rim or inner wall; its centre becomes the datum).
+    if (holeRef.current?.picking) {
+      // A hole's rim (closed edge) or inner wall (curved face) → its centroid IS the
+      // hole's axis; any other feature falls back to the exact clicked point.
+      const c: [number, number, number] =
+        (f.kind === "edge" && f.closed) || (f.kind === "face" && f.curved) ? [f.cx, f.cy, f.cz] : f.at ?? [f.cx, f.cy, f.cz];
+      const refDia = f.kind === "edge" && f.closed && f.len ? Math.round((f.len / Math.PI) * 10) / 10 : undefined;
+      setHoleDraft((d) => (d ? { ...d, picking: false, ref: { center: c, diameter: refDia } } : d));
+      return;
+    }
     setSelectedFeature(f);
     setFaceText("");
     // Only one editing target (point vs single feature vs multi) at a time.
     setActivePinId(null);
     setPinText("");
     setSelectedFaces([]);
+  }
+
+  // ---- Hole tool: measured drilling with hole-to-hole alignment + magnet snap ------
+  type HoleDraft = {
+    at: [number, number, number]; // display coords, ON the face
+    normal: [number, number, number];
+    diameter: number;
+    depth: number; // 0 = through
+    snap: number; // magnet increment for typed/aligned positions, 0 = free
+    ref: { center: [number, number, number]; diameter?: number } | null;
+    picking: boolean; // next feature pick becomes the reference
+  };
+  const [holeDraft, setHoleDraft] = useState<HoleDraft | null>(null);
+  const holeRef = useRef<HoleDraft | null>(null);
+  holeRef.current = holeDraft;
+  const snapV = (v: number, snap: number) => (snap > 0 ? Math.round(v / snap) * snap : Math.round(v * 100) / 100);
+  /** The two editable in-plane axes (0=x 1=y 2=z), given the face normal. */
+  const holeAxes = (n: [number, number, number]): [number, number] => {
+    const k = [Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])].indexOf(Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])));
+    return k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1];
+  };
+  function startHole() {
+    const f = selectedFeature;
+    if (!f || f.kind !== "face") return;
+    const n: [number, number, number] = [f.nx ?? 0, f.ny ?? 0, f.nz ?? 1];
+    const at: [number, number, number] = [...(f.at ?? [f.cx, f.cy, f.cz])] as [number, number, number];
+    const snap = 1;
+    for (const i of holeAxes(n)) at[i] = snapV(at[i], snap); // magnet the click straight away
+    setHoleDraft({ at, normal: n, diameter: 5, depth: 0, snap, ref: null, picking: false });
+    setSelectedFeature(null);
+  }
+  function setHoleAxis(axis: number, value: number) {
+    setHoleDraft((d) => {
+      if (!d) return d;
+      const at = [...d.at] as [number, number, number];
+      at[axis] = snapV(value, d.snap);
+      return { ...d, at };
+    });
+  }
+  async function applyHole() {
+    const d = holeRef.current;
+    if (!d || !result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
+      if (d) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The hole tool works on Precise (CAD) models.", error: true }]);
+      setHoleDraft(null);
+      return;
+    }
+    const src = result.source;
+    const rc = result.recenter ?? [0, 0, 0];
+    const op = {
+      type: "hole" as const,
+      at: [d.at[0] + rc[0], d.at[1] + rc[1], d.at[2] + rc[2]] as [number, number, number],
+      normal: d.normal,
+      diameter: d.diameter,
+      depth: d.depth,
+    };
+    setHoleDraft(null);
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
+      const what = `⌀${d.diameter} mm ${d.depth > 0 ? `pocket, ${d.depth} mm deep` : "through-hole"}`;
+      applyResult(res, project?.name ?? "Model", `Drilled a ${what}`, `hole ${d.diameter}`);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Drilled a **${what}** — free, no AI. Undo reverts it; it also rides along when sliders rebuild the model.` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't drill there: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
   }
   function pickFaces(faces: PickedFeature[], additive = false) {
     setSelectedFaces((prev) => {
@@ -2613,6 +2692,16 @@ export default function App() {
           setMode: setAiApply,
         }}
         aiDiff={pending?.diff ?? null}
+        holeCtl={{
+          draft: holeDraft,
+          canStart: !!selectedFeature && selectedFeature.kind === "face" && !selectedFeature.curved && activeKind === "replicad",
+          axes: holeDraft ? holeAxes(holeDraft.normal) : null,
+          start: startHole,
+          cancel: () => setHoleDraft(null),
+          patch: (patch) => setHoleDraft((d) => (d ? { ...d, ...patch } : d)),
+          setAxis: setHoleAxis,
+          apply: () => void applyHole(),
+        }}
         views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
         onPickView={pickView}
         onClearView={clearView}

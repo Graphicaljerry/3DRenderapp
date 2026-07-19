@@ -76,6 +76,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   (see proxy/DEPLOY.md "Sponsor your visitors"). Currently OFF — the user (Jerry) wants
   it available but not enabled; don't flip it without their say-so. Testing override:
   `localStorage.moldable_house_url`.
+- **AI change preview (ask/auto)**: DEFAULT "ask" — every AI result (chat edit, full
+  gen, generative mesh) is built then HELD: proposal shown on canvas with a real
+  Manifold diff (green = added, red = removed, `computeChangeDiff`), Apply/Discard bar
+  (top-centre), "always apply automatically" escape hatch + Settings → AI toggle
+  (`moldable_ai_apply`). Only Apply commits (`deliverResult` gates the 3 AI apply
+  sites; `applyResultNoCommit` drops a stale pending; new send discards quietly).
+  Direct manipulations (sliders/push-pull/transform/imports) never gate.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

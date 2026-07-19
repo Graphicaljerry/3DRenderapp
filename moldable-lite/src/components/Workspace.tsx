@@ -792,6 +792,15 @@ interface Props {
   imageUrl: string | null;
   imageMarkup: boolean; // the composer image is a marked screenshot, not a photo
   imageNote: string | null; // e.g. "covers ≈ 54 × 4 × 30 mm" — what the circle landed on
+  aiPreview: {
+    active: boolean; // an AI proposal is held on the canvas awaiting Apply/Discard
+    hasDiff: boolean; // green/red change overlays are showing
+    apply: () => void;
+    discard: () => void;
+    mode: "ask" | "auto";
+    setMode: (m: "ask" | "auto") => void;
+  };
+  aiDiff: { added: Float32Array | null; removed: Float32Array | null } | null;
   onPickImage: (f: File) => void;
   onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
@@ -1385,6 +1394,7 @@ export function Workspace(p: Props) {
                 onSelectPin={p.pinCtl.select}
                 onTransformCommit={p.transformCtl.commit}
                 onMeasurePoint={p.measureCtl.point}
+                diff={p.aiDiff}
                 onContext={(h) => {
                   // Right-click selects what it lands on (standard editor behavior), then opens the menu.
                   if (h.target.kind === "attachment") p.onAttachSelect(h.target.id);
@@ -1392,6 +1402,25 @@ export function Workspace(p: Props) {
                   setCtx(h);
                 }}
               />
+              {(p.tab === "3d" || p.tab === "params") && p.aiPreview.active && (
+                <div className="ai-preview-bar" role="region" aria-label="AI change preview">
+                  <span className="apb-text">
+                    <b>AI change ready — this is a preview</b>
+                    {p.aiPreview.hasDiff && (
+                      <span className="apb-legend"><i className="apb-add" /> added <i className="apb-rem" /> removed</span>
+                    )}
+                  </span>
+                  <button className="primary sm" onClick={p.aiPreview.apply} title="Keep this change (saved as a version — Undo still works)">Apply</button>
+                  <button className="ghost sm" onClick={p.aiPreview.discard} title="Throw the proposal away — the model stays exactly as it was">Discard</button>
+                  <button
+                    className="apb-mode"
+                    title="Stop asking: apply AI changes immediately from now on (switch back any time in Settings → AI)"
+                    onClick={() => { p.aiPreview.setMode("auto"); p.aiPreview.apply(); }}
+                  >
+                    always apply automatically
+                  </button>
+                </div>
+              )}
               {p.tab === "3d" && markMode && (
                 <MarkOverlay
                   viewerRef={p.viewerRef}

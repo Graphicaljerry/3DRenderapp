@@ -110,6 +110,8 @@ interface Props {
   // Manifold boolean live preview — present only for extrude drags with a captured cap.
   onPushPullLive: (distance: number, solid?: Float32Array | null) => void;
   onContext: (hit: ContextHit) => void; // right-click (without dragging) → quick-action menu
+  /** AI change preview: ghost overlays for what the proposal adds (green) / removes (red). */
+  diff: { added: Float32Array | null; removed: Float32Array | null } | null;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -189,7 +191,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext, diff }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext });
@@ -1409,6 +1411,32 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.pins = g;
     s.scene.add(g);
   }, [pins, selectedPin, hovered]);
+
+  // AI change preview overlays: what the held proposal would add (green) / remove (red).
+  // depthTest off so both read through the solid — the red volume sits outside the new
+  // shape, the green one inside it.
+  const diffMeshes = useRef<THREE.Mesh[]>([]);
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    for (const m of diffMeshes.current) {
+      m.removeFromParent();
+      m.geometry.dispose();
+      (m.material as THREE.Material).dispose();
+    }
+    diffMeshes.current = [];
+    if (!diff) return;
+    const mk = (pos: Float32Array, color: number) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.38, depthTest: false, side: THREE.DoubleSide }));
+      m.renderOrder = 3;
+      s.scene.add(m);
+      diffMeshes.current.push(m);
+    };
+    if (diff.added) mk(diff.added, 0x22c55e);
+    if (diff.removed) mk(diff.removed, 0xef4444);
+  }, [diff]);
 
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
   useEffect(() => {

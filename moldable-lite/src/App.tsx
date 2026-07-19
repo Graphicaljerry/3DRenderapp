@@ -537,6 +537,91 @@ export default function App() {
     for (const id of ids) viewer.current?.dropAttachment(id);
   }
 
+  // ---- AI change preview ("ask before apply") ----------------------------------
+  // Like an agent's ask-vs-auto mode: in "ask" (default), an AI result is BUILT but
+  // held — shown on canvas with a real geometric diff (green = added, red = removed,
+  // Manifold booleans) and an Apply/Discard bar. Only Apply commits it to the project.
+  // Direct manipulations (sliders, push-pull, transforms, imports) never gate — they
+  // already preview live and are the user's own hands.
+  const [aiApply, setAiApplyState] = useState<"ask" | "auto">(() => {
+    const v = localStorage.getItem("moldable_ai_apply");
+    return v === "auto" ? "auto" : "ask";
+  });
+  const setAiApply = (v: "ask" | "auto") => {
+    setAiApplyState(v);
+    try { localStorage.setItem("moldable_ai_apply", v); } catch { /* private mode */ }
+  };
+  type PendingChange = {
+    res: EngineResult;
+    name: string;
+    summary: string;
+    promptText: string;
+    prevGeometry: THREE.BufferGeometry | null;
+    diff: { added: Float32Array | null; removed: Float32Array | null } | null;
+    clearImageAfter: boolean;
+  };
+  const [pending, setPending] = useState<PendingChange | null>(null);
+  const pendingRef = useRef<PendingChange | null>(null);
+  pendingRef.current = pending;
+  const applyingPending = useRef(false);
+
+  const soupOf = (g: THREE.BufferGeometry): Float32Array => {
+    const ng = g.index ? g.toNonIndexed() : g;
+    const pos = (ng.getAttribute("position").array as Float32Array).slice();
+    if (ng !== g) ng.dispose();
+    return pos;
+  };
+  /** What would this change do, physically? added = new − old, removed = old − new. */
+  async function computeChangeDiff(oldG: THREE.BufferGeometry | null, newG: THREE.BufferGeometry) {
+    try {
+      if (!oldG) return null;
+      const oldSoup = soupOf(oldG);
+      const newSoup = soupOf(newG);
+      let removed: Float32Array | null = null;
+      let added: Float32Array | null = null;
+      if (await previewSetBase(oldG)) removed = await previewBoolean(newSoup, -1);
+      if (await previewSetBase(newG)) added = await previewBoolean(oldSoup, -1);
+      if (removed && meshVolume(removed) < 1) removed = null; // tessellation crumbs
+      if (added && meshVolume(added) < 1) added = null;
+      return added || removed ? { added, removed } : null;
+    } catch {
+      return null; // no diff ≠ no preview — the bar still shows the proposal
+    }
+  }
+  /** Route an AI-built result: auto → commit now; ask → hold it as an on-canvas
+      proposal. Returns which happened so callers can word their chat message. */
+  async function deliverResult(res: EngineResult, name: string, summary: string, promptText: string, clearImageAfter = false): Promise<"applied" | "pending"> {
+    if (aiApply === "auto") {
+      applyResult(res, name, summary, promptText);
+      if (clearImageAfter) clearImage();
+      return "applied";
+    }
+    const prevGeometry = geometry;
+    const diff = await computeChangeDiff(prevGeometry, res.geometry);
+    setGeometry(res.geometry); // show the proposal; `result`/history stay untouched
+    setPending({ res, name, summary, promptText, prevGeometry, diff, clearImageAfter });
+    return "pending";
+  }
+  function applyPending() {
+    const pc = pendingRef.current;
+    if (!pc) return;
+    applyingPending.current = true;
+    try {
+      applyResult(pc.res, pc.name, pc.summary, pc.promptText);
+      if (pc.clearImageAfter) clearImage();
+    } finally {
+      applyingPending.current = false;
+    }
+    setPending(null);
+  }
+  function discardPending(silent = false) {
+    const pc = pendingRef.current;
+    if (!pc) return;
+    setPending(null);
+    setGeometry(pc.prevGeometry);
+    if (!silent) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Discarded — the model is unchanged. (The proposal is gone; re-ask any time.)" }]);
+  }
+
   const attachSelected = selAttachIds.length > 0;
   const addAttachment = (geometry: THREE.BufferGeometry, name: string): string => {
     const id = mid();
@@ -996,6 +1081,9 @@ export default function App() {
   }
 
   function applyResultNoCommit(res: EngineResult) {
+    // Anything landing a real result supersedes a held AI proposal (undo/restore/
+    // sliders/direct ops all come through here) — drop it so it can't linger.
+    if (pendingRef.current && !applyingPending.current) setPending(null);
     setResult(res);
     setSplitPieces(null); // any new/changed model invalidates a prior split's pieces
     // Measurements are anchored to the display mesh's coords, which shift when the model
@@ -1858,6 +1946,7 @@ export default function App() {
   }
 
   async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
+    if (pendingRef.current) discardPending(true); // a new ask supersedes the held proposal
     const p = promptText.trim();
     if (status === "generating") return;
     if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
@@ -1970,9 +2059,8 @@ export default function App() {
         const res = await genEngine.current.build({ kind: "gen", image: image?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: ge.provider, model: genModel });
         const name = deriveName(p || "Photo model");
         const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? ge.provider})`;
-        applyResult(res, name, summary, p || "(image upload)");
-        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary, streaming: false } : x)));
-        clearImage();
+        const how = await deliverResult(res, name, summary, p || "(image upload)", true);
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false } : x)));
       } catch (err: any) {
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: friendlyNet(String(err?.message ?? err)), error: true, streaming: false } : x)));
       } finally {
@@ -2162,8 +2250,8 @@ export default function App() {
           const editParams = result?.source.kind === "code" ? result.source.params : undefined;
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
           const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
-          applyResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
+          const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -2194,9 +2282,8 @@ export default function App() {
           const res = await sel.engine.build(bi);
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
-          applyResult(res, name, summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary, streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
-          if (visionImage) clearImage();
+          const how = await deliverResult(res, name, summary, p, !!visionImage);
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
           ok = true;
           break;
         } catch (err: any) {
@@ -2517,6 +2604,15 @@ export default function App() {
         onPickImage={pickImage}
         onMarkup={attachMarkup}
         onClearImage={clearImage}
+        aiPreview={{
+          active: !!pending,
+          hasDiff: !!pending?.diff,
+          apply: applyPending,
+          discard: () => discardPending(),
+          mode: aiApply,
+          setMode: setAiApply,
+        }}
+        aiDiff={pending?.diff ?? null}
         views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
         onPickView={pickView}
         onClearView={clearView}
@@ -2722,6 +2818,8 @@ export default function App() {
           onSavePrinter={savePrinter}
           onSaveGen={saveGenSettings}
           initialPane={settingsPane}
+          aiApply={aiApply}
+          onSaveAiApply={setAiApply}
           userTint={userTint}
           onSaveTint={saveUserTint}
           lastSyncAt={lastSyncAt}
@@ -2895,6 +2993,8 @@ function SettingsModal({
   onSavePrinter,
   onSaveGen,
   initialPane,
+  aiApply,
+  onSaveAiApply,
   userTint,
   onSaveTint,
   lastSyncAt,
@@ -2915,6 +3015,8 @@ function SettingsModal({
   onSavePrinter: (p: PrinterDefaults) => void;
   onSaveGen: (keys: Record<string, string>, provider: string, model: string, proxy: string) => void;
   initialPane?: SettingsPane;
+  aiApply: "ask" | "auto";
+  onSaveAiApply: (v: "ask" | "auto") => void;
   userTint: string;
   onSaveTint: (c: string) => void;
   lastSyncAt: number | null;
@@ -3098,6 +3200,16 @@ function SettingsModal({
         {pane === "ai" && (
           <>
             <p className="pane-desc">Writes the CAD code in <b>Precise</b> mode. Gemini and Groq have free tiers; Claude gives the best quality.</p>
+            <label>AI changes</label>
+            <div className="seg sm" role="radiogroup" aria-label="How AI changes apply">
+              <button className={aiApply === "ask" ? "on" : ""} onClick={() => onSaveAiApply("ask")} title="Every AI result is shown as an on-canvas preview with green/red change highlights — nothing commits until you tap Apply">
+                Preview &amp; confirm
+              </button>
+              <button className={aiApply === "auto" ? "on" : ""} onClick={() => onSaveAiApply("auto")} title="AI results apply immediately (Undo still reverts any change)">
+                Apply automatically
+              </button>
+            </div>
+            <p className="fine choice-hint">{aiApply === "ask" ? "AI proposals appear as a preview (green = added, red = removed) and wait for your Apply." : "AI results land immediately — Undo still brings anything back."}</p>
             <label>Provider</label>
             <select
               value={lp}

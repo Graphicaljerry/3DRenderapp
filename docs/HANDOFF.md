@@ -124,11 +124,21 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   imperative (temp line/label in s.measures, committed via new `onMeasureSegment`).
   Label pills clamp to a 13–30 px on-screen band (was 16–53 — zooming into a small hole
   used to bury it under its own label).
-- **Build stamp**: the status bar shows `v <short-sha> · <date>` (vite `define`
-  `__BUILD_STAMP__`; CI reads GITHUB_SHA, local builds ask git) — every push to main
-  changes it, so the user can confirm a refresh picked up the deploy. Tool hints
-  (`.box-hint`) sit at bottom: 50px — ABOVE the Top/Front/Right/3D pills, which are
-  also bottom-centred.
+- **Build stamp**: the status bar shows `v<N>` where N = the git commit COUNT (vite
+  `define` `__BUILD_STAMP__`; strictly numeric by user request — it increases on every
+  push to main, so a bigger number after refresh = the deploy landed). The Pages
+  workflow uses `fetch-depth: 0` (a shallow clone would freeze the count at 1). Tool
+  hints (`.box-hint`) sit at bottom: 50px — ABOVE the Top/Front/Right/3D pills.
+- **Installable app (PWA)**: `vite-plugin-pwa` (autoUpdate) + manifest + generated
+  icons (`public/icons/*`, rendered from the brand box glyph via Playwright —
+  regenerate with a gen-icons harness if the brand changes) + iOS meta tags in
+  index.html. The service worker precaches the WHOLE shell including the ~11 MB OCCT
+  wasm (`maximumFileSizeToCacheInBytes` raised; Google Fonts runtime-cached), so the
+  installed app works fully OFFLINE for everything local (templates, direct edits,
+  hole/measure/export) — verified by building a template with the network off against
+  the production build. AI chat still needs the internet. Note: after a deploy, the
+  new worker installs in the background — the SECOND refresh shows the new build
+  number. SW is disabled in dev, so the Playwright harnesses are unaffected.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

@@ -1,16 +1,18 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { VitePWA } from "vite-plugin-pwa";
 import { execSync } from "node:child_process";
 
 // ---- Build stamp -----------------------------------------------------------
-// Shown in the app's status bar so a refresh provably picked up a new deploy:
-// every push to main is a new commit, so the short SHA changes every time.
-// CI (the Pages workflow) provides GITHUB_SHA; local builds ask git directly.
-let buildSha = (process.env.GITHUB_SHA || "").slice(0, 7);
-if (!buildSha) {
-  try { buildSha = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { buildSha = "dev"; }
-}
-const BUILD_STAMP = `${buildSha} · ${new Date().toISOString().slice(0, 10)}`;
+// Shown in the app's status bar so a refresh provably picked up a new deploy.
+// Strictly numeric: the commit COUNT, which grows by (at least) 1 on every push
+// to main. The Pages workflow checks out full history (fetch-depth: 0) so the
+// count is real in CI too; if git is unavailable, fall back to a numeric
+// build-minute stamp so the number still changes per build.
+let buildNum = "";
+try { buildNum = execSync("git rev-list --count HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { /* no git */ }
+if (!/^\d+$/.test(buildNum)) buildNum = new Date().toISOString().slice(2, 16).replace(/\D/g, "");
+const BUILD_STAMP = buildNum;
 
 // ---- Local relay ("backend") ----------------------------------------------
 // Generative-3D providers refuse direct browser calls (CORS) and use secret keys.
@@ -122,7 +124,54 @@ export default defineConfig({
   // Local dev / other hosts keep "/".
   base: process.env.BUILD_BASE || "/",
   define: { __BUILD_STAMP__: JSON.stringify(BUILD_STAMP) },
-  plugins: [react(), relayPlugin()],
+  plugins: [
+    react(),
+    relayPlugin(),
+    // ---- Installable app (PWA): manifest + icons + offline service worker. ----
+    // "Add to Home Screen" / browser Install gives a standalone, dock-launchable
+    // app. The service worker precaches the whole shell INCLUDING the ~11 MB OCCT
+    // wasm, so once visited the CAD kernel works with no network at all (AI chat
+    // still needs the internet, everything local — templates, direct edits,
+    // hole tool, measure, export — does not). autoUpdate: each deploy's new
+    // worker installs in the background and takes over on the next refresh.
+    VitePWA({
+      registerType: "autoUpdate",
+      injectRegister: "auto",
+      includeAssets: ["icons/apple-touch-icon.png"],
+      manifest: {
+        name: "Moldable — AI 3D design for printing",
+        short_name: "Moldable",
+        description: "Design precise, printable 3D parts with chat, templates and direct editing — right in your browser.",
+        theme_color: "#0e9488",
+        background_color: "#ffffff",
+        display: "standalone",
+        icons: [
+          { src: "icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "icons/icon-512.png", sizes: "512x512", type: "image/png" },
+          { src: "icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+        ],
+      },
+      workbox: {
+        globPatterns: ["**/*.{js,css,html,wasm,svg,png,webp,woff2}"],
+        // The OCCT kernel wasm alone is ~11 MB — well past workbox's 2 MB default.
+        maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
+        // Fonts come from Google Fonts at runtime; cache them after first use so
+        // the installed app keeps its typography offline.
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: "StaleWhileRevalidate",
+            options: { cacheName: "google-fonts-css", expiration: { maxEntries: 8, maxAgeSeconds: 60 * 60 * 24 * 365 } },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: "CacheFirst",
+            options: { cacheName: "google-fonts-files", expiration: { maxEntries: 24, maxAgeSeconds: 60 * 60 * 24 * 365 }, cacheableResponse: { statuses: [0, 200] } },
+          },
+        ],
+      },
+    }),
+  ],
   worker: { format: "es" },
   optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },
   build: {

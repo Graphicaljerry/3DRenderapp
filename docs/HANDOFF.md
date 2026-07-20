@@ -139,6 +139,21 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   the production build. AI chat still needs the internet. Note: after a deploy, the
   new worker installs in the background — the SECOND refresh shows the new build
   number. SW is disabled in dev, so the Playwright harnesses are unaffected.
+- **Kernel errors are human**: OCCT C++ exceptions cross the wasm boundary as bare
+  pointer numbers ("8759440" — a real user hit this). `cad.worker.ts kernelError()`
+  translates them (best-effort real OCCT text via `OCJS.getStandard_FailureData`,
+  else a causes-explainer) at build/export/import — which also gives the AI repair
+  loop something to act on (verified: bad-fillet program → readable repair prompt →
+  fixed on attempt 2).
+- **On-device AI (WebLLM)**: provider "local" — Qwen2.5-Coder-1.5B on WebGPU,
+  ~0.9 GB one-time download cached by the browser, then works fully offline.
+  `src/llm/local.ts` (lazy-imports @mlc-ai/web-llm; download progress narrates via
+  onThinking). Picker/Settings hide it without WebGPU. ALSO an automatic fallback:
+  in send(), a reachability failure (fetch/5xx/timeout — NOT model or key errors)
+  retries the same request locally when the weights are already on the device, with
+  a chat note + "on-device" model label. Test hook `localStorage.moldable_local_mock
+  = "1"` swaps in an instant mock engine (streams a 25 mm cube) — the real 0.9 GB
+  download was NOT exercised in CI; first real-device use is the true test.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

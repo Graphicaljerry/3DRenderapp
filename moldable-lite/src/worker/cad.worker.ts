@@ -7,14 +7,32 @@ import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, W
 
 // ---- OCCT boot. locateFile MUST return the ?url import so emscripten fetches the hashed wasm. ----
 let ocReady: Promise<void> | null = null;
+let OCH: any = null; // kept to decode C++ exception pointers into real messages
 function ensureOC(): Promise<void> {
   if (!ocReady) {
     ocReady = (async () => {
       const OC = await opencascade({ locateFile: () => opencascadeWasm });
+      OCH = OC;
       setOC(OC);
     })();
   }
   return ocReady;
+}
+
+/** OCCT C++ exceptions cross the wasm boundary as a bare pointer number ("8759440") —
+    meaningless to the user AND to the AI repair loop that gets the message next. Pull
+    the real exception text back out of the wasm heap when the build exposes it, and
+    always explain the usual causes so a retry has something to act on. */
+function kernelError(e: any): Error {
+  const raw = String(e?.message ?? e).trim();
+  if (!/^\d+$/.test(raw)) return e instanceof Error ? e : new Error(raw);
+  let occText = "";
+  try {
+    occText = String(OCH?.OCJS?.getStandard_FailureData?.(e)?.GetMessageString?.() ?? "");
+  } catch { /* decoding is best-effort */ }
+  return new Error(
+    `the CAD kernel rejected this geometry${occText ? ` (${occText})` : ""} — usually a fillet/chamfer radius larger than its edge can take, a boolean between shapes that only touch instead of overlap, a shell/offset thicker than the wall, or a self-intersecting sketch. Use smaller radii/sizes or build that feature a different way.`,
+  );
 }
 
 const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
@@ -269,11 +287,12 @@ const api: CadWorkerApi = {
       const dims = dimsOf(shape);
       return { ok: true, faces, dims };
     } catch (e: any) {
+      const err = kernelError(e);
       return {
         ok: false,
         error: {
-          name: e?.name ?? "Error",
-          message: String(e?.message ?? e),
+          name: err.name,
+          message: err.message,
           stack: String(e?.stack ?? ""),
         },
       };
@@ -282,10 +301,14 @@ const api: CadWorkerApi = {
 
   async exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>, ops?: WorkerOp[]): Promise<Blob> {
     await ensureOC();
-    const shape = dropToBed(buildShape(code, params, ops));
-    return format === "step"
-      ? shape.blobSTEP()
-      : shape.blobSTL({ tolerance: 0.01, angularTolerance: 0.1, binary: true });
+    try {
+      const shape = dropToBed(buildShape(code, params, ops));
+      return format === "step"
+        ? shape.blobSTEP()
+        : shape.blobSTL({ tolerance: 0.01, angularTolerance: 0.1, binary: true });
+    } catch (e) {
+      throw kernelError(e); // a raw pointer number would otherwise cross comlink verbatim
+    }
   },
 };
 

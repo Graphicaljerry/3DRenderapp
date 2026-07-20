@@ -124,6 +124,11 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   imperative (temp line/label in s.measures, committed via new `onMeasureSegment`).
   Label pills clamp to a 13–30 px on-screen band (was 16–53 — zooming into a small hole
   used to bury it under its own label).
+- **Build stamp**: the status bar shows `v <short-sha> · <date>` (vite `define`
+  `__BUILD_STAMP__`; CI reads GITHUB_SHA, local builds ask git) — every push to main
+  changes it, so the user can confirm a refresh picked up the deploy. Tool hints
+  (`.box-hint`) sit at bottom: 50px — ABOVE the Top/Front/Right/3D pills, which are
+  also bottom-centred.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

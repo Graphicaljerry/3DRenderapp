@@ -115,12 +115,22 @@ async function currentUid(): Promise<string | null> {
   return data?.session?.user?.id ?? null;
 }
 
-/** Meshes/STEP blobs stay on-device; everything else about a project syncs. */
-function sanitizeProject(p: Project): Project {
+/** Meshes/STEP blobs stay on-device; everything else about a project syncs.
+    Inline data-URL images get a size budget: model thumbnails (~10-30 KB) pass,
+    full camera photos / marked screenshots in chat (often multi-MB) do not —
+    unbounded images inflated the single-row payload past the server's statement
+    timeout ("canceling statement due to statement timeout", a real user report).
+    `lean` drops images entirely — the last-resort retry when even the trimmed
+    payload times out; code, chats and settings always survive. */
+const IMG_BUDGET = 64 * 1024;
+function sanitizeProject(p: Project, lean = false): Project {
+  const img = (s?: string) => (s && !lean && s.length <= IMG_BUDGET ? s : undefined);
   return {
     ...p,
     glb: undefined,
     importFile: undefined,
+    thumb: img(p.thumb),
+    chat: p.chat?.map((t) => (t.image ? { ...t, image: img(t.image) } : t)),
     versions: p.versions.map((v) => ({ ...v, glb: undefined, importFile: undefined })),
   };
 }
@@ -130,9 +140,20 @@ export async function cloudSyncPush(): Promise<{ projects: number } | null> {
   const uid = await currentUid();
   if (!uid) return null;
   await pushBlob("settings", await encryptPayload(uid, JSON.stringify(gatherSettings())));
-  const projects = (await listProjects()).map(sanitizeProject);
-  await pushBlob("projects", await encryptPayload(uid, JSON.stringify(projects)));
-  return { projects: projects.length };
+  const all = await listProjects();
+  const attempt = async (lean: boolean) => {
+    const projects = all.map((p) => sanitizeProject(p, lean));
+    await pushBlob("projects", await encryptPayload(uid, JSON.stringify(projects)));
+    return projects.length;
+  };
+  try {
+    return { projects: await attempt(false) };
+  } catch (e: any) {
+    // The server kills oversized upserts mid-statement — retry once without any
+    // inline images rather than failing the whole sync.
+    if (!/statement timeout|57014/i.test(String(e?.message ?? e))) throw e;
+    return { projects: await attempt(true) };
+  }
 }
 
 /** Pull the account's data into this device (idempotent — merges projects by

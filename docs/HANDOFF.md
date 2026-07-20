@@ -165,6 +165,18 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   (≤680px container) the head wraps as clean rows (tools cluster drops below whole).
   `.statusbar` wraps whole chips (dims/p2p are nowrap units). Audited at 1194/1024/834
   via a Playwright overflow scan (no element crosses the viewport at any of them).
+- **Sync payload fix**: cloud sync pushed ALL projects as ONE row — unbounded inline
+  images (camera photos in chat, thumbs) blew past Supabase's statement timeout
+  ("canceling statement due to statement timeout", user report). Now: gzip BEFORE
+  encrypt (envelope v2 `gz:true`, ~4% of plaintext; v1 decrypts fine), inline images
+  capped at 64 KB each (model thumbs pass, camera photos don't), and a statement-
+  timeout retry that drops all images (code/chats/settings always survive).
+- **Settings redesign**: every tab is 1-2 titled `SGroup` cards (`.sgroup`), advanced
+  bits behind `<details>`: AI = Brain + AI changes (OpenRouter search/reasoning
+  collapsed under "More models & thinking"); 3D engine = Engine + Access; Printer =
+  Your printer + Print checks; Appearance = Look (theme + bubble tint) + Workspace
+  (units + dims mode — NEW controls mirroring the View menu / topbar); Sync = Cloud
+  account (+ "What syncs, exactly?" details) + File backup (collapsed).
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

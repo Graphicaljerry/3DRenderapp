@@ -459,6 +459,12 @@ button { font-family: inherit; cursor: pointer; }
 .pmenu-item:hover { background: var(--surf); }
 .pmenu-item.on { color: var(--accent-d); font-weight: 600; }
 .pmenu-sep { height: 1px; background: var(--bord-subtle); margin: 3px 4px; }
+/* Settings groups: one bounded card per topic, so each tab reads as a short list
+   of titled sections instead of a wall of controls. */
+.sgroup { border: 1px solid var(--bord-subtle); border-radius: 10px; padding: 4px 14px 12px; margin: 12px 0; background: color-mix(in srgb, var(--surf) 45%, transparent); }
+.sgroup-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin: 8px 0 2px; }
+.sgroup-head b { font-size: 13px; font-weight: 700; color: var(--ink); }
+.sgroup-head span { font-size: 11px; color: var(--subt); }
 /* Deployed-build stamp in the status bar — proof a refresh picked up the new deploy. */
 .build-tag { font-size: 10px; color: var(--subt); white-space: nowrap; user-select: all; }
 /* Three-way choice inside a menu row (Dimensions: On select / Always / Off). */

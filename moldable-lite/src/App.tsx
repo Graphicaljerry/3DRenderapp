@@ -2958,6 +2958,12 @@ export default function App() {
           onSaveAiApply={setAiApply}
           userTint={userTint}
           onSaveTint={saveUserTint}
+          theme={theme}
+          onSaveTheme={setThemeState}
+          units={units}
+          onSaveUnits={(u) => setUnits(() => u)}
+          dimsMode={dimsMode}
+          onSaveDimsMode={setDimsMode}
           lastSyncAt={lastSyncAt}
           onSynced={markSynced}
           onClose={() => setShowSettings(false)}
@@ -3114,6 +3120,20 @@ function KeyCard({ model, onContinue, onExample, onTemplates, onFree }: { model:
   );
 }
 
+/** One visually-bounded settings group: a title, an optional one-line hint, then its
+    controls — the "categorize, don't overwhelm" building block of the Settings modal. */
+function SGroup({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
+  return (
+    <section className="sgroup">
+      <div className="sgroup-head">
+        <b>{title}</b>
+        {hint && <span>{hint}</span>}
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function SettingsModal({
   initialKey,
   initialModel,
@@ -3133,6 +3153,12 @@ function SettingsModal({
   onSaveAiApply,
   userTint,
   onSaveTint,
+  theme,
+  onSaveTheme,
+  units,
+  onSaveUnits,
+  dimsMode,
+  onSaveDimsMode,
   lastSyncAt,
   onSynced,
   onClose,
@@ -3155,6 +3181,12 @@ function SettingsModal({
   onSaveAiApply: (v: "ask" | "auto") => void;
   userTint: string;
   onSaveTint: (c: string) => void;
+  theme: "light" | "dark";
+  onSaveTheme: (t: "light" | "dark") => void;
+  units: "mm" | "in";
+  onSaveUnits: (u: "mm" | "in") => void;
+  dimsMode: "select" | "always" | "off";
+  onSaveDimsMode: (m: "select" | "always" | "off") => void;
   lastSyncAt: number | null;
   onSynced: () => void;
   onClose: () => void;
@@ -3311,41 +3343,51 @@ function SettingsModal({
 
         {pane === "appearance" && (
           <>
-            <p className="pane-desc">Personalise the look. More options may appear here over time.</p>
-            <label>Your chat bubble colour</label>
-            <div className="tint-swatches">
-              {BUBBLE_TINTS.map((t) => (
-                <button
-                  key={t.color}
-                  type="button"
-                  className={`tint-swatch${userTint.toLowerCase() === t.color.toLowerCase() ? " on" : ""}`}
-                  style={{ ["--sw" as string]: t.color }}
-                  title={t.label}
-                  aria-label={t.label}
-                  onClick={() => onSaveTint(t.color)}
-                >
-                  <span className="tint-dot" />
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <p className="fine">Applies to your own messages in the chat — a subtle tint so they stand out from Moldable's replies.</p>
+            <p className="pane-desc">How Moldable looks and measures.</p>
+            <SGroup title="Look">
+              <label>Theme</label>
+              <div className="seg sm" role="radiogroup" aria-label="Theme">
+                <button className={theme === "light" ? "on" : ""} onClick={() => onSaveTheme("light")}>Light</button>
+                <button className={theme === "dark" ? "on" : ""} onClick={() => onSaveTheme("dark")}>Dark</button>
+              </div>
+              <label>Your chat bubble colour</label>
+              <div className="tint-swatches">
+                {BUBBLE_TINTS.map((t) => (
+                  <button
+                    key={t.color}
+                    type="button"
+                    className={`tint-swatch${userTint.toLowerCase() === t.color.toLowerCase() ? " on" : ""}`}
+                    style={{ ["--sw" as string]: t.color }}
+                    title={t.label}
+                    aria-label={t.label}
+                    onClick={() => onSaveTint(t.color)}
+                  >
+                    <span className="tint-dot" />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </SGroup>
+            <SGroup title="Workspace" hint="also switchable from the viewer's View menu">
+              <label>Units</label>
+              <div className="seg sm" role="radiogroup" aria-label="Units">
+                <button className={units === "mm" ? "on" : ""} onClick={() => onSaveUnits("mm")}>Millimetres</button>
+                <button className={units === "in" ? "on" : ""} onClick={() => onSaveUnits("in")}>Inches</button>
+              </div>
+              <label>Dimensions box</label>
+              <div className="seg sm" role="radiogroup" aria-label="When to show dimensions">
+                <button className={dimsMode === "select" ? "on" : ""} onClick={() => onSaveDimsMode("select")} title="Size lines appear when you select the object">On select</button>
+                <button className={dimsMode === "always" ? "on" : ""} onClick={() => onSaveDimsMode("always")}>Always</button>
+                <button className={dimsMode === "off" ? "on" : ""} onClick={() => onSaveDimsMode("off")}>Off</button>
+              </div>
+            </SGroup>
           </>
         )}
 
         {pane === "ai" && (
           <>
-            <p className="pane-desc">Writes the CAD code in <b>Precise</b> mode. Gemini and Groq have free tiers; Claude gives the best quality.</p>
-            <label>AI changes</label>
-            <div className="seg sm" role="radiogroup" aria-label="How AI changes apply">
-              <button className={aiApply === "ask" ? "on" : ""} onClick={() => onSaveAiApply("ask")} title="Every AI result is shown as an on-canvas preview with green/red change highlights — nothing commits until you tap Apply">
-                Preview &amp; confirm
-              </button>
-              <button className={aiApply === "auto" ? "on" : ""} onClick={() => onSaveAiApply("auto")} title="AI results apply immediately (Undo still reverts any change)">
-                Apply automatically
-              </button>
-            </div>
-            <p className="fine choice-hint">{aiApply === "ask" ? "AI proposals appear as a preview (green = added, red = removed) and wait for your Apply." : "AI results land immediately — Undo still brings anything back."}</p>
+            <p className="pane-desc">The brain that writes your CAD code in <b>Precise</b> mode.</p>
+            <SGroup title="Brain" hint="Gemini & Groq have free tiers · Claude is the most accurate">
             <label>Provider</label>
             <select
               value={lp}
@@ -3438,26 +3480,24 @@ function SettingsModal({
                         </button>
                       ))}
                     </div>
-                    <p className="fine">Picked for accurate CAD code — strongest at code + spatial reasoning. “thinks” = a reasoning model.</p>
                   </>
                 )}
-                <label>Model{lp === "openrouter" ? " — or type to search all" : " id"}</label>
-                <input
-                  value={lmodel}
-                  onChange={(e) => setLmodel(e.target.value)}
-                  placeholder={lpre.defaultModel || "model-name"}
-                  list={lp === "openrouter" ? "openrouter-models" : undefined}
-                  autoComplete="off"
-                />
-                {lp === "openrouter" && (
-                  <datalist id="openrouter-models">
-                    {orModels.map((mm) => (
-                      <option key={mm.id} value={mm.id}>{mm.name}{mm.reasoning ? " · thinks" : ""}{fmtORPrice(mm.inPrice) ? ` — ${fmtORPrice(mm.inPrice)}` : ""}</option>
-                    ))}
-                  </datalist>
-                )}
-                {lp === "openrouter" && (
-                  <>
+                {lp === "openrouter" ? (
+                  <details className="adv">
+                    <summary>More models &amp; thinking effort</summary>
+                    <label>Model — type to search all</label>
+                    <input
+                      value={lmodel}
+                      onChange={(e) => setLmodel(e.target.value)}
+                      placeholder={lpre.defaultModel || "model-name"}
+                      list="openrouter-models"
+                      autoComplete="off"
+                    />
+                    <datalist id="openrouter-models">
+                      {orModels.map((mm) => (
+                        <option key={mm.id} value={mm.id}>{mm.name}{mm.reasoning ? " · thinks" : ""}{fmtORPrice(mm.inPrice) ? ` — ${fmtORPrice(mm.inPrice)}` : ""}</option>
+                      ))}
+                    </datalist>
                     <label>Thinking (reasoning)</label>
                     <select
                       value={orReasoning}
@@ -3473,23 +3513,44 @@ function SettingsModal({
                       <option value="high">High — deepest, slowest</option>
                     </select>
                     <p className="fine">
-                      Applies only to reasoning-capable models (the “thinks” ones). They reason through tricky geometry, fits and threads before writing the code — more accurate, a bit slower/costlier.
+                      “Thinks” models reason through tricky geometry before writing code — more accurate, a bit slower.
+                      {orModels.length ? ` ${orModels.length} models available — browse ` : " Browse "}
+                      <a className="link-inline" href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">openrouter.ai/models</a>. Currently using: <b>{lmodel || lpre.defaultModel}</b>
                     </p>
-                    <p className="fine">
-                      {orModels.length ? `${orModels.length} models available — ` : "Type a model slug, or "}
-                      browse all at <a className="link-inline" href="https://openrouter.ai/models" target="_blank" rel="noopener noreferrer">openrouter.ai/models</a>. Currently using: <b>{lmodel || lpre.defaultModel}</b>
-                    </p>
+                  </details>
+                ) : (
+                  <>
+                    <label>Model id</label>
+                    <input
+                      value={lmodel}
+                      onChange={(e) => setLmodel(e.target.value)}
+                      placeholder={lpre.defaultModel || "model-name"}
+                      autoComplete="off"
+                    />
+                    <p className="fine">{lpre.keyHint}</p>
                   </>
                 )}
-                {lp !== "openrouter" && <p className="fine">{lpre.keyHint}</p>}
               </>
             )}
+            </SGroup>
+            <SGroup title="AI changes" hint="how results land on the canvas">
+              <div className="seg sm" role="radiogroup" aria-label="How AI changes apply">
+                <button className={aiApply === "ask" ? "on" : ""} onClick={() => onSaveAiApply("ask")} title="Every AI result is shown as an on-canvas preview with green/red change highlights — nothing commits until you tap Apply">
+                  Preview &amp; confirm
+                </button>
+                <button className={aiApply === "auto" ? "on" : ""} onClick={() => onSaveAiApply("auto")} title="AI results apply immediately (Undo still reverts any change)">
+                  Apply automatically
+                </button>
+              </div>
+              <p className="fine choice-hint">{aiApply === "ask" ? "AI proposals appear as a preview (green = added, red = removed) and wait for your Apply." : "AI results land immediately — Undo still brings anything back."}</p>
+            </SGroup>
           </>
         )}
 
         {pane === "mesh" && (
           <>
-            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode. Hugging Face is free; fal's Hunyuan 3D v3.1 Pro ($0.375 per model) is the most accurate.</p>
+            <p className="pane-desc">Turns a photo or text into a mesh in <b>Generative</b> mode.</p>
+            <SGroup title="Engine" hint="Hugging Face is free · fal's Hunyuan 3D Pro is the most accurate">
             <label>Engine</label>
             <select
               value={gp}
@@ -3523,76 +3584,80 @@ function SettingsModal({
             {prov.models.find((mm) => mm.id === gm)?.hint && (
               <p className="fine choice-hint">{prov.models.find((mm) => mm.id === gm)!.hint}</p>
             )}
-            <label>
-              {prov.label.split(" (")[0]} key
-              {prov.needsKey ? "" : " — optional but recommended (5× the free GPU quota)"}
-            </label>
-            <input
-              type="password"
-              value={keys[gp] ?? ""}
-              onChange={(e) => setKeys({ ...keys, [gp]: e.target.value })}
-              placeholder={prov.needsKey ? "paste your key…" : "hf_…"}
-            />
-            <p className="fine">{prov.keyHint}</p>
-            <details className="adv">
-              <summary>Advanced — relay (a built-in one is already configured)</summary>
-              <label>Proxy base URL — leave blank to use the built-in relay</label>
-              <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = built-in relay" />
-              <p className="fine">
-                Tripo/Meshy/fal/Replicate now work on the hosted site out of the box through a built-in relay. Paste your own relay URL here
-                only if you want to self-host one (guide: <b>proxy/DEPLOY.md</b> in the repo).
-              </p>
-            </details>
+            </SGroup>
+            <SGroup title="Access">
+              <label>
+                {prov.label.split(" (")[0]} key
+                {prov.needsKey ? "" : " — optional but recommended (5× the free GPU quota)"}
+              </label>
+              <input
+                type="password"
+                value={keys[gp] ?? ""}
+                onChange={(e) => setKeys({ ...keys, [gp]: e.target.value })}
+                placeholder={prov.needsKey ? "paste your key…" : "hf_…"}
+              />
+              <p className="fine">{prov.keyHint}</p>
+              <details className="adv">
+                <summary>Advanced — relay (a built-in one is already configured)</summary>
+                <label>Proxy base URL — leave blank to use the built-in relay</label>
+                <input value={proxy} onChange={(e) => setProxy(e.target.value)} placeholder="blank = built-in relay" />
+                <p className="fine">
+                  Tripo/Meshy/fal/Replicate now work on the hosted site out of the box through a built-in relay. Paste your own relay URL here
+                  only if you want to self-host one (guide: <b>proxy/DEPLOY.md</b> in the repo).
+                </p>
+              </details>
+            </SGroup>
           </>
         )}
 
         {pane === "printer" && (
           <>
             <p className="pane-desc">Used by the bed-fit check and the Printability report.</p>
-            <label>Printer — picking one fills the bed size below</label>
-            <select
-              value={preset}
-              onChange={(e) => {
-                const v = e.target.value;
-                setPreset(v);
-                const pr = PRINTERS.find((x) => printerKey(x) === v);
-                if (pr) setBed({ x: pr.x, y: pr.y, z: pr.z });
-              }}
-            >
-              <option value="custom">Custom / other</option>
-              {PRINTER_BRANDS.map((b) => (
-                <optgroup key={b} label={b}>
-                  {PRINTERS.filter((x) => x.brand === b).map((x) => (
-                    <option key={printerKey(x)} value={printerKey(x)}>
-                      {x.model} — {x.x}×{x.y}×{x.z} mm{x.kind === "Resin" ? " · resin" : ""}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-            <label>Bed size (mm): width × depth × height</label>
-            <div className="row3">
-              <input type="number" value={bed.x} onChange={(e) => { setBed({ ...bed, x: +e.target.value }); setPreset("custom"); }} />
-              <input type="number" value={bed.y} onChange={(e) => { setBed({ ...bed, y: +e.target.value }); setPreset("custom"); }} />
-              <input type="number" value={bed.z} onChange={(e) => { setBed({ ...bed, z: +e.target.value }); setPreset("custom"); }} />
-            </div>
-            <label>Overhang warning threshold (°)</label>
-            <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
-            <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
+            <SGroup title="Your printer">
+              <label>Printer — picking one fills the bed size below</label>
+              <select
+                value={preset}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setPreset(v);
+                  const pr = PRINTERS.find((x) => printerKey(x) === v);
+                  if (pr) setBed({ x: pr.x, y: pr.y, z: pr.z });
+                }}
+              >
+                <option value="custom">Custom / other</option>
+                {PRINTER_BRANDS.map((b) => (
+                  <optgroup key={b} label={b}>
+                    {PRINTERS.filter((x) => x.brand === b).map((x) => (
+                      <option key={printerKey(x)} value={printerKey(x)}>
+                        {x.model} — {x.x}×{x.y}×{x.z} mm{x.kind === "Resin" ? " · resin" : ""}
+                      </option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+              <label>Bed size (mm): width × depth × height</label>
+              <div className="row3">
+                <input type="number" value={bed.x} onChange={(e) => { setBed({ ...bed, x: +e.target.value }); setPreset("custom"); }} />
+                <input type="number" value={bed.y} onChange={(e) => { setBed({ ...bed, y: +e.target.value }); setPreset("custom"); }} />
+                <input type="number" value={bed.z} onChange={(e) => { setBed({ ...bed, z: +e.target.value }); setPreset("custom"); }} />
+              </div>
+            </SGroup>
+            <SGroup title="Print checks">
+              <label>Overhang warning threshold (°)</label>
+              <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
+              <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
+            </SGroup>
           </>
         )}
 
         {pane === "sync" && (
           <>
-            <p className="pane-desc">
-              Access your setup and chats from any computer. Everything synced is <b>encrypted in your browser with a passphrase you choose</b> —
-              the server only ever stores unreadable ciphertext. Meshes stay on each device (they're big); code, chats and settings sync.
-            </p>
-            <div className="sect-label">Cloud account</div>
+            <p className="pane-desc">Sign in once — your projects, chats and settings follow you to any device, encrypted in your browser before upload.</p>
+            <SGroup title="Cloud account">
             {syncMsg && <div className={`sync-status${syncErr ? " err" : ""}`} role="status">{syncMsg}</div>}
             {cloudEmail ? (
               <>
-                <p className="fine">Signed in as <b>{cloudEmail}</b> — your projects, chats &amp; settings sync automatically across your devices.</p>
+                <p className="fine">Signed in as <b>{cloudEmail}</b> — everything syncs automatically.</p>
                 <p className="fine sync-when">
                   {lastSyncAt
                     ? <>Last synced: <b>{new Date(lastSyncAt).toLocaleString()}</b></>
@@ -3602,7 +3667,10 @@ function SettingsModal({
                   <button className="primary sm" disabled={cloudBusy} onClick={() => doCloud("sync")}>Sync now</button>
                   <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>
                 </div>
-                <p className="fine">On another device, sign in the same way — everything appears automatically. (3D meshes stay per-device; CAD models rebuild from their code.)</p>
+                <details className="adv">
+                  <summary>What syncs, exactly?</summary>
+                  <p className="fine">Projects (their code, versions, chats, thumbnails), plus your settings and keys — encrypted in your browser before upload, private to your account. 3D meshes and imported STEP files stay on each device (they're big; CAD models rebuild from their code). On another device, just sign in the same way.</p>
+                </details>
               </>
             ) : (
               <>
@@ -3631,30 +3699,35 @@ function SettingsModal({
               </>
             )}
 
-            <div className="sect-label">Offline backup (encrypted file, no account)</div>
-            <label>Backup passphrase</label>
-            <input
-              type="password"
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              placeholder="choose a passphrase for the file"
-            />
-            <div className="param-actions">
-              <button className="primary sm" disabled={passphrase.length < 4} onClick={doExport}>Download encrypted backup</button>
-              <button className="ghost sm" disabled={passphrase.length < 4} onClick={() => importRef.current?.click()}>Restore from backup…</button>
-            </div>
-            <input
-              ref={importRef}
-              type="file"
-              accept="application/json,.json"
-              hidden
-              onChange={(e) => {
-                const f = e.target.files?.[0];
-                if (f) void doImport(f);
-                e.currentTarget.value = "";
-              }}
-            />
-            <p className="fine">A zero-knowledge option: the file is encrypted with your passphrase and never uploaded. Restore it on another computer with the same passphrase.</p>
+            </SGroup>
+            <SGroup title="File backup" hint="no account needed — an encrypted file you keep">
+              <details className="adv">
+                <summary>Back up or restore with an encrypted file</summary>
+                <label>Backup passphrase</label>
+                <input
+                  type="password"
+                  value={passphrase}
+                  onChange={(e) => setPassphrase(e.target.value)}
+                  placeholder="choose a passphrase for the file"
+                />
+                <div className="param-actions">
+                  <button className="primary sm" disabled={passphrase.length < 4} onClick={doExport}>Download encrypted backup</button>
+                  <button className="ghost sm" disabled={passphrase.length < 4} onClick={() => importRef.current?.click()}>Restore from backup…</button>
+                </div>
+                <input
+                  ref={importRef}
+                  type="file"
+                  accept="application/json,.json"
+                  hidden
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void doImport(f);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <p className="fine">Zero-knowledge: the file is encrypted with your passphrase and never uploaded. Restore it anywhere with the same passphrase.</p>
+              </details>
+            </SGroup>
           </>
         )}
 

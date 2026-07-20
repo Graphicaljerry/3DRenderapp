@@ -42,13 +42,29 @@ export function gatherSettings(): Record<string, string> {
   return out;
 }
 
+// Gzip BEFORE encrypting (ciphertext doesn't compress). JSON of code + chats
+// shrinks 3-10× — big sync payloads were hitting the server's statement timeout.
+async function gz(data: Uint8Array, dir: "gzip" | "gunzip"): Promise<Uint8Array> {
+  const stream = dir === "gzip" ? new CompressionStream("gzip") : new DecompressionStream("gzip");
+  const buf = await new Response(new Blob([data as BlobPart]).stream().pipeThrough(stream)).arrayBuffer();
+  return new Uint8Array(buf);
+}
+
 /** Encrypt any string into a self-describing envelope (also used by cloud sync). */
 export async function encryptPayload(passphrase: string, plaintext: string): Promise<string> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const key = await deriveKey(passphrase, salt);
-  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, new TextEncoder().encode(plaintext)));
-  return JSON.stringify({ app: "moldable-settings", v: 1, salt: b64(salt), iv: b64(iv), data: b64(ct) });
+  let bytes: Uint8Array = new TextEncoder().encode(plaintext);
+  let zipped = false;
+  if (typeof CompressionStream !== "undefined") {
+    try {
+      const packed = await gz(bytes, "gzip");
+      if (packed.length < bytes.length) { bytes = packed; zipped = true; }
+    } catch { /* compression is an optimisation only */ }
+  }
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, bytes as BufferSource));
+  return JSON.stringify({ app: "moldable-settings", v: zipped ? 2 : 1, gz: zipped || undefined, salt: b64(salt), iv: b64(iv), data: b64(ct) });
 }
 
 /** Decrypt an envelope produced by encryptPayload. Throws on wrong passphrase. */
@@ -63,12 +79,14 @@ export async function decryptPayload(passphrase: string, envelope: string): Prom
     throw new Error("That isn't a Moldable backup.");
   }
   const key = await deriveKey(passphrase, unb64(payload.salt));
+  let plain: ArrayBuffer;
   try {
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(payload.iv) as BufferSource }, key, unb64(payload.data) as BufferSource);
-    return new TextDecoder().decode(plain);
+    plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: unb64(payload.iv) as BufferSource }, key, unb64(payload.data) as BufferSource);
   } catch {
     throw new Error("Wrong passphrase for this backup.");
   }
+  const bytes = payload.gz ? await gz(new Uint8Array(plain), "gunzip") : new Uint8Array(plain); // v1 envelopes are plain
+  return new TextDecoder().decode(bytes);
 }
 
 export async function exportSettings(passphrase: string): Promise<Blob> {

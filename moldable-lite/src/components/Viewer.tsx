@@ -90,7 +90,7 @@ interface Props {
   pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round
   modelSelected: boolean; // draw a bounding box around the whole part
   onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
-  attachments: { id: string; geometry: THREE.BufferGeometry }[]; // free-floating objects
+  attachments: { id: string; geometry: THREE.BufferGeometry; tint?: string }[]; // free-floating objects
   selAttachIds: string[]; // which of them are selected (>1 → group transform)
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
@@ -1391,7 +1391,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
     for (const a of attachments) {
       if (s.attachMap.has(a.id)) continue;
-      const m = new THREE.Mesh(a.geometry, new THREE.MeshStandardMaterial({ color: "#7fc4b9", metalness: 0.1, roughness: 0.6 }));
+      // Separated model parts keep the model's grey (tint) — only true foreign objects
+      // (imports, logos, pasted copies) get the distinguishing teal.
+      const m = new THREE.Mesh(a.geometry, new THREE.MeshStandardMaterial({ color: a.tint ?? "#7fc4b9", metalness: 0.1, roughness: 0.6 }));
       // Start resting on top of the model (or the bed) at its centre, ready to be placed —
       // stagger extras a little so stacked drops don't hide each other.
       a.geometry.computeBoundingBox();
@@ -1863,11 +1865,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const s = st.current;
       const m = s?.attachMap.get(id);
       if (!s || !m) return;
+      // The gizmo's pivot group may own this mesh (possibly rotated) — bake it out
+      // first so the z-drop happens in world space, then re-arm the gizmo.
+      const rearm = !!s.attachGroup && cb.current.transformMode !== "off";
+      releaseAttachGroup(s);
       m.updateWorldMatrix(true, false);
       const bb = new THREE.Box3().setFromObject(m);
       if (!isFinite(bb.min.z)) return;
       m.position.z -= bb.min.z;
       m.updateWorldMatrix(true, false);
+      if (rearm) enterTransform(s, cb.current.transformMode as "move" | "rotate" | "scale", "attach");
     },
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;
@@ -2415,27 +2422,25 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
     const sel = s.selAttach ?? [];
     const meshes = sel.map((id) => s.attachMap.get(id)).filter((m): m is THREE.Mesh => !!m);
     if (!meshes.length) return;
-    let handle: THREE.Object3D;
-    if (meshes.length === 1) {
-      handle = meshes[0];
-    } else {
-      // GROUP: a temp pivot at the selection's combined centre; Object3D.attach() preserves
-      // each mesh's world transform in and (on release) back out.
-      const box = new THREE.Box3();
-      for (const m of meshes) {
-        m.updateWorldMatrix(true, false);
-        box.expandByObject(m);
-      }
-      const pivot = new THREE.Group();
-      pivot.position.copy(box.getCenter(new THREE.Vector3()));
-      s.scene.add(pivot);
-      for (const m of meshes) pivot.attach(m);
-      s.attachGroup = pivot;
-      handle = pivot;
+    // ALWAYS drive through a temp pivot at the selection's bounding-box CENTRE.
+    // A separated part keeps its geometry in model coordinates, so attaching the
+    // gizmo to the mesh directly parked the handles at the mesh ORIGIN — off to the
+    // side of the part — and made rotate/scale swing about that distant point
+    // instead of the part itself. Object3D.attach() preserves each mesh's world
+    // transform in and (on release) back out.
+    const box = new THREE.Box3();
+    for (const m of meshes) {
+      m.updateWorldMatrix(true, false);
+      box.expandByObject(m);
     }
+    const pivot = new THREE.Group();
+    pivot.position.copy(box.getCenter(new THREE.Vector3()));
+    s.scene.add(pivot);
+    for (const m of meshes) pivot.attach(m);
+    s.attachGroup = pivot;
     s.tc.setMode("translate");
-    s.tc.attach(handle);
-    s.tcR.attach(handle); // combined: arrows + rings together
+    s.tc.attach(pivot);
+    s.tcR.attach(pivot); // combined: arrows + rings together
     return;
   }
   if (!s.mesh) { s.tc.detach(); s.tcR.detach(); return; }

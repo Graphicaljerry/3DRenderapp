@@ -1839,7 +1839,7 @@ export function Workspace(p: Props) {
               <span>{p.printer.bed.x}×{p.printer.bed.y} mm</span>
             </button>
             {p.status === "generating" && <GenTimer />}
-            <span className="build-tag" title="Deployed build (commit · date) — a new number after a refresh means the update landed">v {__BUILD_STAMP__}</span>
+            <span className="build-tag" title="Deployed build number — it goes up with every update, so a bigger number after a refresh means the update landed">v{__BUILD_STAMP__}</span>
             <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => p.setTab("print")} />
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />
           </div>

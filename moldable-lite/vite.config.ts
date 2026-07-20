@@ -1,5 +1,16 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import { execSync } from "node:child_process";
+
+// ---- Build stamp -----------------------------------------------------------
+// Shown in the app's status bar so a refresh provably picked up a new deploy:
+// every push to main is a new commit, so the short SHA changes every time.
+// CI (the Pages workflow) provides GITHUB_SHA; local builds ask git directly.
+let buildSha = (process.env.GITHUB_SHA || "").slice(0, 7);
+if (!buildSha) {
+  try { buildSha = execSync("git rev-parse --short HEAD", { stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { buildSha = "dev"; }
+}
+const BUILD_STAMP = `${buildSha} · ${new Date().toISOString().slice(0, 10)}`;
 
 // ---- Local relay ("backend") ----------------------------------------------
 // Generative-3D providers refuse direct browser calls (CORS) and use secret keys.
@@ -110,6 +121,7 @@ export default defineConfig({
   // GitHub Pages serves the app under /<repo>/; the deploy workflow sets BUILD_BASE.
   // Local dev / other hosts keep "/".
   base: process.env.BUILD_BASE || "/",
+  define: { __BUILD_STAMP__: JSON.stringify(BUILD_STAMP) },
   plugins: [react(), relayPlugin()],
   worker: { format: "es" },
   optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },

@@ -105,6 +105,7 @@ interface Props {
   onSelectPin: (id: string) => void;
   onTransformCommit: (c: TransformCommit) => void;
   onMeasurePoint: (p: [number, number, number]) => void;
+  onMeasureSegment: (a: [number, number, number], b: [number, number, number]) => void; // drag-a-line measure
   onPushPull: (distance: number) => void;
   // Fires as the drag moves (snapped). `solid` is the closed prism (display coords) for the
   // Manifold boolean live preview — present only for extrude drags with a captured cap.
@@ -129,8 +130,11 @@ const THEME_SCENE = { light: "#f6f7f9", dark: "#101418" } as const;
 const THEME_GRID: Record<string, [number, number]> = { light: [0xced2d8, 0xe3e6ea], dark: [0x39414b, 0x232a31] };
 
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
-const LABEL_MIN_PX = 16;
-const LABEL_MAX_PX = 53;
+// On-screen size band for measurement/dimension label pills (sprite height in px).
+// The max matters most: zooming INTO a small feature used to blow labels up until
+// they hid the very hole being measured.
+const LABEL_MIN_PX = 13;
+const LABEL_MAX_PX = 30;
 
 interface EdgeChain {
   segs: number[]; // sharp-segment indices making up this physical edge
@@ -198,11 +202,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onPushPull, onPushPullLive, onContext };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext };
   // Hole-tool interaction state, read imperatively by the pointer handlers (the ghost
   // follows the cursor at frame rate — no React re-render per mousemove).
   const holeIx = useRef<{ ghost: Props["holeGhost"]; place: Props["holePlace"] }>({ ghost: holeGhost, place: holePlace });
@@ -597,6 +601,41 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
       return out;
     };
+    // ---- Measure snapping: pull a clicked/dragged point onto the nearest tessellation
+    // VERTEX (then the nearest triangle edge) of the hit face, with screen-constant
+    // radii — so hole rims and part corners measure exactly, not "wherever the pixel
+    // landed". Curved surfaces tessellate with their vertices ON the true surface,
+    // which is what makes a rim-to-rim hole measurement come out at the real ⌀. ----
+    const snapMeasure = (hit: THREE.Intersection): [number, number, number] => {
+      const s2 = st.current;
+      const p = hit.point;
+      const mesh = s2?.mesh;
+      if (!s2 || !mesh || !hit.face) return [p.x, p.y, p.z];
+      const pos = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
+      const vs = [hit.face.a, hit.face.b, hit.face.c].map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld));
+      const dCam = camera.position.distanceTo(p);
+      const worldPerPx = (2 * dCam * Math.tan((camera.fov * Math.PI) / 360)) / (el.clientHeight || 1);
+      let best: THREE.Vector3 | null = null;
+      let bestD = 14 * worldPerPx; // vertex magnet: ~14 px
+      for (const v of vs) {
+        const d = v.distanceTo(p);
+        if (d < bestD) { bestD = d; best = v; }
+      }
+      if (!best) {
+        // No corner nearby — try the triangle's edges (~9 px) so straight rims still snap.
+        const seg = new THREE.Line3();
+        const q = new THREE.Vector3();
+        let eD = 9 * worldPerPx;
+        for (let i = 0; i < 3; i++) {
+          seg.set(vs[i], vs[(i + 1) % 3]);
+          seg.closestPointToPoint(p, true, q);
+          const d = q.distanceTo(p);
+          if (d < eD) { eD = d; best = q.clone(); }
+        }
+      }
+      const out = best ?? p;
+      return [out.x, out.y, out.z];
+    };
     const handleTap = (e: { clientX: number; clientY: number; shiftKey?: boolean }) => {
       const s2 = st.current;
       if (!s2) return;
@@ -635,12 +674,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           return;
         }
       }
-      // Measure tool: click a surface point; App pairs two clicks into a measurement.
+      // Measure tool: click a surface point (snapped); App pairs two clicks into a
+      // measurement. (Press-and-drag measures live in onDown/onMove/onUp.)
       if (cb.current.measureMode) {
         if (!s2.mesh) return;
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (!hit) return;
-        cb.current.onMeasurePoint([hit.point.x, hit.point.y, hit.point.z]);
+        cb.current.onMeasurePoint(snapMeasure(hit));
         return;
       }
       // No tool active → a tap on the part selects the WHOLE model (bounding box);
@@ -695,12 +735,51 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s2.box = null;
     };
     let downAt: { x: number; y: number } | null = null;
+    // Press-and-drag tape measure: press on the model pulls a live line; release commits
+    // both (snapped) ends as one measurement. A press without movement falls back to the
+    // classic click (first point / second point).
+    let measDrag: {
+      pointerId: number; sx: number; sy: number; moved: boolean;
+      a: [number, number, number]; b: [number, number, number] | null;
+      line: THREE.Line | null; label: THREE.Sprite | null; lastText: string; baseH: number;
+    } | null = null;
+    const clearMeasDrag = () => {
+      const md = measDrag;
+      if (!md) return;
+      measDrag = null;
+      for (const o of [md.line, md.label]) {
+        if (!o) continue;
+        o.removeFromParent();
+        (o as any).geometry?.dispose?.();
+        const mat = (o as any).material;
+        mat?.map?.dispose?.();
+        mat?.dispose?.();
+      }
+    };
     const onDown = (e: PointerEvent) => {
       const s2 = st.current;
       // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
-      if (axDrag || anchorDrag) return;
+      if (axDrag || anchorDrag || measDrag) return;
+      // Measure mode: a left press ON the model arms the tape drag (and owns the pointer
+      // so orbit can't fight it). Off the model, orbit proceeds as usual.
+      if (s2 && cb.current.measureMode && s2.mesh && e.button === 0 && !inAxes(e)) {
+        const rect0 = renderer.domElement.getBoundingClientRect();
+        rc.setFromCamera(new THREE.Vector2(((e.clientX - rect0.left) / rect0.width) * 2 - 1, -((e.clientY - rect0.top) / rect0.height) * 2 + 1), camera);
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (hit) {
+          let modelSize = 40;
+          s2.mesh.geometry.computeBoundingBox();
+          const sz = s2.mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+          modelSize = Math.max(sz.x, sz.y, sz.z) || 40;
+          measDrag = { pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, a: snapMeasure(hit), b: null, line: null, label: null, lastText: "", baseH: modelSize * 0.05 };
+          controls.enabled = false;
+          e.preventDefault();
+          try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+          return;
+        }
+      }
       // The corner orientation gizmo owns its pointer: drag orbits, click snaps a view.
       if (inAxes(e)) {
         axDrag = { pointerId: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
@@ -795,6 +874,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
         return;
       }
+      if (measDrag) {
+        if (e.pointerId !== measDrag.pointerId) return;
+        const md = measDrag;
+        clearMeasDrag(); // temp line/label go — the committed measurement re-renders via state
+        controls.enabled = true;
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
+        if (md.moved && md.b) cb.current.onMeasureSegment(md.a, md.b);
+        else cb.current.onMeasurePoint(md.a); // no drag → classic first/second click
+        return;
+      }
       if (anchorDrag) {
         if (e.pointerId !== anchorDrag.pointerId) return;
         const { f, center } = anchorDrag;
@@ -870,6 +959,44 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         orbitBy(dx, dy);
         axDrag.x = e.clientX;
         axDrag.y = e.clientY;
+        return;
+      }
+      // Tape-measure drag: stretch the live line to the (snapped) point under the pointer.
+      if (measDrag) {
+        if (e.pointerId !== measDrag.pointerId || !s2?.mesh) return;
+        e.preventDefault();
+        if (!measDrag.moved && Math.hypot(e.clientX - measDrag.sx, e.clientY - measDrag.sy) < 5) return;
+        measDrag.moved = true;
+        const rect = renderer.domElement.getBoundingClientRect();
+        rc.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (!hit) return; // keep the last end while the pointer crosses empty space
+        measDrag.b = snapMeasure(hit);
+        const a = new THREE.Vector3(...measDrag.a), b = new THREE.Vector3(...measDrag.b);
+        if (!measDrag.line) {
+          measDrag.line = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([a, b]),
+            new THREE.LineBasicMaterial({ color: 0x0d9488, transparent: true, opacity: 0.95, depthTest: false }),
+          );
+          measDrag.line.renderOrder = 5;
+          s2.measures.add(measDrag.line);
+        } else {
+          measDrag.line.geometry.setFromPoints([a, b]);
+        }
+        const text = fmtDist(a.distanceTo(b), cb.current.units);
+        if (text !== measDrag.lastText) {
+          measDrag.lastText = text;
+          if (measDrag.label) {
+            measDrag.label.removeFromParent();
+            (measDrag.label.material as THREE.SpriteMaterial).map?.dispose();
+            measDrag.label.material.dispose();
+          }
+          measDrag.label = makeLabel(text, { fg: "#0f766e", bg: "rgba(255,255,255,0.94)", border: "#0d9488" });
+          measDrag.label.userData.dimLabel = true;
+          measDrag.label.userData.baseH = measDrag.baseH;
+          s2.measures.add(measDrag.label);
+        }
+        measDrag.label!.position.copy(a.clone().add(b).multiplyScalar(0.5));
         return;
       }
       // Anchor drag: pointer distance from the part's screen centre sets the scale factor.
@@ -993,6 +1120,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (hp) { setHover(String(hp.object.userData.pinId)); return; }
       }
       setHover(null);
+      // Measure mode: crosshair over the model says "you can click or drag here".
+      if (cb.current.measureMode && s2.mesh) {
+        const mh = rc.intersectObject(s2.mesh, false)[0];
+        renderer.domElement.style.cursor = mh ? "crosshair" : "";
+        return;
+      }
       if (!cb.current.selectMode || !s2.mesh) return;
       // Point mode: just a crosshair over the model (click to drop a marker).
       if (cb.current.selectKind === "point") {
@@ -1025,6 +1158,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // a pen drag can die mid-way and leave the drag armed with orbit frozen.
     const onCancelPtr = (e: PointerEvent) => {
       const s2 = st.current;
+      if (measDrag && e.pointerId === measDrag.pointerId) {
+        clearMeasDrag(); // abandon the tape — nothing commits
+        controls.enabled = true;
+        return;
+      }
       if (axDrag && e.pointerId === axDrag.pointerId) {
         axDrag = null;
         controls.enabled = true;

@@ -107,6 +107,23 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   existing boolean `showDims` prop; Viewer no longer hides dims for the whole gizmo
   session — only during an ACTUAL drag (onDragChange; a model drag stays hidden until
   the op-commit rebuild recreates them, a no-op release or attachment drag restores).
+- **Part context everywhere**: every AI request's system prompt carries `Current canvas:
+  the user is working on the part "<name>", currently W × D × H mm — <first chat blurb>`
+  (built in send() as `partContext`), and the SAME context feeds `researchDimensions`
+  (new third param) so a Web-ON lookup about "add a 7mm screw hole" no longer
+  interrogates the user about what the part is. The research prompt also hard-rules
+  "NEVER reply with questions — reply NONE" (a real-use miss: gemini-flash answered a
+  hole request with a questionnaire).
+- **Composer**: auto-growing textarea (40→132 px, Enter sends / Shift+Enter newline) —
+  long requests wrap instead of scrolling out of a one-line input.
+- **Measure tool v2**: click two points OR press-and-drag a live tape line; both ends
+  SNAP to the nearest tessellation vertex (then triangle edge) with screen-constant
+  radii (~14 px / ~9 px) — hole rims measure their true ⌀ (verified: drilled ⌀7 via the
+  hole tool, dragged across it, read exactly "7 mm"; curved surfaces tessellate with
+  vertices ON the true surface, which is why vertex snap is exact). Drag is fully
+  imperative (temp line/label in s.measures, committed via new `onMeasureSegment`).
+  Label pills clamp to a 13–30 px on-screen band (was 16–53 — zooming into a small hole
+  used to bury it under its own label).
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

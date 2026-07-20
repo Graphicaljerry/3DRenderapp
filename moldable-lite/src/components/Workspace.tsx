@@ -985,6 +985,7 @@ interface Props {
     pending: [number, number, number] | null;
     items: Measurement[];
     point: (p: [number, number, number]) => void;
+    segment: (a: [number, number, number], b: [number, number, number]) => void;
     remove: (id: string) => void;
     clear: () => void;
   };
@@ -992,6 +993,15 @@ interface Props {
 
 export function Workspace(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  // Composer grows with the text (up to ~5 lines) so long requests stay fully readable.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const growComposer = () => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
+  };
+  useEffect(growComposer, [p.input]); // covers dictation, sends (clear), and programmatic sets
   const [dragOver, setDragOver] = useState(false);
   const [dragOverCanvas, setDragOverCanvas] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
@@ -1217,9 +1227,18 @@ export function Workspace(p: Props) {
                   e.currentTarget.value = "";
                 }}
               />
-              <input
+              <textarea
+                ref={composerRef}
+                rows={1}
                 value={p.input}
                 onChange={(e) => p.setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter sends (Shift+Enter = new line), like every chat app.
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    e.currentTarget.form?.requestSubmit();
+                  }
+                }}
                 placeholder={
                   p.mode === "generative"
                     ? "Describe it, or upload / paste a photo…"
@@ -1422,6 +1441,7 @@ export function Workspace(p: Props) {
                 onSelectPin={p.pinCtl.select}
                 onTransformCommit={p.transformCtl.commit}
                 onMeasurePoint={p.measureCtl.point}
+                onMeasureSegment={p.measureCtl.segment}
                 diff={p.aiDiff}
                 holeGhost={p.holeCtl.draft ? { at: p.holeCtl.draft.at, normal: p.holeCtl.draft.normal, diameter: p.holeCtl.draft.diameter, depth: p.holeCtl.draft.depth, ref: p.holeCtl.draft.ref?.center ?? null } : null}
                 holePlace={p.holeCtl.draft && !p.holeCtl.draft.picking
@@ -1764,7 +1784,7 @@ export function Workspace(p: Props) {
               )}
               {p.measureCtl.mode && (
                 <div className="box-hint">
-                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points on the model to measure between them"}
+                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points, or press and drag a tape line — ends snap to corners and edges"}
                 </div>
               )}
               {p.tab === "3d" && p.splitCtl.pieces && p.splitCtl.pieces.length > 0 && (

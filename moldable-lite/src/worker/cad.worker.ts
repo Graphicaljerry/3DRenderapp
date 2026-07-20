@@ -94,9 +94,13 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
   let attempt: ((size: number) => any) | null = null;
   try {
     // Whole-body rigid transforms (gizmo). Cheap gp_Trsf, no re-triangulation.
-    if (op.type === "translate") return shape.translate(op.delta);
-    if (op.type === "rotate") return shape.rotate(op.angleDeg, op.center, op.axis); // angle in DEGREES
-    if (op.type === "scale") return shape.scale(op.factor, op.center); // uniform only
+    // TRANSFORMS DELETE THEIR SOURCE in replicad (translate/rotate/scale call
+    // this.delete()) — but `shape` here is a CACHED base/intermediate that later
+    // rebuilds and exports reuse. Clone first or the cache holds a dead object and
+    // the next use fails with "This object has been deleted".
+    if (op.type === "translate") return shape.clone().translate(op.delta);
+    if (op.type === "rotate") return shape.clone().rotate(op.angleDeg, op.center, op.axis); // angle in DEGREES
+    if (op.type === "scale") return shape.clone().scale(op.factor, op.center); // uniform only
     if (op.type === "fillet" || op.type === "chamfer") {
       const filter = (e: any) => e.withinDistance(PICK_TOL, op.at);
       attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
@@ -182,7 +186,9 @@ function runCode(rawCode: string, params?: Record<string, number>): any {
     throw new Error("Your code must define `function main(replicad, params) { ... }` returning a Shape.");
   }
   // NOTE: the imported shape is passed unfrozen — replicad shapes carry internal caches.
-  const out = mainFn(Object.freeze({ ...replicad }), Object.freeze({ ...(params ?? {}) }), importedShape ?? undefined);
+  // A CLONE goes in: user code may translate/rotate it, and replicad transforms delete
+  // their source — the held original must survive for the next rebuild.
+  const out = mainFn(Object.freeze({ ...replicad }), Object.freeze({ ...(params ?? {}) }), importedShape?.clone() ?? undefined);
   const shape = out?.shape ?? out;
   if (!shape || typeof shape.mesh !== "function") {
     throw new Error("main() must return a replicad Shape (a Solid).");
@@ -224,12 +230,15 @@ function buildShape(code: string, params: Record<string, number> | undefined, op
 }
 
 /** Drop min-z to 0 (sit on the bed), preserving XY — matches the display's Z-only recentre so an
- *  exported STL/STEP sits where the viewer shows it (matters after a gizmo rotate or move). */
+ *  exported STL/STEP sits where the viewer shows it (matters after a gizmo rotate or move).
+ *  MUST clone: replicad's translate() deletes its source, and `shape` is the build cache —
+ *  without the clone the FIRST export killed the cache and every later export failed with
+ *  "This object has been deleted" (a real user hit this exporting STL then STEP). */
 function dropToBed(shape: any): any {
   try {
     const bb = shape.boundingBox;
     const [min] = bb.bounds as [number[], number[]];
-    return shape.translate([0, 0, -min[2]]);
+    return shape.clone().translate([0, 0, -min[2]]);
   } catch {
     return shape; // unusual bbox API? export as-authored
   }

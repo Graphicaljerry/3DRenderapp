@@ -154,6 +154,17 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   a chat note + "on-device" model label. Test hook `localStorage.moldable_local_mock
   = "1"` swaps in an instant mock engine (streams a 25 mm cube) — the real 0.9 GB
   download was NOT exercised in CI; first real-device use is the true test.
+- **Worker shape-cache safety**: replicad's TRANSFORMS (translate/rotate/scale/mirror)
+  DELETE their source shape. Anything that transforms a cached shape (`dropToBed` on
+  export, transform ops on cached intermediates, user code moving the imported STEP)
+  must `.clone()` first — without it the first export killed the cache and the next
+  one failed with "This object has been deleted" (real user report: STL ok → STEP
+  failed). clone() wraps a fresh handle of the same B-rep; booleans (cut/fuse/
+  intersect) and fillet/chamfer do NOT consume inputs.
+- **iPad-width layout**: `.tabs` never wraps internally; at narrow viewer columns
+  (≤680px container) the head wraps as clean rows (tools cluster drops below whole).
+  `.statusbar` wraps whole chips (dims/p2p are nowrap units). Audited at 1194/1024/834
+  via a Playwright overflow scan (no element crosses the viewport at any of them).
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

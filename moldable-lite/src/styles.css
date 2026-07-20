@@ -71,7 +71,7 @@
 [data-theme="dark"] .sync-status.err { background: #392629; color: #ff9ba0; border-color: #553338; }
 [data-theme="dark"] .pill-warn { background: #33290f; }
 [data-theme="dark"] .chip { background: #22262c; }
-[data-theme="dark"] .composer input { background: var(--bg); color: var(--ink); }
+[data-theme="dark"] .composer textarea { background: var(--bg); color: var(--ink); }
 [data-theme="dark"] .pnum { background: var(--bg); color: var(--ink); }
 [data-theme="dark"] .imgchip { background: #22262c; }
 
@@ -213,10 +213,11 @@ button { font-family: inherit; cursor: pointer; }
 .msg.assistant .bubble { background: var(--accent-w); }
 .msg.err .bubble { background: #fbeaea; color: #a23a3a; }
 .bubble.muted { color: var(--mut); }
-.composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); min-width: 0; }
+.composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); min-width: 0; }
 /* min-width:0 lets the input shrink below its intrinsic width — without it the Send
    button gets pushed out of the panel on narrow chat widths. Buttons never shrink. */
-.composer input { flex: 1; min-width: 0; height: 40px; padding: 0 12px; border: 1px solid var(--bord); border-radius: 10px; font-size: 13px; }
+/* Auto-growing message box: wraps long requests instead of scrolling them off-screen. */
+.composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 132px; padding: 10.5px 12px; border: 1px solid var(--bord); border-radius: 10px; font: inherit; font-size: 13px; line-height: 1.4; resize: none; overflow-y: auto; }
 .composer > button { flex: 0 0 auto; }
 .send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
 /* Dictation mic — quiet next to Send; pulses while listening. */

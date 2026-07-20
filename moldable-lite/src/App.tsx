@@ -2007,6 +2007,11 @@ export default function App() {
     setMeasurements((m) => [...m, { id: mid(), a: measurePending, b: p }]);
     setMeasurePending(null);
   }
+  /** Drag-a-line measure: both ends arrive at once (viewer-side tape drag). */
+  function onMeasureSegment(a: [number, number, number], b: [number, number, number]) {
+    setMeasurements((m) => [...m, { id: mid(), a, b }]);
+    setMeasurePending(null); // a stray earlier single click shouldn't chain into the next one
+  }
 
   // ---------------- generate ----------------
   /** Enter the guided "fix a broken part" flow: precise mode, a photo-first nudge,
@@ -2093,7 +2098,8 @@ export default function App() {
         const rk = { geminiKey: llmKeys["gemini"], geminiModel: llm.provider === "gemini" ? llm.model : "", anthropicKey: key, openrouterKey: llmKeys["openrouter"], openrouterModel: llm.provider === "openrouter" ? llm.model : "" };
         if (canResearch(rk)) {
           try {
-            const rr = await researchDimensions(p, rk);
+            const genCtx = result && project ? `the part "${project.name}"` : undefined;
+            const rr = await researchDimensions(p, rk, genCtx);
             if (rr) {
               genPrompt = `${p}\n\nReal product measurements (researched online, mm):\n${rr.text}`;
               setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Measurements found online:\n${rr.text}`, sources: rr.sources }]);
@@ -2256,6 +2262,12 @@ export default function App() {
     // never sees the image, so it replies "no image was provided". Only research with an image
     // attached when the text actually names a real product to look up (e.g. "iPhone 16 Pro case").
     const productNamed = detectProductQuery(p);
+    // The researcher can't see the chat — tell it what's already on the canvas so it
+    // never asks "what is this part?" about a model the user is simply editing.
+    const partBlurb = messages.find((m) => m.role === "assistant" && !m.error && !m.streaming)?.text.split("\n")[0]?.slice(0, 220) ?? "";
+    const partContext = result && project
+      ? `the part "${project.name}"${dims ? `, currently ${Math.round(dims.x * 10) / 10} × ${Math.round(dims.y * 10) / 10} × ${Math.round(dims.z * 10) / 10} mm` : ""}${partBlurb ? ` — ${partBlurb}` : ""}`
+      : undefined;
     const wantWeb = !!p
       && (!visionImage || guided || productNamed)
       && (webMode === "on" || (webMode === "auto" && productNamed && (!visionImage || guided)));
@@ -2264,7 +2276,7 @@ export default function App() {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
     } else if (wantWeb) {
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
-      const rr = await researchDimensions(p, researchKeys);
+      const rr = await researchDimensions(p, researchKeys, partContext);
       researched = rr?.text ?? null;
       researchSources = rr?.sources ?? [];
       if (researched) {
@@ -2290,7 +2302,10 @@ export default function App() {
       (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) +
       (visionImage ? (markupEdit ? markupAddendum(visionImage.view ? viewPhrase(visionImage.view) : "") : VISION_ADDENDUM) : "") +
       (guided ? REPLACEMENT_ADDENDUM : "") +
-      (importFileRef.current ? IMPORT_ADDENDUM : "");
+      (importFileRef.current ? IMPORT_ADDENDUM : "") +
+      // Anchor every turn to what's on the canvas — requests like "add a hole in the
+      // center" refer to THIS part; never ask the user what the part is.
+      (partContext ? `\n\nCurrent canvas: the user is working on ${partContext}. Edit requests refer to this part.` : "");
     const userMsg: ApiMsg = visionImage
       ? {
           role: "user",
@@ -2898,6 +2913,7 @@ export default function App() {
           pending: measurePending,
           items: measurements,
           point: onMeasurePoint,
+          segment: onMeasureSegment,
           remove: (id) => setMeasurements((m) => m.filter((x) => x.id !== id)),
           clear: () => { setMeasurements([]); setMeasurePending(null); },
         }}

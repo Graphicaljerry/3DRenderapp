@@ -20,10 +20,16 @@ export function detectProductQuery(prompt: string): boolean {
   return EXPLICIT.test(prompt) || PRODUCTS.test(prompt);
 }
 
-function researchPrompt(request: string): string {
+function researchPrompt(request: string, context?: string): string {
   return [
     `You are a dimensioning researcher for a 3D-printing CAD app. A user wants a part that must physically fit or mate with a real-world product. Request:`,
     `"${request}"`,
+    ...(context
+      ? [
+          ``,
+          `Context — the user is EDITING an existing part already on their canvas: ${context}. The request refers to THAT part, so you already know what the part is — never ask what it is, what it attaches to, or where a feature goes on it. Only research real-world products, hardware or standards the request itself names (e.g. a screw/thread size, a device it must fit).`,
+        ]
+      : []),
     ``,
     `Goal: gather EVERY real measurement the CAD model needs to build this exact part accurately — not just the overall size.`,
     ``,
@@ -39,6 +45,7 @@ function researchPrompt(request: string): string {
     ``,
     `Output: a compact spec sheet in MILLIMETRES, one fact per line as "label: value (source)". Group under the product name. State the product variant you assumed. Flag any figure you're unsure of with "≈". Convert all units to mm.`,
     `If the request involves no specific real-world product, reply with exactly: NONE`,
+    `NEVER reply with questions for the user — you have no way to receive answers. If you can't identify a concrete product or standard to research, reply NONE and the build continues without web facts.`,
     `No markdown headers, no preamble, keep it under 220 words.`,
   ].join("\n");
 }
@@ -62,7 +69,7 @@ function dedupeSources(list: { url: string; title?: string }[]): { url: string; 
   return list.filter((x) => x.url && !seen.has(x.url) && seen.add(x.url)).slice(0, 6);
 }
 
-async function viaGemini(request: string, apiKey: string, preferred: string): Promise<ResearchResult | null> {
+async function viaGemini(prompt: string, apiKey: string, preferred: string): Promise<ResearchResult | null> {
   // Reuse the model id the compat layer already resolved against this key.
   let model = "";
   try {
@@ -73,7 +80,7 @@ async function viaGemini(request: string, apiKey: string, preferred: string): Pr
     method: "POST",
     headers: { "content-type": "application/json", "x-goog-api-key": apiKey },
     body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: researchPrompt(request) }] }],
+      contents: [{ role: "user", parts: [{ text: prompt }] }],
       tools: [{ google_search: {} }],
     }),
     signal: timeoutSignal(45_000),
@@ -89,7 +96,7 @@ async function viaGemini(request: string, apiKey: string, preferred: string): Pr
   return { text: t, sources };
 }
 
-async function viaAnthropic(request: string, apiKey: string): Promise<ResearchResult | null> {
+async function viaAnthropic(prompt: string, apiKey: string): Promise<ResearchResult | null> {
   const res = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -101,7 +108,7 @@ async function viaAnthropic(request: string, apiKey: string): Promise<ResearchRe
     body: JSON.stringify({
       model: "claude-haiku-4-5", // cheap + fast — plenty for a dimension lookup
       max_tokens: 1024,
-      messages: [{ role: "user", content: researchPrompt(request) }],
+      messages: [{ role: "user", content: prompt }],
       tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
     }),
     signal: timeoutSignal(60_000),
@@ -124,7 +131,7 @@ async function viaAnthropic(request: string, apiKey: string): Promise<ResearchRe
 
 // OpenRouter's built-in web plugin — lets OpenRouter users (one key, many models)
 // get the same grounded lookup without a separate Gemini/Anthropic key.
-async function viaOpenRouter(request: string, apiKey: string, model: string): Promise<ResearchResult | null> {
+async function viaOpenRouter(prompt: string, apiKey: string, model: string): Promise<ResearchResult | null> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
@@ -135,7 +142,7 @@ async function viaOpenRouter(request: string, apiKey: string, model: string): Pr
     },
     body: JSON.stringify({
       model: model || "google/gemini-2.5-flash",
-      messages: [{ role: "user", content: researchPrompt(request) }],
+      messages: [{ role: "user", content: prompt }],
       plugins: [{ id: "web", max_results: 3 }],
       max_tokens: 1024,
     }),
@@ -165,23 +172,25 @@ export function canResearch(keys: ResearchKeys): boolean {
   return !!(keys.geminiKey || keys.anthropicKey || keys.openrouterKey);
 }
 
-/** Look up the product's real dimensions online. Spec sheet + the pages used, or null. */
-export async function researchDimensions(request: string, keys: ResearchKeys): Promise<ResearchResult | null> {
+/** Look up the product's real dimensions online. Spec sheet + the pages used, or null.
+    `context` describes the part already on canvas so the researcher never asks what it is. */
+export async function researchDimensions(request: string, keys: ResearchKeys, context?: string): Promise<ResearchResult | null> {
+  const prompt = researchPrompt(request, context);
   if (keys.geminiKey) {
     try {
-      const r = await viaGemini(request, keys.geminiKey, keys.geminiModel ?? "");
+      const r = await viaGemini(prompt, keys.geminiKey, keys.geminiModel ?? "");
       if (r) return r;
     } catch {}
   }
   if (keys.anthropicKey) {
     try {
-      const r = await viaAnthropic(request, keys.anthropicKey);
+      const r = await viaAnthropic(prompt, keys.anthropicKey);
       if (r) return r;
     } catch {}
   }
   if (keys.openrouterKey) {
     try {
-      return await viaOpenRouter(request, keys.openrouterKey, keys.openrouterModel ?? "");
+      return await viaOpenRouter(prompt, keys.openrouterKey, keys.openrouterModel ?? "");
     } catch {}
   }
   return null;

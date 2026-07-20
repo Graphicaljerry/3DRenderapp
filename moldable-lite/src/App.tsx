@@ -297,7 +297,7 @@ export default function App() {
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
-  const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string }[]>([]); // free-floating objects (logos, badges, parts…)
+  const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string; tint?: string }[]>([]); // free-floating objects (logos, badges, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
   // Build plates: every object (the model = "model", attachments by id) lives on a plate.
   // Bambu-Studio-style: any number of plates, assignment via menu, saved with the project.
@@ -367,7 +367,7 @@ export default function App() {
     for (const [n, parts] of [...plates.entries()].sort((x, y) => x[0] - y[0])) {
       downloadBlob(geometriesTo3MF(parts), safeFileName(`${project?.name ?? "model"}-plate-${n}`, "3mf"));
     }
-    setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.` }]);
+    explainOnce("export-plates", `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.`);
   }
   /** ONE project 3MF with every plate laid out — Bambu Studio / OrcaSlicer open it with
       the plates intact (each part named, grouped and positioned on its plate). */
@@ -376,7 +376,7 @@ export default function App() {
     if (!all) return;
     downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }, plateNames), safeFileName(`${project?.name ?? "model"}-plates`, "3mf"));
     const used = new Set(all.map((p) => p.plate)).size;
-    setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.` }]);
+    explainOnce("export-project", `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.`);
   }
   const [partCount, setPartCount] = useState(1); // disconnected solids in the model mesh
   // Dry-fit sandbox. Separating (and any "Make it fit" carve) deliberately does NOT
@@ -428,13 +428,15 @@ export default function App() {
       supportsStep: false,
       glb: geometryToSTL(main),
     });
-    const ids = rest.map((g, i) => addAttachment(g, `Part ${i + 2}`));
+    // Separated parts keep the model's grey — they ARE the model, just moved apart;
+    // the teal selection chrome already says which one is picked.
+    const ids = rest.map((g, i) => addAttachment(g, `Part ${i + 2}`, "#c7ccd3"));
     separatedRef.current = { ids, result: prior };
     setSeparated(true);
-    setMessages((m) => [...m, {
-      id: mid(), role: "assistant",
-      text: `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check fit** — it computes the real overlap between the solids. If parts are meant to nest and they collide, **Make it fit** carves the needed room out of the model. **Undo** or **Regroup parts** puts everything back exactly as it was; **Merge all into model** makes the new arrangement permanent.`,
-    }]);
+    explainOnce(
+      "separate",
+      `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check fit** — it computes the real overlap between the solids. If parts are meant to nest and they collide, **Make it fit** carves the needed room out of the model. **Undo** or **Regroup parts** puts everything back exactly as it was; **Merge all into model** makes the new arrangement permanent.`,
+    );
   }
 
   /** For parts designed to go INTO each other: carve each selected part's shape — grown
@@ -624,12 +626,30 @@ export default function App() {
   }
 
   const attachSelected = selAttachIds.length > 0;
-  const addAttachment = (geometry: THREE.BufferGeometry, name: string): string => {
+  const addAttachment = (geometry: THREE.BufferGeometry, name: string, tint?: string): string => {
     const id = mid();
-    setAttachments((a) => [...a, { id, geometry, name }]);
+    setAttachments((a) => [...a, { id, geometry, name, tint }]);
     selectAttach(id);
     return id;
   };
+
+  // Chat is a conversation, not an action log. Routine direct actions (separate,
+  // drill, merge, export…) explain themselves the FIRST time — after that they run
+  // quietly; the canvas/Objects panel/download already show what happened. Persisted
+  // per device so the teaching doesn't repeat every session. Errors always post.
+  const explainedRef = useRef<Set<string>>((() => {
+    try { return new Set<string>(JSON.parse(localStorage.getItem("moldable_explained") ?? "[]")); } catch { return new Set<string>(); }
+  })());
+  function explainOnce(key: string, full: string, brief?: string) {
+    const seen = explainedRef.current.has(key);
+    if (!seen) {
+      explainedRef.current.add(key);
+      try { localStorage.setItem("moldable_explained", JSON.stringify([...explainedRef.current])); } catch { /* private mode */ }
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: full }]);
+    } else if (brief) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: brief }]);
+    }
+  }
   const renameAttachment = (id: string, name: string) => {
     const v = name.trim();
     if (v) setAttachments((a) => a.map((x) => (x.id === id ? { ...x, name: v } : x)));
@@ -1587,7 +1607,7 @@ export default function App() {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
       const what = `⌀${d.diameter} mm ${d.depth > 0 ? `pocket, ${d.depth} mm deep` : "through-hole"}`;
       applyResult(res, project?.name ?? "Model", `Drilled a ${what}`, `hole ${d.diameter}`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Drilled a **${what}** — free, no AI. Undo reverts it; it also rides along when sliders rebuild the model.` }]);
+      explainOnce("hole", `Drilled a **${what}** — free, no AI. Undo reverts it; it also rides along when sliders rebuild the model.`);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't drill there: " + String(err?.message ?? err), error: true }]);
     } finally {
@@ -1911,7 +1931,7 @@ export default function App() {
       setSelAttachIds([]);
       setTransformMode("off");
       setModelSelected(false);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Merged **${names}** into the model — one printable solid now (mesh: STL/3MF; STEP needs the pre-merge version in History). Undo brings the pieces back.` }]);
+      explainOnce("merge", `Merged **${names}** into the model — one printable solid now (mesh: STL/3MF; STEP needs the pre-merge version in History). Undo brings the pieces back.`);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't merge: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
@@ -2528,7 +2548,7 @@ export default function App() {
       downloadBlob(blob, safeFileName(project?.name ?? "model", format));
       // STEP is a CAD hand-off, not a print file — skip the print-readiness line.
       if (format !== "step") {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Exported ${format.toUpperCase()}. ${preflightSummary(pf)}` }]);
+        explainOnce("export", `Exported ${format.toUpperCase()}. ${preflightSummary(pf)}`);
       }
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);

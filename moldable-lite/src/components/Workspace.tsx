@@ -854,7 +854,7 @@ interface Props {
   modelSelected: boolean;
   onModelSelect: (sel: boolean) => void;
   onScaleTo: (axis: "x" | "y" | "z", target: number) => void; // uniform-scale the part so `axis` hits target mm
-  attachments: { id: string; geometry: THREE.BufferGeometry; name: string }[];
+  attachments: { id: string; geometry: THREE.BufferGeometry; name: string; tint?: string }[];
   selAttachIds: string[];
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   onMergeAttachments: (ids?: string[]) => void;

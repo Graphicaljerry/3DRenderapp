@@ -177,6 +177,16 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Your printer + Print checks; Appearance = Look (theme + bubble tint) + Workspace
   (units + dims mode — NEW controls mirroring the View menu / topbar); Sync = Cloud
   account (+ "What syncs, exactly?" details) + File backup (collapsed).
+- **Quiet chat (explain-once)**: routine direct actions post their tutorial message the
+  FIRST time only (`explainOnce(key, full, brief?)`, persisted in
+  `localStorage.moldable_explained`) — separate/hole/merge/exports now repeat silently
+  (a user got 4 identical separation walls of text). Errors always post.
+- **Attachment gizmo centring**: enterTransform ALWAYS drives attachments through a
+  temp pivot at the selection's bbox CENTRE (a separated part keeps geometry in model
+  coordinates, so direct mesh attach parked the gizmo at the origin — beside the part —
+  and made rotate/scale orbit that point). dropAttachment releases the pivot group
+  first (world-space z-drop even after a rotation) then re-arms. Separated parts keep
+  the model grey via the new per-attachment `tint` (foreign imports stay teal).
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

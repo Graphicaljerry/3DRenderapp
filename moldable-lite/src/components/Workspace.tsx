@@ -17,6 +17,7 @@ import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconChe
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
+import { localSupported } from "../llm/local";
 import { shortModelName } from "../llm/openrouterModels";
 import type { FitId } from "../llm/prompts";
 import { PROVIDERS } from "../gen/registry";
@@ -1985,7 +1986,8 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: 
       label: "Other providers",
       // "house" (the site's sponsored built-in AI) is only offered once the relay's
       // health check confirmed it — hasKey("house") carries that answer.
-      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic" && (pr.id !== "house" || hasKey("house"))).map((pr) => {
+      // "local" (on-device WebLLM) needs WebGPU — hidden on browsers without it.
+      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic" && (pr.id !== "house" || hasKey("house")) && (pr.id !== "local" || localSupported())).map((pr) => {
         const needs = pr.needsKey && !hasKey(pr.id);
         const base = pr.label.split(" — ")[0];
         // Surface the active model on the current provider so the picker trigger

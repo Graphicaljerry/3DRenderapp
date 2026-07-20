@@ -16,6 +16,7 @@ import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./e
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
+import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -2367,9 +2368,28 @@ export default function App() {
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
     }
 
+    let usedLocal = effLlm.provider === "local";
+    /** Reachability failures only (fetch/network errors, timeouts, provider/relay
+        5xx) — a model's bad output or a key problem must NOT quietly swap brains. */
+    const isNetErr = (err: any) =>
+      /failed to fetch|networkerror|load failed|err_internet|err_network|err_connection|timed? ?out|http 5\d\d|bad gateway|service unavailable|gateway time|relay error|couldn'?t reach|cannot reach|unreachable/i.test(String(err?.message ?? err));
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
+        let raw: string;
+        try {
+          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
+        } catch (err: any) {
+          // Cloud brain unreachable + the on-device model is already on this machine →
+          // answer locally instead of failing (works fully offline).
+          if (effLlm.provider === "local" || !isNetErr(err) || !localSupported() || !localDownloaded()) throw err;
+          usedLocal = true;
+          setMessages((m) => {
+            const idx = m.findIndex((x) => x.id === placeholderId);
+            const note = { id: mid(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
+            return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
+          });
+          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
+        }
         finalRaw = raw;
         try {
           let bi: BuildInput;
@@ -2387,7 +2407,7 @@ export default function App() {
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           const how = await deliverResult(res, name, summary, p, !!visionImage);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
           ok = true;
           break;
         } catch (err: any) {
@@ -3335,7 +3355,7 @@ function SettingsModal({
                 setLmodel(np === "anthropic" ? "" : llmPreset(np).defaultModel);
               }}
             >
-              {LLM_PRESETS.filter((pr) => pr.id !== "house" || !!houseStatusNow()).map((pr) => (
+              {LLM_PRESETS.filter((pr) => (pr.id !== "house" || !!houseStatusNow()) && (pr.id !== "local" || localSupported())).map((pr) => (
                 <option key={pr.id} value={pr.id}>{pr.label}{pr.free ? " · free" : ""}{pr.recommended ? " · recommended" : ""}</option>
               ))}
             </select>

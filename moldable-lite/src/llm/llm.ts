@@ -6,6 +6,7 @@ import { generate as generateAnthropic, MODELS, type ApiMsg, type StreamHandlers
 import { generateCompat } from "./openaiCompat";
 import { modelSupportsReasoning } from "./openrouterModels";
 import { houseStatus, houseUrl } from "./house";
+import { generateLocal, localSupported, LOCAL_MODEL, LOCAL_SIZE_HINT } from "./local";
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 /** OpenRouter "thinking" effort — user-set in Settings, applied to reasoning-capable models. */
@@ -17,7 +18,7 @@ export function getReasoningEffort(): ReasoningEffort {
   return "medium";
 }
 
-export type LlmProviderId = "anthropic" | "gemini" | "openai" | "groq" | "openrouter" | "ollama" | "custom" | "house";
+export type LlmProviderId = "anthropic" | "gemini" | "openai" | "groq" | "openrouter" | "ollama" | "custom" | "house" | "local";
 
 export interface LlmSettings {
   provider: LlmProviderId;
@@ -101,6 +102,15 @@ export const LLM_PRESETS: LlmPreset[] = [
     hint: "Free, fully private and offline — quality depends on the model you install.",
   },
   {
+    id: "local",
+    label: `On-device — free, works offline (${LOCAL_SIZE_HINT} download)`,
+    free: true,
+    needsKey: false,
+    defaultModel: LOCAL_MODEL,
+    keyHint: "",
+    hint: `Runs entirely on this device (WebGPU) — nothing leaves your machine and it keeps working with no internet. One-time ${LOCAL_SIZE_HINT} download on first use. Good for simple parts and edits; cloud brains stay sharper on complex geometry. Also used automatically as a fallback when your cloud brain can't be reached.`,
+  },
+  {
     id: "custom",
     label: "Custom (OpenAI-compatible endpoint)",
     needsKey: false,
@@ -130,6 +140,7 @@ export function llmReady(s: LlmSettings, keys: Record<string, string | undefined
   const p = llmPreset(s.provider);
   if (s.provider === "custom") return !!s.baseUrl;
   if (s.provider === "house") return !!houseStatus(); // only after a live health check
+  if (s.provider === "local") return localSupported(); // needs WebGPU
   if (!p.needsKey) return true;
   return !!keys[s.provider];
 }
@@ -145,6 +156,13 @@ export async function generateLlm(
 ): Promise<string> {
   if (s.provider === "anthropic") {
     return generateAnthropic({ apiKey: keys.anthropic ?? "", model: s.model, system, messages }, h);
+  }
+  if (s.provider === "local") {
+    // Fully on-device (WebLLM). Progress of the one-time weight download streams
+    // through onThinking so the chat narrates it instead of sitting on "Thinking…".
+    return generateLocal(system, messages, h, (p) => {
+      if (p.progress < 1) h.onThinking?.("", `Preparing the on-device model — ${Math.round(p.progress * 100)}% (one-time download; it works offline afterwards)`);
+    });
   }
   if (s.provider === "house") {
     // The site's sponsored relay: an OpenAI-compatible endpoint that injects the

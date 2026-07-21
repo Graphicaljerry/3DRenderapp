@@ -28,6 +28,14 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **Library organization**: toolbar (search over name+version summaries+mesh prompt;
+  sort newest/oldest/name/most-versions; engine filter CAD vs mesh; live "N of M
+  models" count) + FLAT folders — `Project.folder?: string`, per-card select
+  (existing folders / "＋ New folder…" via prompt() / "No folder"), chips row with
+  counts (All / 📁 each / Unfiled), chip click filters (toggle). Folder moves bump
+  updatedAt so they sync. CSS: .lib-toolbar/.lib-search/.lib-chip/.lib-move (width
+  overrides beat the modal's full-width input styling). Verified by
+  `harness/library-organize-e2e.mjs` (11 checks incl. prompt-dialog folder create).
 - **Library thumbnails self-upgrade**: saved previews carry `thumbV` (THUMB_V=2 in
   App.tsx — bump when the studio look changes). Opening the Library rebuilds up to 8
   stale projects OFF-SCREEN (CAD via worker `engine.build` from HEAD code/params/ops;

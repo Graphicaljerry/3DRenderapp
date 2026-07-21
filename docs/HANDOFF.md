@@ -28,6 +28,20 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **iPad white-flash reload loop FIXED (2026-07-21)**: signed-in devices reloaded every
+  ~4 s flashing light mode. Chain: the OpenRouter Auto warm-on-boot fetch rewrote the
+  TIMESTAMPED `moldable_openrouter_models_v2` cache each boot → gatherSettings syncs
+  every `moldable_*` key → cloudSyncPull always saw cloud≠local → "settings changed" →
+  `window.location.reload()` → repeat. Four-part fix: (1) fetchOpenRouterModels
+  short-circuits on a still-fresh localStorage copy (no churn); (2) LOCAL_ONLY_KEYS
+  grew cache/device keys (openrouter_models_v2, gemini_model, local_ready, house_url);
+  (3) the pull-then-reload is capped at ONCE per browser session (sessionStorage
+  `moldable_pull_reloaded`) so this loop CLASS is impossible; (4) index.html gained an
+  inline pre-paint script applying data-theme + a dark backdrop before React mounts —
+  the white flash on legit reloads is gone too. LESSON: any synced `moldable_*` key
+  that self-rewrites (timestamps, caches) MUST go in LOCAL_ONLY_KEYS. Verified by
+  `harness/flashfix-e2e.mjs`. Cloud blobs still holding the key self-heal (pull skips,
+  push drops it).
 - **Studio thumbnails** (`captureThumbnail` in Viewer.tsx): library/template previews are
   now product shots — throwaway scene with a paper-sweep gradient backdrop (CanvasTexture),
   3-point lighting (hemi 0.85 + key 1.8 + cool fill + rim), a radial-gradient contact-shadow

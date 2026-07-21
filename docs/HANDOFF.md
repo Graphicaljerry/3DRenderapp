@@ -28,6 +28,21 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **Printability pack** (Print tab "Print prep" + View menu): (1) overhang heatmap —
+  `src/print/overhang.ts` flags faces with n.z < −sin(threshold) (bed-contact excluded),
+  amber→red by severity, drawn by a Viewer `analysisOverlay` prop (soup + vertex colors,
+  child of the model mesh, polygon-offset, raycast-disabled); (2) auto-orientation —
+  `src/print/orient.ts`, Tweaker-style: candidates = 6 axes + top area-weighted normal
+  clusters, score = overhang − 0.25·contact, `improved` gated (>25 mm² and >20 %/400 mm²
+  gain); Apply = RotateOp via authorObjectOp for CAD, baked matrix + re-bed for meshes
+  (provider "orient"); (3) thin walls — `src/print/thinwalls.ts`, area-weighted seeded
+  sampling + inward ray via three-mesh-bvh (new dep), thickness < 0.8 mm flagged, red
+  overlay; (4) elephant-foot chamfer — WorkerOp `chamferBottom` chamfers the bed-contact
+  loop; edges selected by SAMPLING THE CURVE (start/mid/end z vs true minZ) — bbox and
+  EdgeFinder.inPlane both fail on meshed shapes (OCCT pads bboxes by mesh deflection
+  ~0.05 mm). Analyses clear on geometry change; thin-wall highlight wins over heatmap.
+  Verified by `harness/printprep-e2e.mjs` (synthetic table/plate/thin-wall unit checks
+  via Vite TS imports + full UI flow incl. 28k-pixel heatmap proof from below).
 - **One brain, both engines** (`src/llm/router.ts`): the configured text brain (OpenRouter/
   Gemini/Claude/Groq/Ollama/house/local-if-loaded) now powers the mesh side too —
   (1) fresh-chat intent classifier: when the organic/CAD regexes are both silent, a tiny

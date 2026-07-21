@@ -44,7 +44,12 @@ export interface ScaleOp {
   factor: number;
   center: Vec3;
 }
-export type CadOp = PointOp | HoleOp | TranslateOp | RotateOp | ScaleOp;
+/** Elephant-foot guard: chamfer every edge lying in the bottom (bed) plane. */
+export interface ChamferBottomOp {
+  type: "chamferBottom";
+  size: number; // chamfer distance, mm (0.2–0.5 typical)
+}
+export type CadOp = PointOp | HoleOp | TranslateOp | RotateOp | ScaleOp | ChamferBottomOp;
 
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.

@@ -101,6 +101,30 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
     if (op.type === "translate") return shape.clone().translate(op.delta);
     if (op.type === "rotate") return shape.clone().rotate(op.angleDeg, op.center, op.axis); // angle in DEGREES
     if (op.type === "scale") return shape.clone().scale(op.factor, op.center); // uniform only
+    if (op.type === "chamferBottom") {
+      // Elephant-foot guard: chamfer every edge of the bed-contact loop (z = zmin),
+      // so the squished first layer doesn't bulge past the true footprint and
+      // bed-adjacent holes keep their size. Selection samples the edge CURVE
+      // (start/mid/end z) — exact geometry. Bounding boxes are useless here: once a
+      // shape has been meshed, OCCT pads every bbox by the mesh deflection (~0.05 mm),
+      // and EdgeFinder.inPlane misses filleted/spline outlines on real parts.
+      let minZ = Infinity;
+      for (const ed of shape.edges) {
+        try { minZ = Math.min(minZ, ed.startPoint.z, ed.endPoint.z); } catch { /* skip odd edges */ }
+      }
+      if (!isFinite(minZ)) throw new Error("couldn't find the bottom of the part");
+      const onBed = (edge: any) => {
+        try {
+          const a = edge.startPoint.z, b = edge.endPoint.z, m = edge.pointAt(0.5).z;
+          const lo = Math.min(a, b, m), hi = Math.max(a, b, m);
+          return hi - lo < 0.02 && Math.abs(lo - minZ) < 0.1; // flat in z AND at the bottom
+        } catch {
+          return false;
+        }
+      };
+      attempt = (size) => shape.chamfer(size, (e: any) => e.when(({ element }: any) => onBed(element)));
+      return attempt(op.size);
+    }
     if (op.type === "fillet" || op.type === "chamfer") {
       const filter = (e: any) => e.withinDistance(PICK_TOL, op.at);
       attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
@@ -149,6 +173,7 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       case "translate": label = "Move"; break;
       case "rotate": label = `Rotate of ${op.angleDeg}°`; break;
       case "scale": label = `Scale ×${op.factor}`; break;
+      case "chamferBottom": label = `Bottom-edge chamfer of ${op.size} mm`; break;
       case "extrude": label = `Extrude of ${op.size} mm`; break;
       case "hole": label = `⌀${op.diameter} mm hole`; break;
       default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;

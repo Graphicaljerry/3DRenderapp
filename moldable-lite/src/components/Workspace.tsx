@@ -5,6 +5,18 @@ import { Markdown } from "./Markdown";
 import type { Pin } from "../store/types";
 import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
+import type { ThinWallReport } from "../print/thinwalls";
+import type { OrientSuggestion } from "../print/orient";
+
+/** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
+ *  wall-thickness check, elephant-foot chamfer. All local geometry — no AI calls. */
+export interface PrintPrepCtl {
+  overhangOn: boolean;
+  toggleOverhang: () => void;
+  thin: { report: ThinWallReport | null; busy: boolean; run: () => void; shown: boolean; toggleShown: () => void };
+  orient: { suggestion: OrientSuggestion | null; run: () => void; apply: () => void };
+  chamfer: { can: boolean; apply: (size: number) => void };
+}
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, CadOp, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
@@ -233,12 +245,13 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
 
 /** One home for every display toggle — Dimensions, Wireframe, Stats, Units, Showcase —
     so the toolbar carries tools, not switches. */
-function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, stats, setStats, units, setUnits, showcase, setShowcase, onResetView }: {
+function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, stats, setStats, units, setUnits, showcase, setShowcase, overhangOn, toggleOverhang, onResetView }: {
   dimsMode: "select" | "always" | "off"; setDimsMode: (m: "select" | "always" | "off") => void;
   wireframe: boolean; setWireframe: (f: (w: boolean) => boolean) => void;
   stats: boolean; setStats: (v: boolean) => void;
   units: "mm" | "in"; setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   showcase: boolean; setShowcase: (v: boolean) => void;
+  overhangOn: boolean; toggleOverhang: () => void;
   onResetView: () => void;
 }) {
   const btn = useRef<HTMLButtonElement>(null);
@@ -268,6 +281,7 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, stats, setSt
             </div>
           </div>
           <Row on={wireframe} label="Wireframe" hint="See the mesh triangles" onClick={() => setWireframe((w) => !w)} />
+          <Row on={overhangOn} label="Overhang heatmap" hint="Paint faces that will need support" onClick={toggleOverhang} />
           <Row on={stats} label="Stats" hint="Triangles, volume, watertight" onClick={() => setStats(!stats)} />
           <Row on={showcase} label="Showcase" hint="Clean stage + slow turntable" onClick={() => setShowcase(!showcase)} />
           <div className="pmenu-sep" />
@@ -851,6 +865,8 @@ interface Props {
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
   report: PrintabilityReport | null;
+  analysisOverlay: { positions: Float32Array; colors: Float32Array } | null; // printability paint-on overlay
+  printPrep: PrintPrepCtl;
   modelSelected: boolean;
   onModelSelect: (sel: boolean) => void;
   onScaleTo: (axis: "x" | "y" | "z", target: number) => void; // uniform-scale the part so `axis` hits target mm
@@ -1392,6 +1408,8 @@ export function Workspace(p: Props) {
                   setUnits={p.setUnits}
                   showcase={p.showcase}
                   setShowcase={p.setShowcase}
+                  overhangOn={p.printPrep.overhangOn}
+                  toggleOverhang={p.printPrep.toggleOverhang}
                   onResetView={() => p.viewerRef.current?.resetView()}
                 />
                 <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
@@ -1409,6 +1427,7 @@ export function Workspace(p: Props) {
               <Viewer
                 ref={p.viewerRef}
                 geometry={p.geometry}
+                analysisOverlay={p.analysisOverlay}
                 wireframe={p.wireframe}
                 showDims={p.showDims}
                 units={p.units}
@@ -1823,7 +1842,7 @@ export function Workspace(p: Props) {
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
             {p.tab === "print" && (
-              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} />
+              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} prep={p.printPrep} />
             )}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -2205,8 +2224,10 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, prep }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; prep: PrintPrepCtl }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
+  const sug = prep.orient.suggestion;
+  const thin = prep.thin.report;
   const row = (label: string, value: string, ok?: boolean) => (
     <div className="prow">
       <span>{label}</span>
@@ -2246,6 +2267,54 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
           <button className="primary sm" disabled={busy} onClick={onSplit}>
             Split to fit bed — print in pieces
           </button>
+        </div>
+      )}
+
+      <h3 style={{ marginTop: 14 }}>Print prep</h3>
+      <div className="param-actions" style={{ flexWrap: "wrap" }}>
+        <button className="ghost sm" onClick={prep.toggleOverhang} title="Paint every face steeper than the printer's overhang limit — amber at the limit, red for ceilings that definitely need support">
+          {prep.overhangOn ? "✓ Overhang heatmap" : "Overhang heatmap"}
+        </button>
+        <button className="ghost sm" disabled={busy} onClick={prep.orient.run} title="Try laying each big face on the bed and score support needs — suggests the best rotation">
+          Suggest orientation
+        </button>
+        <button className="ghost sm" disabled={busy || prep.thin.busy} onClick={prep.thin.run} title="Sample the surface and measure wall thickness by ray-casting — flags walls under 0.8 mm (2 perimeters at a 0.4 mm nozzle)">
+          {prep.thin.busy ? "Checking walls…" : "Check wall thickness"}
+        </button>
+        {prep.chamfer.can && (
+          <button className="ghost sm" disabled={busy} onClick={() => prep.chamfer.apply(0.3)} title="Chamfer every bottom edge by 0.3 mm so the squished first layer (elephant foot) doesn't bulge past the true footprint">
+            Elephant-foot chamfer
+          </button>
+        )}
+      </div>
+      {sug && (
+        <div className="prow-note">
+          <p className="fine" style={{ margin: "6px 0 4px" }}>
+            {sug.improved
+              ? `Better orientation found: rotate ${sug.angleDeg}°. ${sug.reason}`
+              : sug.reason}
+          </p>
+          {sug.improved && (
+            <div className="param-actions">
+              <button className="primary sm" disabled={busy} onClick={prep.orient.apply}>Apply rotation</button>
+            </div>
+          )}
+        </div>
+      )}
+      {thin && (
+        <div className="prow-note">
+          <p className="fine" style={{ margin: "6px 0 4px" }}>
+            {thin.thinSamples > 0
+              ? `⚠️ ${thin.thinSamples} of ${thin.sampled} sampled spots are under ${thin.thresholdMM} mm (thinnest ≈ ${thin.minThicknessMM} mm) — they may print fragile or vanish. Thicken them, or use a 0.25 mm nozzle.`
+              : thin.sampled > 0
+                ? `Walls look healthy — thinnest sampled ≈ ${thin.minThicknessMM} mm (limit ${thin.thresholdMM} mm).`
+                : "Couldn't measure walls here (open surfaces) — run Fix model first."}
+          </p>
+          {thin.thinSamples > 0 && (
+            <div className="param-actions">
+              <button className="ghost sm" onClick={prep.thin.toggleShown}>{prep.thin.shown ? "Hide highlight" : "Show on model"}</button>
+            </div>
+          )}
         </div>
       )}
       <p className="fine">Generated meshes are often not watertight — that's expected. Simplify when a slicer (e.g. Bambu Studio) chokes on the triangle count. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>

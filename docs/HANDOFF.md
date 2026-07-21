@@ -196,7 +196,15 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   page; `viewport-fit=cover` + safe-area padding on composer/statusbar. Phone topbar
   (≤480px): engine pill hidden, brand side shrinks with ellipsis — audited no-overflow
   at 390/430/834/1024/1194.
-- STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
+- **Cross-browser (iOS shells)**: every iPhone/iPad browser (Safari, Chrome, Arc,
+  Comet…) is a WEBKIT shell, so all -webkit work applies to all of them. Audited: no
+  unguarded engine-specific APIs (SpeechRecognition/requestIdleCallback/randomUUID/
+  CompressionStream/navigator.gpu all guarded or fallback'd; no File System Access /
+  OffscreenCanvas / Popover API). downloadBlob revokes its object URL on a DELAY —
+  WebKit cancels a download whose blob URL is revoked synchronously after click().
+  Effective CSS floor: iOS 16.2+ (color-mix, @container). Playwright WebKit can NOT be
+  downloaded in the CCR sandbox (CDN 403) — engine-level Safari testing happens on
+  real devices only.
 
 ## Conventions
 

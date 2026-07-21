@@ -6,7 +6,9 @@ export function downloadBlob(blob: Blob, filename: string) {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // WebKit (every iPhone/iPad browser) can CANCEL the download if the object URL is
+  // revoked synchronously — the fetch of the blob races the revoke. Give it a beat.
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
 
 export function safeFileName(name: string, ext: string): string {

@@ -54,6 +54,7 @@ export interface Project {
   glb?: Blob; // HEAD generative mesh
   importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
   thumb?: string; // small rendered preview of the current model (webp/png data URL), refreshed on each change
+  thumbV?: number; // thumbnail style version — the library regenerates thumbs older than the current look
   pins?: Pin[]; // spatial notes / AI-edit markers on the model
   plates?: { count: number; of: Record<string, number>; names?: Record<number, string> }; // build plates: how many, which object prints where, user labels
   genSource?: GenSource;

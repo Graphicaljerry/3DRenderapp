@@ -28,6 +28,14 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **Library thumbnails self-upgrade**: saved previews carry `thumbV` (THUMB_V=2 in
+  App.tsx — bump when the studio look changes). Opening the Library rebuilds up to 8
+  stale projects OFF-SCREEN (CAD via worker `engine.build` from HEAD code/params/ops;
+  meshes via their stored glb) and re-shoots them with `viewer.captureGeometryShot`
+  (temp mesh, default material, same studio pipeline); every touched project is
+  stamped even on failure so nothing retries forever; `libTick` prop repaints the
+  open modal. Chat-shell projects (0 versions) legitimately keep the cube placeholder.
+  Verified by `harness/library-thumbs-e2e.mjs`.
 - **iPad white-flash reload loop FIXED (2026-07-21)**: signed-in devices reloaded every
   ~4 s flashing light mode. Chain: the OpenRouter Auto warm-on-boot fetch rewrote the
   TIMESTAMPED `moldable_openrouter_models_v2` cache each boot → gatherSettings syncs

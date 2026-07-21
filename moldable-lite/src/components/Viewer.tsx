@@ -43,6 +43,9 @@ export interface ViewerHandle {
   } | null;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
+  /** Studio shot of an ARBITRARY geometry (not the canvas model) — lets the library
+   *  regenerate stale project thumbnails from a background rebuild. */
+  captureGeometryShot: (g: THREE.BufferGeometry) => string | null;
   /** A large, clean render of the model alone (no grid/dims/pins) — the reference
    *  image for "refine this as a mesh": it feeds an image→3D generator. */
   captureModelShot: () => string | null;
@@ -1922,6 +1925,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;
     },
+    captureGeometryShot(g) {
+      const s = st.current;
+      if (!s) return null;
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: "#c7ccd3", metalness: 0.05, roughness: 0.6 }));
+      try {
+        return captureThumbnail(s, { mesh: m });
+      } finally {
+        (m.material as THREE.Material).dispose();
+      }
+    },
     captureModelShot() {
       // Image→3D generators want a big, square, clutter-free subject shot.
       return st.current ? captureThumbnail(st.current, { W: 768, H: 768, png: true }) : null;
@@ -1935,8 +1948,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 // a soft neutral backdrop (independent of the app theme), three-point lighting,
 // and a faked soft contact shadow under the part. Captured off-screen in a
 // throwaway scene, so the live view (theme, grid, labels, zoom) is untouched.
-function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: boolean }): string | null {
-  if (!s.mesh) return null;
+function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: boolean; mesh?: THREE.Mesh }): string | null {
+  const subject = opts?.mesh ?? s.mesh;
+  if (!subject) return null;
   const W = opts?.W ?? 512, H = opts?.H ?? 384;
 
   const scene = new THREE.Scene();
@@ -1969,14 +1983,14 @@ function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: b
 
   // The model, sharing geometry but with its own slightly softened material —
   // the user's colour/texture stays, the finish reads like studio-lit plastic.
-  const srcMat = s.mesh.material as THREE.MeshStandardMaterial;
+  const srcMat = subject.material as THREE.MeshStandardMaterial;
   const mat = srcMat.clone();
   if (mat instanceof THREE.MeshStandardMaterial) {
     mat.roughness = Math.min(0.7, Math.max(0.35, mat.roughness ?? 0.6));
     mat.metalness = Math.min(0.15, mat.metalness ?? 0.1);
     mat.wireframe = false;
   }
-  const model = new THREE.Mesh(s.mesh.geometry, mat);
+  const model = new THREE.Mesh(subject.geometry, mat);
   scene.add(model);
 
   const box = new THREE.Box3().setFromObject(model);

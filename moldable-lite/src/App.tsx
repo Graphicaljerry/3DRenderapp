@@ -42,7 +42,7 @@ import { findThinWalls, type ThinWallReport } from "./print/thinwalls";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine } from "./gen/registry";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
-import { newProject, putProject, getProject } from "./store/projects";
+import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { appendVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
 import type { Project, Pin } from "./store/types";
 import { uid } from "./lib/id";
@@ -81,6 +81,9 @@ export const BUBBLE_TINTS: { label: string; color: string }[] = [
 const KEY_LS = "moldable_key";
 const MODEL_LS = "moldable_model";
 const PRINTER_LS = "moldable_printer";
+// Thumbnail style version: bump when the studio look changes so the Library knows
+// which saved previews are stale and quietly re-shoots them.
+const THUMB_V = 2;
 
 // Fresh-chat engine routing: organic/sculptural language → the generative mesh engine
 // (CAD can't sculpt); dimensioned/functional language → Precise CAD. Both matching →
@@ -917,7 +920,7 @@ export default function App() {
       if (!pr) return;
       const thumb = viewer.current?.captureThumbnail();
       if (!thumb) return;
-      const next = { ...pr, thumb, updatedAt: Date.now() };
+      const next = { ...pr, thumb, thumbV: THUMB_V, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
       void putProject(next);
@@ -925,6 +928,52 @@ export default function App() {
     }, 500);
     return () => clearTimeout(t);
   }, [geometry]);
+
+  // ---- library thumbnails: silently upgrade stale ones to the studio look ----
+  // Old captures were raw viewport grabs (theme background, selection box and gizmo
+  // in shot). When the Library opens, rebuild a few stale projects OFF-SCREEN via
+  // the CAD worker (or their saved mesh) and re-shoot them studio-style. Bounded
+  // per open, sequential, and every touched project is version-stamped so nothing
+  // is retried forever.
+  const thumbUpgradeRef = useRef(false);
+  const [libTick, setLibTick] = useState(0);
+  async function refreshLibraryThumbs() {
+    if (thumbUpgradeRef.current || !sel) return;
+    thumbUpgradeRef.current = true;
+    try {
+      const all = await listProjects();
+      const stale = all
+        .filter((p) => (p.thumbV ?? 1) < THUMB_V && p.versions.length > 0 && p.id !== projectRef.current?.id)
+        .slice(0, 8);
+      let changed = 0;
+      for (const p of stale) {
+        let shot: string | null = null;
+        try {
+          if (p.code && sel.kind === "replicad" && !p.importFile) {
+            const res = await sel.engine.build({ kind: "code", code: p.code, params: p.params, ops: p.ops });
+            shot = viewer.current?.captureGeometryShot(res.geometry) ?? null;
+            res.geometry.dispose();
+          } else if (p.glb) {
+            const { geometry: g } = await loadAnyMesh(new File([p.glb], "model.glb"));
+            shot = viewer.current?.captureGeometryShot(g) ?? null;
+            g.dispose();
+          }
+        } catch { /* unbuildable on this device — keep the old thumb, stamp it, move on */ }
+        await putProject({ ...p, thumb: shot ?? p.thumb, thumbV: THUMB_V, ...(shot ? { updatedAt: Date.now() } : {}) });
+        if (shot) changed++;
+      }
+      if (changed) {
+        setLibTick((t) => t + 1); // the open Library re-queries and repaints
+        scheduleSync();
+      }
+    } finally {
+      thumbUpgradeRef.current = false;
+    }
+  }
+  useEffect(() => {
+    if (showLibrary && status !== "generating") void refreshLibraryThumbs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showLibrary]);
 
   // ---- finish an OAuth / magic-link return (?code=...) and greet the user ----
   useEffect(() => {
@@ -3237,7 +3286,7 @@ export default function App() {
           onClose={() => setShowSettings(false)}
         />
       )}
-      {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} />}
+      {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} refreshTick={libTick} />}
       {showTemplates && <TemplatesModal onPick={(t) => void loadTemplate(t)} onClose={() => setShowTemplates(false)} busy={status === "generating"} />}
       {showMeasure && image && (
         <MeasureModal

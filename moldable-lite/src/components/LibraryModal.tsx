@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { listProjects, deleteProject, duplicateProject } from "../store/projects";
 import type { Project } from "../store/types";
 
-export function LibraryModal({ onOpen, onClose, currentId }: { onOpen: (p: Project) => void; onClose: () => void; currentId?: string }) {
+export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOpen: (p: Project) => void; onClose: () => void; currentId?: string; refreshTick?: number }) {
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -15,9 +15,11 @@ export function LibraryModal({ onOpen, onClose, currentId }: { onOpen: (p: Proje
       setLoading(false);
     }
   }
+  // refreshTick bumps when the app finishes upgrading stale thumbnails in the
+  // background — re-query so the new studio shots appear without reopening.
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refreshTick]);
 
   return (
     <div className="overlay" onClick={onClose}>

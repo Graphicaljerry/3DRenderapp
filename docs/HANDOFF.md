@@ -28,6 +28,14 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **Dark composer in light mode FIXED**: the index.html pre-paint script pins
+  `style.colorScheme` INLINE; the theme effect only set dataset.theme, so after a
+  dark→light toggle native form controls (composer textarea) kept UA-dark styling.
+  Theme effect now mirrors the inline styles (colorScheme + backgroundColor); CSS
+  gained `:root { color-scheme: light }` / dark override; composer textarea got an
+  explicit `background: var(--bg); color: var(--ink)` base. RULE: anything the
+  pre-paint script sets inline MUST be updated by the theme effect too. Verified by
+  `harness/theme-toggle-e2e.mjs` (dark boot → light toggle → white composer → back).
 - **Library organization**: toolbar (search over name+version summaries+mesh prompt;
   sort newest/oldest/name/most-versions; engine filter CAD vs mesh; live "N of M
   models" count) + FLAT folders — `Project.folder?: string`, per-card select

@@ -28,6 +28,15 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **Studio thumbnails** (`captureThumbnail` in Viewer.tsx): library/template previews are
+  now product shots — throwaway scene with a paper-sweep gradient backdrop (CanvasTexture),
+  3-point lighting (hemi 0.85 + key 1.8 + cool fill + rim), a radial-gradient contact-shadow
+  decal at the part's min-z, 40° cam with breathing room, 512×384 webp q0.85. CRITICAL FIX
+  found here: offscreen render targets store LINEAR values (the sRGB output transform only
+  applies to the real canvas), so raw readback looked muddy-dark — a linear→sRGB LUT now
+  runs in the readback flip loop. `captureModelShot` (CAD→mesh refine input) shares the
+  pipeline. All 11 template webps regenerated via `harness/gen-thumbs.mjs` (takes an
+  optional template-id arg). User materials/colors survive; only finish is softened.
 - **Feature pack (2026-07-21 second wave)**: (1) OpenRouter Auto FIXED — the catalogue
   was only fetched when Settings opened, so every Auto pick silently fell back to
   gemini-2.5-flash; now `ensureOrCatalog()` awaits `fetchOpenRouterModels()` at pick

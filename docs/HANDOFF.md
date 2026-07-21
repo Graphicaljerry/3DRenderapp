@@ -28,6 +28,28 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **Feature pack (2026-07-21 second wave)**: (1) OpenRouter Auto FIXED — the catalogue
+  was only fetched when Settings opened, so every Auto pick silently fell back to
+  gemini-2.5-flash; now `ensureOrCatalog()` awaits `fetchOpenRouterModels()` at pick
+  time + a warm-on-boot effect + honest "(couldn't load the live model list)" label +
+  AUTO sentinel resolved in research keys and defensively in generateLlm. (2) Narrated
+  thinking: send() keeps a `steps[]` trail (`pushStep`/`onThink`/`thinkTrail`) shown
+  live in the thinking panel and persisted on the finished message (incl. errors) —
+  studying reference image / web research / writing with <model> / kernel build /
+  repair attempts / local fallback. (3) Sketch → model: classifyIntent accepts an
+  image (ApiMsg image part) so fresh-chat routing judges the OBJECT a photo/sketch
+  shows; VISION_ADDENDUM gained sketch rules (lines=edges, read handwritten dims,
+  straighten freehand). (4) Fit calibration: `fitClearance()/fitCalibration()/
+  saveFitCalibration()` in prompts.ts (localStorage moldable_fit_cal) shift
+  snug/loose/press together; Settings → Printer → "Fit calibration" field; new
+  **Tolerance test coupon** template (6 stepped holes, notch-coded, + flanged peg).
+  (5) Fastener presets: `src/cad/fasteners.ts` (M2–M5 heat-set/clearance/pilot) as a
+  dropdown in the hole panel with insert-boss guidance. (6) Textures: wave/voronoi/
+  diamond/fuzzy added to preview.worker patternAt (worley noise; fuzzy subdivides
+  finer). Verified by `harness/printpack2-e2e.mjs` (12 checks incl. seeded-catalogue
+  Auto pick + image-carrying classify) and `harness/engine-audit.mjs` — the full
+  engine matrix: 11 templates × build/rotate/scale/chamferBottom/params/4 exports/
+  re-export/rebuild, 10× repeat stability, humanized kernel errors — ALL CLEAN.
 - **Printability pack** (Print tab "Print prep" + View menu): (1) overhang heatmap —
   `src/print/overhang.ts` flags faces with n.z < −sin(threshold) (bed-contact excluded),
   amber→red by severity, drawn by a Viewer `analysisOverlay` prop (soup + vertex colors,

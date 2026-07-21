@@ -299,4 +299,38 @@ function main(replicad, params) {
     .chamfer(Math.min(0.6, h / 4, (rOut - rIn) / 3), (e) => e.inPlane("XY", h));
 }`,
   },
+  {
+    id: "tolerance-coupon",
+    name: "Tolerance test coupon",
+    blurb: "Measure YOUR printer's real fit",
+    summary:
+      "A fit-calibration coupon: six ⌀10 mm holes stepped from 0.05 to 0.55 mm extra clearance (notches above each hole count the step: 1 notch ≈ 0.05, then +0.1 per notch) plus a ⌀10 test peg. Print it, push the peg into each hole, and note the TIGHTEST one it firmly fits — enter that clearance in Settings → Printer → Fit calibration, and every future snug/press/loose fit uses your printer's reality.",
+    code: `const defaultParams = { pegDiameter: 10, startClearance: 0.05, step: 0.1, holes: 6, thickness: 6 };
+function main(replicad, params) {
+  const p = { ...defaultParams, ...params };
+  const { makeBaseBox, makeCylinder } = replicad;
+  const d = Math.max(4, p.pegDiameter);
+  const n = Math.min(8, Math.max(3, Math.round(p.holes)));
+  const t = Math.max(3, p.thickness);
+  const pitch = d + 8;
+  const W = n * pitch + 6;
+  const H = d + 14;
+  let plate = makeBaseBox(W, H, t);
+  for (let i = 0; i < n; i++) {
+    const cx = (i - (n - 1) / 2) * pitch;
+    const c = p.startClearance + p.step * i;
+    plate = plate.cut(makeCylinder((d + c) / 2, t + 2, [cx, 0, -1], [0, 0, 1]));
+    // Notch code above each hole: 1 notch = the start clearance, +1 per step.
+    for (let k = 0; k <= i; k++) {
+      const nx = cx + (k - i / 2) * 1.8;
+      plate = plate.cut(makeBaseBox(1, 2.4, 1.4).translate([nx, H / 2 - 0.8, t - 1.2]));
+    }
+  }
+  // The test peg, printed beside the plate: same nominal size as the holes, with a
+  // grip flange so it's easy to push and pull.
+  const peg = makeCylinder(d / 2, t + 6, [-(W / 2 + d / 2 + 6), 0, 3], [0, 0, 1])
+    .fuse(makeCylinder(d / 2 + 3, 3, [-(W / 2 + d / 2 + 6), 0, 0], [0, 0, 1]));
+  return plate.fuse(peg);
+}`,
+  },
 ];

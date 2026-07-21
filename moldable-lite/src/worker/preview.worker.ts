@@ -68,10 +68,47 @@ function patternAt(kind: string, px: number, py: number, pz: number, nx: number,
     const w = Math.cos(k * u) + Math.cos(k * (u / 2 + (v * Math.sqrt(3)) / 2)) + Math.cos(k * (u / 2 - (v * Math.sqrt(3)) / 2));
     return Math.min(1, Math.max(0, (w + 1.5) / 4.5));
   }
+  if (kind === "wave") {
+    // Flowing parallel ridges with a slow drift — the ribbed-vase / dune look.
+    return 0.5 + 0.5 * Math.sin((2 * Math.PI * u) / s + 0.8 * Math.cos((2 * Math.PI * v) / (s * 3)));
+  }
+  if (kind === "voronoi") {
+    // Organic cell walls: ridge where the two nearest feature points tie (F2−F1≈0).
+    const { f1, f2 } = worley(u / s, v / s);
+    return Math.min(1, Math.max(0, 1 - (f2 - f1) * 2.5));
+  }
+  if (kind === "diamond") {
+    // Smooth pyramid grid (stud/quilt look) — unlike knurl's hard checker.
+    const tri = (x: number) => 1 - Math.abs(2 * (x - Math.floor(x)) - 1);
+    return tri(u / s) * tri(v / s);
+  }
+  if (kind === "fuzzy") {
+    // Fuzzy skin: fine random stipple that hides layer lines (like slicers' fuzzy
+    // skin, but real geometry that survives any slicer).
+    return vnoise(u / (s * 0.18), v / (s * 0.18));
+  }
   // knurl: crisp diamond checker.
   const a = Math.sin((Math.PI * (u + v)) / s);
   const b = Math.sin((Math.PI * (u - v)) / s);
   return a * b > 0 ? 1 : 0;
+}
+
+/** Worley/cellular noise: distance to the nearest (f1) and 2nd-nearest (f2) hashed
+ *  feature point on the unit lattice. */
+function worley(u: number, v: number): { f1: number; f2: number } {
+  const iu = Math.floor(u), iv = Math.floor(v);
+  let f1 = 9, f2 = 9;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cx = iu + dx, cy = iv + dy;
+      const px = cx + hash2(cx, cy);
+      const py = cy + hash2(cy * 7 + 1, cx * 3 + 5);
+      const d = Math.hypot(u - px, v - py);
+      if (d < f1) { f2 = f1; f1 = d; }
+      else if (d < f2) f2 = d;
+    }
+  }
+  return { f1, f2 };
 }
 
 export interface PreviewApi {
@@ -83,7 +120,7 @@ export interface PreviewApi {
   preview(prism: Float32Array, op: "add" | "cut" | "intersect"): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
   /** Physical surface texture: weld → subdivide until edges suit the pattern scale →
    *  displace along vertex normals. Returns a closed triangle soup. */
-  displace(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
+  displace(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise" | "wave" | "voronoi" | "diamond" | "fuzzy"; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
   /** Uniform outward surface offset (~delta mm): weld, then displace every vertex along
    *  its area-weighted normal. Correct on non-convex shapes (interior steps move OUT,
    *  where bbox scaling would pull them in) — powers "Make it fit" clearance. */
@@ -110,7 +147,8 @@ const api: PreviewApi = {
         verts = v3;
       }
       // Subdivide (1 tri → 4) until edges are fine enough to carry the pattern.
-      const targetEdge = Math.max(0.35, opts.scale * 0.45);
+      // Fuzzy skin's effective wavelength is a fraction of the cell size — go finer.
+      const targetEdge = Math.max(0.3, opts.scale * (opts.pattern === "fuzzy" ? 0.12 : 0.45));
       for (let pass = 0; pass < 6; pass++) {
         let maxE = 0;
         for (let t = 0; t < tris.length; t += 3) {

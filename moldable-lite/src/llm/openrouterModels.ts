@@ -41,9 +41,13 @@ export function cachedOpenRouterModels(): ORModel[] {
   return [];
 }
 
-/** Fetch (and cache) the live catalogue. Resolves to [] if the network fails. */
+/** Fetch (and cache) the live catalogue. Resolves to [] if the network fails.
+ *  A fresh localStorage copy short-circuits WITHOUT refetching — rewriting the
+ *  timestamped cache on every boot once caused a cloud-sync reload loop (the
+ *  synced key differed from the cloud copy on every single pull). */
 export async function fetchOpenRouterModels(): Promise<ORModel[]> {
-  if (cache) return cache;
+  const have = cachedOpenRouterModels(); // memory, then still-fresh localStorage
+  if (have.length) return have;
   if (inflight) return inflight;
   inflight = (async () => {
     try {

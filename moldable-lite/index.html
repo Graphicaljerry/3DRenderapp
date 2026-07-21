@@ -15,6 +15,22 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="Moldable" />
     <title>Moldable</title>
+    <!-- Apply the saved theme BEFORE first paint: without this, every load (and any
+         reload) flashes the default light theme until React mounts — a full-screen
+         white blink for dark-mode users. Inline and tiny so it can't be deferred. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("moldable_theme");
+          if (t !== "dark" && t !== "light") {
+            t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+          }
+          document.documentElement.dataset.theme = t;
+          document.documentElement.style.colorScheme = t;
+          if (t === "dark") document.documentElement.style.backgroundColor = "#121213"; // --surf
+        } catch (e) { /* private mode — default theme */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

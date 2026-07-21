@@ -267,7 +267,15 @@ export default function App() {
       // conflicts; this push only adds the local-only settings/projects on top.
       await cloudSyncPush();
       markSynced();
-      if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 400);
+      // Reload so React state picks up adopted settings — but AT MOST ONCE per
+      // browser session. Without this cap, any synced key that legitimately
+      // differs on every boot turns "reload to apply" into an endless reload
+      // loop that flashes the app white every few seconds (it happened).
+      const reloaded = sessionStorage.getItem("moldable_pull_reloaded");
+      if (r && (r.settings > 0 || r.projects > 0) && !reloaded) {
+        try { sessionStorage.setItem("moldable_pull_reloaded", "1"); } catch { /* private mode */ }
+        setTimeout(() => window.location.reload(), 400);
+      }
     } catch {
       setSyncState("idle");
     }

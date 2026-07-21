@@ -28,9 +28,18 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
 // Device-local keys that must NOT sync. `moldable_last_sync` in particular changes
 // on every sync (it's written AFTER each push), so if it synced it would always
 // differ between cloud and local — making the pull report "settings changed"
-// forever and triggering an endless reload loop. `moldable_last_project` is just
-// which project this device last had open, also per-device.
-export const LOCAL_ONLY_KEYS = new Set(["moldable_last_sync", "moldable_last_project"]);
+// forever and triggering an endless reload loop. This is not hypothetical: the
+// timestamped OpenRouter catalogue cache did exactly that (rewritten each boot →
+// every pull saw a "change" → reload → rewrite → …), flashing the app white every
+// few seconds on any signed-in device. Caches and per-device state live here.
+export const LOCAL_ONLY_KEYS = new Set([
+  "moldable_last_sync", // written after every push — always differs
+  "moldable_last_project", // which project THIS device last had open
+  "moldable_openrouter_models_v2", // timestamped catalogue cache, refetched per device
+  "moldable_gemini_model", // model id resolved against this device's key at runtime
+  "moldable_local_ready", // whether THIS device downloaded the 0.9 GB on-device model
+  "moldable_house_url", // developer relay override for this device
+]);
 
 /** Everything the app stores in localStorage (keys, providers, printer, units…), minus device-local keys. */
 export function gatherSettings(): Record<string, string> {

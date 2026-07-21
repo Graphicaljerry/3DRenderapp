@@ -61,7 +61,10 @@ export async function growMesh(positions: Float32Array, delta: number): Promise<
 }
 
 /** Physical surface texture: subdivide + displace the mesh in the preview worker. */
-export async function displaceMesh(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise"; scale: number; depth: number }): Promise<Float32Array | null> {
+/** Every physical surface pattern the texture tool offers (real displaced geometry). */
+export type SurfacePattern = "knurl" | "honeycomb" | "noise" | "wave" | "voronoi" | "diamond" | "fuzzy";
+
+export async function displaceMesh(positions: Float32Array, opts: { pattern: SurfacePattern; scale: number; depth: number }): Promise<Float32Array | null> {
   const r = await ensure().displace(positions, opts);
   return r.ok ? r.positions : null;
 }

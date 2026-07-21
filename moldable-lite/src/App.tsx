@@ -9,7 +9,7 @@ import { geometryToSTL, geometryTo3MF, geometriesTo3MF, platesToProject3MF, zipM
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfacePattern } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
@@ -20,7 +20,7 @@ import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -123,6 +123,15 @@ function loadLlmKeys(): Record<string, string> {
   }
 }
 
+/** OpenRouter "Auto" needs the live catalogue to route. It used to be fetched only
+ *  when Settings was opened — so on a fresh device every Auto pick silently fell back
+ *  to the preset default (gemini-2.5-flash), which is exactly what users saw. */
+async function ensureOrCatalog(): Promise<ORModel[]> {
+  const have = cachedOpenRouterModels();
+  if (have.length) return have;
+  return fetchOpenRouterModels();
+}
+
 function loadPrinter(): PrinterDefaults {
   try {
     const raw = localStorage.getItem(PRINTER_LS);
@@ -191,6 +200,11 @@ export default function App() {
   const effectiveProxy = proxyBase || (import.meta.env.DEV ? "" : DEFAULT_RELAY);
   const [genEng, setGenEng] = useState(loadGenEng);
   const [llm, setLlm] = useState<LlmSettings>(loadLlm);
+  // Warm the OpenRouter catalogue whenever OpenRouter is the brain, so "Auto" can
+  // route from the very first request instead of falling back to the default model.
+  useEffect(() => {
+    if (llm.provider === "openrouter") void fetchOpenRouterModels();
+  }, [llm.provider]);
   const [llmKeys, setLlmKeys] = useState<Record<string, string>>(loadLlmKeys);
   // Optional "house AI": if the site owner's relay sponsors a key, visitors get a
   // Built-in brain with zero setup. One health check at boot; null = feature off.
@@ -1991,7 +2005,7 @@ export default function App() {
     try {
       let effLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
       if (effLlm.provider === "openrouter" && effLlm.model === AUTO_MODEL) {
-        const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: request, isEdit: true });
+        const pick = pickAutoModel(await ensureOrCatalog(), { prompt: request, isEdit: true });
         if (pick) effLlm = { ...effLlm, model: pick.model.id };
       }
       const system = [
@@ -2065,7 +2079,7 @@ export default function App() {
 
   /** Physical surface texture: subdivide + displace the current model's mesh (any kind).
    *  CAD models become meshes here — precision-edit first, texture last (History keeps both). */
-  async function applySurfaceTexture(pattern: "knurl" | "honeycomb" | "noise", scale: number, depth: number) {
+  async function applySurfaceTexture(pattern: SurfacePattern, scale: number, depth: number) {
     if (!geometry || !result) return;
     setStatus("generating");
     try {
@@ -2181,7 +2195,7 @@ export default function App() {
     setFit(next);
     if (!result || result.source.kind !== "code") return;
     const key = Object.keys(cadDefaults ?? {}).find((k) => k.toLowerCase() === "clearance");
-    if (key) void applyParams({ ...paramValues, [key]: FIT_CLEARANCE[next] });
+    if (key) void applyParams({ ...paramValues, [key]: fitClearance(next) });
   }
 
   async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
@@ -2207,23 +2221,34 @@ export default function App() {
     const brainKeys = { anthropic: key, ...llmKeys };
     let routedMode: Mode | null = null;
     let refineRoute = false; // routed to mesh specifically to refine the CURRENT model
-    if (!forceMode && !result && !modeTouched.current && p) {
+    if (!forceMode && !result && !modeTouched.current && (p || (image && !image.markup))) {
       const organic = ORGANIC_RE.test(p) && !CADISH_RE.test(p);
       const cadish = CADISH_RE.test(p) && !ORGANIC_RE.test(p);
       if (mode === "precise" && organic) routedMode = "generative";
       else if (mode === "generative" && cadish) routedMode = "precise";
-      else if (!organic && !cadish && !image) {
-        const cls = await classifyIntent(p, brainLlm, brainKeys, effectiveProxy);
+      else if (!organic && !cadish) {
+        // Words alone don't decide — the brain classifies. With an attachment (a photo
+        // OR a hand-drawn sketch), the vision brain judges the OBJECT it shows: a
+        // sketched bracket routes to CAD, a sketched dragon to the mesh engine.
+        let routeImg: { dataBase64: string; mediaType: string } | undefined;
+        if (image && !image.markup) {
+          try {
+            const dataUrl = await blobToDataURL(image.blob);
+            routeImg = { dataBase64: dataUrl.split(",")[1], mediaType: image.blob.type || "image/png" };
+          } catch { /* classify from text alone */ }
+        }
+        const cls = await classifyIntent(p, brainLlm, brainKeys, effectiveProxy, routeImg);
         if (cls === "mesh" && mode === "precise") routedMode = "generative";
         else if (cls === "cad" && mode === "generative") routedMode = "precise";
       }
       if (routedMode) {
         setMode(routedMode);
+        const seen = image ? "Your attachment looks" : "This sounds";
         setMessages((m) => [...m, {
           id: mid(), role: "assistant",
           text: routedMode === "generative"
-            ? "This sounds organic/sculptural — I routed it to **Generative (AI mesh)**, which models freeform shapes far better than CAD. Tap Precise (CAD) above to override."
-            : "This sounds like a dimensioned, functional part — I routed it to **Precise (CAD)** for exact measurements and STEP export. Tap Generative (AI mesh) above to override.",
+            ? `${seen} organic/sculptural — I routed it to **Generative (AI mesh)**, which models freeform shapes far better than CAD. Tap Precise (CAD) above to override.`
+            : `${seen} like a dimensioned, functional part — I routed it to **Precise (CAD)** for exact measurements and STEP export. Tap Generative (AI mesh) above to override.`,
         }]);
       }
     }
@@ -2288,7 +2313,7 @@ export default function App() {
         }
       }
       if (p && !genImage && detectProductQuery(p)) {
-        const rk = { geminiKey: llmKeys["gemini"], geminiModel: llm.provider === "gemini" ? llm.model : "", anthropicKey: key, openrouterKey: llmKeys["openrouter"], openrouterModel: llm.provider === "openrouter" ? llm.model : "" };
+        const rk = { geminiKey: llmKeys["gemini"], geminiModel: llm.provider === "gemini" ? llm.model : "", anthropicKey: key, openrouterKey: llmKeys["openrouter"], openrouterModel: llm.provider === "openrouter" && llm.model !== AUTO_MODEL ? llm.model : "" };
         if (canResearch(rk)) {
           try {
             const genCtx = result && project ? `the part "${project.name}"` : undefined;
@@ -2371,10 +2396,10 @@ export default function App() {
     // for small edits, strong/reasoning for fresh or complex work) so the user doesn't
     // hand-pick among hundreds — and we don't pay for a big model on a tiny edit.
     if (effLlm.provider === "openrouter" && effLlm.model === AUTO_MODEL) {
-      const pick = pickAutoModel(cachedOpenRouterModels(), { prompt: promptText, isEdit: !!result, hasImage: !!image });
+      const pick = pickAutoModel(await ensureOrCatalog(), { prompt: promptText, isEdit: !!result, hasImage: !!image });
       const chosen = pick?.model.id ?? llmPreset("openrouter").defaultModel;
       effLlm = { ...effLlm, model: chosen };
-      setAutoPick(pick ? `Auto → ${shortModelName(chosen)} (${pick.reason})` : `Auto → ${shortModelName(chosen)}`);
+      setAutoPick(pick ? `Auto → ${shortModelName(chosen)} (${pick.reason})` : `Auto → ${shortModelName(chosen)} (couldn't load the live model list — using the default)`);
     } else if (effLlm.provider === "openrouter" && image && cachedOpenRouterModels().find((x) => x.id === effLlm.model)?.vision === false) {
       // Hand-picked model that can't SEE the attached photo → OpenRouter 404s ("No
       // endpoints found that support image input"). Swap to a vision pick and say so.
@@ -2437,6 +2462,27 @@ export default function App() {
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");
 
+    // Narrated thinking: every request shows its working steps live in the thinking
+    // panel — what the AI is looking at and doing — with the model's own reasoning
+    // streaming underneath when the model exposes it. The trail is kept on the
+    // finished message too, so "what did it just do?" always has an answer.
+    const steps: string[] = [];
+    let lastThink = ""; // model reasoning (kept on the reply for later reading)
+    const thinkTrail = () => steps.join("\n") + (lastThink ? `\n\n${lastThink}` : "");
+    const pushStep = (s: string) => {
+      steps.push(`▸ ${s}`);
+      setStreamingThink(thinkTrail());
+    };
+    const onThink = (_t: string, full: string) => {
+      lastThink = full;
+      setStreamingThink(thinkTrail());
+    };
+    if (visionImage) {
+      pushStep(visionImage.markup
+        ? "Reading your marked screenshot — mapping the circled region onto the model…"
+        : "Studying your reference image — outlines, proportions, and any written measurements…");
+    }
+
     // Product research: when the request names a real-world product ("a case
     // for my iPhone 17 Pro"), look up its exact measurements on the web first
     // so the CAD code is built from real numbers instead of guesses. Runs via
@@ -2455,7 +2501,7 @@ export default function App() {
       geminiModel: llm.provider === "gemini" ? llm.model : "",
       anthropicKey: key,
       openrouterKey: llmKeys["openrouter"],
-      openrouterModel: llm.provider === "openrouter" ? llm.model : "",
+      openrouterModel: llm.provider === "openrouter" && llm.model !== AUTO_MODEL ? llm.model : "",
     };
     // Text-only web research is pointless — and actively confusing — when a photo IS the
     // reference and the prompt names no product ("make it look like this"): the research model
@@ -2475,6 +2521,7 @@ export default function App() {
       // Forced on but no browsing-capable key — tell the user rather than silently skip.
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
     } else if (wantWeb) {
+      pushStep("Searching the web for the product's real dimensions…");
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
       const rr = await researchDimensions(p, researchKeys, partContext);
       researched = rr?.text ?? null;
@@ -2523,7 +2570,6 @@ export default function App() {
     // Cap the rolling context so long sessions don't slow down / blow the window.
     let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
-    let lastThink = ""; // final reasoning text, attached to the reply for later reading
     let ok = false;
     let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
 
@@ -2547,15 +2593,17 @@ export default function App() {
         // to earlier turns ("make it match what I said before"). The edit-block savings are on
         // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
         const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
+        pushStep(`Writing the change with ${shortModelName(effLlm.model)} (edit mode — only the lines that change)…`);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink }, effectiveProxy);
         finalRaw = raw;
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {
+          pushStep("Applying the edit and rebuilding the solid in the CAD kernel…");
           const editParams = result?.source.kind === "code" ? result.source.params : undefined;
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
           const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -2575,19 +2623,23 @@ export default function App() {
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
         let raw: string;
+        pushStep(attempt === 1
+          ? `Writing the ${kind === "replicad" ? "CAD program" : "model spec"} with ${shortModelName(effLlm.model)}…`
+          : `Attempt ${attempt} — feeding the build error back so the model can fix its code…`);
         try {
-          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
+          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink }, effectiveProxy);
         } catch (err: any) {
           // Cloud brain unreachable + the on-device model is already on this machine →
           // answer locally instead of failing (works fully offline).
           if (effLlm.provider === "local" || !isNetErr(err) || !localSupported() || !localDownloaded()) throw err;
           usedLocal = true;
+          pushStep("Cloud brain unreachable — switching to the on-device model…");
           setMessages((m) => {
             const idx = m.findIndex((x) => x.id === placeholderId);
             const note = { id: mid(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
             return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
           });
-          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: (_t, full) => { lastThink = full; setStreamingThink(full); } }, effectiveProxy);
+          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink }, effectiveProxy);
         }
         finalRaw = raw;
         try {
@@ -2602,11 +2654,12 @@ export default function App() {
             name = spec.name;
             summary = spec.summary ?? spec.name;
           }
+          pushStep("Building the solid in the CAD kernel…");
           const res = await sel.engine.build(bi);
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           const how = await deliverResult(res, name, summary, p, !!visionImage);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: lastThink || undefined } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined } : x)));
           ok = true;
           break;
         } catch (err: any) {
@@ -2622,7 +2675,7 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: friendlyNet(String(err?.message ?? err)), error: true, streaming: false } : x)));
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: friendlyNet(String(err?.message ?? err)), error: true, streaming: false, thinking: thinkTrail() || undefined } : x)));
     } finally {
       if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }];
       setStatus("idle");
@@ -3525,6 +3578,7 @@ function SettingsModal({
   // Printer
   const [bed, setBed] = useState(printer.bed);
   const [oh, setOh] = useState(printer.overhangThresholdDeg);
+  const [fitCal, setFitCalState] = useState<number | null>(() => fitCalibration());
   const [preset, setPreset] = useState(printer.name ?? "custom");
 
   function saveAll() {
@@ -3863,6 +3917,25 @@ function SettingsModal({
               <label>Overhang warning threshold (°)</label>
               <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
               <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
+            </SGroup>
+            <SGroup title="Fit calibration">
+              <label>Measured snug clearance (mm)</label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                placeholder="0.20 (default)"
+                value={fitCal ?? ""}
+                onChange={(e) => {
+                  const v = e.target.value === "" ? null : Math.max(0, Math.min(1, +e.target.value));
+                  setFitCalState(v);
+                  saveFitCalibration(v);
+                }}
+              />
+              <p className="fine">
+                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Its notch count × 0.1 mm (+0.05) is your number. Snug/loose/press fits in every future part then use YOUR printer's reality instead of the 0.2 mm default.
+              </p>
             </SGroup>
           </>
         )}

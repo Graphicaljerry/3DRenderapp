@@ -101,13 +101,14 @@ Rules:
 // the "broken part -> exact replacement" flow.
 export const VISION_ADDENDUM = `
 
-THE USER ATTACHED A PHOTO of a physical part to recreate or replace. Work like a reverse engineer:
+THE USER ATTACHED A PICTURE of the part they want — a photo of a physical part, OR a hand-drawn sketch (paper, whiteboard, tablet). Work like a reverse engineer:
 1) Identify the part and its function.
 2) Any measurement the user supplied OVERRIDES your estimates — use them exactly.
-3) Estimate the remaining dimensions from proportions in the photo; round to sensible values (0.5 mm).
+3) Estimate the remaining dimensions from proportions in the picture; round to sensible values (0.5 mm).
 4) At the top of the code, add a comment listing every key dimension and whether it was GIVEN or ESTIMATED.
 5) Rebuild the part as clean, simple, printable geometry — capture function (holes, slots, mounting faces), not cosmetic detail. Add FDM tolerance (0.2–0.3 mm) at mating surfaces.
-6) If a critical dimension is unknowable from the photo, choose the nearest standard size and say so in the summary.`;
+6) If a critical dimension is unknowable from the picture, choose the nearest standard size and say so in the summary.
+IF IT IS A SKETCH: drawn outlines are the part's edges — build the solid they describe, not a plaque of the drawing. READ every handwritten dimension, arrow and label and use those numbers exactly (they are GIVEN). Treat circles as holes or bosses from context, hatched areas as cut-outs, and a side/top view pair as one part seen from two angles. Straighten wobbly freehand lines to clean geometry (parallel, perpendicular, symmetric) unless the sketch clearly intends an angle or curve; when no sizes are written, scale from any one stated measurement or pick sensible printable proportions and say so.`;
 
 // Appended when the user MARKED a region on a screenshot of the CURRENT model
 // ("circle it and ask"). Opposite framing from VISION_ADDENDUM: the screenshot is a
@@ -164,11 +165,39 @@ Rules:
 // setting to an FDM clearance the model applies to mating features.
 export type FitId = "loose" | "snug" | "press";
 export const FIT_CLEARANCE: Record<FitId, number> = { loose: 0.4, snug: 0.2, press: 0.1 };
+const FIT_CAL_LS = "moldable_fit_cal";
+
+/** The user's measured snug clearance (from printing the Tolerance test coupon
+ *  template), or null when uncalibrated. Every printer/filament squishes
+ *  differently — one printed measurement beats any table. */
+export function fitCalibration(): number | null {
+  try {
+    const v = parseFloat(localStorage.getItem(FIT_CAL_LS) ?? "");
+    if (isFinite(v) && v >= 0 && v <= 1) return v;
+  } catch {}
+  return null;
+}
+export function saveFitCalibration(v: number | null) {
+  try {
+    if (v == null || !isFinite(v)) localStorage.removeItem(FIT_CAL_LS);
+    else localStorage.setItem(FIT_CAL_LS, String(Math.round(v * 100) / 100));
+  } catch {}
+}
+
+/** Effective clearance for a fit, honouring the printed calibration: the measured
+ *  value IS "snug"; loose/press shift with it by the same margins as the defaults. */
+export function fitClearance(fit: FitId): number {
+  const cal = fitCalibration();
+  const shift = cal == null ? 0 : cal - FIT_CLEARANCE.snug;
+  return Math.round(Math.max(0.05, FIT_CLEARANCE[fit] + shift) * 100) / 100;
+}
+
 export function fitDirective(fit: FitId): string {
-  const mm = FIT_CLEARANCE[fit];
+  const mm = fitClearance(fit);
   if (mm === undefined) return "";
   const how = fit === "loose" ? "loose / sliding" : fit === "press" ? "press / interference" : "snug";
-  return `\n\n[Fit: ${how} — target about ${mm} mm clearance on any mating/insert dimension (a hole over a shaft, a slot over a tab, a socket for a part). Expose it as a numeric \`clearance\` parameter = ${mm} and apply it only to those fitted features, not to cosmetic or screw-clearance holes.]`;
+  const cal = fitCalibration() != null ? " (calibrated to this user's printer)" : "";
+  return `\n\n[Fit: ${how} — target about ${mm} mm clearance${cal} on any mating/insert dimension (a hole over a shaft, a slot over a tab, a socket for a part). Expose it as a numeric \`clearance\` parameter = ${mm} and apply it only to those fitted features, not to cosmetic or screw-clearance holes.]`;
 }
 
 export function replicadRepairMessage(err: { name: string; message: string; stack?: string }): string {

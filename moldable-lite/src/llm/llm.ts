@@ -4,7 +4,7 @@
 
 import { generate as generateAnthropic, MODELS, type ApiMsg, type StreamHandlers } from "./anthropic";
 import { generateCompat } from "./openaiCompat";
-import { modelSupportsReasoning } from "./openrouterModels";
+import { modelSupportsReasoning, AUTO_MODEL } from "./openrouterModels";
 import { houseStatus, houseUrl } from "./house";
 import { generateLocal, localSupported, LOCAL_MODEL, LOCAL_SIZE_HINT } from "./local";
 
@@ -177,7 +177,9 @@ export async function generateLlm(
   const p = llmPreset(s.provider);
   const baseUrl = s.provider === "custom" ? s.baseUrl ?? "" : p.baseUrl!;
   if (!baseUrl) throw new Error("Set the custom provider's Base URL in Settings.");
-  const model = s.model || p.defaultModel;
+  // "auto" is Moldable's routing sentinel, not a real OpenRouter model id — callers
+  // normally resolve it via pickAutoModel first; if one slips through, use the default.
+  const model = (s.provider === "openrouter" && s.model === AUTO_MODEL ? "" : s.model) || p.defaultModel;
   // Turn on "thinking" for OpenRouter models that support it — the reasoning param
   // is only sent when the catalogue says the model supports it, so it never 400s
   // a model that doesn't. Off = never send it.

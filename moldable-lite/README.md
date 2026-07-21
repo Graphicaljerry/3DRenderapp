@@ -42,17 +42,33 @@ for the full engineering notes:
 ## Features
 
 - **Streaming chat** with a **self-healing loop** — on a build/compile error the exact error is fed
-  back to the model and it retries (up to 3×) before surfacing anything.
+  back to the model and it retries (up to 3×) before surfacing anything. The **thinking panel
+  narrates every step** live (studying your reference image, web research, which model is writing,
+  kernel build), with the model's own reasoning streaming underneath when available.
+- **Smart engine routing** — organic asks go to the AI-mesh engine, dimensioned parts to CAD;
+  ambiguous requests (words **or an attached photo/sketch**) are classified by your configured
+  brain. **Hand-drawn sketches become models**: drawn lines are read as edges and handwritten
+  dimensions are used exactly, in either engine.
 - **Live 3D viewer** — orbit/zoom, print-bed grid, wireframe toggle, Z-up mm.
 - **Code tab** — view/edit the replicad code (or the JSON spec) and **Re-run** with no AI call.
-- **Printability** — bed-fit, watertight/manifold (edge-adjacency), overhang %, triangles, volume.
+- **Printability** — bed-fit, watertight/manifold (edge-adjacency), overhang %, triangles, volume —
+  plus **print prep**: an overhang **heatmap** painted on the model, Tweaker-style
+  **auto-orientation** with one-tap apply, ray-cast **wall-thickness** checking, and a one-click
+  **elephant-foot chamfer** on the bed-contact edges.
+- **Fit calibration** — print the **Tolerance test coupon** template once, enter the measured snug
+  clearance in Settings, and every future snug/press/loose fit uses your printer's reality.
+- **Fastener presets** — the hole tool knows **M2–M5 heat-set inserts** (with boss guidance),
+  screw clearance, and thread-forming pilot sizes.
+- **Surface textures** — knurl, hex, noise, **wave, voronoi, diamond, fuzzy skin**: real displaced,
+  printable geometry (not a shader).
 - **Version history** — every change is snapshotted; **restore** any earlier version (append-only).
 - **Project library** — saved locally (IndexedDB, localStorage fallback): open / duplicate / delete.
 - **Export menu** — STL · 3MF · STEP · OBJ (STEP gated to the replicad engine).
-- **Settings** — Anthropic key + model + printer defaults (bed size, overhang threshold).
+- **Settings** — AI brains (Anthropic, Gemini, OpenAI, Groq, **OpenRouter with per-request Auto
+  routing**, Ollama, on-device) + printer defaults (bed size, overhang threshold, fit calibration).
 - **Zero-spend example** — "Try the built-in example" builds an L-bracket with no API call.
-- **Template gallery** — photo cards of 10 common parts (phone stand, cable clip, wall hook,
-  box with lid…): one tap builds a fully parametric model, no AI call, no key.
+- **Template gallery** — photo cards of 11 common parts (phone stand, cable clip, wall hook,
+  box with lid, tolerance coupon…): one tap builds a fully parametric model, no AI call, no key.
 
 ## Run
 

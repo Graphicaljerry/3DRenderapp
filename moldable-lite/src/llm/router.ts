@@ -6,6 +6,7 @@
 // timeout returns null and the caller falls back to the regex heuristics.
 
 import { generateLlm, llmReady, type LlmSettings } from "./llm";
+import type { ApiMsg } from "./anthropic";
 import { AUTO_MODEL } from "./openrouterModels";
 import { localLoaded } from "./local";
 
@@ -26,25 +27,35 @@ function utilityBrain(s: LlmSettings, keys: Record<string, string | undefined>):
 }
 
 /** Which engine fits this request? "cad" = parametric/dimensioned/functional,
- *  "mesh" = organic/sculptural/artistic. Null = couldn't tell (or no brain). */
+ *  "mesh" = organic/sculptural/artistic. Null = couldn't tell (or no brain).
+ *  Pass `image` (a photo OR a hand-drawn sketch) and the brain judges the OBJECT
+ *  it shows — a pencil sketch of a bracket routes to CAD, of a dragon to mesh. */
 export async function classifyIntent(
   prompt: string,
   s: LlmSettings,
   keys: Record<string, string | undefined>,
   proxyBase = "",
+  image?: { dataBase64: string; mediaType: string },
 ): Promise<"cad" | "mesh" | null> {
   const brain = utilityBrain(s, keys);
   if (!brain) return null;
   const system = [
-    "You route requests in a 3D-printing app between two engines. Reply with exactly one word:",
+    "You route requests in a 3D-printing app between two engines. The user may attach a photo of a real object or a hand-drawn sketch of what they want. Reply with exactly one word:",
     "CAD — functional/geometric parts: brackets, cases, mounts, adapters, gears, anything with dimensions, holes, threads, fits, or made of simple geometric forms (boxes, cylinders). CAD gives exact measurements and STEP export.",
     "MESH — organic/sculptural/artistic shapes: figurines, characters, animals, faces, statues, freeform art. An AI mesh generator sculpts these far better than CAD.",
+    "Judge the OBJECT requested or depicted, never the medium — a rough pencil sketch of a mounting bracket is still CAD; a photo of a garden gnome is MESH.",
     "When both could work, prefer CAD (it prints more reliably and stays editable). Reply CAD or MESH only.",
   ].join("\n");
+  const userContent: ApiMsg["content"] = image
+    ? [
+        { type: "image", mediaType: image.mediaType, dataBase64: image.dataBase64 },
+        { type: "text", text: prompt.slice(0, 500) || "Route this attachment: which engine should build the object it shows?" },
+      ]
+    : prompt.slice(0, 500);
   try {
     const out = await withTimeout(
-      generateLlm(brain, keys, system, [{ role: "user", content: prompt.slice(0, 500) }], {}, proxyBase),
-      8000,
+      generateLlm(brain, keys, system, [{ role: "user", content: userContent }], {}, proxyBase),
+      image ? 12_000 : 8000,
     );
     if (!out) return null;
     const t = out.trim().toUpperCase();

@@ -7,6 +7,8 @@ import type { ChatMessage, Mode } from "../App";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
+import { FASTENER_GROUPS, findFastener, insertBossHint } from "../cad/fasteners";
+import type { SurfacePattern } from "../engine/previewEngine";
 
 /** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
  *  wall-thickness check, elephant-foot chamfer. All local geometry — no AI calls. */
@@ -584,24 +586,26 @@ function MaterialMenu({ appearance, setAppearance }: { appearance: { color: stri
   );
 }
 
-/** Physical surface texture: knurl / honeycomb / noise as REAL printable geometry. */
-function SurfaceMenu({ disabled, isCad, onApply }: { disabled: boolean; isCad: boolean; onApply: (pattern: "knurl" | "honeycomb" | "noise", scale: number, depth: number) => void }) {
+/** Physical surface texture: knurl / honeycomb / noise / wave / voronoi / diamond /
+ *  fuzzy skin as REAL printable geometry. */
+function SurfaceMenu({ disabled, isCad, onApply }: { disabled: boolean; isCad: boolean; onApply: (pattern: SurfacePattern, scale: number, depth: number) => void }) {
   const [open, setOpen] = useState(false);
-  const [pattern, setPattern] = useState<"knurl" | "honeycomb" | "noise">("knurl");
+  const [pattern, setPattern] = useState<SurfacePattern>("knurl");
   const [scale, setScale] = useState(3);
   const [depth, setDepth] = useState(0.4);
   const [raised, setRaised] = useState(true);
+  const LABELS: Record<SurfacePattern, string> = { knurl: "Knurl", honeycomb: "Hex", noise: "Noise", wave: "Wave", voronoi: "Voronoi", diamond: "Diamond", fuzzy: "Fuzzy" };
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
-      <button className="ghost sm iconbtn has-modes" aria-label="Surface texture" aria-expanded={open} title="Surface texture — knurl/honeycomb/noise as real printable geometry" onClick={() => setOpen((v) => !v)}>
+      <button className="ghost sm iconbtn has-modes" aria-label="Surface texture" aria-expanded={open} title="Surface texture — knurl, hex, noise, wave, voronoi, diamond or fuzzy skin as real printable geometry" onClick={() => setOpen((v) => !v)}>
         <IconTexturize />
       </button>
       {open && (
         <div className="snap-menu" role="menu">
           <div className="snap-row"><span>Pattern</span>
-            <div className="seg sm">
-              {(["knurl", "honeycomb", "noise"] as const).map((pp) => (
-                <button key={pp} className={pattern === pp ? "on" : ""} onClick={() => setPattern(pp)}>{pp === "honeycomb" ? "Hex" : pp[0].toUpperCase() + pp.slice(1)}</button>
+            <div className="seg sm" style={{ flexWrap: "wrap" }}>
+              {(Object.keys(LABELS) as SurfacePattern[]).map((pp) => (
+                <button key={pp} className={pattern === pp ? "on" : ""} onClick={() => setPattern(pp)}>{LABELS[pp]}</button>
               ))}
             </div>
           </div>
@@ -911,7 +915,7 @@ interface Props {
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
   setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void;
   texture: THREE.Texture | null;
-  onApplySurface: (pattern: "knurl" | "honeycomb" | "noise", scale: number, depth: number) => void;
+  onApplySurface: (pattern: SurfacePattern, scale: number, depth: number) => void;
   printer: PrinterDefaults;
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
@@ -2420,6 +2424,9 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
   const axes = ctl.axes ?? [0, 1];
   const AX = "XYZ";
   const r1 = (v: number) => Math.round(v * 100) / 100;
+  // Fastener presets: the current draft matches a preset when ⌀+depth agree.
+  const activePreset = FASTENER_GROUPS.flatMap((g) => g.items).find((i) => i.diameter === d.diameter && i.depth === d.depth)?.id ?? "";
+  const bossHint = activePreset ? insertBossHint(findFastener(activePreset)!) : null;
   const spacing = d.ref ? Math.hypot(d.at[axes[0]] - d.ref.center[axes[0]], d.at[axes[1]] - d.ref.center[axes[1]]) : 0;
   const setSpacing = (target: number) => {
     if (!d.ref || spacing < 0.01 || target <= 0) return;
@@ -2433,6 +2440,29 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
         <span>Drill a hole — free, no AI</span>
         <button className="x" aria-label="Cancel hole" onClick={ctl.cancel}><IconX /></button>
       </div>
+      <div className="hp-row">
+        <label>for</label>
+        <select
+          value={activePreset}
+          style={{ flex: 1, minWidth: 0 }}
+          aria-label="Fastener preset"
+          title="Fastener presets — sets the right hole size for heat-set inserts, screw clearance, or screws that thread into the plastic"
+          onChange={(e) => {
+            const f = findFastener(e.target.value);
+            if (f) ctl.patch({ diameter: f.diameter, depth: f.depth });
+          }}
+        >
+          <option value="">Custom size…</option>
+          {FASTENER_GROUPS.map((g) => (
+            <optgroup key={g.group} label={g.group}>
+              {g.items.map((i) => (
+                <option key={i.id} value={i.id}>{i.label}</option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
+      </div>
+      {bossHint && <div className="fine" style={{ margin: "2px 0 4px" }}>{bossHint}</div>}
       <div className="hp-row">
         <label>⌀</label>
         <input type="number" min={0.5} max={100} step={0.1} value={d.diameter} onChange={(e) => ctl.patch({ diameter: Math.max(0.5, Number(e.target.value) || 0) })} aria-label="Hole diameter (mm)" />

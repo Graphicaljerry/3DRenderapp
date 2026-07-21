@@ -27,6 +27,33 @@
 }
 
 
+/* ---------- touch / trackpad / Pencil (iPadOS + phones) ----------
+   The app is a TOOL, not a document: dragging must orbit/move/measure, never
+   start a native text selection (iPad trackpad + Pencil drags painted the whole
+   screen blue). Chrome is unselectable by default; the things a person actually
+   reads or edits — chat, code, inputs — explicitly opt back in. */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+html, body { overscroll-behavior: none; } /* no pull-to-refresh / rubber-band while orbiting */
+body { user-select: none; -webkit-user-select: none; -webkit-tap-highlight-color: transparent; }
+input, textarea, select, [contenteditable] { user-select: text; -webkit-user-select: text; }
+.msg .bubble, .msg .bubble * { user-select: text; -webkit-user-select: text; }
+pre, code, pre *, code * { user-select: text; -webkit-user-select: text; }
+/* The 3D canvas: no long-press callout, no image-drag ghost. */
+.viewerCanvas, .viewerCanvas canvas { -webkit-touch-callout: none; -webkit-user-drag: none; }
+img { -webkit-user-drag: none; }
+button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on controls */
+/* iOS auto-zooms the page when focusing a control set below 16px — keep form
+   type at 16px on iOS touch screens so focus never lurches the layout. */
+@supports (-webkit-touch-callout: none) {
+  @media (pointer: coarse) {
+    .composer textarea, .card input, .card select, .card textarea,
+    .pin-panel input, .pin-panel select, .hole-panel input, .hole-panel select { font-size: 16px; }
+  }
+}
+/* Home-indicator clearance when installed edge-to-edge (env() is 0 elsewhere). */
+.composer { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+.statusbar { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
+
 /* ---------- dark mode ---------- */
 :root[data-theme="dark"] {
   /* Neutral greys/blacks — no green tint. Teal appears only as the accent. */
@@ -817,6 +844,15 @@ details.guide { margin-top: 10px; }
   .lib-grid { grid-template-columns: 1fr; }
   .tpl-grid { grid-template-columns: repeat(2, 1fr); }
   .row3 { grid-template-columns: 1fr; }
+  /* Phones: the topbar can't seat every button. Templates and the engine pill
+     leave (both are reachable from the chat / entry screen); the brand side may
+     shrink and the project title truncates instead of pushing the row out. */
+  .topbar { padding: 0 10px; gap: 6px; }
+  .topbar-right { gap: 5px; flex: 0 0 auto; }
+  .topbar-right .pill { display: none; }
+  .topbar-right .ghost { padding-left: 9px; padding-right: 9px; }
+  .topbar .brand { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+  .topbar .brand > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 /* Narrow viewers (iPad portrait, phones): the plate bar can't share the bottom row with
    the view-angle buttons — stack it just above them, centred, full available width. */

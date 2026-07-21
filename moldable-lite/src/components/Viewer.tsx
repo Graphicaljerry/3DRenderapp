@@ -1931,31 +1931,89 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   return <div ref={mount} className="viewerCanvas" />;
 });
 
-// Render a clean, consistent library thumbnail: the model alone on the scene
-// background, framed 3/4, with the grid, dimensions and pins hidden — captured
-// off-screen so the on-screen view (zoom, labels, angle) is never disturbed.
+// Render a studio product shot of the model — the library/template card look:
+// a soft neutral backdrop (independent of the app theme), three-point lighting,
+// and a faked soft contact shadow under the part. Captured off-screen in a
+// throwaway scene, so the live view (theme, grid, labels, zoom) is untouched.
 function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: boolean }): string | null {
   if (!s.mesh) return null;
-  const W = opts?.W ?? 384, H = opts?.H ?? 288;
-  // Hide chrome for the shot.
-  const gridVis = s.grid.visible;
-  const dimsVis = s.dims?.visible;
-  const pinsVis = s.pins?.visible;
-  s.grid.visible = false;
-  if (s.dims) s.dims.visible = false;
-  if (s.pins) s.pins.visible = false;
+  const W = opts?.W ?? 512, H = opts?.H ?? 384;
 
-  const cam = new THREE.PerspectiveCamera(45, W / H, 0.1, 5000);
-  cam.up.set(0, 0, 1);
-  const box = new THREE.Box3().setFromObject(s.mesh);
+  const scene = new THREE.Scene();
+  // Backdrop: gentle top-lit vertical gradient, like a seamless paper sweep.
+  const bgCv = document.createElement("canvas");
+  bgCv.width = 8;
+  bgCv.height = 256;
+  const bgCtx = bgCv.getContext("2d")!;
+  const grad = bgCtx.createLinearGradient(0, 0, 0, 256);
+  grad.addColorStop(0, "#f4f5f7");
+  grad.addColorStop(0.55, "#e9ebee");
+  grad.addColorStop(1, "#dcdfe4");
+  bgCtx.fillStyle = grad;
+  bgCtx.fillRect(0, 0, 8, 256);
+  const bgTex = new THREE.CanvasTexture(bgCv);
+  bgTex.colorSpace = THREE.SRGBColorSpace;
+  scene.background = bgTex;
+
+  // Three-point studio light: soft ambient dome, warm-neutral key, cool fill, rim.
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xb9bec6, 0.85));
+  const key = new THREE.DirectionalLight(0xffffff, 1.8);
+  key.position.set(90, -110, 190);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xf2f5ff, 0.55);
+  fill.position.set(-140, -60, 80);
+  scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xffffff, 0.5);
+  rim.position.set(-40, 150, 120);
+  scene.add(rim);
+
+  // The model, sharing geometry but with its own slightly softened material —
+  // the user's colour/texture stays, the finish reads like studio-lit plastic.
+  const srcMat = s.mesh.material as THREE.MeshStandardMaterial;
+  const mat = srcMat.clone();
+  if (mat instanceof THREE.MeshStandardMaterial) {
+    mat.roughness = Math.min(0.7, Math.max(0.35, mat.roughness ?? 0.6));
+    mat.metalness = Math.min(0.15, mat.metalness ?? 0.1);
+    mat.wireframe = false;
+  }
+  const model = new THREE.Mesh(s.mesh.geometry, mat);
+  scene.add(model);
+
+  const box = new THREE.Box3().setFromObject(model);
   const sphere = box.getBoundingSphere(new THREE.Sphere());
   const r = Math.max(sphere.radius, 1);
-  const dist = r / Math.sin((cam.fov * Math.PI) / 180 / 2);
-  const dirv = new THREE.Vector3(1, -1.3, 0.9).normalize();
-  cam.position.copy(sphere.center.clone().add(dirv.multiplyScalar(dist * 1.05)));
+
+  // Soft contact shadow: a radial-gradient decal on the ground plane — reads like
+  // ambient occlusion without touching the renderer's shadow-map state.
+  const shCv = document.createElement("canvas");
+  shCv.width = 256;
+  shCv.height = 256;
+  const shCtx = shCv.getContext("2d")!;
+  const rg = shCtx.createRadialGradient(128, 128, 8, 128, 128, 128);
+  rg.addColorStop(0, "rgba(28,32,38,0.5)");
+  rg.addColorStop(0.5, "rgba(28,32,38,0.22)");
+  rg.addColorStop(1, "rgba(28,32,38,0)");
+  shCtx.fillStyle = rg;
+  shCtx.fillRect(0, 0, 256, 256);
+  const shTex = new THREE.CanvasTexture(shCv);
+  const shSize = Math.max(box.max.x - box.min.x, box.max.y - box.min.y) * 1.7;
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(shSize, shSize),
+    new THREE.MeshBasicMaterial({ map: shTex, transparent: true, depthWrite: false }),
+  );
+  // Ground = the part's lowest point; squash the blob a touch along the view axis.
+  shadow.position.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z + 0.01);
+  shadow.scale.y = 0.85;
+  scene.add(shadow);
+
+  const cam = new THREE.PerspectiveCamera(40, W / H, 0.1, 5000);
+  cam.up.set(0, 0, 1);
+  const dist = (r / Math.sin((cam.fov * Math.PI) / 180 / 2)) * 1.12; // breathing room
+  const dirv = new THREE.Vector3(1, -1.25, 0.85).normalize();
+  cam.position.copy(sphere.center.clone().add(dirv.multiplyScalar(dist)));
   cam.near = dist / 100;
   cam.far = dist * 100;
-  cam.lookAt(sphere.center);
+  cam.lookAt(sphere.center.clone().add(new THREE.Vector3(0, 0, -r * 0.04)));
   cam.updateProjectionMatrix();
 
   const target = new THREE.WebGLRenderTarget(W, H, { samples: 4 });
@@ -1963,7 +2021,7 @@ function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: b
   let url: string | null = null;
   try {
     s.renderer.setRenderTarget(target);
-    s.renderer.render(s.scene, cam);
+    s.renderer.render(scene, cam);
     const buf = new Uint8Array(W * H * 4);
     s.renderer.readRenderTargetPixels(target, 0, 0, W, H, buf);
     const cv = document.createElement("canvas");
@@ -1971,16 +2029,29 @@ function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: b
     cv.height = H;
     const ctx = cv.getContext("2d")!;
     const img = ctx.createImageData(W, H);
-    // WebGL reads bottom-to-top; flip rows into the top-down 2D canvas.
+    // An offscreen render target stores LINEAR values — the sRGB output transform
+    // only happens on the real canvas — so raw readback looks muddy-dark. Apply the
+    // linear→sRGB curve here (LUT), while flipping WebGL's bottom-up rows.
+    const lut = new Uint8Array(256);
+    for (let i = 0; i < 256; i++) {
+      const L = i / 255;
+      lut[i] = Math.round(Math.min(1, L <= 0.0031308 ? L * 12.92 : 1.055 * Math.pow(L, 1 / 2.4) - 0.055) * 255);
+    }
     for (let y = 0; y < H; y++) {
       const src = (H - 1 - y) * W * 4;
-      img.data.set(buf.subarray(src, src + W * 4), y * W * 4);
+      const dst = y * W * 4;
+      for (let x = 0; x < W * 4; x += 4) {
+        img.data[dst + x] = lut[buf[src + x]];
+        img.data[dst + x + 1] = lut[buf[src + x + 1]];
+        img.data[dst + x + 2] = lut[buf[src + x + 2]];
+        img.data[dst + x + 3] = buf[src + x + 3];
+      }
     }
     ctx.putImageData(img, 0, 0);
     if (opts?.png) {
       url = cv.toDataURL("image/png"); // lossless — this shot feeds an image→3D model
     } else {
-      url = cv.toDataURL("image/webp", 0.72);
+      url = cv.toDataURL("image/webp", 0.85);
       if (!url.startsWith("data:image/webp")) url = cv.toDataURL("image/png"); // Safari fallback
     }
   } catch {
@@ -1988,9 +2059,11 @@ function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: b
   } finally {
     s.renderer.setRenderTarget(prevTarget);
     target.dispose();
-    s.grid.visible = gridVis;
-    if (s.dims) s.dims.visible = dimsVis!;
-    if (s.pins) s.pins.visible = pinsVis!;
+    mat.dispose();
+    shadow.geometry.dispose();
+    (shadow.material as THREE.Material).dispose();
+    shTex.dispose();
+    bgTex.dispose();
   }
   return url;
 }

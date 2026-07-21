@@ -18,6 +18,7 @@ import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
 import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
+import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, FIT_CLEARANCE, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
@@ -83,6 +84,13 @@ const PRINTER_LS = "moldable_printer";
 // leave the user's current mode alone.
 const ORGANIC_RE = /\b(figurine|figure|statue|sculpt(?:ure|ed)?|character|creature|animal|dog|cat|dragon|dinosaur|mask|bust|head of|face of|monster|superhero|iron\s?man|batman|pokemon|pikachu|skull|gnome|ornament|organic|life[- ]?like|realistic (?:model|version))\b/i;
 const CADISH_RE = /\b(\d+(?:\.\d+)?\s*(?:mm|cm|inch|inches|in\b)|bracket|mount(?:ing)?|holder|case|enclosure|adapter|clip|hook|gear|thread(?:ed)?|screw|bolt|hole|stand|tray|spacer|hinge|clamp|knob|plate|wall thickness|tolerance|snap[- ]?fit|press[- ]?fit)\b/i;
+// A model is already on the canvas and the words ask for sculptural work ON it
+// ("sculpt organic vines on it", "make it look like a dragon") — CAD can't sculpt;
+// the mesh engine can, seeded with a clean snapshot of the current model.
+const SCULPT_EDIT_RE = /\b(sculpt|organic|life[- ]?like|ornate|flowing|artistic(?:ally)?|statue|figurine|creature|character)\b/i;
+// In Generative mode with a model on canvas: do the words point AT the model
+// (refine it) rather than ask for a brand-new object?
+const REFINE_REF_RE = /\b(it|this|these|the (?:part|model|piece|current|existing)|refine|sculpt|smooth(?:er)?|detail(?:s|ed)?|texture)\b/i;
 const PKEYS_LS = "moldable_provider_keys";
 const PROXY_LS = "moldable_proxy";
 const GENENG_LS = "moldable_geneng";
@@ -2076,13 +2084,23 @@ export default function App() {
 
     // Fresh chat + the user never touched the engine switch → route by what the words
     // describe. Organic/sculptural things are beyond CAD's reach and belong on the mesh
-    // engine; dimensioned functional parts belong in CAD. One notice, one tap to override.
+    // engine; dimensioned functional parts belong in CAD. When the words alone don't
+    // decide, the configured brain (OpenRouter, Gemini, Claude, …) classifies the
+    // request — tiny, fast, best-effort. One notice, one tap to override.
+    const brainLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
+    const brainKeys = { anthropic: key, ...llmKeys };
     let routedMode: Mode | null = null;
+    let refineRoute = false; // routed to mesh specifically to refine the CURRENT model
     if (!forceMode && !result && !modeTouched.current && p) {
       const organic = ORGANIC_RE.test(p) && !CADISH_RE.test(p);
       const cadish = CADISH_RE.test(p) && !ORGANIC_RE.test(p);
       if (mode === "precise" && organic) routedMode = "generative";
       else if (mode === "generative" && cadish) routedMode = "precise";
+      else if (!organic && !cadish && !image) {
+        const cls = await classifyIntent(p, brainLlm, brainKeys, effectiveProxy);
+        if (cls === "mesh" && mode === "precise") routedMode = "generative";
+        else if (cls === "cad" && mode === "generative") routedMode = "precise";
+      }
       if (routedMode) {
         setMode(routedMode);
         setMessages((m) => [...m, {
@@ -2093,14 +2111,39 @@ export default function App() {
         }]);
       }
     }
+    // A CAD model is on the canvas and the ask is sculptural ("make it look like a
+    // dragon", "sculpt organic vines on it") — CAD genuinely can't do that. Hop to the
+    // mesh engine and refine a SNAPSHOT of the current model; the CAD program stays in
+    // History, so nothing is lost.
+    if (!forceMode && !routedMode && p && !image && result && geometry && mode === "precise"
+      && SCULPT_EDIT_RE.test(p) && !CADISH_RE.test(p) && REFINE_REF_RE.test(p)) {
+      routedMode = "generative";
+      refineRoute = true;
+      setMode("generative");
+    }
     // The mode switch decides: Generative -> mesh provider; Precise + photo -> vision CAD.
     const useGen = (routedMode ?? forceMode ?? mode) === "generative";
 
     if (useGen) {
       if (!p && !image) return;
+      // "Refine the current model as a mesh": no photo attached, but a model is on the
+      // canvas and the words point at it → a clean snapshot of the model becomes the
+      // reference image for the image→3D engine. Works from the sculpt-route above OR
+      // when the user flipped to Generative themselves and said "refine/sculpt it".
+      let genImage = image;
+      let refinedFromCanvas = false;
+      if (!image && p && result && geometry && (refineRoute || REFINE_REF_RE.test(p))) {
+        const shot = viewer.current?.captureModelShot();
+        if (shot) {
+          try {
+            genImage = { blob: dataUrlToBlob(shot), url: shot };
+            refinedFromCanvas = true;
+          } catch { /* snapshot failed — continue as plain text→3D */ }
+        }
+      }
       let ge = override?.genEng ?? genEng; // retry-with-model can override the engine
       if (ge.provider === "auto") {
-        const pick = pickAutoGenEngine({ hasImage: !!image, prompt: p, hasKey: (id) => !!providerKeys[id] });
+        const pick = pickAutoGenEngine({ hasImage: !!genImage, prompt: p, hasKey: (id) => !!providerKeys[id] });
         ge = { provider: pick.provider, model: pick.model };
         setAutoPick(`Auto → ${pick.label} (${pick.reason})`);
       } else {
@@ -2114,15 +2157,28 @@ export default function App() {
       // Web-grounded dimensions for TEXT mesh prompts that name a real product — the same
       // lookup Precise uses, so "a phone stand for an iPhone 17 Pro" is proportioned from
       // real numbers. Skipped for photo inputs (the photo IS the reference).
+      // Short text→3D asks get a free "prompt polish" from the configured brain (the
+      // same OpenRouter/Gemini/Claude key that powers Precise) — mesh generators reward
+      // detailed visual descriptions. Digits mean the user gave specs: don't paraphrase.
       let genPrompt = p;
-      if (p && !image && detectProductQuery(p)) {
+      if (p && !genImage && p.length < 120 && !/\d/.test(p)) {
+        const polished = await polishMeshPrompt(p, brainLlm, brainKeys, effectiveProxy);
+        if (polished && polished.toLowerCase() !== p.toLowerCase()) {
+          genPrompt = polished;
+          explainOnce(
+            "meshpolish",
+            `I expanded your ask into a fuller description for the mesh engine (they do best with detail): “${polished}”. From now on I'll do this quietly — add your own detail any time to take over.`,
+          );
+        }
+      }
+      if (p && !genImage && detectProductQuery(p)) {
         const rk = { geminiKey: llmKeys["gemini"], geminiModel: llm.provider === "gemini" ? llm.model : "", anthropicKey: key, openrouterKey: llmKeys["openrouter"], openrouterModel: llm.provider === "openrouter" ? llm.model : "" };
         if (canResearch(rk)) {
           try {
             const genCtx = result && project ? `the part "${project.name}"` : undefined;
             const rr = await researchDimensions(p, rk, genCtx);
             if (rr) {
-              genPrompt = `${p}\n\nReal product measurements (researched online, mm):\n${rr.text}`;
+              genPrompt = `${genPrompt}\n\nReal product measurements (researched online, mm):\n${rr.text}`;
               setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Measurements found online:\n${rr.text}`, sources: rr.sources }]);
             }
           } catch { /* research is best-effort */ }
@@ -2133,7 +2189,7 @@ export default function App() {
       // model from the same provider instead of dead-ending the user in Settings.
       let genModel = ge.model;
       let switchedTo: string | null = null;
-      if (!image && p && prov) {
+      if (!genImage && p && prov) {
         const cur = prov.models.find((mm) => mm.id === genModel);
         if (cur && !cur.text) {
           const textModel = prov.models.find((mm) => mm.text);
@@ -2159,8 +2215,15 @@ export default function App() {
       }
 
       setInput("");
-      const genThumb = image ? await blobToDataURL(image.blob) : undefined;
-      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (image ? "Reference image" : ""), image: genThumb, mode: "generative" }]);
+      if (refinedFromCanvas) {
+        explainOnce(
+          "cad2mesh",
+          "Refining your current model as a **mesh**: I snapshotted it and I'm feeding that picture to the image→3D engine along with your words. The trade: the result is a sculpted mesh (STL/OBJ/3MF — prints great, opens in Nomad Sculpt), not parametric CAD, so STEP export and dimension-exact edits don't apply to it. Your CAD version stays safe in **History** — restore it any time.",
+          "Refining the current model as a mesh (snapshot → image→3D). The CAD version stays in History.",
+        );
+      }
+      const genThumb = genImage ? await blobToDataURL(genImage.blob) : undefined;
+      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (genImage ? "Reference image" : ""), image: genThumb, mode: "generative" }]);
       const ph = mid();
       setMessages((m) => [
         ...m,
@@ -2172,7 +2235,7 @@ export default function App() {
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
       try {
-        const res = await genEngine.current.build({ kind: "gen", image: image?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: ge.provider, model: genModel });
+        const res = await genEngine.current.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: ge.provider, model: genModel });
         const name = deriveName(p || "Photo model");
         const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? ge.provider})`;
         const how = await deliverResult(res, name, summary, p || "(image upload)", true);
@@ -3028,6 +3091,16 @@ function viewPhrase(v: { azimuthDeg: number; elevationDeg: number }): string {
   const horiz = names[Math.round(az / 45) % 8];
   const vert = v.elevationDeg > 55 ? ", nearly top-down" : v.elevationDeg > 25 ? " and above" : v.elevationDeg < -10 ? " and below" : "";
   return `, seen from the ${horiz}${vert}`;
+}
+
+/** data:… URL → Blob (a viewer snapshot becoming an image→3D input). */
+function dataUrlToBlob(u: string): Blob {
+  const comma = u.indexOf(",");
+  const mime = /data:(.*?)[;,]/.exec(u)?.[1] || "image/png";
+  const bin = atob(u.slice(comma + 1));
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 function deriveName(prompt: string): string {

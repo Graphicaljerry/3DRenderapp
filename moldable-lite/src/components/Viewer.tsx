@@ -77,6 +77,9 @@ export interface ViewerPin { id: string; x: number; y: number; z: number; }
 
 interface Props {
   geometry: THREE.BufferGeometry | null;
+  /** Printability paint-on overlay (overhang heatmap / thin walls): flagged triangles
+   *  as a soup in the model's display coords, with per-vertex colours. */
+  analysisOverlay: { positions: Float32Array; colors: Float32Array } | null;
   wireframe: boolean;
   showDims: boolean;
   units: "mm" | "in";
@@ -200,12 +203,13 @@ interface Internals {
   pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number; live?: boolean } | null; // active push-pull drag; live = a real boolean preview replaced the ghost
   arrowHot: boolean; // pointer is over (or dragging) the push-pull arrow — drawn yellow
   selBox: THREE.Group | null; // selection chrome: bounding box + corner anchor dots
+  analysisMesh: THREE.Mesh | null; // printability overlay (child of `mesh`, follows its transform)
   axScene: THREE.Scene; // corner orientation gizmo (Blender-style): its own tiny scene…
   axCam: THREE.OrthographicCamera; // …rendered through an ortho cam into a corner viewport
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
@@ -1219,7 +1223,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
+    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -1362,6 +1366,42 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (!hadMesh) frameToObject(s); // keep the current camera on edits; frame only on first load
     if (cb.current.transformMode !== "off") enterTransform(s, cb.current.transformMode); // re-arm gizmo on the new mesh
   }, [geometry]);
+
+  // Printability paint-on overlay (overhang heatmap / thin walls). A child of the model
+  // mesh so it rides every transform; polygon-offset floats it just off the surface.
+  // Runs after the geometry effect above, so a rebuilt mesh gets the overlay re-attached.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (s.analysisMesh) {
+      s.analysisMesh.removeFromParent();
+      s.analysisMesh.geometry.dispose();
+      (s.analysisMesh.material as THREE.Material).dispose();
+      s.analysisMesh = null;
+    }
+    if (!analysisOverlay || !s.mesh || analysisOverlay.positions.length === 0) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(analysisOverlay.positions, 3));
+    g.setAttribute("color", new THREE.BufferAttribute(analysisOverlay.colors, 3));
+    const m = new THREE.Mesh(
+      g,
+      new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.8,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+        toneMapped: false,
+      }),
+    );
+    m.renderOrder = 5;
+    m.raycast = () => {}; // display-only — never intercept picking/measure rays
+    s.mesh.add(m);
+    s.analysisMesh = m;
+  }, [analysisOverlay, geometry]);
 
   // Toggle the transform gizmo on/off, switch rotate↔scale, and retarget to the attachment.
   useEffect(() => {

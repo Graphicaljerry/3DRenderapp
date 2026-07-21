@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
@@ -36,6 +36,9 @@ import type { Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
+import { overhangOverlay } from "./print/overhang";
+import { suggestOrientation, type OrientSuggestion } from "./print/orient";
+import { findThinWalls, type ThinWallReport } from "./print/thinwalls";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine } from "./gen/registry";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
@@ -1087,6 +1090,119 @@ export default function App() {
     return () => window.removeEventListener("paste", onPaste);
     // pickImage closes over current mode/llm/keys/guided; re-bind when those change.
   }, [entered, mode, guided, llm, key, llmKeys, image]);
+
+  // ---------------- printability pack: overhang view / orientation / walls / chamfer ----------------
+  const [overhangView, setOverhangView] = useState(false);
+  const [thinReport, setThinReport] = useState<ThinWallReport | null>(null);
+  const [thinShow, setThinShow] = useState(false);
+  const [thinBusy, setThinBusy] = useState(false);
+  const [orientSug, setOrientSug] = useState<OrientSuggestion | null>(null);
+  // Analyses describe ONE mesh — a rebuild invalidates them (the heatmap recomputes itself).
+  useEffect(() => {
+    setThinReport(null);
+    setThinShow(false);
+    setOrientSug(null);
+  }, [geometry]);
+  // The paint-on overlay the viewer draws: thin-wall highlight wins while shown
+  // (it's the result the user just asked for), otherwise the live overhang heatmap.
+  const analysisOverlay = useMemo(() => {
+    if (!geometry) return null;
+    if (thinShow && thinReport && thinReport.overlay.triangles > 0) return thinReport.overlay;
+    if (overhangView) return overhangOverlay(geometry, printer.overhangThresholdDeg);
+    return null;
+  }, [geometry, overhangView, thinShow, thinReport, printer.overhangThresholdDeg]);
+
+  function runThinWalls() {
+    if (!geometry || thinBusy) return;
+    setThinBusy(true);
+    // Yield a frame so the button's busy state paints before the scan blocks the thread.
+    setTimeout(() => {
+      try {
+        const rep = findThinWalls(geometry, 0.8);
+        setThinReport(rep);
+        setThinShow(rep.thinSamples > 0);
+      } catch (err: any) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Wall-thickness check failed: " + String(err?.message ?? err), error: true }]);
+      } finally {
+        setThinBusy(false);
+      }
+    }, 30);
+  }
+
+  function runOrientSuggest() {
+    if (!geometry) return;
+    try {
+      setOrientSug(suggestOrientation(geometry, printer.overhangThresholdDeg));
+    } catch {
+      setOrientSug(null);
+    }
+  }
+
+  /** Apply the suggested print orientation: CAD models get a parametric rotate op
+   *  (History/Undo, sliders and export all follow); meshes get the rotation baked in. */
+  async function applyOrientation() {
+    const s = orientSug;
+    if (!s?.improved || !geometry || !result) return;
+    if (result.source.kind === "code" && activeKind === "replicad") {
+      geometry.computeBoundingBox();
+      const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
+      await authorObjectOp({ kind: "rotate", axis: s.axis, angleDeg: s.angleDeg, center: [c.x, c.y, c.z] });
+    } else {
+      const g = geometry.clone();
+      g.computeBoundingBox();
+      const c = g.boundingBox!.getCenter(new THREE.Vector3());
+      const rot = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(s.axis[0], s.axis[1], s.axis[2]).normalize(), THREE.MathUtils.degToRad(s.angleDeg));
+      const m = new THREE.Matrix4()
+        .makeTranslation(c.x, c.y, c.z)
+        .multiply(rot)
+        .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+      g.applyMatrix4(m);
+      g.computeBoundingBox();
+      g.translate(0, 0, -g.boundingBox!.min.z); // sit back on the bed
+      g.computeBoundingBox();
+      const sz = g.boundingBox!.getSize(new THREE.Vector3());
+      const r = (n: number) => Math.round(n * 10) / 10;
+      const dd = { x: r(sz.x), y: r(sz.y), z: r(sz.z) };
+      const res: EngineResult = {
+        kind: "generative",
+        geometry: g,
+        dims: dd,
+        source: { kind: "gen", provider: "orient", model: "auto-orient" },
+        supportsStep: false,
+        glb: geometryToSTL(g),
+      };
+      applyResult(res, project?.name ?? "Model", `Auto-oriented for printing — ${dd.x} × ${dd.y} × ${dd.z} mm`, "auto-orient");
+    }
+    setOrientSug(null);
+    explainOnce(
+      "orient",
+      `Rotated the part to its best printing orientation — ${s.reason} Less support means faster prints, less filament and cleaner surfaces. Undo reverts it.`,
+      `Auto-oriented: ${s.reason}`,
+    );
+  }
+
+  /** Elephant-foot guard: chamfer every bed-plane edge of the CAD solid. */
+  async function applyChamferBottom(size: number) {
+    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The elephant-foot chamfer edits the real CAD solid, so it works on Precise (CAD) models.", error: true }]);
+      return;
+    }
+    const src = result.source;
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), { type: "chamferBottom", size }] });
+      applyResult(res, project?.name ?? "Model", `Elephant-foot chamfer: ${size} mm off the bottom edges`, `chamfer bottom ${size}`);
+      explainOnce(
+        "efoot",
+        `Chamfered every bottom edge by **${size} mm** — the elephant-foot guard. The squished first layer bulges outward on most printers; this bevel absorbs the bulge so the footprint stays true and holes near the bed keep their size. Undo reverts it.`,
+        `Elephant-foot chamfer ${size} mm applied.`,
+      );
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't chamfer the bottom edges: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
 
   function computeReport(geo: THREE.BufferGeometry): PrintabilityReport | null {
     try {
@@ -2849,6 +2965,14 @@ export default function App() {
         geometry={geometry}
         dims={dims}
         report={report}
+        analysisOverlay={analysisOverlay}
+        printPrep={{
+          overhangOn: overhangView,
+          toggleOverhang: () => { setOverhangView((v) => !v); setThinShow(false); },
+          thin: { report: thinReport, busy: thinBusy, run: runThinWalls, shown: thinShow, toggleShown: () => setThinShow((v) => !v) },
+          orient: { suggestion: orientSug, run: runOrientSuggest, apply: () => void applyOrientation() },
+          chamfer: { can: activeKind === "replicad" && result?.source.kind === "code", apply: (size) => void applyChamferBottom(size) },
+        }}
         modelSelected={(modelSelected || transformMode !== "off") && !attachSelected}
         onModelSelect={selectModel}
         onScaleTo={scaleToDim}

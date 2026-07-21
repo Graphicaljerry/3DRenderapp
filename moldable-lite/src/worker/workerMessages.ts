@@ -33,7 +33,8 @@ export type WorkerOp =
   | { type: "hole"; at: Vec3; normal: Vec3; diameter: number; depth: number }
   | { type: "translate"; delta: Vec3 }
   | { type: "rotate"; axis: Vec3; angleDeg: number; center: Vec3 }
-  | { type: "scale"; factor: number; center: Vec3 };
+  | { type: "scale"; factor: number; center: Vec3 }
+  | { type: "chamferBottom"; size: number }; // elephant-foot guard: chamfer all bed-plane edges
 
 export interface CadWorkerApi {
   init(): Promise<boolean>;

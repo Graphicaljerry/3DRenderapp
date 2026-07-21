@@ -187,6 +187,15 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   and made rotate/scale orbit that point). dropAttachment releases the pivot group
   first (world-space z-drop even after a rotation) then re-arms. Separated parts keep
   the model grey via the new per-attachment `tint` (foreign imports stay teal).
+- **Touch/trackpad/Pencil policy** (real iPad report: trackpad drags painted native
+  text-selection blue across the app): body is `user-select: none` with explicit
+  opt-ins for chat bubbles, pre/code and form controls; canvas gets
+  `-webkit-touch-callout/user-drag: none`; tap-highlight transparent; buttons
+  `touch-action: manipulation`; `overscroll-behavior: none`; iOS-only (`@supports
+  -webkit-touch-callout` + coarse pointer) 16px form type so focusing never zooms the
+  page; `viewport-fit=cover` + safe-area padding on composer/statusbar. Phone topbar
+  (≤480px): engine pill hidden, brand side shrinks with ellipsis — audited no-overflow
+  at 390/430/834/1024/1194.
 - STL imports as editable faceted CAD; STEP as exact CAD; iPad toolbar/pointer work is solid.
 
 ## Conventions

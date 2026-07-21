@@ -1,4 +1,6 @@
 :root {
+  /* Native form controls (textarea/select/scrollbars) follow the app theme, not the OS. */
+  color-scheme: light;
   /* Neutrals carry a faint teal cast (not dead grays) — hue ~180, very low chroma. */
   --ink: #18201e;
   --ink2: #333d39;
@@ -56,6 +58,7 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
 
 /* ---------- dark mode ---------- */
 :root[data-theme="dark"] {
+  color-scheme: dark;
   /* Neutral greys/blacks — no green tint. Teal appears only as the accent. */
   --ink: #ececed;
   --ink2: #c6c7c9;
@@ -244,7 +247,7 @@ button { font-family: inherit; cursor: pointer; }
 /* min-width:0 lets the input shrink below its intrinsic width — without it the Send
    button gets pushed out of the panel on narrow chat widths. Buttons never shrink. */
 /* Auto-growing message box: wraps long requests instead of scrolling them off-screen. */
-.composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 132px; padding: 10.5px 12px; border: 1px solid var(--bord); border-radius: 10px; font: inherit; font-size: 13px; line-height: 1.4; resize: none; overflow-y: auto; }
+.composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 132px; padding: 10.5px 12px; border: 1px solid var(--bord); border-radius: 10px; font: inherit; font-size: 13px; line-height: 1.4; resize: none; overflow-y: auto; background: var(--bg); color: var(--ink); }
 .composer > button { flex: 0 0 auto; }
 .send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
 /* Dictation mic — quiet next to Send; pulses while listening. */

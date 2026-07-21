@@ -17,6 +17,9 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
   const [sort, setSort] = useState<SortId>("recent");
   const [engineF, setEngineF] = useState<"all" | "cad" | "mesh">("all");
   const [folder, setFolder] = useState<string | null>(null); // null = all · "" = unfiled · name = that folder
+  // Bulk selection: in Select mode, tapping a card toggles it instead of opening.
+  const [selMode, setSelMode] = useState(false);
+  const [selIds, setSelIds] = useState<Set<string>>(new Set());
 
   async function refresh() {
     setLoading(true);
@@ -63,6 +66,42 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
   const folderCount = (f: string | null) =>
     f === null ? items.length : f === "" ? items.filter((i) => !i.folder).length : items.filter((i) => i.folder === f).length;
 
+  function toggleSel(id: string) {
+    setSelIds((s) => {
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id);
+      else n.add(id);
+      return n;
+    });
+  }
+  function exitSelect() {
+    setSelMode(false);
+    setSelIds(new Set());
+  }
+  async function deleteSelected() {
+    if (!selIds.size) return;
+    if (!confirm(`Delete ${selIds.size} model${selIds.size === 1 ? "" : "s"}? This can't be undone.`)) return;
+    for (const id of selIds) await deleteProject(id);
+    exitSelect();
+    void refresh();
+  }
+  /** Bulk move: same semantics as the per-card select ("" unfiles, "__new__" prompts once). */
+  async function moveSelected(dest: string) {
+    if (!selIds.size) return;
+    let name: string | undefined = dest || undefined;
+    if (dest === "__new__") {
+      const typed = prompt("New folder name:")?.trim().slice(0, 40);
+      if (!typed) return;
+      name = typed;
+    }
+    for (const id of selIds) {
+      const p = items.find((i) => i.id === id);
+      if (p) await putProject({ ...p, folder: name, updatedAt: Date.now() });
+    }
+    exitSelect();
+    void refresh();
+  }
+
   return (
     <div className="overlay" onClick={onClose}>
       <div className="card wide" onClick={(e) => e.stopPropagation()}>
@@ -96,10 +135,38 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
                 <option value="cad">Precise (CAD)</option>
                 <option value="mesh">Generative (mesh)</option>
               </select>
+              <button className={`ghost sm${selMode ? " on" : ""}`} onClick={() => (selMode ? exitSelect() : setSelMode(true))} title="Select several models to delete or move them together">
+                {selMode ? "Done" : "Select"}
+              </button>
               <span className="lib-count" role="status">
                 {shown.length === items.length ? `${items.length} model${items.length === 1 ? "" : "s"}` : `${shown.length} of ${items.length} models`}
               </span>
             </div>
+            {selMode && (
+              <div className="lib-bulk" role="toolbar" aria-label="Bulk actions">
+                <span className="lib-bulk-count">{selIds.size} selected</span>
+                <button className="ghost sm" onClick={() => setSelIds(new Set(shown.map((p) => p.id)))}>Select all shown</button>
+                <button className="ghost sm" disabled={!selIds.size} onClick={() => setSelIds(new Set())}>Clear</button>
+                <select
+                  className="lib-move"
+                  value=""
+                  disabled={!selIds.size}
+                  onChange={(e) => { if (e.target.value) void moveSelected(e.target.value === "__none__" ? "" : e.target.value); e.target.value = ""; }}
+                  aria-label="Move selected to folder"
+                  title="Move the selected models to a folder"
+                >
+                  <option value="" disabled>Move to…</option>
+                  {folders.map((f) => (
+                    <option key={f} value={f}>📁 {f}</option>
+                  ))}
+                  <option value="__new__">＋ New folder…</option>
+                  <option value="__none__">No folder</option>
+                </select>
+                <button className="ghost sm danger" disabled={!selIds.size} onClick={() => void deleteSelected()}>
+                  Delete selected{selIds.size ? ` (${selIds.size})` : ""}
+                </button>
+              </div>
+            )}
             {(folders.length > 0 || folder !== null) && (
               <div className="lib-folders" role="tablist" aria-label="Folders">
                 <button className={`lib-chip${folder === null ? " on" : ""}`} onClick={() => setFolder(null)}>All ({folderCount(null)})</button>
@@ -119,9 +186,15 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
               <div className="lib-grid">
                 {shown.map((p) => {
                   const last = p.versions[p.versions.length - 1];
+                  const selected = selIds.has(p.id);
                   return (
-                    <div key={p.id} className={`lib-card ${p.id === currentId ? "current" : ""}`}>
-                      <button className="lib-open" onClick={() => onOpen(p)}>
+                    <div key={p.id} className={`lib-card ${p.id === currentId ? "current" : ""}${selected ? " sel" : ""}`}>
+                      <button
+                        className="lib-open"
+                        aria-pressed={selMode ? selected : undefined}
+                        onClick={() => (selMode ? toggleSel(p.id) : onOpen(p))}
+                      >
+                        {selMode && <span className={`lib-check${selected ? " on" : ""}`} aria-hidden="true">{selected ? "✓" : ""}</span>}
                         <div className="lib-thumb">
                           {p.thumb ? (
                             <img src={p.thumb} alt="" loading="lazy" />
@@ -143,7 +216,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
                           {p.folder ? ` · 📁 ${p.folder}` : ""}
                         </div>
                       </button>
-                      <div className="lib-actions">
+                      {!selMode && <div className="lib-actions">
                         <button className="ghost sm" onClick={() => onOpen(p)}>Open</button>
                         <button
                           className="ghost sm"
@@ -178,7 +251,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
                         >
                           Delete
                         </button>
-                      </div>
+                      </div>}
                     </div>
                   );
                 })}

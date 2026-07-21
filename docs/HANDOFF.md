@@ -36,6 +36,13 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   explicit `background: var(--bg); color: var(--ink)` base. RULE: anything the
   pre-paint script sets inline MUST be updated by the theme effect too. Verified by
   `harness/theme-toggle-e2e.mjs` (dark boot → light toggle → white composer → back).
+- **Library bulk select**: "Select" toggle in the toolbar → tap cards to select
+  (check badge, accent border, per-card actions hidden, tap does NOT open), bulk bar
+  with count / Select all shown / Clear / Move to… (same folder semantics incl.
+  "＋ New folder…" prompt) / Delete selected (confirm). Bulk actions exit select
+  mode and refresh. Verified by `harness/library-bulk-e2e.mjs` (10 checks). NOTE for
+  tests: the modal's Select button collides with the viewer's Select tool by
+  accessible name — target it via its title.
 - **Library organization**: toolbar (search over name+version summaries+mesh prompt;
   sort newest/oldest/name/most-versions; engine filter CAD vs mesh; live "N of M
   models" count) + FLAT folders — `Project.folder?: string`, per-card select

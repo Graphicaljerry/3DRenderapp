@@ -89,7 +89,7 @@ export const LLM_PRESETS: LlmPreset[] = [
     relayPrefix: "openrouter",
     defaultModel: "google/gemini-2.5-flash",
     keyHint: "sk-or-… from openrouter.ai/keys",
-    hint: "One key that reaches many different models — prices vary per model; some are free.",
+    hint: "One key that reaches many different models — prices vary per model; some are free. Also powers the mesh side's smarts: engine auto-routing, prompt polish and web dimension lookups.",
   },
   {
     id: "ollama",

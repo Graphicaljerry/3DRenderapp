@@ -28,6 +28,19 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   Generative-tab Auto; fresh-chat routing (organic → mesh, dimensioned → CAD); AI-drawn SVG
   logos ("add an apple logo") land as movable attachments; markdown chat with live thinking
   + research source chips.
+- **One brain, both engines** (`src/llm/router.ts`): the configured text brain (OpenRouter/
+  Gemini/Claude/Groq/Ollama/house/local-if-loaded) now powers the mesh side too —
+  (1) fresh-chat intent classifier: when the organic/CAD regexes are both silent, a tiny
+  "CAD or MESH" call routes the request (8 s cap, best-effort, regex behaviour unchanged
+  offline); (2) mesh prompt polish: short digit-free text→3D asks get expanded into a
+  detailed sculptural description (explainOnce "meshpolish" narrates the first one);
+  (3) CAD→mesh refine: a sculptural ask on an existing CAD model (SCULPT_EDIT_RE +
+  REFINE_REF_RE, CADISH_RE veto) — or any generative text ask that references the current
+  model — snapshots it via `viewer.captureModelShot()` (768² clean PNG, no grid/dims) and
+  feeds the image→3D engine; explainOnce "cad2mesh" states the mesh-vs-STEP trade and that
+  History keeps the CAD version. OpenRouter itself hosts NO 3D models (confirmed 2026-07) —
+  it contributes routing/polish/dimension-research, while meshes stay on HF/fal/Tripo/Meshy/
+  Replicate. Verified by `harness/routing-e2e.mjs` (mock OpenAI-compat brain on :8788).
 - **Materials & textures**: colour/finish picker; AI meshes keep their baked textures;
   physical surface textures (knurl/hex/noise) as real displaced geometry.
 - **Build plates**: Bambu-Studio-style. A plate bar over the viewer (tabs with object

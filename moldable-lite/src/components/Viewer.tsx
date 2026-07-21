@@ -43,6 +43,9 @@ export interface ViewerHandle {
   } | null;
   /** Render a small, cleanly-framed preview of the current model (no grid/dims/pins). Null if empty. */
   captureThumbnail: () => string | null;
+  /** A large, clean render of the model alone (no grid/dims/pins) — the reference
+   *  image for "refine this as a mesh": it feeds an image→3D generator. */
+  captureModelShot: () => string | null;
 }
 
 export interface PickedPoint {
@@ -1879,6 +1882,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;
     },
+    captureModelShot() {
+      // Image→3D generators want a big, square, clutter-free subject shot.
+      return st.current ? captureThumbnail(st.current, { W: 768, H: 768, png: true }) : null;
+    },
   }));
 
   return <div ref={mount} className="viewerCanvas" />;
@@ -1887,9 +1894,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 // Render a clean, consistent library thumbnail: the model alone on the scene
 // background, framed 3/4, with the grid, dimensions and pins hidden — captured
 // off-screen so the on-screen view (zoom, labels, angle) is never disturbed.
-function captureThumbnail(s: Internals): string | null {
+function captureThumbnail(s: Internals, opts?: { W?: number; H?: number; png?: boolean }): string | null {
   if (!s.mesh) return null;
-  const W = 384, H = 288;
+  const W = opts?.W ?? 384, H = opts?.H ?? 288;
   // Hide chrome for the shot.
   const gridVis = s.grid.visible;
   const dimsVis = s.dims?.visible;
@@ -1930,8 +1937,12 @@ function captureThumbnail(s: Internals): string | null {
       img.data.set(buf.subarray(src, src + W * 4), y * W * 4);
     }
     ctx.putImageData(img, 0, 0);
-    url = cv.toDataURL("image/webp", 0.72);
-    if (!url.startsWith("data:image/webp")) url = cv.toDataURL("image/png"); // Safari fallback
+    if (opts?.png) {
+      url = cv.toDataURL("image/png"); // lossless — this shot feeds an image→3D model
+    } else {
+      url = cv.toDataURL("image/webp", 0.72);
+      if (!url.startsWith("data:image/webp")) url = cv.toDataURL("image/png"); // Safari fallback
+    }
   } catch {
     url = null;
   } finally {

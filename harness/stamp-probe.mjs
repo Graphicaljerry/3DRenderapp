@@ -1,0 +1,12 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
+await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
+await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.waitForSelector(".topbar", { timeout: 60_000 });
+const tag = await page.locator(".build-tag").innerText();
+console.log("build tag:", JSON.stringify(tag));
+const ok = /^v [0-9a-f]{7} · \d{4}-\d{2}-\d{2}$/.test(tag);
+console.log(ok ? "PASS build stamp renders (sha · date)" : "FAIL build stamp format");
+await browser.close();
+process.exit(ok ? 0 : 1);

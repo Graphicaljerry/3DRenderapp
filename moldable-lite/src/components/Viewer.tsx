@@ -111,6 +111,8 @@ interface Props {
   clay: boolean; // View > Grayscale: studio clay presentation (smooth display normals + neutral material)
   bed: { x: number; y: number }; // printer plate size (mm) — drives the solid build plate
   showPlate: boolean; // View > Build plate
+  plateColor: string | null; // user plate colour (Settings > Appearance); null = theme slate
+  gridOpacity: number; // 0.15..1 (Settings > Appearance)
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[], additive?: boolean) => void; // additive = shift-click added to the set
@@ -142,11 +144,14 @@ const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // 
 const THEME_SCENE = { light: "#eceff0", dark: "#101418" } as const;
 // Solid build plate (Bambu/Orca-style): a slab sized to the printer bed so models
 // stand off the background instead of floating on gridlines.
-function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark"): THREE.Group {
+function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
   const g = new THREE.Group();
   // Dark slate in BOTH themes, like a real textured print plate (Bambu/Orca) —
-  // the first light-theme cut was near-background gray and read as "no change".
-  const c = theme === "dark" ? { top: 0x272b30, edge: 0x4a5158 } : { top: 0x363c42, edge: 0x5c646c };
+  // unless the user picked their own plate colour in Settings > Appearance.
+  const slate = theme === "dark" ? { top: 0x272b30, edge: 0x4a5158 } : { top: 0x363c42, edge: 0x5c646c };
+  const c = colorOverride
+    ? { top: new THREE.Color(colorOverride), edge: new THREE.Color(colorOverride).offsetHSL(0, 0, 0.16) }
+    : { top: new THREE.Color(slate.top), edge: new THREE.Color(slate.edge) };
   // One-sided like real slicers: solid seen from above, see-through from below,
   // so orbiting UNDER the bed still shows the model's underside (overhang checks).
   const slab = new THREE.Mesh(
@@ -240,7 +245,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, clay, bed, showPlate, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
@@ -1726,10 +1731,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const mat = (any as { material?: THREE.Material | THREE.Material[] }).material;
       if (mat) (Array.isArray(mat) ? mat : [mat]).forEach((x) => x.dispose());
     });
-    s.plate = buildPlate(bed, theme);
+    s.plate = buildPlate(bed, theme, plateColor);
     s.plate.visible = showPlate && !showcase;
     s.scene.add(s.plate);
-  }, [bed.x, bed.y, theme, showPlate, showcase]);
+  }, [bed.x, bed.y, theme, showPlate, showcase, plateColor]);
+
+  // Grid line opacity (Settings > Appearance) — re-applied after theme rebuilds too.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    const m = s.grid.material as THREE.Material;
+    m.transparent = gridOpacity < 1;
+    m.opacity = gridOpacity;
+    m.needsUpdate = true;
+  }, [gridOpacity, theme]);
 
   useEffect(() => {
     const s = st.current;

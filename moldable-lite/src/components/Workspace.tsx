@@ -1010,6 +1010,8 @@ interface Props {
   setGray: (v: boolean) => void;
   showPlate: boolean; // View > Build plate (solid slab under the model)
   setShowPlate: (v: boolean) => void;
+  plateColor: string | null;
+  gridOpacity: number;
   modelBadge: { label: string; color: string } | null; // which engine/AI made the model (Objects panel)
   showDims: boolean; // resolved visibility for the viewer (App folds mode + selection)
   dimsMode: "select" | "always" | "off";
@@ -1121,6 +1123,12 @@ export function Workspace(p: Props) {
   const growComposer = () => {
     const el = composerRef.current;
     if (!el) return;
+    // Empty box stays one line tall: scrollHeight of an EMPTY textarea includes the
+    // WRAPPED placeholder at narrow widths, which ballooned the box (real report).
+    if (!el.value) {
+      el.style.height = "40px";
+      return;
+    }
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
   };
@@ -1452,6 +1460,8 @@ export function Workspace(p: Props) {
                 clay={p.gray}
                 bed={{ x: p.printer.bed.x, y: p.printer.bed.y }}
                 showPlate={p.showPlate}
+                plateColor={p.plateColor}
+                gridOpacity={p.gridOpacity}
                 showDims={p.showDims}
                 units={p.units}
                 theme={p.theme}

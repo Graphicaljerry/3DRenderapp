@@ -857,6 +857,23 @@ export default function App() {
     localStorage.setItem("moldable_plate", v ? "1" : "0");
     setShowPlateState(v);
   };
+  // Plate colour + grid opacity (Settings > Appearance > Workspace).
+  const [plateColor, setPlateColorState] = useState<string | null>(() => localStorage.getItem("moldable_plate_color") || null);
+  const setPlateColor = (v: string | null) => {
+    if (v) localStorage.setItem("moldable_plate_color", v);
+    else localStorage.removeItem("moldable_plate_color");
+    setPlateColorState(v);
+    scheduleSync();
+  };
+  const [gridOpacity, setGridOpacityState] = useState(() => {
+    const v = parseFloat(localStorage.getItem("moldable_grid_op") ?? "1");
+    return Number.isFinite(v) && v >= 0.15 && v <= 1 ? v : 1;
+  });
+  const setGridOpacity = (v: number) => {
+    localStorage.setItem("moldable_grid_op", String(v));
+    setGridOpacityState(v);
+    scheduleSync();
+  };
   // Dimensions box: "select" (default) draws the size lines + gray bounding box only
   // around a SELECTED object — click empty space and the canvas is clean again.
   // "always" is the old permanent box; "off" never draws it.
@@ -3365,6 +3382,8 @@ export default function App() {
         setGray={setGrayView}
         showPlate={showPlate}
         setShowPlate={setShowPlate}
+        plateColor={plateColor}
+        gridOpacity={gridOpacity}
         modelBadge={modelBadge}
         onApplySurface={(pat, sc, d) => { void applySurfaceTexture(pat, sc, d); }}
         printer={printer}
@@ -3533,6 +3552,10 @@ export default function App() {
           onSaveUnits={(u) => setUnits(() => u)}
           dimsMode={dimsMode}
           onSaveDimsMode={setDimsMode}
+          plateColor={plateColor}
+          onPlateColor={setPlateColor}
+          gridOpacity={gridOpacity}
+          onGridOpacity={setGridOpacity}
           lastSyncAt={lastSyncAt}
           onSynced={markSynced}
           onClose={() => setShowSettings(false)}
@@ -3742,6 +3765,10 @@ function SettingsModal({
   onSaveUnits,
   dimsMode,
   onSaveDimsMode,
+  plateColor,
+  onPlateColor,
+  gridOpacity,
+  onGridOpacity,
   lastSyncAt,
   onSynced,
   onClose,
@@ -3772,6 +3799,10 @@ function SettingsModal({
   onSaveUnits: (u: "mm" | "in") => void;
   dimsMode: "select" | "always" | "off";
   onSaveDimsMode: (m: "select" | "always" | "off") => void;
+  plateColor: string | null;
+  onPlateColor: (v: string | null) => void;
+  gridOpacity: number;
+  onGridOpacity: (v: number) => void;
   lastSyncAt: number | null;
   onSynced: () => void;
   onClose: () => void;
@@ -3978,6 +4009,13 @@ function SettingsModal({
                 <button className={dimsMode === "always" ? "on" : ""} onClick={() => onSaveDimsMode("always")}>Always</button>
                 <button className={dimsMode === "off" ? "on" : ""} onClick={() => onSaveDimsMode("off")}>Off</button>
               </div>
+              <label>Build plate colour</label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input type="color" value={plateColor ?? "#363c42"} onChange={(e) => onPlateColor(e.target.value)} style={{ width: 44, height: 28, padding: 2 }} aria-label="Build plate colour" />
+                {plateColor && <button className="ghost sm" onClick={() => onPlateColor(null)}>Reset to default</button>}
+              </div>
+              <label>Grid line opacity — {Math.round(gridOpacity * 100)}%</label>
+              <input type="range" min={0.15} max={1} step={0.05} value={gridOpacity} onChange={(e) => onGridOpacity(parseFloat(e.target.value))} aria-label="Grid line opacity" />
             </SGroup>
           </>
         )}

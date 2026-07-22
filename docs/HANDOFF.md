@@ -36,6 +36,21 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   explicit `background: var(--bg); color: var(--ink)` base. RULE: anything the
   pre-paint script sets inline MUST be updated by the theme effect too. Verified by
   `harness/theme-toggle-e2e.mjs` (dark boot → light toggle → white composer → back).
+- **Mesh cost clarity**: every gen model in `gen/registry.ts` carries `usd` (+
+  optional `credits`) — `costUsd()` / `costLabel()` render "free (daily GPU
+  minutes)" / "≈ $0.04" / "~25 credits · ≈ $0.50". The price appears BEFORE a
+  run everywhere: the Generative mode hint, the in-chat engine picker subs, the
+  Auto pick note, the "Preparing…" placeholder, every progress line, and the
+  keyed-fallback announcement; the success summary is stamped with it too.
+  `gen/ledger.ts` records paid successes to `moldable_spend_v1` (LOCAL_ONLY —
+  per-device estimates, list prices, capped 500 entries) and `spendSummary()`
+  feeds Settings → 3D engine → **Cost & balance**: selected-model price,
+  month-to-date spend per provider, a live **Check my balance** button for the
+  two engines with balance APIs (`gen/balance.ts`: Meshy
+  `GET /openapi/v1/balance`, Tripo `GET /v2/openapi/user/balance`, both via the
+  same /prox relay the generators use; other engines get a dashboard pointer),
+  and a full price-guide list. Verified by `harness/cost-e2e.mjs` (stubbed Meshy
+  task + minimal one-triangle GLB + stubbed balance endpoint; 8 checks).
 - **HF quota auto-fallback**: when the FREE Hugging Face GPU rejects a mesh job
   (quota drained / Space overloaded — matched on the humanized error text) and the
   user has a KEYED provider, the app retries ONCE automatically on the best keyed

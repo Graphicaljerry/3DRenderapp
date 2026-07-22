@@ -34,7 +34,7 @@ import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
 import { localSupported } from "../llm/local";
 import { shortModelName } from "../llm/openrouterModels";
 import type { FitId } from "../llm/prompts";
-import { PROVIDERS } from "../gen/registry";
+import { PROVIDERS, costLabel } from "../gen/registry";
 
 // The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
 // Each carries an icon so the label can collapse on narrow viewer columns (iPad).
@@ -1201,7 +1201,9 @@ export function Workspace(p: Props) {
                         ? "Marked screenshot → the change goes where you circled"
                         : "Photo → exact CAD replacement (vision)"
                       : "Exact parts from text or a photo · STEP export"
-                  : "Whole/organic objects from a photo or text"}
+                  : p.genProvider === "auto"
+                    ? "Whole/organic objects from a photo or text · Auto shows the engine & price when you send"
+                    : `Whole/organic objects from a photo or text · ${costLabel(p.genProvider, p.genModel) || "see Settings for pricing"}`}
               </span>
               {p.mode === "precise" && p.guided && <FitControl fit={p.fit} onFit={p.onFit} />}
             </div>
@@ -2028,7 +2030,12 @@ function engineGroups(hasKey: (p: string) => boolean): PickGroup[] {
     const needs = pv.needsKey && !hasKey(pv.id);
     return {
       label: `${pv.label}${pv.free ? " · free" : ""}${needs ? " · add key" : ""}`,
-      items: pv.models.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `${pv.id}|${mm.id}`, name, sub }; }),
+      items: pv.models.map((mm) => {
+        const [name, sub] = splitLabel(mm.label);
+        // Price tag on every model — but not twice when the label already carries it.
+        const cost = /\$|free/i.test(mm.label) ? "" : costLabel(pv.id, mm.id);
+        return { value: `${pv.id}|${mm.id}`, name, sub: cost ? (sub ? `${sub} · ${cost}` : cost) : sub };
+      }),
     };
   })];
 }

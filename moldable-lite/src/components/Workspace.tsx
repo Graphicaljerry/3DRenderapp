@@ -22,7 +22,7 @@ export interface PrintPrepCtl {
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, CadOp, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
-import { HEAVY_TRIANGLES } from "../print/simplify";
+import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";

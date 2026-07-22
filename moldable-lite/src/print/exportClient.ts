@@ -1,19 +1,16 @@
 import * as THREE from "three";
-import { STLExporter } from "three/examples/jsm/exporters/STLExporter.js";
 import { OBJExporter } from "three/examples/jsm/exporters/OBJExporter.js";
 import { zipSync, strToU8 } from "fflate";
+import { meshOf } from "./stl";
 
 // Our geometry is authored Z-up in millimetres (matching slicers), so NO
 // reorientation is applied on export.
+//
+// This module is loaded on demand (export menus / engine.export are async) so
+// fflate + the exporters stay out of the first-load bundle. STL serialization
+// lives in ./stl — it runs on every mesh commit, so it stays eager.
 
-function meshOf(geometry: THREE.BufferGeometry): THREE.Mesh {
-  return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial());
-}
-
-export function geometryToSTL(geometry: THREE.BufferGeometry): Blob {
-  const dv = new STLExporter().parse(meshOf(geometry), { binary: true }) as unknown as DataView;
-  return new Blob([dv as unknown as BlobPart], { type: "model/stl" });
-}
+export { geometryToSTL } from "./stl";
 
 export function geometryToOBJ(geometry: THREE.BufferGeometry): Blob {
   const text = new OBJExporter().parse(meshOf(geometry));

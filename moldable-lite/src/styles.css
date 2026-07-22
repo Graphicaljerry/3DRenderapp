@@ -886,3 +886,22 @@ details.guide { margin-top: 10px; }
 @media (min-width: 901px) {
   .viewer.params-docked .export-menu { right: 324px; }
 }
+
+/* ---- Boot splash (main.tsx): shown while the lazy app chunk loads. Fades in
+   after a beat so fast/SW-cached loads never flash it; the backdrop color is
+   already right pre-CSS via the index.html pre-paint script. ---- */
+.boot-splash {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: var(--surf);
+  opacity: 0;
+  animation: boot-splash-in 0.4s ease-out 0.25s forwards;
+}
+.boot-splash svg { animation: boot-splash-pulse 1.4s ease-in-out 0.25s infinite; }
+@keyframes boot-splash-in { to { opacity: 1; } }
+@keyframes boot-splash-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.06); }
+}

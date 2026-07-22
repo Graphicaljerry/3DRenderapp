@@ -1,5 +1,4 @@
 import { ReplicadEngine } from "./replicadEngine";
-import { FallbackPrimitiveEngine } from "./fallbackEngine";
 import type { Engine, EngineKind } from "./types";
 
 export interface EngineSelection {
@@ -24,6 +23,9 @@ export async function selectEngine(): Promise<EngineSelection> {
     await replicad.boot();
     return { engine: replicad, kind: "replicad", fellBack: false };
   } catch (e: any) {
+    // Failure path only — the primitive/CSG engine (and its three-bvh-csg dep)
+    // loads solely when OCCT couldn't boot, instead of riding in the main bundle.
+    const { FallbackPrimitiveEngine } = await import("./fallbackEngine");
     return {
       engine: new FallbackPrimitiveEngine(),
       kind: "primitive",

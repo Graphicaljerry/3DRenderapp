@@ -15,8 +15,9 @@ export interface SimplifyOutcome {
 }
 
 /** Above this the big slicers get sluggish; preflight flags it and the
- *  Printability tab offers one-click simplification. */
-export const HEAVY_TRIANGLES = 1_000_000;
+ *  Printability tab offers one-click simplification. Defined in ./heavy (import
+ *  it from there) so reading the threshold doesn't load meshoptimizer. */
+export { HEAVY_TRIANGLES } from "./heavy";
 
 /** Halve the triangle count (default) while keeping the shape within ~1% of
  *  its extents. Click-again-to-halve keeps the control predictable. */

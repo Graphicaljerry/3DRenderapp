@@ -1,9 +1,13 @@
-import type { ProviderDef } from "./types";
-import { hfGenerate } from "./providers/hf";
-import { meshyGenerate } from "./providers/meshy";
-import { tripoGenerate } from "./providers/tripo";
-import { replicateGenerate } from "./providers/replicate";
-import { falGenerate } from "./providers/fal";
+import type { ProviderDef, GenFn } from "./types";
+
+// The registry (labels, prices, model lists) renders in Settings and pickers, so
+// it stays eager — but each provider's client code only loads when a generation
+// actually runs on it. Same GenFn signature, one dynamic hop inside.
+const hfGenerate: GenFn = (input, onProgress, signal) => import("./providers/hf").then((m) => m.hfGenerate(input, onProgress, signal));
+const meshyGenerate: GenFn = (input, onProgress, signal) => import("./providers/meshy").then((m) => m.meshyGenerate(input, onProgress, signal));
+const tripoGenerate: GenFn = (input, onProgress, signal) => import("./providers/tripo").then((m) => m.tripoGenerate(input, onProgress, signal));
+const replicateGenerate: GenFn = (input, onProgress, signal) => import("./providers/replicate").then((m) => m.replicateGenerate(input, onProgress, signal));
+const falGenerate: GenFn = (input, onProgress, signal) => import("./providers/fal").then((m) => m.falGenerate(input, onProgress, signal));
 
 export const PROVIDERS: ProviderDef[] = [
   {

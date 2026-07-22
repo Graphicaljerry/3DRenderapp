@@ -247,10 +247,11 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
 
 /** One home for every display toggle — Dimensions, Wireframe, Stats, Units, Showcase —
     so the toolbar carries tools, not switches. */
-function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGray, stats, setStats, units, setUnits, showcase, setShowcase, overhangOn, toggleOverhang, onResetView }: {
+function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGray, plate, setPlate, stats, setStats, units, setUnits, showcase, setShowcase, overhangOn, toggleOverhang, onResetView }: {
   dimsMode: "select" | "always" | "off"; setDimsMode: (m: "select" | "always" | "off") => void;
   wireframe: boolean; setWireframe: (f: (w: boolean) => boolean) => void;
   gray: boolean; setGray: (v: boolean) => void;
+  plate: boolean; setPlate: (v: boolean) => void;
   stats: boolean; setStats: (v: boolean) => void;
   units: "mm" | "in"; setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   showcase: boolean; setShowcase: (v: boolean) => void;
@@ -285,6 +286,7 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGra
           </div>
           <Row on={wireframe} label="Wireframe" hint="See the mesh triangles" onClick={() => setWireframe((w) => !w)} />
           <Row on={gray} label="Grayscale" hint="Hide baked colors — see the print, not the paint" onClick={() => setGray(!gray)} />
+          <Row on={plate} label="Build plate" hint="Solid plate under the model, sized to your printer" onClick={() => setPlate(!plate)} />
           <Row on={overhangOn} label="Overhang heatmap" hint="Paint faces that will need support" onClick={toggleOverhang} />
           <Row on={stats} label="Stats" hint="Triangles, volume, watertight" onClick={() => setStats(!stats)} />
           <Row on={showcase} label="Showcase" hint="Clean stage + slow turntable" onClick={() => setShowcase(!showcase)} />
@@ -1006,6 +1008,8 @@ interface Props {
   setWireframe: (f: (w: boolean) => boolean) => void;
   gray: boolean; // View > Grayscale: hide baked mesh colors (display only)
   setGray: (v: boolean) => void;
+  showPlate: boolean; // View > Build plate (solid slab under the model)
+  setShowPlate: (v: boolean) => void;
   modelBadge: { label: string; color: string } | null; // which engine/AI made the model (Objects panel)
   showDims: boolean; // resolved visibility for the viewer (App folds mode + selection)
   dimsMode: "select" | "always" | "off";
@@ -1528,6 +1532,8 @@ export function Workspace(p: Props) {
                   setWireframe={p.setWireframe}
                   gray={p.gray}
                   setGray={p.setGray}
+                  plate={p.showPlate}
+                  setPlate={p.setShowPlate}
                   stats={showStats}
                   setStats={setShowStats}
                   units={p.units}
@@ -1556,6 +1562,8 @@ export function Workspace(p: Props) {
                 analysisOverlay={p.analysisOverlay}
                 wireframe={p.wireframe}
                 clay={p.gray}
+                bed={{ x: p.printer.bed.x, y: p.printer.bed.y }}
+                showPlate={p.showPlate}
                 showDims={p.showDims}
                 units={p.units}
                 theme={p.theme}

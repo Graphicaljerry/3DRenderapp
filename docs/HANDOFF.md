@@ -1,6 +1,6 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#114 merged, latest: clay grayscale view). New
+*Updated 2026-07-22 (PRs #43–#116 merged, latest: build plate + part colors). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
 
@@ -60,6 +60,19 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
+
+- **Build plate + colored parts (2026-07-22)**: (1) View ▾ **Build plate** (default
+  ON, `moldable_plate`) — a solid Bambu-style slab sized to `printer.bed` under the
+  model (`buildPlate()` in Viewer; slab top at z=-0.06 so bottoms/grid never
+  z-fight; rebuilt on bed/theme change; hidden in showcase; captures use a
+  throwaway scene so thumbs are unaffected). (2) **Separate parts now tint each
+  part a distinct pastel** (PART_TINTS in separateParts — Meshy-splitter look; the
+  Objects-panel dot matches; display-only, Merge/Regroup untouched). (3) Clay view
+  is double-sided (#115) — panel-line slits stopped reading as black scratches.
+  QUEUED with Jerry (he asked, needs design confirmation): in-canvas vertical tool
+  rail (Photoshop-style) replacing the wrapping head toolbar at narrow widths;
+  semantic part-splitting à la Meshy (needs their API or segmentation research —
+  we have disconnected-shell Separate + planar Split-to-fit today).
 
 - **Clay grayscale view (2026-07-22, follow-up to the color pack)**: the first
   Grayscale cut looked like a "pencil sketch" (real report) — AI mesh soups are

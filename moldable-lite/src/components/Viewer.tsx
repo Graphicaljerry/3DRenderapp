@@ -109,6 +109,8 @@ interface Props {
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   clay: boolean; // View > Grayscale: studio clay presentation (smooth display normals + neutral material)
+  bed: { x: number; y: number }; // printer plate size (mm) — drives the solid build plate
+  showPlate: boolean; // View > Build plate
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[], additive?: boolean) => void; // additive = shift-click added to the set
@@ -138,6 +140,25 @@ export type SelectKind = "face" | "edge" | "vertex" | "point";
 
 const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // grayscale display copies
 const THEME_SCENE = { light: "#eceff0", dark: "#101418" } as const;
+// Solid build plate (Bambu/Orca-style): a slab sized to the printer bed so models
+// stand off the background instead of floating on gridlines.
+function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark"): THREE.Group {
+  const g = new THREE.Group();
+  const c = theme === "dark" ? { top: 0x23272c, edge: 0x3d444b } : { top: 0xdadfdd, edge: 0xb2bcb9 };
+  const slab = new THREE.Mesh(
+    new THREE.BoxGeometry(bed.x, bed.y, 2),
+    new THREE.MeshStandardMaterial({ color: c.top, roughness: 0.95, metalness: 0 }),
+  );
+  slab.position.z = -1.06; // top face just under z=0 — model bottoms and the grid never z-fight
+  g.add(slab);
+  const border = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(bed.x, bed.y)),
+    new THREE.LineBasicMaterial({ color: c.edge }),
+  );
+  border.position.z = 0.02;
+  g.add(border);
+  return g;
+}
 const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x39414b, 0x232a31] };
 
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
@@ -179,6 +200,7 @@ interface Internals {
   camera: THREE.PerspectiveCamera;
   controls: OrbitControls;
   grid: THREE.GridHelper;
+  plate: THREE.Group;
   content: THREE.Group;
   mesh: THREE.Mesh | null;
   dims: THREE.Group | null;
@@ -214,7 +236,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, clay, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, clay, bed, showPlate, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
@@ -278,6 +300,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const grid = new THREE.GridHelper(300, 30, ...THEME_GRID.light);
     grid.rotation.x = Math.PI / 2;
     scene.add(grid);
+    const plate = buildPlate({ x: 256, y: 256 }, "light"); // real size/theme applied by the plate effect
+    scene.add(plate);
 
     const content = new THREE.Group();
     scene.add(content);
@@ -1228,7 +1252,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
+    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -1573,6 +1597,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const s = st.current;
     if (!s) return;
     s.grid.visible = !showcase;
+    s.plate.visible = showPlate && !showcase;
     if (s.dims) s.dims.visible = !showcase && showDims;
     if (s.pins) s.pins.visible = !showcase;
     s.measures.visible = !showcase;
@@ -1685,6 +1710,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.grid.rotation.x = Math.PI / 2;
     s.scene.add(s.grid);
   }, [theme]);
+
+  // Build plate: rebuild on bed-size/theme change; visibility follows the toggle.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    s.scene.remove(s.plate);
+    s.plate.traverse((o) => {
+      const any = o as THREE.Mesh;
+      if (any.geometry) any.geometry.dispose();
+      const mat = (any as { material?: THREE.Material | THREE.Material[] }).material;
+      if (mat) (Array.isArray(mat) ? mat : [mat]).forEach((x) => x.dispose());
+    });
+    s.plate = buildPlate(bed, theme);
+    s.plate.visible = showPlate && !showcase;
+    s.scene.add(s.plate);
+  }, [bed.x, bed.y, theme, showPlate, showcase]);
 
   useEffect(() => {
     const s = st.current;

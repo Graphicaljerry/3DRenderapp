@@ -495,9 +495,11 @@ export default function App() {
       supportsStep: false,
       glb: geometryToSTL(main),
     });
-    // Separated parts keep the model's grey — they ARE the model, just moved apart;
-    // the teal selection chrome already says which one is picked.
-    const ids = rest.map((g, i) => addAttachment(g, `Part ${i + 2}`, "#c7ccd3"));
+    // Each separated part gets its own pastel (Meshy-splitter look) — the Objects
+    // panel dot matches, so "which part is which" reads at a glance. Display-only:
+    // Merge/Regroup restores the single model exactly.
+    const PART_TINTS = ["#f0a8a8", "#a8d8b8", "#a8c4f0", "#e8cc98", "#c8b0e8", "#98d4d8"];
+    const ids = rest.map((g, i) => addAttachment(g, `Part ${i + 2}`, PART_TINTS[i % PART_TINTS.length]));
     separatedRef.current = { ids, result: prior };
     setSeparated(true);
     explainOnce(
@@ -847,6 +849,13 @@ export default function App() {
   const setGrayView = (v: boolean) => {
     localStorage.setItem("moldable_gray", v ? "1" : "0");
     setGrayViewState(v);
+  };
+  // View ▾ Build plate: solid slab under the model (default ON — models read as
+  // sitting on the printer, not floating on gridlines).
+  const [showPlate, setShowPlateState] = useState(() => localStorage.getItem("moldable_plate") !== "0");
+  const setShowPlate = (v: boolean) => {
+    localStorage.setItem("moldable_plate", v ? "1" : "0");
+    setShowPlateState(v);
   };
   // Dimensions box: "select" (default) draws the size lines + gray bounding box only
   // around a SELECTED object — click empty space and the canvas is clean again.
@@ -3354,6 +3363,8 @@ export default function App() {
         texture={grayView ? null : result?.texture ?? null}
         gray={grayView}
         setGray={setGrayView}
+        showPlate={showPlate}
+        setShowPlate={setShowPlate}
         modelBadge={modelBadge}
         onApplySurface={(pat, sc, d) => { void applySurfaceTexture(pat, sc, d); }}
         printer={printer}

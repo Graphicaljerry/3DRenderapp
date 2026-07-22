@@ -14,7 +14,7 @@ export const meshyGenerate: GenFn = async (input, onProgress, signal) => {
       method: "POST",
       headers: h,
       signal,
-      body: JSON.stringify({ image_url, should_texture: false, target_formats: ["glb"] }),
+      body: JSON.stringify({ image_url, should_texture: input.texture === true, target_formats: ["glb"] }),
     });
     taskId = (await jsonOrThrow(r, "Meshy")).result;
     pollPath = `${base}/openapi/v1/image-to-3d/${taskId}`;
@@ -23,7 +23,7 @@ export const meshyGenerate: GenFn = async (input, onProgress, signal) => {
       method: "POST",
       headers: h,
       signal,
-      body: JSON.stringify({ mode: "preview", prompt: input.prompt, should_texture: false, target_formats: ["glb"] }),
+      body: JSON.stringify({ mode: "preview", prompt: input.prompt, should_texture: input.texture === true, target_formats: ["glb"] }),
     });
     taskId = (await jsonOrThrow(r, "Meshy")).result;
     pollPath = `${base}/openapi/v2/text-to-3d/${taskId}`;

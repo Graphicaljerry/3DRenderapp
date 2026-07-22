@@ -46,6 +46,10 @@ const run: GenFn = async (input, onProgress, signal) => {
   } else {
     taskBody = { type: "text_to_model", prompt: input.prompt };
   }
+  // Print-first default: geometry only. Texturing is Tripo's paid add-on — leaving
+  // it off returns the untextured base model and costs fewer credits.
+  taskBody.texture = input.texture === true;
+  taskBody.pbr = input.texture === true;
 
   const cr = await fetch(`${base}/task`, {
     method: "POST",

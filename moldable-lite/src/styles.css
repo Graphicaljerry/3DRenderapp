@@ -905,3 +905,26 @@ details.guide { margin-top: 10px; }
   0%, 100% { opacity: 0.55; transform: scale(1); }
   50% { opacity: 1; transform: scale(1.06); }
 }
+
+/* ---- Resize panel (Workspace ResizeMenu): typed W/D/H + % + fit-to-plate ---- */
+.resize-menu { min-width: 240px; }
+.resize-menu .rz-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink2);
+}
+.resize-menu .rz-field input {
+  width: 62px;
+  padding: 4px 6px;
+  border: 1px solid var(--bord);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: 12px;
+}
+.resize-menu .rz-dims { display: flex; gap: 8px; align-items: center; }
+.resize-menu .rz-unit { font-size: 11px; color: var(--ink2); }
+.resize-menu .rz-uniform { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink2); }
+.resize-menu .rz-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }

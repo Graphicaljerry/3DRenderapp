@@ -37,7 +37,9 @@ export interface Version {
   spec?: unknown; // primitive spec at this snapshot
   dims?: { x: number; y: number; z: number };
   glb?: Blob; // generative mesh at this snapshot (so it re-renders without re-calling the API)
-  importFile?: Blob; // imported STEP the code's `imported` argument refers to
+  meshXform?: number[]; // baked transform (Matrix4 elements) applied over glb on load — scale/rotate survive reopen without re-encoding the textured glb
+  importFile?: Blob; // imported STEP/STL the code's `imported` argument refers to
+  importKind?: "step" | "stl"; // how importFile parses — STL-as-CAD imports must NOT be re-read as STEP on undo/reopen
   genSource?: GenSource;
 }
 
@@ -52,7 +54,9 @@ export interface Project {
   ops?: CadOp[]; // HEAD direct fillet/chamfer ops
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
-  importFile?: Blob; // HEAD imported STEP (the `imported` arg for the code)
+  meshXform?: number[]; // HEAD baked mesh transform (see Version.meshXform)
+  importFile?: Blob; // HEAD imported STEP/STL (the `imported` arg for the code)
+  importKind?: "step" | "stl"; // HEAD import parser kind (see Version.importKind)
   thumb?: string; // small rendered preview of the current model (webp/png data URL), refreshed on each change
   thumbV?: number; // thumbnail style version — the library regenerates thumbs older than the current look
   folder?: string; // library folder name (flat, user-defined); unset = unfiled

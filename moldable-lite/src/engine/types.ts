@@ -73,6 +73,7 @@ export interface EngineResult {
   supportsStep: boolean;
   glb?: Blob; // present for generative results (for persistence + re-render)
   texture?: THREE.Texture; // baked color texture (AI meshes ship painted) — display only
+  meshXform?: number[]; // cumulative baked transform (Matrix4, column-major) replayed over `glb` on reopen — keeps scale/rotate while the textured glb stays original
   recenter?: [number, number, number]; // display was shifted by this from the engine's own coords
 }
 

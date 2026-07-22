@@ -113,7 +113,9 @@ async function upload(loc: ApiLoc, blob: Blob, headers: Record<string, string>):
   return arr[0];
 }
 
-/** POST /call/<api> then stream GET /call/<api>/<event_id> until complete. */
+/** POST /call/<api> then stream GET /call/<api>/<event_id> until complete.
+ *  `textOnly` tailors the quota advice: Stable Fast 3D can't take a text prompt,
+ *  so "switch to the lighter model" is wrong guidance for text→3D jobs. */
 async function call(
   loc: ApiLoc,
   api: string,
@@ -121,6 +123,7 @@ async function call(
   headers: Record<string, string>,
   onProgress: (p: GenProgress) => void,
   ms: number,
+  textOnly = false,
 ): Promise<any[]> {
   const post = await fetch(signed(`${loc.apiBase}/call/${api}`, loc.sign), {
     method: "POST",
@@ -186,12 +189,18 @@ async function call(
             if (empty || quota) {
               // ZeroGPU kills over-quota/reclaimed jobs with a bare (often null) error event.
               const detail = quota && !empty ? ` (${s.slice(0, 120)})` : "";
+              // The lighter path differs by job type: photos can drop to Stable Fast 3D
+              // (seconds of GPU); text→3D ONLY runs on the heavy model, so the honest
+              // free advice for text is "attach a photo instead".
+              const lighter = textOnly
+                ? "Free text→3D only runs on this heavy model (one run can eat a whole day's free GPU minutes, and failed runs still burn time) — for a free result, attach a PHOTO of the object instead: the light “Stable Fast 3D” engine handles photos in seconds."
+                : "Try again later or use the lighter “Stable Fast 3D” model.";
               throw new Error(
                 isSigned
-                  ? `The free GPU rejected this job${detail} even with your account authenticated to the Space. That means today's free GPU minutes on your account are used up (they reset 24h after first use) or the Space is overloaded. Try again later or use the lighter “Stable Fast 3D” model. For a genuinely reliable engine: grab a free key at platform.tripo3d.ai and switch Settings → 3D engine to Tripo — it works right here, no extra setup.`
+                  ? `The free GPU rejected this job${detail} even with your account authenticated to the Space. Either the Space is overloaded right now (very common — retry in a few minutes), or today's free GPU minutes on your account are used up (they reset 24h after first use). ${lighter} For a genuinely reliable engine: grab a free key at platform.tripo3d.ai and switch Settings → 3D engine to Tripo — it works right here, no extra setup.`
                   : hasToken
                     ? `The free GPU rejected this job${detail}. Your token was sent but couldn't be exchanged for a Space pass, so the GPU treated you as anonymous. Make sure the token is a plain “Read” token, then retry.`
-                    : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or try later.`,
+                    : `The free GPU rejected the job${detail} — the anonymous quota is tiny. Create a free “Read” token at huggingface.co/settings/tokens and paste it into Settings → 3D engine (~5× the quota), or try later. ${textOnly ? "Better for free: attach a PHOTO — the light “Stable Fast 3D” engine handles photos in seconds." : ""}`,
               );
             }
             throw new Error(`The Space reported an error: ${s.slice(0, 200)}`);
@@ -263,7 +272,7 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   }
 
   onProgress({ status: "queued on a free GPU (can take 30–120s)…" });
-  const result = await call(loc, def.endpoint, def.data(imagePath, input.prompt), headers, onProgress, 300_000);
+  const result = await call(loc, def.endpoint, def.data(imagePath, input.prompt), headers, onProgress, 300_000, !input.image);
 
   let glbUrl = findGlb(result, base, loc.filePrefix);
   if (!glbUrl) throw new Error(`${def.space} finished but returned no .glb — its interface may have changed. Try another free model in Settings.`);

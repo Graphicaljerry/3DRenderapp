@@ -37,6 +37,7 @@ export class GenerativeEngine implements Engine {
         model: input.model,
         apiKey: this.config.keyFor(prov.id),
         proxyBase: this.config.proxyBase || "",
+        texture: input.texture,
       },
       this.onProgress,
     );

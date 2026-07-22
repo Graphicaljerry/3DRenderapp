@@ -1,6 +1,6 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#111 merged, latest: print-fit pack). New
+*Updated 2026-07-22 (PRs #43–#113 merged, latest: print-first color pack). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
 
@@ -23,8 +23,12 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   route interception (see `harness/hf-fallback-e2e.mjs`, `harness/cost-e2e.mjs`);
   server-side WebSearch works for research.
 - **Queued / open items**:
-  - **Jerry asked (2026-07-22) — researched, ready to implement**: (a) untextured /
-    grayscale mesh generation option; (b) cheap multi-engine preview → pick → final.
+  - **Jerry asked (2026-07-22) — (a) SHIPPED as the texture toggle (#113); (b)
+    still open**: (a) untextured / grayscale mesh generation option; (b) cheap
+    multi-engine preview → pick → final. Also still open from that batch:
+    per-object AI attribution for attachments + storing the writing LLM per CAD
+    version (Objects badge currently says "CAD"), and Bambu-style per-region
+    fill-color painting (big feature).
     FINDINGS (verified 2026-07): texture is the EXPENSIVE add-on everywhere —
     fal Hunyuan3D v2 white mesh $0.16 vs textured 3× ($0.48, `textured_mesh` bool);
     Tripo `texture:false, pbr:false` → untextured base model, credits drop below the
@@ -56,6 +60,32 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
+
+- **Print-first color pack (2026-07-22, Jerry batch #2)**: (1) **Texture toggle** —
+  mesh generation is geometry-only by DEFAULT (gray, print-first); composer chip
+  ("⬜ Color: off — print-first" / "🎨 Color: on") + a Settings → 3D engine
+  checkbox (`moldable_gen_texture`). Wired per provider: meshy `should_texture`,
+  tripo `texture`+`pbr`, fal Hunyuan v3.x `generate_type` Geometry/Normal and v2
+  `textured_mesh` (Rodin + the free HF spaces always texture — the Settings hint
+  says so). Texture is the expensive stage (fal v2 charges 3×), so default-off
+  also halves paid costs. (2) **View ▾ Grayscale** — display-only texture hide
+  (App passes texture=null to the viewer; persisted `moldable_gray`); exports and
+  the stored glb keep color. (3) **Objects-panel provenance badge** (`.lp-badge`)
+  — the model row shows WHICH engine made it, color-coded per provider (fal
+  violet, tripo blue, meshy green, hf amber, replicate pink); deterministic
+  sources read plainly ("imported file", "SVG"…); CAD models show "CAD" —
+  per-version LLM attribution isn't stored yet (future: aiModel on Version).
+  (4) **Toolbar slims for meshes** — the Select tool (CAD feature edits) hides
+  when activeKind !== "replicad"; Transform/Resize/Measure/Mark/View stay.
+  (5) **Light mode softened** (too-bright report): `--surf` #e9edec, `--bg`
+  #f8faf9, borders re-tuned, viewer stage #eceff0 — index.html's pre-paint now
+  sets the LIGHT backdrop too and the theme effect mirrors it (the pre-paint
+  rule). Verified by `harness/texture-e2e.mjs` (17 checks: default+toggled
+  request bodies through the real UI for Tripo and at module level for fal
+  v3.1/v2 + Meshy, badge, Select gating, Grayscale persistence) + theme-toggle
+  re-run. TEST GOTCHAS: the View ▾ button needs `button[title^="View options"]`
+  targeting; a generated mesh is a HELD preview until Apply — `result` (and the
+  badge) only exist after commit.
 
 - **Print-fit pack (2026-07-22, direct Jerry request)**: (1) REAL BUG FIXED — the
   transform gizmo on a MESH model silently reverted (`authorObjectOp` only handled

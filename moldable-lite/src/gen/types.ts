@@ -13,6 +13,7 @@ export interface GenInput {
   model: string; // provider-specific model / space id
   apiKey?: string; // user's own key for this provider (from settings)
   proxyBase?: string; // "" = local Vite relay; a URL when hosted behind a Worker
+  texture?: boolean; // true = bake color textures; false/unset = geometry-only gray mesh (print-first, cheaper on paid engines)
 }
 
 export interface GenResult {
@@ -24,6 +25,9 @@ export type GenFn = (
   onProgress: (p: GenProgress) => void,
   signal?: AbortSignal,
 ) => Promise<GenResult>;
+
+// NOTE: GenInput.texture — false/undefined = geometry-only ("print-first" gray
+// mesh; cheaper on paid engines), true = ask the engine to bake color textures.
 
 export interface ProviderModel {
   id: string; // value passed as GenInput.model

@@ -333,6 +333,17 @@ export default function App() {
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const apiHistory = useRef<ApiMsg[]>([]);
+  // Mesh texture toggle: OFF by default ("print-first") — engines return a clean
+  // gray geometry-only mesh, which is also the cheaper call on every paid engine
+  // (fal Hunyuan textures cost ~3× the white mesh). ON asks for baked color.
+  const [genTexture, setGenTextureState] = useState<"on" | "off">(() => (localStorage.getItem("moldable_gen_texture") === "on" ? "on" : "off"));
+  const toggleGenTexture = () =>
+    setGenTextureState((v) => {
+      const next = v === "on" ? "off" : "on";
+      localStorage.setItem("moldable_gen_texture", next);
+      scheduleSync();
+      return next;
+    });
   // Web research toggle: Auto = smart (looks up named real-world products), On =
   // always research before building, Off = never. Persisted across sessions.
   const [webMode, setWebMode] = useState<"auto" | "on" | "off">(() => {
@@ -830,6 +841,13 @@ export default function App() {
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
   const [wireframe, setWireframe] = useState(false);
+  // View ▾ Grayscale: hide baked mesh colors so the canvas shows the PRINT, not the
+  // paint (display-only — exports and the stored glb keep their texture). Persisted.
+  const [grayView, setGrayViewState] = useState(() => localStorage.getItem("moldable_gray") === "1");
+  const setGrayView = (v: boolean) => {
+    localStorage.setItem("moldable_gray", v ? "1" : "0");
+    setGrayViewState(v);
+  };
   // Dimensions box: "select" (default) draws the size lines + gray bounding box only
   // around a SELECTED object — click empty space and the canvas is clean again.
   // "always" is the old permanent box; "off" never draws it.
@@ -853,7 +871,7 @@ export default function App() {
     // CSS — without updating them here, toggling dark→light kept native form
     // controls (the chat composer) rendering dark in a light UI.
     document.documentElement.style.colorScheme = theme;
-    document.documentElement.style.backgroundColor = theme === "dark" ? "#121213" : "#ffffff";
+    document.documentElement.style.backgroundColor = theme === "dark" ? "#121213" : "#e9edec"; // mirror index.html pre-paint + --surf
     localStorage.setItem("moldable_theme", theme);
     scheduleSync(); // no-op until signed in (accountEmailRef guards it)
   }, [theme]);
@@ -1338,6 +1356,25 @@ export default function App() {
       setStatus("idle");
     }
   }
+
+  // Objects-panel badge: which engine/AI produced the current model. Mesh engines are
+  // color-coded per provider; deterministic sources (imports, SVG, split…) read plainly.
+  // (Per-CAD-version LLM attribution isn't stored yet — CAD models show "CAD".)
+  const modelBadge = useMemo(() => {
+    if (!result) return null;
+    if (result.source.kind === "gen") {
+      const src = result.source;
+      const colors: Record<string, string> = { hf: "#f59e0b", fal: "#8b5cf6", tripo: "#3b82f6", meshy: "#22c55e", replicate: "#ec4899" };
+      const prov = getProvider(src.provider);
+      if (prov) {
+        const m = prov.models.find((x) => x.id === src.model);
+        return { label: (m?.label ?? prov.label).split(" — ")[0].split(" (")[0], color: colors[src.provider] ?? "#64748b" };
+      }
+      const plain: Record<string, string> = { import: "imported file", svg: "SVG", split: "split", separate: "separated", orient: "auto-orient", scale: "resized" };
+      return { label: plain[src.provider] ?? src.provider, color: "#64748b" };
+    }
+    return { label: result.kind === "replicad" ? "CAD" : "CSG", color: "#0e9488" };
+  }, [result]);
 
   function computeReport(geo: THREE.BufferGeometry): PrintabilityReport | null {
     try {
@@ -2585,7 +2622,7 @@ export default function App() {
       genEngine.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, streaming: true } : x)));
       const runGen = async (provId: string, modelId: string, label: string) => {
-        let res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
+        let res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId, texture: genTexture === "on" });
         // AI meshes carry no real-world units — engines routinely hand back a "car-sized
         // car" (a real one arrived at 1161 mm on a 320 mm bed). Print-friendly default:
         // shrink anything oversize to fit the plate, say so, and record the scale so it
@@ -3314,7 +3351,10 @@ export default function App() {
         setShowcase={setShowcase}
         appearance={appearance}
         setAppearance={setAppearance}
-        texture={result?.texture ?? null}
+        texture={grayView ? null : result?.texture ?? null}
+        gray={grayView}
+        setGray={setGrayView}
+        modelBadge={modelBadge}
         onApplySurface={(pat, sc, d) => { void applySurfaceTexture(pat, sc, d); }}
         printer={printer}
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
@@ -3437,6 +3477,7 @@ export default function App() {
           resize: (s) => void resizeModel(s),
           fitToPlate: () => void fitModelToPlate(),
         }}
+        genTexCtl={{ on: genTexture === "on", toggle: toggleGenTexture }}
         measureCtl={{
           mode: measureMode,
           toggle: () => setMeasureMode((on) => {
@@ -3463,6 +3504,8 @@ export default function App() {
           providerKeys={providerKeys}
           genProvider={genEng.provider}
           genModel={genEng.model}
+          genTexture={genTexture}
+          onToggleGenTexture={toggleGenTexture}
           proxyBase={proxyBase}
           onSaveKey={saveKey}
           onSaveLlm={saveLlmSettings}
@@ -3670,6 +3713,8 @@ function SettingsModal({
   providerKeys,
   genProvider,
   genModel,
+  genTexture,
+  onToggleGenTexture,
   proxyBase,
   onSaveKey,
   onSaveLlm,
@@ -3698,6 +3743,8 @@ function SettingsModal({
   providerKeys: Record<string, string>;
   genProvider: string;
   genModel: string;
+  genTexture: "on" | "off";
+  onToggleGenTexture: () => void;
   proxyBase: string;
   onSaveKey: (k: string, m: string) => void;
   onSaveLlm: (s: LlmSettings, keys: Record<string, string>) => void;
@@ -4124,6 +4171,15 @@ function SettingsModal({
             {prov.models.find((mm) => mm.id === gm)?.hint && (
               <p className="fine choice-hint">{prov.models.find((mm) => mm.id === gm)!.hint}</p>
             )}
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={genTexture === "on"} onChange={onToggleGenTexture} style={{ width: "auto" }} />
+              Bake color textures onto generated meshes
+            </label>
+            <p className="fine choice-hint">
+              Off (default) = a clean gray, geometry-only mesh — what your single-filament print will actually look like, and the cheaper call on every paid
+              engine (Hunyuan's texture pass costs about 3× the plain mesh; Tripo and Meshy bill texturing as an add-on). Turn on for full-color previews or
+              multi-color printing. The free Hugging Face engines and Rodin always texture.
+            </p>
             </SGroup>
             <SGroup title="Cost & balance" hint="know the price before you press send">
               <p className="fine">

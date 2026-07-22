@@ -135,8 +135,8 @@ interface Props {
 // pick a face / edge / corner. One tool, one segmented control.
 export type SelectKind = "face" | "edge" | "vertex" | "point";
 
-const THEME_SCENE = { light: "#f6f7f9", dark: "#101418" } as const;
-const THEME_GRID: Record<string, [number, number]> = { light: [0xced2d8, 0xe3e6ea], dark: [0x39414b, 0x232a31] };
+const THEME_SCENE = { light: "#eceff0", dark: "#101418" } as const;
+const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x39414b, 0x232a31] };
 
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
 // On-screen size band for measurement/dimension label pills (sprite height in px).
@@ -232,7 +232,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     el.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#f6f7f9");
+    scene.background = new THREE.Color("#eceff0");
 
     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 5000);
     camera.up.set(0, 0, 1);

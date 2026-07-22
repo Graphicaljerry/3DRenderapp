@@ -6,11 +6,11 @@
   --ink2: #333d39;
   --mut: #5f6b66;
   --subt: #8d9994;
-  --bord: #e4eae8;        /* default hairline */
-  --bord-subtle: #eef2f1; /* dividers */
-  --bord-strong: #d4ded9; /* hover / focus edges */
-  --surf: #f3f6f5;        /* app background / recessed */
-  --bg: #ffffff;          /* panels & cards */
+  --bord: #dbe2e0;        /* default hairline */
+  --bord-subtle: #e4e9e7; /* dividers */
+  --bord-strong: #c9d3cf; /* hover / focus edges */
+  --surf: #e9edec;        /* app background / recessed — dimmed off-white: easier on the eyes than pure white in a dark room */
+  --bg: #f8faf9;          /* panels & cards — off-white, not stark #fff */
   --accent: #14b8a6;      /* brand teal */
   --accent-d: #0e9488;    /* teal hover */
   --accent-w: #e7f5f2;    /* faint teal wash */
@@ -928,3 +928,31 @@ details.guide { margin-top: 10px; }
 .resize-menu .rz-unit { font-size: 11px; color: var(--ink2); }
 .resize-menu .rz-uniform { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink2); }
 .resize-menu .rz-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
+
+/* ---- Texture toggle chip (generative mode hint row) ---- */
+.texchip {
+  border: 1px solid var(--bord);
+  background: var(--bg);
+  color: var(--ink2);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.texchip.on { color: var(--accent-d); border-color: var(--accent); }
+
+/* ---- Objects panel: engine/AI provenance badge on the model row ---- */
+.lp-badge {
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  border: 1px solid;
+  border-radius: 999px;
+  padding: 1px 7px;
+  white-space: nowrap;
+  max-width: 110px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.9;
+}

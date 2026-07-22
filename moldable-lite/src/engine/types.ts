@@ -56,7 +56,7 @@ export type CadOp = PointOp | HoleOp | TranslateOp | RotateOp | ScaleOp | Chamfe
 export type BuildInput =
   | { kind: "code"; code: string; params?: Record<string, number>; ops?: CadOp[]; preview?: boolean } // preview: live-drag rebuild — skip limit probing
   | { kind: "spec"; spec: ModelSpec }
-  | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string };
+  | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string; texture?: boolean };
 
 /** Extra reference angles (the primary photo is the "front") — used by multi-view engines. */
 export interface MultiViews {

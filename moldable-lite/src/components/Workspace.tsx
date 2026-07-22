@@ -247,9 +247,10 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
 
 /** One home for every display toggle — Dimensions, Wireframe, Stats, Units, Showcase —
     so the toolbar carries tools, not switches. */
-function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, stats, setStats, units, setUnits, showcase, setShowcase, overhangOn, toggleOverhang, onResetView }: {
+function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGray, stats, setStats, units, setUnits, showcase, setShowcase, overhangOn, toggleOverhang, onResetView }: {
   dimsMode: "select" | "always" | "off"; setDimsMode: (m: "select" | "always" | "off") => void;
   wireframe: boolean; setWireframe: (f: (w: boolean) => boolean) => void;
+  gray: boolean; setGray: (v: boolean) => void;
   stats: boolean; setStats: (v: boolean) => void;
   units: "mm" | "in"; setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   showcase: boolean; setShowcase: (v: boolean) => void;
@@ -283,6 +284,7 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, stats, setSt
             </div>
           </div>
           <Row on={wireframe} label="Wireframe" hint="See the mesh triangles" onClick={() => setWireframe((w) => !w)} />
+          <Row on={gray} label="Grayscale" hint="Hide baked colors — see the print, not the paint" onClick={() => setGray(!gray)} />
           <Row on={overhangOn} label="Overhang heatmap" hint="Paint faces that will need support" onClick={toggleOverhang} />
           <Row on={stats} label="Stats" hint="Triangles, volume, watertight" onClick={() => setStats(!stats)} />
           <Row on={showcase} label="Showcase" hint="Clean stage + slow turntable" onClick={() => setShowcase(!showcase)} />
@@ -1002,6 +1004,9 @@ interface Props {
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
   setWireframe: (f: (w: boolean) => boolean) => void;
+  gray: boolean; // View > Grayscale: hide baked mesh colors (display only)
+  setGray: (v: boolean) => void;
+  modelBadge: { label: string; color: string } | null; // which engine/AI made the model (Objects panel)
   showDims: boolean; // resolved visibility for the viewer (App folds mode + selection)
   dimsMode: "select" | "always" | "off";
   setDimsMode: (m: "select" | "always" | "off") => void;
@@ -1092,6 +1097,7 @@ interface Props {
     resize: (scale: [number, number, number]) => void;
     fitToPlate: () => void;
   };
+  genTexCtl: { on: boolean; toggle: () => void };
   measureCtl: {
     mode: boolean;
     toggle: () => void;
@@ -1298,6 +1304,18 @@ export function Workspace(p: Props) {
                     : `Whole/organic objects from a photo or text · ${costLabel(p.genProvider, p.genModel) || "see Settings for pricing"}`}
               </span>
               {p.mode === "precise" && p.guided && <FitControl fit={p.fit} onFit={p.onFit} />}
+              {p.mode === "generative" && (
+                <button
+                  className={`texchip${p.genTexCtl.on ? " on" : ""}`}
+                  aria-pressed={p.genTexCtl.on}
+                  title={p.genTexCtl.on
+                    ? "Baked color textures ON — pretty previews, but paid engines charge extra for texturing (Hunyuan ~3×) and the colors don't survive single-filament printing. Tap for print-first gray."
+                    : "Print-first: geometry only, no baked textures — a clean gray mesh (what your print will look like) at the lower engine price. Tap to bake colors."}
+                  onClick={p.genTexCtl.toggle}
+                >
+                  {p.genTexCtl.on ? "🎨 Color: on" : "⬜ Color: off — print-first"}
+                </button>
+              )}
             </div>
 
             {p.imageUrl && (
@@ -1424,23 +1442,30 @@ export function Workspace(p: Props) {
                   <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
                   <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
                 </div>
-                <button
-                  className={`ghost sm iconbtn has-modes${p.featureCtl.mode ? " on" : ""}`}
-                  aria-pressed={p.featureCtl.mode}
-                  aria-label="Select"
-                  title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
-                  onClick={p.featureCtl.toggleMode}
-                >
-                  <IconPointer /><span className="btn-label">Select</span>
-                </button>
-                {p.featureCtl.mode && (
-                  <div className="seg sm mode-seg">
-                    {SELECT_MODES.map((m, i) => (
-                      <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
-                        <m.icon /><span className="btn-label">{m.label}</span>
-                      </button>
-                    ))}
-                  </div>
+                {p.activeKind === "replicad" && (
+                  <>
+                    {/* Select feeds CAD feature edits (fillet/extrude/hole on picked faces/edges) —
+                        meshes can't take those ops, so the tool hides for them and the toolbar
+                        stays lean. Transform/Resize/Measure/Mark/View work on both. */}
+                    <button
+                      className={`ghost sm iconbtn has-modes${p.featureCtl.mode ? " on" : ""}`}
+                      aria-pressed={p.featureCtl.mode}
+                      aria-label="Select"
+                      title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
+                      onClick={p.featureCtl.toggleMode}
+                    >
+                      <IconPointer /><span className="btn-label">Select</span>
+                    </button>
+                    {p.featureCtl.mode && (
+                      <div className="seg sm mode-seg">
+                        {SELECT_MODES.map((m, i) => (
+                          <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
+                            <m.icon /><span className="btn-label">{m.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
                 <button
                   className={`ghost sm iconbtn has-modes${p.transformCtl.mode !== "off" ? " on" : ""}`}
@@ -1501,6 +1526,8 @@ export function Workspace(p: Props) {
                   setDimsMode={p.setDimsMode}
                   wireframe={p.wireframe}
                   setWireframe={p.setWireframe}
+                  gray={p.gray}
+                  setGray={p.setGray}
                   stats={showStats}
                   setStats={setShowStats}
                   units={p.units}
@@ -1715,6 +1742,11 @@ export function Workspace(p: Props) {
                   <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box) — double-click the name to rename" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
                     <IconCube />
                     <EditableName name={p.projectName} className="lp-name" editing={renaming === "model"} onStartEdit={() => setRenaming("model")} onRename={p.onRename} onDone={() => setRenaming(null)} />
+                    {p.modelBadge && p.geometry && (
+                      <span className="lp-badge" style={{ color: p.modelBadge.color, borderColor: p.modelBadge.color }} title={`Made by ${p.modelBadge.label}`}>
+                        {p.modelBadge.label}
+                      </span>
+                    )}
                     {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
                     {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
                   </div>

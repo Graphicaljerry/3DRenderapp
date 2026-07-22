@@ -663,6 +663,88 @@ function SnapMenu({ snap, setSnap }: { snap: { move: number; rotate: number }; s
   );
 }
 
+/** Typed resize, Bambu-style: exact W/D/H in mm (linked by default) or a uniform %,
+ *  plus one-tap "Fit to plate". Mesh models may stretch per-axis; CAD scales uniformly. */
+function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
+  const [open, setOpen] = useState(false);
+  const [vals, setVals] = useState({ x: "", y: "", z: "", pct: "100" });
+  const [uniform, setUniform] = useState(true);
+  const d = ctl.dims;
+  const linked = uniform || !ctl.perAxis; // CAD is always uniform
+  const r1s = (n: number) => String(Math.round(n * 10) / 10);
+  const seed = () => d && setVals({ x: r1s(d.x), y: r1s(d.y), z: r1s(d.z), pct: "100" });
+  const setAxis = (axis: "x" | "y" | "z", v: string) => {
+    const n = parseFloat(v);
+    if (linked && d && Number.isFinite(n) && n > 0 && d[axis] > 0) {
+      const f = n / d[axis];
+      setVals({
+        x: axis === "x" ? v : r1s(d.x * f),
+        y: axis === "y" ? v : r1s(d.y * f),
+        z: axis === "z" ? v : r1s(d.z * f),
+        pct: String(Math.round(f * 1000) / 10),
+      });
+    } else setVals((s) => ({ ...s, [axis]: v }));
+  };
+  const setPct = (v: string) => {
+    const n = parseFloat(v);
+    if (d && Number.isFinite(n) && n > 0) setVals({ x: r1s((d.x * n) / 100), y: r1s((d.y * n) / 100), z: r1s((d.z * n) / 100), pct: v });
+    else setVals((s) => ({ ...s, pct: v }));
+  };
+  const apply = () => {
+    if (!d) return;
+    const sx = parseFloat(vals.x) / d.x;
+    const sy = parseFloat(vals.y) / d.y;
+    const sz = parseFloat(vals.z) / d.z;
+    if (![sx, sy, sz].every((v) => Number.isFinite(v) && v > 0)) return;
+    ctl.resize(linked ? [sx, sx, sx] : [sx, sy, sz]);
+    setOpen(false);
+  };
+  const num = (axis: "x" | "y" | "z", label: string) => (
+    <label className="rz-field">
+      {label}
+      <input type="number" min={0.1} step={0.1} value={vals[axis]} onChange={(e) => setAxis(axis, e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} />
+    </label>
+  );
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button
+        className={`ghost sm iconbtn${open ? " on" : ""}`}
+        aria-label="Resize"
+        aria-expanded={open}
+        disabled={!d || ctl.busy}
+        title="Resize — type the exact size in mm (or a %) instead of dragging; includes one-tap Fit to plate"
+        onClick={() => { if (!open) seed(); setOpen((v) => !v); }}
+      >
+        <IconScale /><span className="btn-label">Resize</span>
+      </button>
+      {open && d && (
+        <div className="snap-menu resize-menu" role="menu">
+          <div className="snap-row rz-dims">
+            {num("x", "W")}
+            {num("y", "D")}
+            {num("z", "H")}
+            <span className="rz-unit">mm</span>
+          </div>
+          <div className="snap-row">
+            <label className="rz-field">%<input type="number" min={1} step={1} value={vals.pct} onChange={(e) => setPct(e.target.value)} onKeyDown={(e) => e.key === "Enter" && apply()} /></label>
+            {ctl.perAxis ? (
+              <label className="rz-uniform"><input type="checkbox" checked={uniform} onChange={(e) => setUniform(e.target.checked)} /> uniform</label>
+            ) : (
+              <span className="rz-uniform" title="CAD parts scale uniformly — ask in chat or edit Params for exact per-axis dimensions">uniform (CAD)</span>
+            )}
+          </div>
+          <div className="snap-row rz-actions">
+            <button className="ghost sm" disabled={ctl.fits || ctl.busy} title={ctl.fits ? "Already fits the plate" : `Shrink to fit your ${ctl.bed.x} × ${ctl.bed.y} mm plate`} onClick={() => { ctl.fitToPlate(); setOpen(false); }}>
+              Fit to plate
+            </button>
+            <button className="primary sm" disabled={ctl.busy} onClick={apply}>Apply</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Docked selection inspector — the selected part's numbers, editable. replicad scale is
  *  uniform-only, so editing any one dimension rescales the whole part to match it. */
 function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }: {
@@ -940,6 +1022,7 @@ interface Props {
   onRepair: () => void;
   onSimplify: () => void;
   onSplit: () => void;
+  onFitToPlate: () => void;
   splitCtl: {
     pieces: SplitPiece[] | null;
     exportPiece: (index: number, format: "stl" | "3mf") => void;
@@ -999,6 +1082,15 @@ interface Props {
     setMode: (m: TransformMode) => void;
     commit: (c: TransformCommit) => void;
     busy: boolean;
+  };
+  resizeCtl: {
+    dims: { x: number; y: number; z: number } | null;
+    bed: { x: number; y: number; z: number };
+    perAxis: boolean; // mesh models stretch per axis; CAD ops are uniform-only
+    fits: boolean;
+    busy: boolean;
+    resize: (scale: [number, number, number]) => void;
+    fitToPlate: () => void;
   };
   measureCtl: {
     mode: boolean;
@@ -1367,6 +1459,7 @@ export function Workspace(p: Props) {
                     <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                   </div>
                 )}
+                {p.transformCtl.mode !== "off" && <ResizeMenu ctl={p.resizeCtl} />}
                 <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
                 <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
                 <SnapMenu snap={p.snap} setSnap={p.setSnap} />
@@ -1606,7 +1699,7 @@ export function Workspace(p: Props) {
                 </div>
               )}
               {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
-                <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind === "replicad"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
+                <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
               )}
               {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
               {showLayers && (p.tab === "3d" || p.tab === "params") && (
@@ -1848,7 +1941,7 @@ export function Workspace(p: Props) {
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
             {p.tab === "print" && (
-              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} prep={p.printPrep} />
+              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} />
             )}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -2235,7 +2328,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, prep }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; prep: PrintPrepCtl }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const sug = prep.orient.suggestion;
   const thin = prep.thin.report;
@@ -2275,7 +2368,10 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
       )}
       {!report.bedFit.fitsRotated && (
         <div className="param-actions" style={{ flexWrap: "wrap" }}>
-          <button className="primary sm" disabled={busy} onClick={onSplit}>
+          <button className="primary sm" disabled={busy} onClick={onFitToPlate} title="Uniformly shrink the model until it fits the plate — one tap, undoable">
+            Fit to plate — scale down
+          </button>
+          <button className="ghost sm" disabled={busy} onClick={onSplit}>
             Split to fit bed — print in pieces
           </button>
         </div>

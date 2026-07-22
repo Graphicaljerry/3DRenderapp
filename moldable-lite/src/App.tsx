@@ -23,6 +23,7 @@ import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAd
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
+import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, scaleAboutBase } from "./print/resize";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
@@ -935,7 +936,8 @@ export default function App() {
 
   // ---- chat memory: every message is saved into the project, continuously ----
   const projectRef = useRef<Project | null>(null);
-  const importFileRef = useRef<Blob | null>(null); // the live STEP behind the code's `imported` arg
+  const importFileRef = useRef<Blob | null>(null); // the live STEP/STL behind the code's `imported` arg
+  const importKindRef = useRef<"step" | "stl">("step"); // how importFileRef parses (STL-as-CAD must not be re-read as STEP)
   projectRef.current = project;
   useEffect(() => {
     if (messages.length === 0 && pins.length === 0) return;
@@ -1023,6 +1025,7 @@ export default function App() {
             res.geometry.dispose();
           } else if (p.glb) {
             const { geometry: g } = await loadAnyMesh(new File([p.glb], "model.glb"));
+            applyStoredMeshXform(g, p.meshXform); // thumbs show the resized/oriented state
             shot = viewer.current?.captureGeometryShot(g) ?? null;
             g.dispose();
           }
@@ -1288,30 +1291,22 @@ export default function App() {
       const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
       await authorObjectOp({ kind: "rotate", axis: s.axis, angleDeg: s.angleDeg, center: [c.x, c.y, c.z] });
     } else {
-      const g = geometry.clone();
-      g.computeBoundingBox();
-      const c = g.boundingBox!.getCenter(new THREE.Vector3());
-      const rot = new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(s.axis[0], s.axis[1], s.axis[2]).normalize(), THREE.MathUtils.degToRad(s.angleDeg));
+      // Mesh model: bake the rotation, keep the ORIGINAL glb + texture, and record
+      // the matrix (meshXform) so the orientation survives reopening the project.
+      geometry.computeBoundingBox();
+      const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
       const m = new THREE.Matrix4()
         .makeTranslation(c.x, c.y, c.z)
-        .multiply(rot)
+        .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(s.axis[0], s.axis[1], s.axis[2]).normalize(), THREE.MathUtils.degToRad(s.angleDeg)))
         .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
-      g.applyMatrix4(m);
-      g.computeBoundingBox();
-      g.translate(0, 0, -g.boundingBox!.min.z); // sit back on the bed
-      g.computeBoundingBox();
-      const sz = g.boundingBox!.getSize(new THREE.Vector3());
-      const r = (n: number) => Math.round(n * 10) / 10;
-      const dd = { x: r(sz.x), y: r(sz.y), z: r(sz.z) };
-      const res: EngineResult = {
-        kind: "generative",
-        geometry: g,
-        dims: dd,
-        source: { kind: "gen", provider: "orient", model: "auto-orient" },
-        supportsStep: false,
-        glb: geometryToSTL(g),
-      };
-      applyResult(res, project?.name ?? "Model", `Auto-oriented for printing — ${dd.x} × ${dd.y} × ${dd.z} mm`, "auto-orient");
+      const baked = bakeMeshTransform(geometry, m);
+      const dd = baked.dims;
+      applyResult(
+        { ...result, geometry: baked.geometry, dims: dd, meshXform: composeXform(result.meshXform, baked.applied) },
+        project?.name ?? "Model",
+        `Auto-oriented for printing — ${dd.x} × ${dd.y} × ${dd.z} mm`,
+        "auto-orient",
+      );
     }
     setOrientSug(null);
     explainOnce(
@@ -1365,9 +1360,11 @@ export default function App() {
       params: res.source.kind === "code" ? res.source.params : undefined,
       ops: res.source.kind === "code" ? res.source.ops : undefined,
       importFile: res.source.kind === "code" ? importFileRef.current ?? undefined : undefined,
+      importKind: res.source.kind === "code" && importFileRef.current ? importKindRef.current : undefined,
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
       glb: res.glb,
+      meshXform: res.meshXform,
       genSource: res.source.kind === "gen" ? { provider: res.source.provider, model: res.source.model, prompt: res.source.prompt } : undefined,
     });
     // Chat is synced separately (continuous effect) — keep whatever is there.
@@ -1588,9 +1585,11 @@ export default function App() {
     }
   }
 
-  async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>) {
+  async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>, meshXform?: number[]) {
     const { geometry: g, dims: d, texture } = await loadAnyMesh(glb);
-    applyResultNoCommit({ kind: "generative", geometry: g, dims: d, source, supportsStep: false, glb, texture });
+    // Replay any baked transform (resize / rotate / fit-to-plate) recorded over this glb.
+    const dd = applyStoredMeshXform(g, meshXform) ?? d;
+    applyResultNoCommit({ kind: "generative", geometry: g, dims: dd, source, supportsStep: false, glb, texture, meshXform });
   }
 
   /** Turn the dropped SVG into a solid — extrude, revolve, or emboss. Persisted
@@ -1686,6 +1685,7 @@ export default function App() {
         try {
           await s.engine.setImport!(f, asCad);
           importFileRef.current = f;
+          importKindRef.current = asCad;
           const res = await s.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
           const cleanName = f.name.replace(/\.(step|stp|stl)$/i, "");
           applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
@@ -2257,9 +2257,42 @@ export default function App() {
 
   /** Commit a whole-body transform-gizmo drag as ONE parametric op (rotate/scale). The gizmo
    *  reports its pivot in display coords; map the pivot centre back to engine coords (+recenter),
-   *  exactly like applyDirectOp does for picked points. No AI, no tokens. */
+   *  exactly like applyDirectOp does for picked points. No AI, no tokens.
+   *  MESH models can't take parametric ops — their transform is BAKED into the geometry
+   *  instead (and recorded as meshXform so it survives reopen). Before this branch existed,
+   *  a gizmo scale/rotate/move on a generated mesh silently reverted — real user report. */
   async function authorObjectOp(commit: TransformCommit) {
-    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") return;
+    if (!result || status === "generating") return;
+    if (!(result.source.kind === "code" && sel && activeKind === "replicad")) {
+      if (result.kind !== "generative" || !result.geometry) return; // primitive spec models: no transform ops
+      const c = commit.kind === "translate" ? null : new THREE.Vector3(...commit.center);
+      const m =
+        commit.kind === "translate"
+          ? new THREE.Matrix4().makeTranslation(...commit.delta)
+          : commit.kind === "rotate"
+            ? new THREE.Matrix4()
+                .makeTranslation(c!.x, c!.y, c!.z)
+                .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(...commit.axis).normalize(), THREE.MathUtils.degToRad(commit.angleDeg)))
+                .multiply(new THREE.Matrix4().makeTranslation(-c!.x, -c!.y, -c!.z))
+            : new THREE.Matrix4()
+                .makeTranslation(c!.x, c!.y, c!.z)
+                .multiply(new THREE.Matrix4().makeScale(commit.factor, commit.factor, commit.factor))
+                .multiply(new THREE.Matrix4().makeTranslation(-c!.x, -c!.y, -c!.z));
+      const baked = bakeMeshTransform(result.geometry, m);
+      const label =
+        commit.kind === "translate"
+          ? "Moved the part"
+          : commit.kind === "rotate"
+            ? `Rotated ${Math.round(commit.angleDeg)}°`
+            : `Scaled to ${Math.round(commit.factor * 100)}%`;
+      applyResult(
+        { ...result, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(result.meshXform, baked.applied) },
+        project?.name ?? deriveName("Edited part"),
+        `${label} — ${baked.dims.x} × ${baked.dims.y} × ${baked.dims.z} mm`,
+        `transform ${commit.kind}`,
+      );
+      return;
+    }
     const src = result.source;
     const rc = result.recenter ?? [0, 0, 0];
     // translate.delta is a pure vector — recenter-invariant. rotate/scale pivot about a picked
@@ -2290,6 +2323,44 @@ export default function App() {
     } finally {
       setStatus("idle");
     }
+  }
+
+  /** Typed resize (Resize panel / Fit to plate). Mesh models bake the scale into the
+   *  geometry (per-axis allowed, texture kept, recorded as meshXform); CAD models
+   *  author a parametric UNIFORM scale op — same path as the gizmo. */
+  async function resizeModel(scale: [number, number, number]) {
+    if (!result || !geometry || status === "generating") return;
+    const s = scale.map((v) => (Number.isFinite(v) && v > 0.001 ? v : 1)) as [number, number, number];
+    if (s.every((v) => Math.abs(v - 1) < 1e-3)) return;
+    if (result.source.kind === "code" && activeKind === "replicad") {
+      geometry.computeBoundingBox();
+      const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
+      await authorObjectOp({ kind: "scale", factor: Math.round(s[0] * 1000) / 1000, center: [c.x, c.y, c.z] });
+    } else if (result.kind === "generative") {
+      const baked = bakeMeshTransform(result.geometry, scaleAboutBase(result.geometry, s));
+      applyResult(
+        { ...result, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(result.meshXform, baked.applied) },
+        project?.name ?? "Model",
+        `Resized — ${baked.dims.x} × ${baked.dims.y} × ${baked.dims.z} mm`,
+        "resize",
+      );
+    }
+  }
+
+  /** One tap: shrink an oversize model until it fits the printer's plate. */
+  async function fitModelToPlate() {
+    if (!result) return;
+    const f = fitToBedFactor(result.dims, printer.bed);
+    if (f >= 1) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Already fits — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm on a ${printer.bed.x} × ${printer.bed.y} mm plate.` }]);
+      return;
+    }
+    await resizeModel([f, f, f]);
+    explainOnce(
+      "fitplate",
+      `Scaled the model to ${Math.round(f * 100)}% so it fits your ${printer.bed.x} × ${printer.bed.y} mm plate. Undo reverts it; the Resize panel (Transform → Resize) sets any exact size.`,
+      `Fit to plate: scaled to ${Math.round(f * 100)}%.`,
+    );
   }
 
   /** Measure tool: first click sets an anchor, second click records a point-to-point
@@ -2514,12 +2585,23 @@ export default function App() {
       genEngine.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, streaming: true } : x)));
       const runGen = async (provId: string, modelId: string, label: string) => {
-        const res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
+        let res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
+        // AI meshes carry no real-world units — engines routinely hand back a "car-sized
+        // car" (a real one arrived at 1161 mm on a 320 mm bed). Print-friendly default:
+        // shrink anything oversize to fit the plate, say so, and record the scale so it
+        // survives reopen. Resize / Fit to plate can make it any size afterwards.
+        let fitNote = "";
+        const ff = fitToBedFactor(res.dims, printer.bed);
+        if (ff < 1) {
+          const baked = bakeMeshTransform(res.geometry, scaleAboutBase(res.geometry, [ff, ff, ff]));
+          res = { ...res, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(res.meshXform, baked.applied) };
+          fitNote = ` — scaled to fit your ${printer.bed.x}×${printer.bed.y} mm plate (AI meshes have no real size; use Resize to make it any size)`;
+        }
         const name = deriveName(p || "Photo model");
         const usd = costUsd(provId, modelId) ?? 0;
         recordSpend(provId, modelId, usd); // paid runs land in the local spend ledger
         const spent = usd > 0 ? ` · ${costLabel(provId, modelId)}` : "";
-        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label}${spent})`;
+        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label}${spent})${fitNote}`;
         const how = await deliverResult(res, name, summary, p || "(image upload)", true);
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false } : x)));
       };
@@ -2950,14 +3032,17 @@ export default function App() {
     seedHistory(next.engine, next.code, next.spec);
     clearImage();
     if (next.engine === "generative" && next.glb) {
-      await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
+      await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
     } else {
       // Boot-on-demand (don't skip the rebuild when a resume/open races the deferred
       // kernel warm-up — that left the viewer empty until the next interaction).
       const s = sel ?? (await ensureEngine());
       if (s.engine.setImport) {
-        await s.engine.setImport(next.importFile ?? null);
+        // The stored kind matters: an STL-as-CAD import re-read as STEP fails with a
+        // bare kernel error on every undo/reopen (found by resize-e2e).
+        await s.engine.setImport(next.importFile ?? null, next.importKind ?? "step");
         importFileRef.current = next.importFile ?? null;
+        importKindRef.current = next.importKind ?? "step";
       }
       const bi: BuildInput =
         next.engine === "replicad"
@@ -3255,6 +3340,7 @@ export default function App() {
         onRepair={repairMesh}
         onSimplify={simplifyMesh}
         onSplit={splitMesh}
+        onFitToPlate={() => void fitModelToPlate()}
         splitCtl={{ pieces: splitPieces, exportPiece, exportAll: exportAllPieces, clear: () => setSplitPieces(null) }}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
@@ -3341,6 +3427,15 @@ export default function App() {
           setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
           busy: status === "generating",
+        }}
+        resizeCtl={{
+          dims,
+          bed: printer.bed,
+          perAxis: result?.kind === "generative", // CAD ops are uniform-only
+          fits: report?.bedFit.fitsRotated ?? true,
+          busy: status === "generating",
+          resize: (s) => void resizeModel(s),
+          fitToPlate: () => void fitModelToPlate(),
         }}
         measureCtl={{
           mode: measureMode,

@@ -9,9 +9,11 @@ export interface Snapshot {
   params?: Record<string, number>;
   ops?: CadOp[];
   importFile?: Blob;
+  importKind?: "step" | "stl";
   spec?: unknown;
   dims?: { x: number; y: number; z: number };
   glb?: Blob;
+  meshXform?: number[];
   genSource?: GenSource;
 }
 
@@ -29,9 +31,11 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     params: snap.params,
     ops: snap.ops,
     importFile: snap.importFile,
+    importKind: snap.importKind,
     spec: snap.spec,
     dims: snap.dims,
     glb: snap.glb,
+    meshXform: snap.meshXform,
     genSource: snap.genSource,
   };
   const kept = project.versions.slice(0, headIndex(project) + 1); // drop any redo branch past HEAD
@@ -42,8 +46,10 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     params: snap.params,
     ops: snap.ops,
     importFile: snap.importFile,
+    importKind: snap.importKind,
     spec: snap.spec,
     glb: snap.glb,
+    meshXform: snap.meshXform,
     genSource: snap.genSource,
     updatedAt: Date.now(),
     versions: [...kept, v],
@@ -64,9 +70,11 @@ export function restoreVersion(project: Project, versionId: string): Project {
     params: t.params,
     ops: t.ops,
     importFile: t.importFile,
+    importKind: t.importKind,
     spec: t.spec,
     dims: t.dims,
     glb: t.glb,
+    meshXform: t.meshXform,
     genSource: t.genSource,
   };
   return {
@@ -76,8 +84,10 @@ export function restoreVersion(project: Project, versionId: string): Project {
     params: t.params,
     ops: t.ops,
     importFile: t.importFile,
+    importKind: t.importKind,
     spec: t.spec,
     glb: t.glb,
+    meshXform: t.meshXform,
     genSource: t.genSource,
     updatedAt: Date.now(),
     versions: [...project.versions, v],
@@ -106,8 +116,10 @@ export function navigateHead(project: Project, versionId: string): Project {
     params: t.params,
     ops: t.ops,
     importFile: t.importFile,
+    importKind: t.importKind,
     spec: t.spec,
     glb: t.glb,
+    meshXform: t.meshXform,
     genSource: t.genSource,
     updatedAt: Date.now(),
     headId: t.id,

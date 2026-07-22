@@ -1,6 +1,6 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#110 merged, latest: first-load/bundle split). New
+*Updated 2026-07-22 (PRs #43–#111 merged, latest: print-fit pack). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
 
@@ -23,6 +23,11 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   route interception (see `harness/hf-fallback-e2e.mjs`, `harness/cost-e2e.mjs`);
   server-side WebSearch works for research.
 - **Queued / open items**:
+  - **Jerry asked (2026-07-22)**: (a) an option to generate meshes UNTEXTURED /
+    grayscale (worried baked gradients mislead vs. the printed result) + longer-term
+    a Bambu-style "fill color" painting concept; (b) a cheap multi-engine low-res
+    preview → pick → final-generation flow. Research findings + recommendation were
+    delivered in-session (see the session close-out message); implementation queued.
   - Wire the newer free HF Spaces (tencent/Hunyuan3D-2.1, microsoft/TRELLIS.2,
     stabilityai/stable-point-aware-3d) into `gen/providers/hf.ts` — researched and
     promising, but their Gradio endpoint signatures couldn't be verified from the
@@ -37,6 +42,31 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
+
+- **Print-fit pack (2026-07-22, direct Jerry request)**: (1) REAL BUG FIXED — the
+  transform gizmo on a MESH model silently reverted (`authorObjectOp` only handled
+  CAD; the gizmo pivot arms for any mesh and its commit was swallowed). Mesh models
+  now BAKE gizmo move/rotate/scale via `print/resize.ts` (`bakeMeshTransform`) and
+  record the cumulative matrix as **`meshXform`** (EngineResult + Version/Project +
+  all versions.ts copy sites) — the ORIGINAL glb and its baked texture stay
+  untouched; `showFromGlb` replays the matrix on reopen and thumb rebuilds replay
+  it too. (2) **Generated meshes auto-fit the plate** (runGen: `fitToBedFactor`,
+  margin 0.95 — engines return unit-less "car-sized cars"; real case: a 1161 mm
+  Gallardo on a 320 mm bed) with the scale noted in the chat summary; file IMPORTS
+  keep true size deliberately. (3) **Fit to plate — scale down** button in
+  Printability's too-big block (next to Split) and in the Resize panel. (4) **Typed
+  resize**: Transform toolbar → Resize popover (W/D/H mm linked + uniform % +
+  per-axis for meshes; CAD stays uniform via the parametric scale op), and the
+  Selection inspector's W/D/H typing now works for meshes too (canScale gate
+  relaxed — `scaleToDim` routes through the same authorObjectOp). (5)
+  `applyOrientation`'s mesh branch switched to meshXform — the old glb→STL swap
+  LOST baked textures on auto-orient. (6) SECOND REAL BUG: STL-as-CAD imports were
+  re-read as STEP on undo/reopen ("This shape has not type, it is null") —
+  **`importKind`** is now persisted on versions and passed by `rebuildHead`; and
+  STEP/STL drops boot the kernel on demand (ensureEngine) instead of bouncing
+  "try again in a few seconds". Verified by `harness/resize-e2e.mjs` (13 checks:
+  exact matrix round-trips, GLB mesh flow incl. reload persistence, STL-as-CAD
+  flow incl. the undo fix) + printprep re-run.
 
 - **First-load & bundle split (2026-07-22)**: the entry bundle is ~3 kB + React
   (~47 kB gz before first paint, was 459 kB gz) — `main.tsx` lazy-imports the whole

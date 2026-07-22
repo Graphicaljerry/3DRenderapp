@@ -2,7 +2,6 @@ import { wrap, type Remote } from "comlink";
 import type { CadWorkerApi, WorkerBuildResult } from "../worker/workerMessages";
 import type { Engine, EngineResult, BuildInput, ExportFormat } from "./types";
 import { facesToGeometry } from "./mesh";
-import { geometryToOBJ, geometryTo3MF } from "../print/exportClient";
 
 const BUILD_TIMEOUT_MS = 25_000;
 
@@ -97,6 +96,7 @@ export class ReplicadEngine implements Engine {
     const ops = result.source.kind === "code" ? result.source.ops : undefined;
     if (format === "stl") return this.withWatchdog(this.api.exportBlob(code, "stl", params, ops));
     if (format === "step") return this.withWatchdog(this.api.exportBlob(code, "step", params, ops));
+    const { geometryToOBJ, geometryTo3MF } = await import("../print/exportClient"); // exporters load on demand
     if (format === "obj") return geometryToOBJ(result.geometry);
     return geometryTo3MF(result.geometry);
   }

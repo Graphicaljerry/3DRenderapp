@@ -1,17 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Workspace } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
-import { ExtrudeModal, type SvgMode, type SvgParams } from "./components/ExtrudeModal";
-import { extrudeSvg, revolveSvg, embossSvg } from "./svg/extrude";
-import { geometryToSTL, geometryTo3MF, geometriesTo3MF, platesToProject3MF, zipModelFiles } from "./print/exportClient";
+import type { SvgMode, SvgParams } from "./components/ExtrudeModal";
+import { geometryToSTL } from "./print/stl";
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfacePattern } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
-import { GenerativeEngine } from "./engine/generativeEngine";
+import type { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
@@ -24,8 +23,6 @@ import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAd
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
-import { simplifyGeometry } from "./print/simplify";
-import { splitToFitBed } from "./print/split";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
@@ -38,12 +35,11 @@ import { IconGitHub, IconGoogle, IconX } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
-import { findThinWalls, type ThinWallReport } from "./print/thinwalls";
+import type { ThinWallReport } from "./print/thinwalls";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine, costLabel, costUsd } from "./gen/registry";
 import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
-import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { appendVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
 import type { Project, Pin } from "./store/types";
@@ -52,6 +48,16 @@ import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+
+// On-demand UI (code-split): the SVG modal's svg/extrude graph carries
+// three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
+// Suspense fallback is null: it opens from a tap and the chunk is tiny (and
+// PWA-precached), so there's nothing to skeleton. (TemplatesModal stays eager —
+// its TemplateStrip renders on the first screen.)
+const ExtrudeModal = lazy(() => import("./components/ExtrudeModal").then((m) => ({ default: m.ExtrudeModal })));
+
+// GLB/STL parsing (GLTFLoader + friends) loads with the first mesh that needs it.
+const loadAnyMesh = async (f: Blob | File) => (await import("./gen/loadMesh")).loadAnyMesh(f);
 
 // Run heavy, non-urgent work after the browser has painted the current frame — keeps the
 // model swap feeling instant. Uses requestIdleCallback where available, else a short timeout.
@@ -312,7 +318,16 @@ export default function App() {
 
   const [sel, setSel] = useState<EngineSelection | null>(null);
   const [booting, setBooting] = useState(false);
-  const genEngine = useRef(new GenerativeEngine());
+  // Lazy: the mesh-engine module (GLB loaders, export helpers) loads with the
+  // first generative build/export, not at mount. Every use site is async already.
+  const genEngineRef = useRef<GenerativeEngine | null>(null);
+  async function getGenEngine(): Promise<GenerativeEngine> {
+    if (!genEngineRef.current) {
+      const { GenerativeEngine } = await import("./engine/generativeEngine");
+      genEngineRef.current ??= new GenerativeEngine();
+    }
+    return genEngineRef.current;
+  }
 
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -394,9 +409,10 @@ export default function App() {
     return parts;
   }
   /** One 3MF per non-empty plate — real named <object>s, positioned as placed. */
-  function exportPlates() {
+  async function exportPlates() {
     const all = collectPlateParts();
     if (!all) return;
+    const { geometriesTo3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
     const plates = new Map<number, { geometry: THREE.BufferGeometry; name: string }[]>();
     for (const part of all) {
       if (!plates.has(part.plate)) plates.set(part.plate, []);
@@ -409,9 +425,10 @@ export default function App() {
   }
   /** ONE project 3MF with every plate laid out — Bambu Studio / OrcaSlicer open it with
       the plates intact (each part named, grouped and positioned on its plate). */
-  function exportPlatesProject() {
+  async function exportPlatesProject() {
     const all = collectPlateParts();
     if (!all) return;
+    const { platesToProject3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
     downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }, plateNames), safeFileName(`${project?.name ?? "model"}-plates`, "3mf"));
     const used = new Set(all.map((p) => p.plate)).size;
     explainOnce("export-project", `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.`);
@@ -855,17 +872,60 @@ export default function App() {
   const [svgDraft, setSvgDraft] = useState<{ text: string; url: string; name: string } | null>(null);
   const viewer = useRef<ViewerHandle>(null);
 
+  // Warm the CAD kernel AFTER first paint has settled, not at mount: the ~11 MB
+  // OCCT wasm fetch+compile otherwise competes with the app chunk, fonts and
+  // thumbnails for bandwidth on first load. Anything that needs the engine sooner
+  // (template tap, resume, example, chat build) calls ensureEngine() and preempts
+  // this — getEngineSelection() is memoized, so first caller wins and everyone
+  // shares the same single boot.
   useEffect(() => {
     if (!entered || sel) return;
     let alive = true;
-    setBooting(true);
-    getEngineSelection() // memoized: boots the CAD kernel exactly once
-      .then((s) => alive && setSel(s))
-      .finally(() => alive && setBooting(false));
+    let kicked = false;
+    let idleId = 0;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+    const kick = () => {
+      if (!alive || kicked) return;
+      kicked = true;
+      setBooting(true);
+      getEngineSelection()
+        .then((s) => alive && setSel(s))
+        .finally(() => alive && setBooting(false));
+    };
+    const whenIdle = () => {
+      const ric = (globalThis as any).requestIdleCallback as undefined | ((cb: () => void, o?: any) => number);
+      if (ric) idleId = ric(kick, { timeout: 1500 });
+      else timerId = setTimeout(kick, 350);
+    };
+    const onLoad = () => whenIdle();
+    if (document.readyState === "complete") whenIdle();
+    else {
+      window.addEventListener("load", onLoad, { once: true });
+      timerId = setTimeout(whenIdle, 3000); // belt & braces: a stalled asset must not block the kernel forever
+    }
     return () => {
       alive = false;
+      window.removeEventListener("load", onLoad);
+      if (timerId) clearTimeout(timerId);
+      const cic = (globalThis as any).cancelIdleCallback as undefined | ((id: number) => void);
+      if (idleId && cic) cic(idleId);
     };
   }, [entered, sel]);
+
+  /** The engine, booting it NOW if the deferred warm-up hasn't run yet — shared by
+   *  every path that needs a build before the idle boot lands (template, resume,
+   *  example, chat). Memoized upstream, so calling it "too often" costs nothing. */
+  async function ensureEngine(): Promise<EngineSelection> {
+    if (sel) return sel;
+    setBooting(true);
+    try {
+      const s = await getEngineSelection();
+      setSel(s);
+      return s;
+    } finally {
+      setBooting(false);
+    }
+  }
 
   function persist(next: Project) {
     setProject(next);
@@ -1195,8 +1255,9 @@ export default function App() {
     if (!geometry || thinBusy) return;
     setThinBusy(true);
     // Yield a frame so the button's busy state paints before the scan blocks the thread.
-    setTimeout(() => {
+    setTimeout(async () => {
       try {
+        const { findThinWalls } = await import("./print/thinwalls"); // three-mesh-bvh loads on demand
         const rep = findThinWalls(geometry, 0.8);
         setThinReport(rep);
         setThinShow(rep.thinSamples > 0);
@@ -1403,6 +1464,7 @@ export default function App() {
     if (!result || result.kind === "replicad" || status === "generating") return;
     setStatus("generating");
     try {
+      const { simplifyGeometry } = await import("./print/simplify"); // meshoptimizer loads on demand
       const out = await simplifyGeometry(result.geometry);
       applyResultNoCommit({ ...result, geometry: out.geometry, dims: out.dims });
       setMessages((m) => [
@@ -1426,6 +1488,7 @@ export default function App() {
     const bed = report.bedFit.bed;
     setStatus("generating");
     try {
+      const { splitToFitBed } = await import("./print/split"); // CSG splitter loads on demand
       const out = splitToFitBed(result.geometry, bed);
       if (out.parts <= 1) {
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model already fits the bed — no split needed." }]);
@@ -1457,20 +1520,21 @@ export default function App() {
     }
   }
 
-  const pieceBlob = (g: THREE.BufferGeometry, format: "stl" | "3mf") => (format === "stl" ? geometryToSTL(g) : geometryTo3MF(g));
-  function exportPiece(index: number, format: "stl" | "3mf") {
+  const pieceBlob = async (g: THREE.BufferGeometry, format: "stl" | "3mf") =>
+    format === "stl" ? geometryToSTL(g) : (await import("./print/exportClient")).geometryTo3MF(g);
+  async function exportPiece(index: number, format: "stl" | "3mf") {
     const piece = splitPieces?.[index];
     if (!piece) return;
     const base = safeFileName(project?.name ?? "model", format).replace(/\.[^.]+$/, "");
-    downloadBlob(pieceBlob(piece.geometry, format), `${base}-part${index + 1}.${format}`);
+    downloadBlob(await pieceBlob(piece.geometry, format), `${base}-part${index + 1}.${format}`);
   }
   async function exportAllPieces(format: "stl" | "3mf") {
     if (!splitPieces?.length) return;
     const base = safeFileName(project?.name ?? "model", format).replace(/\.[^.]+$/, "");
     try {
       const files: Record<string, Blob> = {};
-      splitPieces.forEach((p, i) => { files[`${base}-part${i + 1}.${format}`] = pieceBlob(p.geometry, format); });
-      const zip = await zipModelFiles(files);
+      for (const [i, p] of splitPieces.entries()) files[`${base}-part${i + 1}.${format}`] = await pieceBlob(p.geometry, format);
+      const zip = await (await import("./print/exportClient")).zipModelFiles(files);
       downloadBlob(zip, `${base}-parts-${format}.zip`);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
@@ -1480,7 +1544,7 @@ export default function App() {
   /** Export a 3MF and hand it to a desktop slicer (deep link locally; download on hosted). */
   async function openSlicer(target: SlicerTarget) {
     if (!result) return;
-    const engine = result.kind === "generative" ? genEngine.current : sel?.engine;
+    const engine = result.kind === "generative" ? await getGenEngine() : sel?.engine;
     if (!engine) return;
     try {
       const pf = preflightExport(result, printer);
@@ -1531,9 +1595,10 @@ export default function App() {
 
   /** Turn the dropped SVG into a solid — extrude, revolve, or emboss. Persisted
    *  as an STL blob (Z-up mm), so it re-opens through the same path. */
-  function createFromSvg(mode: SvgMode, prm: SvgParams) {
+  async function createFromSvg(mode: SvgMode, prm: SvgParams) {
     if (!svgDraft) return;
     try {
+      const { extrudeSvg, revolveSvg, embossSvg } = await import("./svg/extrude"); // SVG→solid graph loads on demand
       if (mode === "attach") {
         // A free-floating object ON the current model: position with the gizmo/anchors,
         // then Merge in the Objects panel fuses it into one printable solid.
@@ -1606,48 +1671,50 @@ export default function App() {
     // faceted B-rep solid — good enough for AI edits (holes, cuts, resize, booleans); smooth
     // fillets won't work on facets. If the conversion fails (huge/organic/broken meshes),
     // the file falls through to the plain mesh pipeline below with a note.
-    const asCad = /\.(step|stp)$/i.test(f.name) ? "step" : /\.stl$/i.test(f.name) && sel?.kind === "replicad" && sel.engine.setImport ? "stl" : null;
-    if (/\.(step|stp)$/i.test(f.name) || asCad === "stl") {
-      if (!sel) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The CAD engine is still starting — try the import again in a few seconds." }]);
-        return;
-      }
-      if (asCad === "step" && (sel.kind !== "replicad" || !sel.engine.setImport)) {
+    const isStep = /\.(step|stp)$/i.test(f.name);
+    if (isStep || /\.stl$/i.test(f.name)) {
+      // The kernel warm-up is deferred to post-paint idle — boot it here rather than
+      // bouncing a STEP import ("try again") or quietly routing an STL to the mesh path.
+      const s = sel ?? (await ensureEngine());
+      const asCad = isStep ? ("step" as const) : s.kind === "replicad" && s.engine.setImport ? ("stl" as const) : null;
+      if (asCad === "step" && (s.kind !== "replicad" || !s.engine.setImport)) {
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: "STEP import needs the OpenCascade engine, which failed to boot on this device (the app fell back to the primitive engine).", error: true }]);
         return;
       }
-      setStatus("generating");
-      try {
-        await sel.engine.setImport!(f, asCad ?? "step");
-        importFileRef.current = f;
-        const res = await sel.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
-        const cleanName = f.name.replace(/\.(step|stp|stl)$/i, "");
-        applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
-        seedHistory("replicad", IMPORT_PASSTHROUGH, undefined);
-        setMode("precise");
-        const caveat = asCad === "stl"
-          ? " (converted from a mesh — flat facets, so cuts, holes, resize and booleans work; smooth fillets may not)"
-          : "";
-        setMessages((m) => [
-          ...m,
-          {
-            id: mid(),
-            role: "assistant",
-            text: `Imported ${f.name} as an editable CAD solid${caveat} (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
-          },
-        ]);
-        setStatus("idle");
-        return;
-      } catch (err: any) {
-        setStatus("idle");
-        if (asCad !== "stl") {
-          setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
+      if (asCad) {
+        setStatus("generating");
+        try {
+          await s.engine.setImport!(f, asCad);
+          importFileRef.current = f;
+          const res = await s.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
+          const cleanName = f.name.replace(/\.(step|stp|stl)$/i, "");
+          applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
+          seedHistory("replicad", IMPORT_PASSTHROUGH, undefined);
+          setMode("precise");
+          const caveat = asCad === "stl"
+            ? " (converted from a mesh — flat facets, so cuts, holes, resize and booleans work; smooth fillets may not)"
+            : "";
+          setMessages((m) => [
+            ...m,
+            {
+              id: mid(),
+              role: "assistant",
+              text: `Imported ${f.name} as an editable CAD solid${caveat} (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
+            },
+          ]);
+          setStatus("idle");
           return;
+        } catch (err: any) {
+          setStatus("idle");
+          if (asCad !== "stl") {
+            setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
+            return;
+          }
+          // STL that OCCT couldn't solidify → import it as a plain mesh instead (below).
+          try { await s.engine.setImport!(null); } catch { /* worker may have respawned */ }
+          importFileRef.current = null;
+          setMessages((m) => [...m, { id: mid(), role: "assistant", text: "That STL couldn't be converted to an editable solid — importing it as a plain mesh instead (measure, repair, resize, export still work)." }]);
         }
-        // STL that OCCT couldn't solidify → import it as a plain mesh instead (below).
-        try { await sel.engine.setImport!(null); } catch { /* worker may have respawned */ }
-        importFileRef.current = null;
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "That STL couldn't be converted to an editable solid — importing it as a plain mesh instead (measure, repair, resize, export still work)." }]);
       }
     }
 
@@ -2081,6 +2148,7 @@ export default function App() {
       const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, [{ role: "user", content: `Draw: ${request}` }], {}, effectiveProxy);
       const svgText = /<svg[\s\S]*?<\/svg>/i.exec(raw)?.[0];
       if (!svgText) throw new Error("the model didn't return a usable SVG — try rephrasing (e.g. \"a minimalist apple silhouette logo\")");
+      const { extrudeSvg } = await import("./svg/extrude"); // SVG→solid graph loads on demand
       const { geometry: g, dims: d } = extrudeSvg(svgText, { sizeMm: 25, heightMm: 0.8 });
       addAttachment(g, request.match(/\b([a-z0-9-]+)\s+(?:logo|emblem|badge|icon|symbol)/i)?.[1] ?? "logo");
       setMessages((m) => m.map((x) => (x.id === ph ? { ...x, streaming: false, model: shortModelName(effLlm.model), text: `Drew it and placed it on the model as a new object (${d.x} × ${d.y} mm, 0.8 mm raised). Drag the arrows to position it on the back, corner dots to resize, then **Merge** in the Objects panel to make it part of the case. Not right? ✕ removes it — ask again with more detail.` } : x)));
@@ -2441,11 +2509,12 @@ export default function App() {
       ]);
       setStatus("generating");
 
-      genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
-      genEngine.current.onProgress = (pr) =>
+      const genEngine = await getGenEngine();
+      genEngine.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
+      genEngine.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, streaming: true } : x)));
       const runGen = async (provId: string, modelId: string, label: string) => {
-        const res = await genEngine.current.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
+        const res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
         const name = deriveName(p || "Photo model");
         const usd = costUsd(provId, modelId) ?? 0;
         recordSpend(provId, modelId, usd); // paid runs land in the local spend ledger
@@ -2473,7 +2542,7 @@ export default function App() {
           // Keep the fallback context in EVERY progress line — the engine's first
           // progress event lands within milliseconds and would otherwise erase the
           // announcement before anyone could read it.
-          genEngine.current.onProgress = (pr) =>
+          genEngine.onProgress = (pr) =>
             setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}… ${pr.status}`, streaming: true } : x)));
           setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}…`, streaming: true } : x)));
           try {
@@ -2528,13 +2597,12 @@ export default function App() {
       setShowSettings(true);
       return;
     }
-    if (!sel) {
-      setMessages((m) => [
-        ...m,
-        { id: mid(), role: "assistant", text: "One moment — the CAD engine is still starting (the first load fetches ~11 MB, then it's cached). Try again in a few seconds." },
-      ]);
-      return;
-    }
+    // The kernel warm-up is deferred to post-paint idle — if a fast first message
+    // beats it, boot now (same shared, memoized boot; the status pill narrates it)
+    // instead of bouncing the user to "try again in a few seconds". Shadows the
+    // state on purpose: the rest of send() must use TODAY's engine, not the
+    // closure's possibly-null snapshot.
+    const sel = await ensureEngine();
 
     const kind = sel.kind;
     const visionImage = image; // capture before we clear it
@@ -2814,13 +2882,7 @@ export default function App() {
     setEntered(true);
     if (projectRef.current || messages.length) startNew();
     setMode("precise");
-    let s = sel;
-    if (!s) {
-      setBooting(true);
-      s = await getEngineSelection(); // same memoized boot as the effect — no double kernel
-      setSel(s);
-      setBooting(false);
-    }
+    const s = await ensureEngine();
     if (s.kind !== "replicad") {
       setMessages([{ id: mid(), role: "assistant", text: "Templates need the full CAD kernel, which couldn't load in this browser — try reloading the page.", error: true }]);
       return;
@@ -2849,13 +2911,7 @@ export default function App() {
   async function loadExample() {
     setEntered(true);
     setGuided(false); // the example is an ordinary part, not a guided replacement
-    let s = sel;
-    if (!s) {
-      setBooting(true);
-      s = await getEngineSelection(); // same memoized boot as the effect — no double kernel
-      setSel(s);
-      setBooting(false);
-    }
+    const s = await ensureEngine();
     setStatus("generating"); // drives the elapsed-time pill
     try {
       const bi: BuildInput = s.kind === "replicad" ? { kind: "code", code: EXAMPLE_REPLICAD } : { kind: "spec", spec: EXAMPLE_SPEC };
@@ -2871,7 +2927,7 @@ export default function App() {
 
   async function exportAs(format: ExportFormat) {
     if (!result) return;
-    const engine = result.kind === "generative" ? genEngine.current : sel?.engine;
+    const engine = result.kind === "generative" ? await getGenEngine() : sel?.engine;
     if (!engine) return;
     try {
       // Print-ready by default: analyse, auto-repair meshes, sanity-check scale/bed.
@@ -2895,16 +2951,19 @@ export default function App() {
     clearImage();
     if (next.engine === "generative" && next.glb) {
       await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt });
-    } else if (sel) {
-      if (sel.engine.setImport) {
-        await sel.engine.setImport(next.importFile ?? null);
+    } else {
+      // Boot-on-demand (don't skip the rebuild when a resume/open races the deferred
+      // kernel warm-up — that left the viewer empty until the next interaction).
+      const s = sel ?? (await ensureEngine());
+      if (s.engine.setImport) {
+        await s.engine.setImport(next.importFile ?? null);
         importFileRef.current = next.importFile ?? null;
       }
       const bi: BuildInput =
         next.engine === "replicad"
           ? { kind: "code", code: next.code ?? "", params: next.params, ops: next.ops }
           : { kind: "spec", spec: parseSpec(JSON.stringify(next.spec)) };
-      applyResultNoCommit(await sel.engine.build(bi));
+      applyResultNoCommit(await s.engine.build(bi));
     }
   }
 
@@ -3201,7 +3260,7 @@ export default function App() {
         onRestore={restoreTo}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy }}
         supportsStep={result?.supportsStep ?? false}
-        canExport={(f) => (result?.kind === "generative" ? genEngine.current.canExport(f) : sel?.engine.canExport(f) ?? false)}
+        canExport={(f) => (result?.kind === "generative" ? f === "stl" || f === "obj" || f === "3mf" /* = GenerativeEngine.canExport, inlined so the render path never loads the lazy engine */ : sel?.engine.canExport(f) ?? false)}
         onExport={exportAs}
         onOpenSettings={() => { setSettingsPane("ai"); setShowSettings(true); }}
         onOpenLibrary={() => setShowLibrary(true)}
@@ -3341,15 +3400,17 @@ export default function App() {
         />
       )}
       {svgDraft && (
-        <ExtrudeModal
-          svgText={svgDraft.text}
-          svgUrl={svgDraft.url}
-          name={svgDraft.name}
-          hasModel={!!geometry}
-          initialMode={geometry ? "attach" : "extrude"}
-          onCreate={createFromSvg}
-          onClose={() => { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }}
-        />
+        <Suspense fallback={null}>
+          <ExtrudeModal
+            svgText={svgDraft.text}
+            svgUrl={svgDraft.url}
+            name={svgDraft.name}
+            hasModel={!!geometry}
+            initialMode={geometry ? "attach" : "extrude"}
+            onCreate={createFromSvg}
+            onClose={() => { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }}
+          />
+        </Suspense>
       )}
     </>
   );

@@ -1,13 +1,13 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#108 merged, latest: mesh cost clarity). New session?
-Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md`
-for architecture.*
+*Updated 2026-07-22 (PRs #43–#110 merged, latest: first-load/bundle split). New
+session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
+`moldable-lite/README.md` for architecture.*
 
 ## Resuming in a new session — read me first
 
 - **Workflow (standing instruction from Jerry): everything ships to main.** Develop
-  on branch `claude/moldable-template-gallery-2jhvod`, commit, push, open a PR with
+  on your session's designated `claude/...` branch, commit, push, open a PR with
   the GitHub MCP tools, **squash-merge it immediately yourself**, then
   `git fetch origin main && git merge origin/main` and push the branch again. Don't
   wait for review, don't force-push (it's denied).
@@ -37,6 +37,32 @@ for architecture.*
   selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
+
+- **First-load & bundle split (2026-07-22)**: the entry bundle is ~3 kB + React
+  (~47 kB gz before first paint, was 459 kB gz) — `main.tsx` lazy-imports the whole
+  App (the `import()` fires at module eval so the chunk streams while a themed
+  `.boot-splash` paints; Suspense at root). **OCCT warm-up is deferred** to
+  load-event + `requestIdleCallback` (boot effect in App.tsx); every need-it-now
+  path (send / STEP-STL import / template / example / rebuildHead) goes through
+  `ensureEngine()` — which also fixed a real race: rebuildHead used to silently
+  SKIP the build when a resume/open beat the boot (empty viewer). Code-split on
+  demand: meshoptimizer (simplify), three-mesh-bvh (thin walls), three-bvh-csg
+  (split / svg / fallback engine), exportClient (fflate + OBJ/3MF writers —
+  `geometryToSTL` stayed eager in new `print/stl.ts`; `HEAVY_TRIANGLES` moved to
+  `print/heavy.ts` so UI reads don't pull meshoptimizer), gen providers (lazy
+  thunks in registry — defs stay eager for Settings), `gen/loadMesh` (GLTFLoader),
+  GenerativeEngine (`getGenEngine()`), ExtrudeModal (React.lazy). Vite
+  `manualChunks`: three / react / supabase / webllm — stable vendor hashes mean a
+  deploy re-ships ~416 kB of app code, not 1.48 MB. **PWA precache 19.4 → 13.5 MB**:
+  the ~6 MB webllm chunk is `globIgnore`d and runtime-cached (CacheFirst) on first
+  real use, so on-device AI still works offline after first use (pwa-e2e re-passed).
+  `@gradio/client` dep removed (hf.ts talks raw Gradio HTTP). GOTCHAS: TemplateStrip
+  renders on the FIRST screen, so TemplatesModal + cad/templates must stay eager;
+  headless software-GL Chromium emits no FCP entries — boot-e2e anchors "painted
+  before wasm" on a #root MutationObserver. Verified by `harness/boot-e2e.mjs`
+  (splash while app chunk slowed, wasm request after load+idle, example-before-boot
+  preemption) plus engine-audit / printprep / export / plates / fit / theme-toggle /
+  pwa suites.
 
 - **Template gallery**: photo cards of 10 common parts (phone stand, cable clip, wall
   hook, box with lid, desk hook, plant pot, coaster, bag clip, cable winder, spacer) —
@@ -378,9 +404,11 @@ for architecture.*
 ## Agreed priority order for what's next
 
 1. ~~**Template gallery**~~ — shipped (see above).
-2. **PWA/offline** — manifest + service worker; installable on iPad.
-3. **Bundle/first-load** — lazy-boot OCCT after first paint; code-split LLM providers
-   (main bundle ~1.37 MB + 10.8 MB WASM today).
+2. ~~**PWA/offline**~~ — shipped (see "Installable app").
+3. ~~**Bundle/first-load**~~ — shipped 2026-07-22 (see "First-load & bundle split").
+   Note: the "code-split LLM providers" half was already largely true (WebLLM and
+   Supabase were dynamic); the remaining static llm/ modules are ~8 kB gz of
+   render-needed constants + small clients — not worth further surgery.
 4. **Print profiles** — per-project printer + filament presets feeding clearances.
 5. **Share links** — public viewable model page (showcase-style turntable).
 6. **Failure analytics** — opt-in local event log of failed ops/builds.

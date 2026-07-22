@@ -7,7 +7,7 @@
 import type { EngineResult } from "../engine/types";
 import { analyzePrintability, type PrintabilityReport, type PrinterDefaults } from "./printability";
 import { repairGeometry, type RepairOutcome } from "./repair";
-import { HEAVY_TRIANGLES } from "./simplify";
+import { HEAVY_TRIANGLES } from "./heavy";
 
 export interface PreflightOutcome {
   /** The result to export — geometry swapped for the repaired one when repair ran. */

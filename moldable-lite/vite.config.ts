@@ -153,11 +153,23 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,wasm,svg,png,webp,woff2}"],
+        // The on-device AI runtime (WebLLM) is a ~6 MB chunk that only loads if the
+        // user picks the "On-device" brain — precaching it would push 6 MB to every
+        // visitor in the background. Skip it here; the runtimeCaching rule below
+        // caches it on first actual use, so offline-after-first-use still holds.
+        globIgnores: ["**/webllm-*.js"],
         // The OCCT kernel wasm alone is ~11 MB — well past workbox's 2 MB default.
         maximumFileSizeToCacheInBytes: 20 * 1024 * 1024,
         // Fonts come from Google Fonts at runtime; cache them after first use so
         // the installed app keeps its typography offline.
         runtimeCaching: [
+          {
+            // Hashed chunks excluded from precache (the WebLLM runtime): cache on
+            // first use. CacheFirst is safe — a new deploy emits a new hash/URL.
+            urlPattern: /\/assets\/webllm-[^/]+\.js$/i,
+            handler: "CacheFirst",
+            options: { cacheName: "lazy-chunks", expiration: { maxEntries: 4, maxAgeSeconds: 60 * 60 * 24 * 365 } },
+          },
           {
             urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
             handler: "StaleWhileRevalidate",
@@ -179,7 +191,22 @@ export default defineConfig({
     // Multi-page: the app is the default entry (index.html); landing.html is a
     // separate lightweight marketing entry (no app bundle). See landing.html for
     // the launch-day flip. Adding entries here never touches the app bundle.
-    rollupOptions: { input: { main: "index.html", landing: "landing.html" } },
+    rollupOptions: {
+      input: { main: "index.html", landing: "landing.html" },
+      output: {
+        // Stable vendor chunks. Deploys are frequent (every merge) and the PWA
+        // re-precaches changed files each deploy — keeping the big, rarely-updated
+        // libraries in their own hashed chunks means a typical deploy only re-ships
+        // app code, not three.js + React again. "webllm" also gives the on-device
+        // AI runtime a recognizable filename for the precache exclusion above.
+        manualChunks(id: string) {
+          if (id.includes("node_modules/three/")) return "three";
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react";
+          if (id.includes("node_modules/@mlc-ai/web-llm/")) return "webllm";
+          if (id.includes("node_modules/@supabase/") || id.includes("node_modules/iceberg-js/")) return "supabase";
+        },
+      },
+    },
   },
   server: { port: 5173, open: true },
 });

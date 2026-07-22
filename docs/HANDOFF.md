@@ -1,6 +1,6 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#116 merged, latest: build plate + part colors). New
+*Updated 2026-07-22 (PRs #43–#117 merged, latest: in-canvas tool rail). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
 
@@ -60,6 +60,22 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
+
+- **In-canvas tool rail (2026-07-22, Jerry-approved design)**: the head row now
+  carries TABS ONLY — pointer tools moved into a vertical Photoshop-style rail
+  docked at the canvas's LEFT edge (`.canvas-rail`: Select [CAD only], Transform,
+  Measure, Mark, separator, Material/Surface/Snap menus; icon-only, titles carry
+  words; active-tool flyouts open to the RIGHT via `.rail-tool`/`.rail-fly` —
+  Transform's flyout holds Move/Rotate/Scale + Resize). Undo/redo + View ▾ +
+  Objects + Help live in `.canvas-tr` (top-right in-canvas); `.mesh-stats` moved
+  down to top:56px. All aria-labels/titles preserved, so harness selectors kept
+  working. The narrow-width toolbar wrapping problem is structurally gone.
+  PLATE v2: dark slate in BOTH themes (first light cut was near-background and
+  read as "no change") and ONE-SIDED (PlaneGeometry FrontSide) — orbiting under
+  the bed still shows the model's underside; a solid slab broke printprep B1's
+  from-below heatmap check until this. TEST GOTCHA: dims-e2e counts accent pixels
+  over the canvas REGION — the rail's active-state accents (Snap is on by
+  default) sit inside it now; its colorCount skips the left 80px / top 60px.
 
 - **Build plate + colored parts (2026-07-22)**: (1) View ▾ **Build plate** (default
   ON, `moldable_plate`) — a solid Bambu-style slab sized to `printer.bed` under the

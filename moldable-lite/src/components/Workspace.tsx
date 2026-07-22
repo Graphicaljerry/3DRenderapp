@@ -1555,6 +1555,7 @@ export function Workspace(p: Props) {
                 geometry={p.geometry}
                 analysisOverlay={p.analysisOverlay}
                 wireframe={p.wireframe}
+                clay={p.gray}
                 showDims={p.showDims}
                 units={p.units}
                 theme={p.theme}

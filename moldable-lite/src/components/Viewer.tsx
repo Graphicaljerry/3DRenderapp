@@ -2,7 +2,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
-import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { mergeGeometries, toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 /** A point-to-point measurement on the model (display coords). */
 export type Measurement = { id: string; a: [number, number, number]; b: [number, number, number] };
@@ -108,6 +108,7 @@ interface Props {
   showcase: boolean; // presentation mode: clean stage, studio light, slow turntable
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
+  clay: boolean; // View > Grayscale: studio clay presentation (smooth display normals + neutral material)
   onPickPoint: (p: PickedPoint) => void;
   onPickFeature: (f: PickedFeature) => void;
   onPickFaces: (faces: PickedFeature[], additive?: boolean) => void; // additive = shift-click added to the set
@@ -135,6 +136,7 @@ interface Props {
 // pick a face / edge / corner. One tool, one segmented control.
 export type SelectKind = "face" | "edge" | "vertex" | "point";
 
+const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // grayscale display copies
 const THEME_SCENE = { light: "#eceff0", dark: "#101418" } as const;
 const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x39414b, 0x232a31] };
 
@@ -212,7 +214,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, clay, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
@@ -1578,9 +1580,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.controls.autoRotateSpeed = 1.4;
     const hemi = s.scene.children.find((o) => (o as THREE.HemisphereLight).isHemisphereLight) as THREE.HemisphereLight | undefined;
     const dir = s.scene.children.find((o) => (o as THREE.DirectionalLight).isDirectionalLight) as THREE.DirectionalLight | undefined;
-    if (hemi) hemi.intensity = showcase ? 1.35 : 1.05;
-    if (dir) dir.intensity = showcase ? 2.1 : 1.4;
-  }, [showcase, showDims]);
+    if (hemi) hemi.intensity = showcase ? 1.35 : clay ? 1.3 : 1.05;
+    if (dir) dir.intensity = showcase ? 2.1 : clay ? 0.9 : 1.4;
+  }, [showcase, showDims, clay]);
 
   // Display material: filament colour + finish, and the baked texture when the model
   // ships painted (AI meshes). Split-piece vertex colours always win over both.
@@ -1590,13 +1592,46 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const m = s.material;
     const FINISH: Record<string, [number, number]> = { matte: [0.85, 0], satin: [0.55, 0.02], glossy: [0.25, 0.05], metal: [0.35, 0.9] };
     const [rough, metal] = FINISH[appearance.finish] ?? FINISH.matte;
-    m.roughness = rough;
-    m.metalness = metal;
-    const hasUv = !!geometry?.getAttribute("uv");
-    m.map = texture && hasUv ? texture : null;
-    if (!m.vertexColors) m.color.set(m.map ? "#ffffff" : appearance.color);
+    if (clay) {
+      // Studio clay: neutral warm gray, soft sheen, never a texture map — reads like
+      // an unpainted resin print under a softbox instead of a raw triangle soup.
+      m.roughness = 0.62;
+      m.metalness = 0.03;
+      m.map = null;
+      if (!m.vertexColors) m.color.set("#b9bec3");
+    } else {
+      m.roughness = rough;
+      m.metalness = metal;
+      const hasUv = !!geometry?.getAttribute("uv");
+      m.map = texture && hasUv ? texture : null;
+      if (!m.vertexColors) m.color.set(m.map ? "#ffffff" : appearance.color);
+    }
     m.needsUpdate = true;
-  }, [appearance.color, appearance.finish, texture, geometry]);
+  }, [appearance.color, appearance.finish, texture, clay, geometry]);
+
+  // Clay presentation, part 2: AI mesh soups carry FLAT per-triangle normals — the
+  // baked texture used to hide the faceting, so plain gray looked like a pencil
+  // sketch (real user report). Swap in a creased-normals DISPLAY copy (smooth
+  // within 40°, crisp beyond; positions identical, so picking/measuring/dims all
+  // still land true) — cached per geometry, exports untouched.
+  useEffect(() => {
+    const s = st.current;
+    if (!s?.mesh || !geometry) return;
+    if (clay && !geometry.index && !geometry.getAttribute("color")) {
+      let g = clayCache.get(geometry);
+      if (!g) {
+        try {
+          g = toCreasedNormals(geometry, THREE.MathUtils.degToRad(40));
+          clayCache.set(geometry, g);
+        } catch {
+          g = geometry; // a degenerate soup keeps its raw normals rather than erroring
+        }
+      }
+      if (s.mesh.geometry !== g) s.mesh.geometry = g;
+    } else if (s.mesh.geometry !== geometry) {
+      s.mesh.geometry = geometry;
+    }
+  }, [clay, geometry]);
 
   // Leaving select mode clears the highlight + locked feature.
   useEffect(() => {

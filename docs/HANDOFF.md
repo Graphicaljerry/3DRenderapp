@@ -1,6 +1,6 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#113 merged, latest: print-first color pack). New
+*Updated 2026-07-22 (PRs #43–#114 merged, latest: clay grayscale view). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
 
@@ -60,6 +60,19 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
+
+- **Clay grayscale view (2026-07-22, follow-up to the color pack)**: the first
+  Grayscale cut looked like a "pencil sketch" (real report) — AI mesh soups are
+  non-indexed with FLAT per-triangle normals, and the baked texture had been
+  hiding the faceting + shell-seam noise. Now View ▾ Grayscale renders a studio
+  CLAY look: Viewer gets a `clay` prop → (1) `toCreasedNormals(geo, 40°)` builds a
+  smooth-normal DISPLAY copy for non-indexed, non-vertex-color geometry (cached in
+  a module WeakMap keyed by the source geometry; positions identical so raycast
+  picking/measure/dims land true; exports untouched); (2) clay material override
+  (#b9bec3, roughness .62, metalness .03, map off); (3) softer key light (dir 0.9,
+  hemi 1.3) so facet/z-fight contrast drops. Verified by a sphere-GLB pixel probe
+  + texture-e2e (Grayscale rows) + preview-e2e (push-pull unaffected — the clay
+  geometry-swap effect only reacts to [clay, geometry], never mid-drag).
 
 - **Print-first color pack (2026-07-22, Jerry batch #2)**: (1) **Texture toggle** —
   mesh generation is geometry-only by DEFAULT (gray, print-first); composer chip

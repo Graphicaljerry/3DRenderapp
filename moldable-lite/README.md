@@ -49,6 +49,10 @@ for the full engineering notes:
   ambiguous requests (words **or an attached photo/sketch**) are classified by your configured
   brain. **Hand-drawn sketches become models**: drawn lines are read as edges and handwritten
   dimensions are used exactly, in either engine.
+- **Cost clarity** — every mesh engine shows its price **before** you generate (mode hint, engine
+  picker, and the "Preparing…" line), successful paid runs are stamped with what they cost and added
+  to a local month-to-date spend estimate, and Settings → 3D engine → **Cost & balance** has a full
+  price guide plus a live credit-balance check for Meshy and Tripo.
 - **Live 3D viewer** — orbit/zoom, print-bed grid, wireframe toggle, Z-up mm.
 - **Code tab** — view/edit the replicad code (or the JSON spec) and **Re-run** with no AI call.
 - **Printability** — bed-fit, watertight/manifold (edge-adjacency), overhang %, triangles, volume —

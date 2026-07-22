@@ -20,19 +20,19 @@ export const PROVIDERS: ProviderDef[] = [
       {
         id: "stabilityai/stable-fast-3d",
         label: "Stable Fast 3D — image (fast & reliable)",
-        image: true, text: false, recommended: true,
+        image: true, text: false, recommended: true, usd: 0,
         hint: "Fastest free result (~10 s). Great for checking the overall shape.",
       },
       {
         id: "tencent/Hunyuan3D-2",
         label: "Hunyuan3D-2 — image or text (higher quality, slower)",
-        image: true, text: true,
+        image: true, text: true, usd: 0,
         hint: "Best free quality, and the only free model that works from text alone. Slower — uses more of the day's free GPU minutes.",
       },
       {
         id: "trellis-community/TRELLIS",
         label: "TRELLIS — image (best geometry, ~1 free call/day)",
-        image: true, text: false,
+        image: true, text: false, usd: 0,
         hint: "Sharpest free geometry, but so heavy you get roughly one free run per day.",
       },
     ],
@@ -50,13 +50,13 @@ export const PROVIDERS: ProviderDef[] = [
       {
         id: "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d",
         label: "Hunyuan 3D v3.1 Pro — image ($0.375, best accuracy)",
-        image: true, text: false, recommended: true,
+        image: true, text: false, recommended: true, usd: 0.375,
         hint: "The most accurate photo-to-3D in the app: finest detail, cleanest surfaces. $0.375 per model.",
       },
       {
         id: "fal-ai/hyper3d/rodin",
         label: "Rodin Gen-2 — image or text ($0.40)",
-        image: true, text: true,
+        image: true, text: true, usd: 0.4,
         hint: "Production-grade meshes and the best paid text-to-3D. $0.40 per model.",
       },
     ],
@@ -71,8 +71,8 @@ export const PROVIDERS: ProviderDef[] = [
     viaProxy: true,
     generate: tripoGenerate,
     models: [
-      { id: "image_to_model", label: "Tripo — image", image: true, text: false, recommended: true },
-      { id: "text_to_model", label: "Tripo — text", image: false, text: true },
+      { id: "image_to_model", label: "Tripo — image", image: true, text: false, recommended: true, usd: 0.25, credits: "~20-30 credits" },
+      { id: "text_to_model", label: "Tripo — text", image: false, text: true, usd: 0.15, credits: "~10-20 credits" },
     ],
   },
   {
@@ -84,7 +84,7 @@ export const PROVIDERS: ProviderDef[] = [
     keyHint: "msy_… (API needs a paid Meshy plan, from $20/month ≈ 1,000 credits)",
     viaProxy: true,
     generate: meshyGenerate,
-    models: [{ id: "meshy", label: "Meshy 6 — image or text", image: true, text: true, recommended: true }],
+    models: [{ id: "meshy", label: "Meshy 6 — image or text", image: true, text: true, recommended: true, usd: 0.5, credits: "~25 credits" }],
   },
   {
     id: "replicate",
@@ -99,16 +99,34 @@ export const PROVIDERS: ProviderDef[] = [
       {
         id: "firtoz/trellis",
         label: "TRELLIS — image (~$0.04)",
-        image: true, text: false, recommended: true,
+        image: true, text: false, recommended: true, usd: 0.04,
         hint: "Sharpest geometry per dollar — about 4¢ a run, no daily limit.",
       },
-      { id: "tencent/hunyuan3d-2", label: "Hunyuan3D-2 — image", image: true, text: false },
+      { id: "tencent/hunyuan3d-2", label: "Hunyuan3D-2 — image", image: true, text: false, usd: 0.15 },
     ],
   },
 ];
 
 export function getProvider(id: string): ProviderDef | undefined {
   return PROVIDERS.find((p) => p.id === id);
+}
+
+/** Estimated USD list price of one run (0 = free tier), or null when unknown. */
+export function costUsd(providerId: string, modelId: string): number | null {
+  const m = getProvider(providerId)?.models.find((mm) => mm.id === modelId);
+  return m?.usd ?? null;
+}
+
+/** Short human price tag shown BEFORE a generation runs: "free (daily GPU minutes)",
+ *  "≈ $0.04", "~25 credits · ≈ $0.50". Empty string when the price isn't known. */
+export function costLabel(providerId: string, modelId: string): string {
+  const prov = getProvider(providerId);
+  const m = prov?.models.find((mm) => mm.id === modelId);
+  if (!prov || !m) return "";
+  if (m.usd === 0 || prov.free) return "free (daily GPU minutes)";
+  if (m.usd == null) return "";
+  const dollars = `≈ $${m.usd.toFixed((m.usd * 100) % 1 ? 3 : 2)}`;
+  return m.credits ? `${m.credits} · ${dollars}` : dollars;
 }
 
 /** Engines that actually consume extra reference angles (front/left/back/right). */

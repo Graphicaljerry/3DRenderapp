@@ -32,6 +32,8 @@ export interface ProviderModel {
   text: boolean; // supports text -> 3D
   recommended?: boolean; // the best default model for this provider
   hint?: string; // one-line "pick this when…" guidance shown in Settings
+  usd?: number; // estimated list price per generated model in USD (0 = free tier)
+  credits?: string; // how the provider itself bills it, e.g. "~25 credits"
 }
 
 export interface ProviderDef {

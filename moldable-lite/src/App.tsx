@@ -40,7 +40,9 @@ import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
 import { findThinWalls, type ThinWallReport } from "./print/thinwalls";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
-import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine } from "./gen/registry";
+import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine, costLabel, costUsd } from "./gen/registry";
+import { recordSpend, spendSummary } from "./gen/ledger";
+import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { glbToGeometry, loadAnyMesh } from "./gen/loadMesh";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { appendVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
@@ -2349,7 +2351,7 @@ export default function App() {
       if (ge.provider === "auto") {
         const pick = pickAutoGenEngine({ hasImage: !!genImage, prompt: p, hasKey: (id) => !!providerKeys[id] });
         ge = { provider: pick.provider, model: pick.model };
-        setAutoPick(`Auto → ${pick.label} (${pick.reason})`);
+        setAutoPick(`Auto → ${pick.label} (${pick.reason} · ${costLabel(pick.provider, pick.model) || "price unknown"})`);
       } else {
         setAutoPick("");
       }
@@ -2428,20 +2430,27 @@ export default function App() {
       }
       const genThumb = genImage ? await blobToDataURL(genImage.blob) : undefined;
       setMessages((m) => [...m, { id: mid(), role: "user", text: p || (genImage ? "Reference image" : ""), image: genThumb, mode: "generative" }]);
+      // Price BEFORE anything runs — the answer to "which platform is going to bill
+      // me, and how much?" belongs in the very first line, not on the invoice.
+      const costNote = costLabel(ge.provider, genModel);
+      const costTag = costNote ? ` · ${costNote}` : "";
       const ph = mid();
       setMessages((m) => [
         ...m,
-        { id: ph, role: "assistant", text: switchedTo ? `Switched to ${switchedTo} — it supports text → 3D. Preparing…` : "Preparing…", streaming: true },
+        { id: ph, role: "assistant", text: switchedTo ? `Switched to ${switchedTo} — it supports text → 3D${costTag}. Preparing…` : `Preparing… (${prov?.label ?? ge.provider}${costTag})`, streaming: true },
       ]);
       setStatus("generating");
 
       genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
       genEngine.current.onProgress = (pr) =>
-        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, streaming: true } : x)));
       const runGen = async (provId: string, modelId: string, label: string) => {
         const res = await genEngine.current.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
         const name = deriveName(p || "Photo model");
-        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label})`;
+        const usd = costUsd(provId, modelId) ?? 0;
+        recordSpend(provId, modelId, usd); // paid runs land in the local spend ledger
+        const spent = usd > 0 ? ` · ${costLabel(provId, modelId)}` : "";
+        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label}${spent})`;
         const how = await deliverResult(res, name, summary, p || "(image upload)", true);
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false } : x)));
       };
@@ -2459,12 +2468,14 @@ export default function App() {
         if (alt && alt.provider !== "hf") {
           const altProv = getProvider(alt.provider);
           const altLabel = altProv?.label ?? alt.provider;
+          const altCost = costLabel(alt.provider, alt.model);
+          const altTag = altCost ? ` (${altCost})` : "";
           // Keep the fallback context in EVERY progress line — the engine's first
           // progress event lands within milliseconds and would otherwise erase the
           // announcement before anyone could read it.
           genEngine.current.onProgress = (pr) =>
-            setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key… ${pr.status}`, streaming: true } : x)));
-          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key…`, streaming: true } : x)));
+            setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}… ${pr.status}`, streaming: true } : x)));
+          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}…`, streaming: true } : x)));
           try {
             await runGen(alt.provider, alt.model, altLabel);
           } catch (err2: any) {
@@ -3664,6 +3675,18 @@ function SettingsModal({
   const [gm, setGm] = useState(genModel);
   const [proxy, setProxy] = useState(proxyBase);
   const prov = getProvider(gp) ?? PROVIDERS[0];
+  // Cost & balance: month-to-date estimates from the local ledger, plus a live
+  // credit check for the engines that expose one (Meshy, Tripo).
+  const spend = useMemo(() => spendSummary(), []);
+  const [balMsg, setBalMsg] = useState("");
+  const [balBusy, setBalBusy] = useState(false);
+  const checkBalance = async () => {
+    setBalBusy(true);
+    setBalMsg("Checking…");
+    const bal = await providerBalance(gp, keys[gp] ?? "", proxy || (import.meta.env.DEV ? "" : DEFAULT_RELAY));
+    setBalMsg(bal ? `${prov.label.split(" (")[0]} balance: ${bal}` : `Couldn't read the balance — check the key, or see ${BALANCE_DASHBOARDS[gp] ?? "the provider's dashboard"}.`);
+    setBalBusy(false);
+  };
 
   // Printer
   const [bed, setBed] = useState(printer.bed);
@@ -3945,6 +3968,40 @@ function SettingsModal({
             {prov.models.find((mm) => mm.id === gm)?.hint && (
               <p className="fine choice-hint">{prov.models.find((mm) => mm.id === gm)!.hint}</p>
             )}
+            </SGroup>
+            <SGroup title="Cost & balance" hint="know the price before you press send">
+              <p className="fine">
+                Selected: <b>{prov.label.split(" (")[0]}</b> — <b>{costLabel(gp, gm) || "price not published"}</b>
+                {(costUsd(gp, gm) ?? 0) > 0 ? " per generated model" : ""}. The same price tag appears in chat before every run.
+              </p>
+              <p className="fine">
+                This device, this month: <b>${spend.monthUsd.toFixed(2)}</b> across {spend.monthCount} paid run{spend.monthCount === 1 ? "" : "s"}
+                {Object.keys(spend.byProvider).length
+                  ? ` — ${Object.entries(spend.byProvider).map(([id, b]) => `${getProvider(id)?.label.split(" (")[0] ?? id} $${b.usd.toFixed(2)} (${b.count})`).join(" · ")}`
+                  : ""}. Free runs cost $0 and aren't counted. Estimates use list prices — the provider's own dashboard is the bill of record.
+              </p>
+              {BALANCE_CAPABLE.has(gp) ? (
+                <>
+                  <button className="ghost sm" disabled={balBusy || !(keys[gp] ?? "").trim()} onClick={() => void checkBalance()}>
+                    {(keys[gp] ?? "").trim() ? `Check my ${prov.label.split(" (")[0]} balance` : "Add your key below to check your balance"}
+                  </button>
+                  {balMsg && <p className="fine">{balMsg}</p>}
+                </>
+              ) : (
+                <p className="fine">Balance lives on the provider's site: {BALANCE_DASHBOARDS[gp] ?? "see their dashboard"}.</p>
+              )}
+              <details className="adv guide">
+                <summary>Price guide — every engine at a glance</summary>
+                <ul className="guide-list">
+                  {PROVIDERS.flatMap((pv) =>
+                    pv.models.map((mm) => (
+                      <li key={`${pv.id}|${mm.id}`}>
+                        <b>{pv.label.split(" (")[0]} · {mm.label.split(" — ")[0]}</b> — {costLabel(pv.id, mm.id) || "price varies"}
+                      </li>
+                    )),
+                  )}
+                </ul>
+              </details>
             </SGroup>
             <SGroup title="Access">
               <label>

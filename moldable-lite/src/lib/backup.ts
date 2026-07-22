@@ -39,6 +39,7 @@ export const LOCAL_ONLY_KEYS = new Set([
   "moldable_gemini_model", // model id resolved against this device's key at runtime
   "moldable_local_ready", // whether THIS device downloaded the 0.9 GB on-device model
   "moldable_house_url", // developer relay override for this device
+  "moldable_spend_v1", // per-device spend estimates, appended on every paid run
 ]);
 
 /** Everything the app stores in localStorage (keys, providers, printer, units…), minus device-local keys. */

@@ -1595,11 +1595,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (clay) {
       // Studio clay: neutral warm gray, soft sheen, never a texture map — reads like
       // an unpainted resin print under a softbox instead of a raw triangle soup.
+      // Double-sided: AI meshes model panel lines as hairline slits + overlapping
+      // shells; front-only shading let the unlit interior show through as black
+      // scratches (real report) — shading both sides the same clay closes them.
       m.roughness = 0.62;
       m.metalness = 0.03;
       m.map = null;
+      m.side = THREE.DoubleSide;
       if (!m.vertexColors) m.color.set("#b9bec3");
     } else {
+      m.side = THREE.FrontSide;
       m.roughness = rough;
       m.metalness = metal;
       const hasUv = !!geometry?.getAttribute("uv");

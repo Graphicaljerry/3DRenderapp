@@ -2438,14 +2438,41 @@ export default function App() {
       genEngine.current.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
       genEngine.current.onProgress = (pr) =>
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh… ${pr.status}`, streaming: true } : x)));
-      try {
-        const res = await genEngine.current.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: ge.provider, model: genModel });
+      const runGen = async (provId: string, modelId: string, label: string) => {
+        const res = await genEngine.current.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId });
         const name = deriveName(p || "Photo model");
-        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${prov?.label ?? ge.provider})`;
+        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label})`;
         const how = await deliverResult(res, name, summary, p || "(image upload)", true);
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false } : x)));
+      };
+      try {
+        await runGen(ge.provider, genModel, prov?.label ?? ge.provider);
       } catch (err: any) {
-        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: friendlyNet(String(err?.message ?? err)), error: true, streaming: false } : x)));
+        // The free GPU turning a job away (quota drained / Space overloaded) isn't the
+        // end when a KEYED engine can take the same request — retry there automatically,
+        // once, and say so. Never falls back for real config errors or non-HF failures.
+        const msg = String(err?.message ?? err);
+        const hfRejected = ge.provider === "hf" && /free GPU rejected|GPU minutes|anonymous quota is tiny|free GPU queue/i.test(msg);
+        const alt = hfRejected && !override?.genEng
+          ? pickAutoGenEngine({ hasImage: !!genImage, prompt: p, hasKey: (id) => !!providerKeys[id] })
+          : null;
+        if (alt && alt.provider !== "hf") {
+          const altProv = getProvider(alt.provider);
+          const altLabel = altProv?.label ?? alt.provider;
+          // Keep the fallback context in EVERY progress line — the engine's first
+          // progress event lands within milliseconds and would otherwise erase the
+          // announcement before anyone could read it.
+          genEngine.current.onProgress = (pr) =>
+            setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key… ${pr.status}`, streaming: true } : x)));
+          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key…`, streaming: true } : x)));
+          try {
+            await runGen(alt.provider, alt.model, altLabel);
+          } catch (err2: any) {
+            setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU: ${msg}\n\nFallback (${altLabel}): ${friendlyNet(String(err2?.message ?? err2))}`, error: true, streaming: false } : x)));
+          }
+        } else {
+          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: friendlyNet(msg), error: true, streaming: false } : x)));
+        }
       } finally {
         setStatus("idle");
       }

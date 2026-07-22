@@ -1002,3 +1002,13 @@ details.guide { margin-top: 10px; }
 }
 /* Stats yield the corner to the cluster */
 .mesh-stats { top: 56px; }
+
+/* Rail popovers (Material / Surface / Snap / Resize) open to the RIGHT of the
+   rail — their default right-aligned drop (from the old top toolbar) opened
+   leftward, off the canvas edge and clipped under the chat panel. */
+.canvas-rail .snap-menu {
+  left: calc(100% + 10px);
+  right: auto;
+  top: 0;
+  z-index: 40;
+}

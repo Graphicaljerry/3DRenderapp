@@ -23,11 +23,25 @@ session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
   route interception (see `harness/hf-fallback-e2e.mjs`, `harness/cost-e2e.mjs`);
   server-side WebSearch works for research.
 - **Queued / open items**:
-  - **Jerry asked (2026-07-22)**: (a) an option to generate meshes UNTEXTURED /
-    grayscale (worried baked gradients mislead vs. the printed result) + longer-term
-    a Bambu-style "fill color" painting concept; (b) a cheap multi-engine low-res
-    preview → pick → final-generation flow. Research findings + recommendation were
-    delivered in-session (see the session close-out message); implementation queued.
+  - **Jerry asked (2026-07-22) — researched, ready to implement**: (a) untextured /
+    grayscale mesh generation option; (b) cheap multi-engine preview → pick → final.
+    FINDINGS (verified 2026-07): texture is the EXPENSIVE add-on everywhere —
+    fal Hunyuan3D v2 white mesh $0.16 vs textured 3× ($0.48, `textured_mesh` bool);
+    Tripo `texture:false, pbr:false` → untextured base model, credits drop below the
+    ~20-credit v3 base (texture quality is a paid add-on); Meshy in THIS app already
+    sends `should_texture:false` (geometry-only preview mode) — that's why Meshy runs
+    come out gray. HF free Space: shape-only stages burn fewer free GPU minutes.
+    PLAN: one persisted "Texture: on/off (print-first)" toggle in Generative mode,
+    default OFF for text prompts / ON for photo recreations; wire per provider
+    (tripo: texture+pbr bools; fal v2: textured_mesh; fal v3.x: verify param name
+    live before shipping — sandbox can't reach fal); update gen/registry usd fields
+    to show both prices. Preview strategy: do NOT fan out 4 full paid generations —
+    use (1) the FREE HF engine as the concept preview, (2) native two-stage flows
+    (Meshy preview→refine continues the SAME task; Tripo draft→refine) so "preview
+    then commit" wastes nothing, (3) an explicit opt-in "Compare engines" that runs
+    untextured/preview stages only (~$0.16–0.35 total) and refines the winner.
+    Bambu-style per-region fill-color painting: big, separate feature (mesh face
+    segmentation + painted regions → 3MF color zones) — treat as its own roadmap item.
   - Wire the newer free HF Spaces (tencent/Hunyuan3D-2.1, microsoft/TRELLIS.2,
     stabilityai/stable-point-aware-3d) into `gen/providers/hf.ts` — researched and
     promising, but their Gradio endpoint signatures couldn't be verified from the

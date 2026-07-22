@@ -36,6 +36,16 @@ first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for arc
   explicit `background: var(--bg); color: var(--ink)` base. RULE: anything the
   pre-paint script sets inline MUST be updated by the theme effect too. Verified by
   `harness/theme-toggle-e2e.mjs` (dark boot → light toggle → white composer → back).
+- **HF quota auto-fallback**: when the FREE Hugging Face GPU rejects a mesh job
+  (quota drained / Space overloaded — matched on the humanized error text) and the
+  user has a KEYED provider, the app retries ONCE automatically on the best keyed
+  engine (pickAutoGenEngine, hf excluded), announces it, and keeps the fallback
+  context in every progress line (the engine's first onProgress lands in ms and
+  would erase a one-shot announcement — real bug found by the e2e). If the fallback
+  also fails, BOTH errors surface ("Free GPU: … / Fallback (X): …"). Never fires on
+  retry-with-model overrides or non-HF failures. Verified by
+  `harness/hf-fallback-e2e.mjs` (Playwright route-stubs the Space's gradio_api to
+  emit ZeroGPU's empty SSE error + a delayed relay 401).
 - **Library bulk select**: "Select" toggle in the toolbar → tap cards to select
   (check badge, accent border, per-card actions hidden, tap does NOT open), bulk bar
   with count / Select all shown / Clear / Move to… (same folder semantics incl.

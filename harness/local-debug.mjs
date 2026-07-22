@@ -1,0 +1,20 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
+page.on("console", (m) => console.log("[page]", m.type(), m.text().slice(0, 160)));
+await page.addInitScript(() => {
+  localStorage.setItem("moldable_entered", "1");
+  localStorage.setItem("moldable_local_mock", "1");
+  localStorage.setItem("moldable_ai_apply", "auto");
+  localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "test-model", baseUrl: "http://127.0.0.1:9999/v1" }));
+});
+await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.waitForSelector(".topbar", { timeout: 60_000 });
+await page.waitForTimeout(600);
+const ta = page.getByPlaceholder(/Describe a part/);
+await ta.fill("a test cube");
+await ta.press("Enter");
+await page.waitForTimeout(25_000);
+console.log("=== chat ===");
+console.log(await page.evaluate(() => [...document.querySelectorAll(".msg .bubble")].map((b) => b.textContent?.slice(0, 220)).join("\n---\n")));
+await browser.close();

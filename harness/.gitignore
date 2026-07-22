@@ -1,0 +1,4 @@
+node_modules/
+*.png
+*.webp
+package-lock.json

@@ -1,7 +1,40 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-10 (PRs #43–#75 merged + template gallery). New session? Read this
-first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md` for architecture.*
+*Updated 2026-07-22 (PRs #43–#108 merged, latest: mesh cost clarity). New session?
+Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and `moldable-lite/README.md`
+for architecture.*
+
+## Resuming in a new session — read me first
+
+- **Workflow (standing instruction from Jerry): everything ships to main.** Develop
+  on branch `claude/moldable-template-gallery-2jhvod`, commit, push, open a PR with
+  the GitHub MCP tools, **squash-merge it immediately yourself**, then
+  `git fetch origin main && git merge origin/main` and push the branch again. Don't
+  wait for review, don't force-push (it's denied).
+- **Verify before shipping**: the Playwright suites live in `harness/` (see its
+  README for setup, the suite map, and hard-won test gotchas). Start the dev server
+  from `moldable-lite/` (`npm run dev` — it includes the /prox relay), run the
+  suites touching your area, plus `npx tsc --noEmit` and `npm run build`.
+- **Standing product rules**: the house AI (sponsored-key relay) stays DORMANT
+  unless Jerry explicitly asks to enable it. Bambu multi-plate project 3MF is
+  awaiting confirmation in a real slicer — don't declare it done.
+- **Sandbox limits (Claude Code remote)**: shell/browser egress to huggingface.co,
+  *.hf.space and api.meshy.ai is blocked — stub external APIs with Playwright
+  route interception (see `harness/hf-fallback-e2e.mjs`, `harness/cost-e2e.mjs`);
+  server-side WebSearch works for research.
+- **Queued / open items**:
+  - Wire the newer free HF Spaces (tencent/Hunyuan3D-2.1, microsoft/TRELLIS.2,
+    stabilityai/stable-point-aware-3d) into `gen/providers/hf.ts` — researched and
+    promising, but their Gradio endpoint signatures couldn't be verified from the
+    sandbox (egress blocked). Verify signatures first, then add to the def map.
+  - Offered to Jerry, unanswered: HDRI environment map for studio thumbnails;
+    drag-a-card-onto-a-folder-chip in the Library.
+- **Key architecture lessons** are inlined in the feature notes below — the ones
+  that bite: any synced `moldable_*` localStorage key that rewrites itself causes a
+  cloud-pull reload loop (put caches in `LOCAL_ONLY_KEYS`, `lib/backup.ts`);
+  anything the index.html pre-paint script sets inline must also be set by the
+  theme effect; offscreen render targets are linear (LUT on readback); OCCT edge
+  selection on meshed shapes needs curve sampling, not bboxes.
 
 ## What the app can do now (beyond the README basics)
 

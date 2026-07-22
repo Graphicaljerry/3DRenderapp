@@ -1440,118 +1440,6 @@ export function Workspace(p: Props) {
                 );
               })}
             </div>
-            {(p.tab === "3d" || p.tab === "params") && (
-              <div className="viewer-tools">
-                <div className="seg sm">
-                  <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
-                  <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
-                </div>
-                {p.activeKind === "replicad" && (
-                  <>
-                    {/* Select feeds CAD feature edits (fillet/extrude/hole on picked faces/edges) —
-                        meshes can't take those ops, so the tool hides for them and the toolbar
-                        stays lean. Transform/Resize/Measure/Mark/View work on both. */}
-                    <button
-                      className={`ghost sm iconbtn has-modes${p.featureCtl.mode ? " on" : ""}`}
-                      aria-pressed={p.featureCtl.mode}
-                      aria-label="Select"
-                      title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
-                      onClick={p.featureCtl.toggleMode}
-                    >
-                      <IconPointer /><span className="btn-label">Select</span>
-                    </button>
-                    {p.featureCtl.mode && (
-                      <div className="seg sm mode-seg">
-                        {SELECT_MODES.map((m, i) => (
-                          <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
-                            <m.icon /><span className="btn-label">{m.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </>
-                )}
-                <button
-                  className={`ghost sm iconbtn has-modes${p.transformCtl.mode !== "off" ? " on" : ""}`}
-                  aria-pressed={p.transformCtl.mode !== "off"}
-                  aria-label="Transform"
-                  disabled={p.transformCtl.busy}
-                  title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
-                  onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
-                >
-                  <IconTransform /><span className="btn-label">Transform</span>
-                </button>
-                {p.transformCtl.mode !== "off" && (
-                  <div className="seg sm mode-seg">
-                    <button className={`iconbtn${p.transformCtl.mode === "move" ? " on" : ""}`} aria-label="Move" title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}><IconTransform /><span className="btn-label">Move</span></button>
-                    <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
-                    <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
-                  </div>
-                )}
-                {p.transformCtl.mode !== "off" && <ResizeMenu ctl={p.resizeCtl} />}
-                <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
-                <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
-                <SnapMenu snap={p.snap} setSnap={p.setSnap} />
-                <button
-                  className={`ghost sm iconbtn${p.measureCtl.mode ? " on" : ""}`}
-                  aria-pressed={p.measureCtl.mode}
-                  aria-label="Measure"
-                  title="Measure tool: click two points on the model to see the distance between them"
-                  onClick={p.measureCtl.toggle}
-                >
-                  <IconRuler /><span className="btn-label">Measure</span>
-                </button>
-                {p.measureCtl.mode && p.measureCtl.items.length > 0 && (
-                  <button className="ghost sm" title="Clear all measurements" onClick={p.measureCtl.clear}>
-                    Clear ({p.measureCtl.items.length})
-                  </button>
-                )}
-                <button
-                  className={`ghost sm iconbtn${markMode ? " on" : ""}`}
-                  aria-pressed={markMode}
-                  aria-label="Mark"
-                  disabled={!p.geometry || p.tab !== "3d"}
-                  title="Mark tool: draw around a part of the model — a marked screenshot attaches to the chat so the AI knows exactly where your change goes"
-                  onClick={() => setMarkMode((v) => !v)}
-                >
-                  <IconMarker /><span className="btn-label">Mark</span>
-                </button>
-                {p.pins.length > 0 && (
-                  <button
-                    className="ghost sm"
-                    title={`Remove all ${p.pins.length} point${p.pins.length > 1 ? "s" : ""}`}
-                    onClick={p.pinCtl.clearAll}
-                  >
-                    Clear points ({p.pins.length})
-                  </button>
-                )}
-                <ViewMenu
-                  dimsMode={p.dimsMode}
-                  setDimsMode={p.setDimsMode}
-                  wireframe={p.wireframe}
-                  setWireframe={p.setWireframe}
-                  gray={p.gray}
-                  setGray={p.setGray}
-                  plate={p.showPlate}
-                  setPlate={p.setShowPlate}
-                  stats={showStats}
-                  setStats={setShowStats}
-                  units={p.units}
-                  setUnits={p.setUnits}
-                  showcase={p.showcase}
-                  setShowcase={p.setShowcase}
-                  overhangOn={p.printPrep.overhangOn}
-                  toggleOverhang={p.printPrep.toggleOverhang}
-                  onResetView={() => p.viewerRef.current?.resetView()}
-                />
-                <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
-                  <IconLayers /><span className="btn-label">Objects</span>
-                </button>
-                <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
-                  <IconHelp />
-                </button>
-              </div>
-            )}
           </div>
 
           <div className="viewer-body">
@@ -1703,6 +1591,128 @@ export function Workspace(p: Props) {
                   </AnchoredMenu>
                 );
               })()}
+              {(p.tab === "3d" || p.tab === "params") && (
+                <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+                  {p.activeKind === "replicad" && (
+                    <div className="rail-tool">
+                      {/* Select feeds CAD feature edits (fillet/extrude/hole on picked faces/edges) —
+                          meshes can't take those ops, so the tool hides for them. */}
+                      <button
+                        className={`ghost sm iconbtn${p.featureCtl.mode ? " on" : ""}`}
+                        aria-pressed={p.featureCtl.mode}
+                        aria-label="Select"
+                        title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
+                        onClick={p.featureCtl.toggleMode}
+                      >
+                        <IconPointer />
+                      </button>
+                      {p.featureCtl.mode && (
+                        <div className="rail-fly">
+                          <div className="seg sm mode-seg">
+                            {SELECT_MODES.map((m, i) => (
+                              <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
+                                <m.icon /><span className="btn-label">{m.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  <div className="rail-tool">
+                    <button
+                      className={`ghost sm iconbtn${p.transformCtl.mode !== "off" ? " on" : ""}`}
+                      aria-pressed={p.transformCtl.mode !== "off"}
+                      aria-label="Transform"
+                      disabled={p.transformCtl.busy}
+                      title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
+                      onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
+                    >
+                      <IconTransform />
+                    </button>
+                    {p.transformCtl.mode !== "off" && (
+                      <div className="rail-fly">
+                        <div className="seg sm mode-seg">
+                          <button className={`iconbtn${p.transformCtl.mode === "move" ? " on" : ""}`} aria-label="Move" title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}><IconTransform /><span className="btn-label">Move</span></button>
+                          <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
+                          <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
+                        </div>
+                        <ResizeMenu ctl={p.resizeCtl} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-tool">
+                    <button
+                      className={`ghost sm iconbtn${p.measureCtl.mode ? " on" : ""}`}
+                      aria-pressed={p.measureCtl.mode}
+                      aria-label="Measure"
+                      title="Measure tool: click two points on the model to see the distance between them"
+                      onClick={p.measureCtl.toggle}
+                    >
+                      <IconRuler />
+                    </button>
+                    {p.measureCtl.mode && p.measureCtl.items.length > 0 && (
+                      <div className="rail-fly">
+                        <button className="ghost sm" title="Clear all measurements" onClick={p.measureCtl.clear}>Clear ({p.measureCtl.items.length})</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-tool">
+                    <button
+                      className={`ghost sm iconbtn${markMode ? " on" : ""}`}
+                      aria-pressed={markMode}
+                      aria-label="Mark"
+                      disabled={!p.geometry || p.tab !== "3d"}
+                      title="Mark tool: draw around a part of the model — a marked screenshot attaches to the chat so the AI knows exactly where your change goes"
+                      onClick={() => setMarkMode((v) => !v)}
+                    >
+                      <IconMarker />
+                    </button>
+                    {p.pins.length > 0 && (
+                      <div className="rail-fly">
+                        <button className="ghost sm" title={`Remove all ${p.pins.length} point${p.pins.length > 1 ? "s" : ""}`} onClick={p.pinCtl.clearAll}>Clear points ({p.pins.length})</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-sep" aria-hidden="true" />
+                  <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
+                  <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
+                  <SnapMenu snap={p.snap} setSnap={p.setSnap} />
+                </div>
+              )}
+              {(p.tab === "3d" || p.tab === "params") && (
+                <div className="canvas-tr">
+                  <div className="seg sm">
+                    <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
+                    <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
+                  </div>
+                  <ViewMenu
+                    dimsMode={p.dimsMode}
+                    setDimsMode={p.setDimsMode}
+                    wireframe={p.wireframe}
+                    setWireframe={p.setWireframe}
+                    gray={p.gray}
+                    setGray={p.setGray}
+                    plate={p.showPlate}
+                    setPlate={p.setShowPlate}
+                    stats={showStats}
+                    setStats={setShowStats}
+                    units={p.units}
+                    setUnits={p.setUnits}
+                    showcase={p.showcase}
+                    setShowcase={p.setShowcase}
+                    overhangOn={p.printPrep.overhangOn}
+                    toggleOverhang={p.printPrep.toggleOverhang}
+                    onResetView={() => p.viewerRef.current?.resetView()}
+                  />
+                  <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
+                    <IconLayers /><span className="btn-label">Objects</span>
+                  </button>
+                  <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
+                    <IconHelp />
+                  </button>
+                </div>
+              )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
                 <div className="zoom-ctl" role="group" aria-label="Zoom">
                   <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>

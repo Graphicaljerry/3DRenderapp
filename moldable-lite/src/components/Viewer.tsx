@@ -144,12 +144,16 @@ const THEME_SCENE = { light: "#eceff0", dark: "#101418" } as const;
 // stand off the background instead of floating on gridlines.
 function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark"): THREE.Group {
   const g = new THREE.Group();
-  const c = theme === "dark" ? { top: 0x23272c, edge: 0x3d444b } : { top: 0xdadfdd, edge: 0xb2bcb9 };
+  // Dark slate in BOTH themes, like a real textured print plate (Bambu/Orca) —
+  // the first light-theme cut was near-background gray and read as "no change".
+  const c = theme === "dark" ? { top: 0x272b30, edge: 0x4a5158 } : { top: 0x363c42, edge: 0x5c646c };
+  // One-sided like real slicers: solid seen from above, see-through from below,
+  // so orbiting UNDER the bed still shows the model's underside (overhang checks).
   const slab = new THREE.Mesh(
-    new THREE.BoxGeometry(bed.x, bed.y, 2),
-    new THREE.MeshStandardMaterial({ color: c.top, roughness: 0.95, metalness: 0 }),
+    new THREE.PlaneGeometry(bed.x, bed.y),
+    new THREE.MeshStandardMaterial({ color: c.top, roughness: 0.95, metalness: 0, side: THREE.FrontSide }),
   );
-  slab.position.z = -1.06; // top face just under z=0 — model bottoms and the grid never z-fight
+  slab.position.z = -0.06; // just under z=0 — model bottoms and the grid never z-fight
   g.add(slab);
   const border = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.PlaneGeometry(bed.x, bed.y)),

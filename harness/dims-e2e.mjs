@@ -34,8 +34,14 @@ const colorCount = async (rgb, tol = 12) => {
     g.drawImage(img, 0, 0);
     const d = g.getImageData(0, 0, c.width, c.height).data;
     let n = 0;
-    for (let i = 0; i < d.length; i += 4) {
-      if (Math.abs(d[i] - rgb[0]) < tol && Math.abs(d[i + 1] - rgb[1]) < tol && Math.abs(d[i + 2] - rgb[2]) < tol) n++;
+    // Skip the in-canvas tool rail (left strip) and top-right cluster — their
+    // active-state accents (e.g. Snap on by default) are UI, not selection chrome.
+    const x0 = 80, y0 = 60;
+    for (let y = y0; y < c.height; y++) {
+      for (let x = x0; x < c.width; x++) {
+        const i = (y * c.width + x) * 4;
+        if (Math.abs(d[i] - rgb[0]) < tol && Math.abs(d[i + 1] - rgb[1]) < tol && Math.abs(d[i + 2] - rgb[2]) < tol) n++;
+      }
     }
     return n;
   }, { b64, rgb, tol });

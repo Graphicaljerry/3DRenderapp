@@ -713,13 +713,13 @@ function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button
         className={`ghost sm iconbtn${open ? " on" : ""}`}
-        aria-label="Resize"
+        aria-label="Set size"
         aria-expanded={open}
         disabled={!d || ctl.busy}
-        title="Resize — type the exact size in mm (or a %) instead of dragging; includes one-tap Fit to plate"
+        title="Set size — type the exact size in mm (or a %) instead of dragging the Scale gizmo; includes one-tap Fit to plate"
         onClick={() => { if (!open) seed(); setOpen((v) => !v); }}
       >
-        <IconScale /><span className="btn-label">Resize</span>
+        <IconScale /><span className="btn-label">Set size…</span>
       </button>
       {open && d && (
         <div className="snap-menu resize-menu" role="menu">
@@ -1681,6 +1681,7 @@ export function Workspace(p: Props) {
                           <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                         </div>
                         <ResizeMenu ctl={p.resizeCtl} />
+                        <SnapMenu snap={p.snap} setSnap={p.setSnap} />
                       </div>
                     )}
                   </div>
@@ -1720,7 +1721,6 @@ export function Workspace(p: Props) {
                   <div className="rail-sep" aria-hidden="true" />
                   <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
                   <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
-                  <SnapMenu snap={p.snap} setSnap={p.setSnap} />
                 </div>
               )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (

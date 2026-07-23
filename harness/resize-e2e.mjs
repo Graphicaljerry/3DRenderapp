@@ -85,7 +85,7 @@ check("B3 proportions kept (uniform)", fitRatioOk, JSON.stringify(afterFit));
 // Typed resize: back to the 3D view (the toolbar lives there) → Transform → Resize → 50%
 await page.getByRole("button", { name: "3D View", exact: true }).click();
 await page.getByRole("button", { name: "Transform", exact: true }).click();
-await page.getByRole("button", { name: "Resize", exact: true }).click();
+await page.getByRole("button", { name: "Set size", exact: true }).click();
 const wBefore = afterFit[0];
 await page.locator(".resize-menu label:has-text('%') input").fill("50");
 await page.locator(".resize-menu").getByRole("button", { name: "Apply" }).click();

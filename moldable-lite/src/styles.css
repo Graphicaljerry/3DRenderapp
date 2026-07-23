@@ -264,6 +264,11 @@ button { font-family: inherit; cursor: pointer; }
    read as a broken overlay at iPad widths) — when the head runs out of room the
    whole tools cluster drops to its own row instead (see the 680px tier). */
 .tabs { display: flex; gap: 2px; flex-wrap: nowrap; flex: 0 0 auto; background: var(--surf); padding: 3px; border-radius: var(--r-md); }
+/* Right cluster rides at the tabs pill's exact height for one clean optical row. */
+.viewer-head .viewer-tools { align-items: stretch; }
+.viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 32px; box-sizing: border-box; }
+.viewer-head .viewer-tools .seg.sm { align-items: stretch; }
+.viewer-head .viewer-tools .seg.sm .iconbtn { height: 100%; }
 .tabs button { border: 1px solid transparent; background: transparent; border-radius: var(--r-sm); padding: 5px 12px; font-size: 13px; font-weight: 500; color: var(--mut); }
 .tabs button:hover:not(.on) { color: var(--ink2); }
 .tabs button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
@@ -278,11 +283,16 @@ button { font-family: inherit; cursor: pointer; }
    (view tabs + the Face/Edge/Corner/Point & Move/Rotate/Scale segs) drop first;
    at iPad-width columns everything is recognizable icons (tooltips + aria-labels
    carry the names). */
-@container (max-width: 1500px) {
-  .tabs .btn-label, .mode-seg .btn-label { display: none; }
+/* The head carries tabs + a small right cluster now (tools live in the canvas
+   rail), so labels stay until genuinely tight — the old 1500px threshold dated
+   from the crowded pre-rail toolbar and collapsed tabs with acres of space left. */
+@container (max-width: 900px) {
+  .viewer-head .btn-label { display: none; } /* View/Objects give up words first */
+}
+@container (max-width: 720px) {
+  .tabs .btn-label { display: none; }
 }
 @container (max-width: 1180px) {
-  .viewer-head .btn-label { display: none; }
   .viewer-tools { gap: 5px; }
   .viewer-tools .ghost.sm { padding: 5px 8px; }
   .viewer-tools .seg button { padding: 5px 8px; }

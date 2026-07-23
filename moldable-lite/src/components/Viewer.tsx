@@ -141,14 +141,14 @@ interface Props {
 export type SelectKind = "face" | "edge" | "vertex" | "point";
 
 const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // grayscale display copies
-const THEME_SCENE = { light: "#eceff0", dark: "#101418" } as const;
+const THEME_SCENE = { light: "#eceff0", dark: "#17181a" } as const; // dark: neutral, no blue cast
 // Solid build plate (Bambu/Orca-style): a slab sized to the printer bed so models
 // stand off the background instead of floating on gridlines.
 function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
   const g = new THREE.Group();
   // Dark slate in BOTH themes, like a real textured print plate (Bambu/Orca) —
   // unless the user picked their own plate colour in Settings > Appearance.
-  const slate = theme === "dark" ? { top: 0x272b30, edge: 0x4a5158 } : { top: 0x363c42, edge: 0x5c646c };
+  const slate = theme === "dark" ? { top: 0x26282b, edge: 0x4b4e53 } : { top: 0x3a3d41, edge: 0x5f6368 };
   const c = colorOverride
     ? { top: new THREE.Color(colorOverride), edge: new THREE.Color(colorOverride).offsetHSL(0, 0, 0.16) }
     : { top: new THREE.Color(slate.top), edge: new THREE.Color(slate.edge) };
@@ -168,7 +168,7 @@ function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark", colo
   g.add(border);
   return g;
 }
-const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x39414b, 0x232a31] };
+const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x4b4e53, 0x2b2d31] };
 
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
 // On-screen size band for measurement/dimension label pills (sprite height in px).

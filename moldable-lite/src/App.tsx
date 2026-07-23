@@ -1166,6 +1166,9 @@ export default function App() {
       const next = { ...pr, name: clean, updatedAt: Date.now() };
       projectRef.current = next;
       persist(next);
+      // A rename is a deliberate "save this" moment — push the cloud sync NOW
+      // instead of waiting out the debounce (felt like it hadn't saved).
+      if (accountEmailRef.current) void cloudSyncPush().then(() => markSynced()).catch(() => {});
     } else {
       const chat = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
       const shell = { ...newProject(clean, "replicad"), chat, pins };

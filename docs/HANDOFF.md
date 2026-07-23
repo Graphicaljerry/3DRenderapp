@@ -1,8 +1,42 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-22 (PRs #43–#117 merged, latest: in-canvas tool rail). New
+*Updated 2026-07-23 (PRs #43–#121 merged; latest code: snap-in-flyout / "Set
+size…". Design file rebuilt in Figma — see "Figma design file" below). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
+
+## Figma design file (Moldable — Design & Assets)
+
+File key `1P7VBfxbJ62kjYXvd94tYF` (Jerry's link: figma.com/design/1P7VBfxbJ62kjYXvd94tYF).
+Rebuilt 2026-07-23 to mirror the deployed v208 UI — **everything is editable
+layers except the 3D canvas**, which is a real in-app render (phone-stand
+template, dark theme) captured by `harness/canvas-clean.mjs` and set as an
+image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame.
+
+- Pages: **Assets** (empty), **Screens** (everything). On Screens:
+  - `73:2` **Workspace — dark · v208** at (3071,1069) — the hero. Canvas `76:2`
+    carries the render fill; rail/stats/snaps/zoom/statusbar float above as
+    editable layers. Story is coherent end-to-end: Phone stand, 77.8 × 70 ×
+    77.9 mm, 52 tris / 76.2 cm³, Precise (CAD) active (mesh texture chip kept
+    as hidden layer `74:17`).
+  - Popup artboards (clones of the hero, chrome anchored from the clone's real
+    geometry): `93:64` Settings open (dim + card, Appearance pane), `93:192`
+    View menu open (all rows incl. Grayscale/Build plate/Overhang), `93:320`
+    Objects & plates (panel + CAD badge + export menu), `93:448` Transform
+    tools (rail active + Move/Rotate/Scale + Set size… + Snap flyout).
+  - Inside Jerry's "Styling & Components" section: `90:2` **Moldable — UI kit**
+    — all 39 `icons.tsx` icons as true vectors (24px grid, 1.8 stroke, exact
+    paths), cloned specimens of every control, provenance badges, dark palette
+    swatches.
+  - The 2026-07-19 artboards are renamed with a "(v1)" suffix — superseded, kept.
+- Gotchas that cost time: `upload_assets` with `nodeId` may commit the image
+  but not apply the fill — re-apply via `use_figma` with the returned
+  `imageHash`; `figma.createAutoLayout`/`createFrame` default to a WHITE fill
+  (always set `fills = []`); the workspace frames' small icons are Inter glyph
+  texts — a swap map in this session's scripts replaces ▻ ✥ ⟋ ⟠ ▦ 📎 🎤 with
+  the real vectors; `query()` selectors reject `/` in attribute values (use
+  `findAll`); text-match anchors must be exact ("◇ View", not "View" — that
+  matches the "3D View" tab first).
 
 ## Resuming in a new session — read me first
 

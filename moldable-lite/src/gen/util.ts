@@ -72,11 +72,6 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
   });
 }
 
-export function authHeaders(scheme: "Bearer" | "Key" | "x-api-key", key: string): Record<string, string> {
-  if (scheme === "x-api-key") return { "x-api-key": key, "content-type": "application/json" };
-  return { authorization: `${scheme} ${key}`, "content-type": "application/json" };
-}
-
 export async function jsonOrThrow(r: Response, name: string): Promise<any> {
   if (!r.ok) throw new Error(`${name} ${r.status}: ${(await r.text().catch(() => "")).slice(0, 300)}`);
   return r.json();

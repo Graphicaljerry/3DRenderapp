@@ -123,11 +123,11 @@ button { font-family: inherit; cursor: pointer; }
 .seg button:hover:not(.on), .fit-seg button:hover:not(.on) { color: var(--ink2); }
 .x:hover { color: var(--ink); }
 .link:hover { color: var(--accent); text-decoration: underline; }
-.avatar-wrap:hover .avatar, .profile:hover .avatar { filter: brightness(1.06); }
+.profile:hover .avatar { filter: brightness(1.06); }
 /* Display face for the brand + section headings — gives hierarchy a voice. */
 .wordmark, .empty-q, .card h1, .card h2, .panel h3, .side-head, .measure-head, .gc-title { font-family: var(--font-display); letter-spacing: -0.01em; }
 /* Numeric readouts align in columns. */
-.statusbar, .pnum, .prow, .measure-mm, .fine-inline { font-variant-numeric: tabular-nums; }
+.statusbar, .pnum, .prow, .measure-mm { font-variant-numeric: tabular-nums; }
 
 /* ---------- gate / cards ---------- */
 .gate, .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(21,24,30,0.45); padding: 24px; z-index: 50; }
@@ -849,7 +849,6 @@ details.guide { margin-top: 10px; }
 .pnum { grid-area: num; height: 32px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 8px; font-size: 13px; width: 100%; }
 .punit { grid-area: unit; font-size: 11px; color: var(--subt); }
 .param-actions { display: flex; gap: 8px; margin-top: 14px; }
-.fine-inline { font-size: 11px; font-weight: 400; color: var(--subt); margin-left: 8px; }
 .export-sep { height: 1px; background: var(--bord); margin: 6px 4px; }
 
 /* ---------- responsive: stack chat over viewer on small screens ---------- */

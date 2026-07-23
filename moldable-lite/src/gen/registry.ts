@@ -139,12 +139,6 @@ export function usesMultiView(providerId: string, modelId: string): boolean {
   if (providerId === "tripo") return modelId === "image_to_model"; // -> multiview_to_model
   return false;
 }
-/** The engines to recommend when the user wants multi-view accuracy. */
-export const MULTIVIEW_HINT = "fal · Rodin or Tripo";
-
-export function providerOfModel(): ProviderDef {
-  return PROVIDERS[0];
-}
 
 /** "Auto" engine: pick the best mesh provider+model the user can actually run.
  *  Premium keyed providers beat the free tier (accuracy); within a provider the

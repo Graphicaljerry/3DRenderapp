@@ -1,0 +1,13 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
+const page = await browser.newPage({ viewport: { width: 1400, height: 950 }, deviceScaleFactor: 2 });
+await page.addInitScript(() => { localStorage.setItem("moldable_entered", "1"); localStorage.setItem("moldable_theme", "dark"); });
+await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.waitForSelector(".topbar", { timeout: 60_000 });
+await page.getByRole("button", { name: "Templates", exact: true }).click();
+await page.locator(".overlay").getByTitle("Build the phone stand template").click();
+await page.waitForFunction(() => document.querySelector(".statusbar .dims")?.textContent?.includes("77"), null, { timeout: 120_000 });
+await page.waitForTimeout(800);
+await page.locator(".viewer canvas").first().screenshot({ path: "canvas-dark.png" });
+await browser.close();
+console.log("saved canvas-dark.png");

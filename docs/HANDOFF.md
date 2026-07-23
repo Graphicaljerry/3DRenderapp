@@ -1,7 +1,8 @@
 # Session handoff — state & roadmap
 
-*Updated 2026-07-23 (PRs #43–#121 merged; latest code: snap-in-flyout / "Set
-size…". Design file rebuilt in Figma — see "Figma design file" below). New
+*Updated 2026-07-23 (PRs #43–#123 merged; latest code: snap-in-flyout / "Set
+size…". Design file rebuilt + consolidated in Figma — see "Figma design file"
+below). New
 session? Read this first, then `docs/NOTES_PREVIEW_ENGINE.md` and
 `moldable-lite/README.md` for architecture.*
 
@@ -19,16 +20,21 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
     editable layers. Story is coherent end-to-end: Phone stand, 77.8 × 70 ×
     77.9 mm, 52 tris / 76.2 cm³, Precise (CAD) active (mesh texture chip kept
     as hidden layer `74:17`).
-  - Popup artboards (clones of the hero, chrome anchored from the clone's real
-    geometry): `93:64` Settings open (dim + card, Appearance pane), `93:192`
-    View menu open (all rows incl. Grayscale/Build plate/Overhang), `93:320`
-    Objects & plates (panel + CAD badge + export menu), `93:448` Transform
-    tools (rail active + Move/Rotate/Scale + Set size… + Snap flyout).
+  - `93:64` **Workspace — Settings open · v208** — the one popup-over-app
+    artboard (dim + card, Appearance pane). Jerry's rule, stated 2026-07-23:
+    **"Don't make too many artboards of the same thing"** — so the other three
+    popup states were consolidated onto `102:2` **Menus & panels — v208** at
+    (6530,1069): View menu (full row list), Objects panel + export menu open
+    (CAD badge, plates row), Transform flyout (Move/Rotate/Scale + Set size… +
+    Snap). The three full-workspace clones they came from were deleted.
   - Inside Jerry's "Styling & Components" section: `90:2` **Moldable — UI kit**
     — all 39 `icons.tsx` icons as true vectors (24px grid, 1.8 stroke, exact
     paths), cloned specimens of every control, provenance badges, dark palette
     swatches.
   - The 2026-07-19 artboards are renamed with a "(v1)" suffix — superseded, kept.
+- Jerry asked (2026-07-23) for Figma MCP calls to auto-accept: `.claude/settings.json`
+  now allowlists `mcp__Figma`. It loads at session start, so new sessions run
+  prompt-free; a settings file created mid-session may not hot-load.
 - Gotchas that cost time: `upload_assets` with `nodeId` may commit the image
   but not apply the fill — re-apply via `use_figma` with the returned
   `imageHash`; `figma.createAutoLayout`/`createFrame` default to a WHITE fill

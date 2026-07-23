@@ -20,14 +20,14 @@ export interface PrintPrepCtl {
   chamfer: { can: boolean; apply: (size: number) => void };
 }
 import type { Version } from "../store/types";
-import type { EngineKind, ExportFormat, CadOp, PointOp } from "../engine/types";
+import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconDims, IconWireframe, IconStats, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPlay } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";

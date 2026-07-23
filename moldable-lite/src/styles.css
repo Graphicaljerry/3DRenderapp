@@ -991,17 +991,7 @@ details.guide { margin-top: 10px; }
 .canvas-rail .ghost.sm.iconbtn { border-color: transparent; background: transparent; }
 .canvas-rail .ghost.sm.iconbtn:hover { border-color: var(--bord); background: var(--surf); }
 .canvas-rail .ghost.sm.iconbtn.on { border-color: var(--accent); }
-.canvas-tr {
-  position: absolute;
-  right: 12px;
-  top: 12px;
-  z-index: 30;
-  display: flex;
-  gap: 6px;
-  align-items: center;
-}
-/* Stats yield the corner to the cluster */
-.mesh-stats { top: 56px; }
+/* (top-right canvas cluster retired — undo/View/Objects/Help live in the header again) */
 
 /* Rail popovers (Material / Surface / Snap / Resize) open to the RIGHT of the
    rail — their default right-aligned drop (from the old top toolbar) opened
@@ -1012,3 +1002,7 @@ details.guide { margin-top: 10px; }
   top: 0;
   z-index: 40;
 }
+
+/* Rail icons a touch bigger (user request) */
+.canvas-rail .ghost.sm.iconbtn { padding: 8px 9px; }
+.canvas-rail .iconbtn svg { width: 19px; height: 19px; }

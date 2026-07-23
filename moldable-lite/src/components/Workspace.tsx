@@ -1448,6 +1448,39 @@ export function Workspace(p: Props) {
                 );
               })}
             </div>
+              {(p.tab === "3d" || p.tab === "params") && (
+                <div className="viewer-tools">
+                  <div className="seg sm">
+                    <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
+                    <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
+                  </div>
+                  <ViewMenu
+                    dimsMode={p.dimsMode}
+                    setDimsMode={p.setDimsMode}
+                    wireframe={p.wireframe}
+                    setWireframe={p.setWireframe}
+                    gray={p.gray}
+                    setGray={p.setGray}
+                    plate={p.showPlate}
+                    setPlate={p.setShowPlate}
+                    stats={showStats}
+                    setStats={setShowStats}
+                    units={p.units}
+                    setUnits={p.setUnits}
+                    showcase={p.showcase}
+                    setShowcase={p.setShowcase}
+                    overhangOn={p.printPrep.overhangOn}
+                    toggleOverhang={p.printPrep.toggleOverhang}
+                    onResetView={() => p.viewerRef.current?.resetView()}
+                  />
+                  <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
+                    <IconLayers /><span className="btn-label">Objects</span>
+                  </button>
+                  <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
+                    <IconHelp />
+                  </button>
+                </div>
+              )}
           </div>
 
           <div className="viewer-body">
@@ -1688,39 +1721,6 @@ export function Workspace(p: Props) {
                   <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
                   <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
                   <SnapMenu snap={p.snap} setSnap={p.setSnap} />
-                </div>
-              )}
-              {(p.tab === "3d" || p.tab === "params") && (
-                <div className="canvas-tr">
-                  <div className="seg sm">
-                    <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
-                    <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
-                  </div>
-                  <ViewMenu
-                    dimsMode={p.dimsMode}
-                    setDimsMode={p.setDimsMode}
-                    wireframe={p.wireframe}
-                    setWireframe={p.setWireframe}
-                    gray={p.gray}
-                    setGray={p.setGray}
-                    plate={p.showPlate}
-                    setPlate={p.setShowPlate}
-                    stats={showStats}
-                    setStats={setShowStats}
-                    units={p.units}
-                    setUnits={p.setUnits}
-                    showcase={p.showcase}
-                    setShowcase={p.setShowcase}
-                    overhangOn={p.printPrep.overhangOn}
-                    toggleOverhang={p.printPrep.toggleOverhang}
-                    onResetView={() => p.viewerRef.current?.resetView()}
-                  />
-                  <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
-                    <IconLayers /><span className="btn-label">Objects</span>
-                  </button>
-                  <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
-                    <IconHelp />
-                  </button>
                 </div>
               )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (

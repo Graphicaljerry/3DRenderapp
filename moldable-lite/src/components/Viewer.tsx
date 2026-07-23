@@ -260,9 +260,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const el = mount.current!;
     const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    const FULL_DPR = Math.min(window.devicePixelRatio, 2);
+    const LOW_DPR = Math.min(window.devicePixelRatio, 1); // motion resolution: on a 2× panel this ~quarters the fill cost
+    renderer.setPixelRatio(FULL_DPR);
     renderer.setSize(el.clientWidth, el.clientHeight);
     el.appendChild(renderer.domElement);
+
+    // getBoundingClientRect forces a synchronous layout reflow. The pointer hot path (the
+    // corner-gizmo hit test + the hover raycast) calls it on EVERY pointermove — a hidden
+    // per-move stall. Cache it; drop the cache only when the canvas could have moved.
+    let rectCache: DOMRect | null = null;
+    const canvasRect = () => rectCache ?? (rectCache = renderer.domElement.getBoundingClientRect());
+    const dropRect = () => { rectCache = null; };
+    window.addEventListener("scroll", dropRect, true);
+    window.addEventListener("resize", dropRect);
+
+    // Dynamic resolution: while orbiting/panning or dragging the gizmo, render at LOW_DPR so
+    // motion stays fluid on dense meshes and hi-DPI panels, then snap back to a crisp
+    // FULL_DPR a beat after motion stops. A no-op when the display isn't hi-DPI.
+    let dprRestore = 0;
+    const setDpr = (r: number) => {
+      if (renderer.getPixelRatio() === r) return;
+      renderer.setPixelRatio(r);
+      renderer.setSize(el.clientWidth, el.clientHeight);
+    };
+    const qualityDown = () => { if (dprRestore) { clearTimeout(dprRestore); dprRestore = 0; } setDpr(LOW_DPR); };
+    const qualityUp = () => { if (dprRestore) clearTimeout(dprRestore); dprRestore = window.setTimeout(() => { dprRestore = 0; setDpr(FULL_DPR); }, 220); };
+    const dynamicRes = FULL_DPR !== LOW_DPR;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#eceff0");
@@ -276,6 +300,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     controls.target.set(0, 0, 15);
     // Middle-drag pans (CAD convention — wheel still zooms); right-drag pans too.
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+    if (dynamicRes) {
+      controls.addEventListener("start", qualityDown);
+      controls.addEventListener("end", qualityUp);
+    }
 
     // Right-CLICK (no drag) → quick-action context menu on whatever is under the cursor.
     // Right-DRAG stays a pan: suppress the menu once the pointer moved past a few px.
@@ -396,6 +424,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!s) return;
       controls.enabled = !e.value;
       s.transforming = e.value;
+      if (dynamicRes) { if (e.value) qualityDown(); else qualityUp(); } // low-res while the handle drags
       // The dims box can't follow a mid-drag pivot — hide it for the drag only. A model
       // drag commits an op whose rebuild recreates the dims; a no-op release or an
       // attachment drag (dims measure the model, which didn't move) restores it here.
@@ -505,7 +534,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
     // Canvas-relative hit test for the gizmo's corner box.
     const inAxes = (e: { clientX: number; clientY: number }) => {
-      const r = renderer.domElement.getBoundingClientRect();
+      const r = canvasRect();
       const x = e.clientX - r.left, y = e.clientY - r.top;
       return x > r.width - AX_PX - 8 && x < r.width - 8 && y > r.height - AX_PX - 8 && y < r.height - 8;
     };
@@ -803,6 +832,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onDown = (e: PointerEvent) => {
       const s2 = st.current;
+      dropRect(); // a gesture may follow a layout shift that moved the canvas without scroll/resize
       // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
@@ -1126,7 +1156,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
       // Anchor hover works IN transform mode (that's when the box shows): resize cursor + grow.
       if (s2.selBox && !s2.transforming) {
-        const r0 = renderer.domElement.getBoundingClientRect();
+        const r0 = canvasRect();
         rc.setFromCamera(new THREE.Vector2(((e.clientX - r0.left) / r0.width) * 2 - 1, -((e.clientY - r0.top) / r0.height) * 2 + 1), camera);
         const hit = rc.intersectObjects(anchorsOf(s2), false)[0]?.object as THREE.Mesh | undefined;
         for (const b of anchorsOf(s2)) b.scale.setScalar(b === hit ? 1.35 : 1);
@@ -1136,7 +1166,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
       }
       if (cb.current.transformMode !== "off" || s2.transforming) return; // gizmo mode: no hover-pick
-      const rect = renderer.domElement.getBoundingClientRect();
+      const rect = canvasRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - rect.left) / rect.width) * 2 - 1,
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
@@ -1255,6 +1285,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const ro = new ResizeObserver(() => {
       const w = el.clientWidth, h = el.clientHeight;
       if (w === 0 || h === 0) return;
+      dropRect(); // the canvas resized — its screen rect is stale
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
@@ -1277,6 +1308,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.removeEventListener("pointerdown", arbitrate, true);
       window.removeEventListener("keydown", onShiftKey);
       window.removeEventListener("keyup", onShiftKey);
+      window.removeEventListener("scroll", dropRect, true);
+      window.removeEventListener("resize", dropRect);
+      if (dprRestore) clearTimeout(dprRestore);
       controls.dispose();
       axScene.traverse((o) => {
         const m = o as THREE.Mesh & THREE.Sprite;

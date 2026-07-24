@@ -1,0 +1,72 @@
+# Builds a native macOS (Apple Silicon) .dmg of Moldable and attaches it to a Release.
+# The web build is untouched — this wraps the same dist/ in a Tauri (WKWebView) shell.
+#
+# Trigger:  git tag v0.2.0 && git push origin v0.2.0   → builds + publishes a Release
+#           or run manually (workflow_dispatch) → uploads the .dmg as a run artifact.
+#
+# Signing/notarization is OFF by default (unsigned beta — users right-click → Open the
+# first time). Add the APPLE_* repo secrets and uncomment the env block for a clean,
+# Gatekeeper-approved public download.
+name: Build macOS DMG (Apple Silicon)
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create/upload the Release
+
+jobs:
+  build-macos:
+    runs-on: macos-14 # Apple Silicon (arm64) runner → aarch64-apple-darwin host
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: moldable-lite/package-lock.json
+
+      - name: Setup Rust (aarch64-apple-darwin)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Cache cargo build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: moldable-lite/src-tauri -> target
+
+      - name: Install JS deps
+        working-directory: moldable-lite
+        run: npm ci
+
+      - name: Build Moldable.app + .dmg
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ---- Signing + notarization (uncomment once the Apple Developer account + secrets exist) ----
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}                 # base64 of the Developer ID Application .p12
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}       # "Developer ID Application: Name (TEAMID)"
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}                       # app-specific password
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: moldable-lite # where src-tauri/ + package.json live
+          args: --target aarch64-apple-darwin
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+          releaseName: "Moldable ${{ github.ref_name }}"
+          releaseBody: "Native macOS (Apple Silicon) build. Download the .dmg below and open it. (Beta builds are unsigned — right-click the app → Open the first time.)"
+          releaseDraft: false
+          prerelease: false
+
+      - name: Upload .dmg as a run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: moldable-macos-dmg
+          path: moldable-lite/src-tauri/target/**/release/bundle/dmg/*.dmg
+          if-no-files-found: warn

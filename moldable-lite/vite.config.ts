@@ -121,8 +121,9 @@ function relayPlugin(): Plugin {
 
 export default defineConfig({
   // GitHub Pages serves the app under /<repo>/; the deploy workflow sets BUILD_BASE.
-  // Local dev / other hosts keep "/".
-  base: process.env.BUILD_BASE || "/",
+  // Local dev / other hosts keep "/". The Tauri (macOS desktop) build serves assets
+  // from a custom tauri://localhost origin, where relative "./" paths are safest.
+  base: process.env.TAURI_ENV_PLATFORM ? "./" : (process.env.BUILD_BASE || "/"),
   define: { __BUILD_STAMP__: JSON.stringify(BUILD_STAMP) },
   plugins: [
     react(),
@@ -134,7 +135,10 @@ export default defineConfig({
     // still needs the internet, everything local — templates, direct edits,
     // hole tool, measure, export — does not). autoUpdate: each deploy's new
     // worker installs in the background and takes over on the next refresh.
-    VitePWA({
+    // The Tauri desktop bundle ships all assets locally, so the Workbox service
+    // worker + ~13 MB precache is pointless there (and the SW can misbehave on the
+    // tauri:// scheme) — drop the PWA plugin for the Tauri build only. Web is unchanged.
+    ...(process.env.TAURI_ENV_PLATFORM ? [] : [VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
       includeAssets: ["icons/apple-touch-icon.png"],
@@ -182,9 +186,11 @@ export default defineConfig({
           },
         ],
       },
-    }),
+    })]),
   ],
   worker: { format: "es" },
+  // Tauri reads TAURI_ENV_* during `tauri dev/build`; expose them to import.meta.env.
+  envPrefix: ["VITE_", "TAURI_ENV_*"],
   optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },
   build: {
     target: "esnext",
@@ -208,5 +214,5 @@ export default defineConfig({
       },
     },
   },
-  server: { port: 5173, open: true },
+  server: { port: 5173, strictPort: true, open: true },
 });

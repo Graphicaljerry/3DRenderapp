@@ -63,6 +63,7 @@ export interface Project {
   pins?: Pin[]; // spatial notes / AI-edit markers on the model
   plates?: { count: number; of: Record<string, number>; names?: Record<number, string> }; // build plates: how many, which object prints where, user labels
   partColors?: Record<string, string>; // per-object fill colour (objectId → hex): "model" + attachment ids. Exported as filament slots so Bambu/Orca pre-assign each part.
+  facePaint?: { count: number; b64: string }; // per-face MMU paint on the model: base64 of a per-triangle palette-index Uint8Array (count guards against a reshaped mesh). Exported as 3MF paint_color.
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest

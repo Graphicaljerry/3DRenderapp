@@ -106,11 +106,29 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
     picks it up — distinct colours become filament slots: project 3MF writes per-object
     `extruder` + `Metadata/project_settings.config` `filament_colour`; core per-plate
     3MF writes `<basematerials>` displaycolor + object `pid/pindex`. Unpainted parts
-    share a neutral default filament (slot 1). Multi-colour WITHIN one solid = separate
-    it into parts first, then paint each.
-    STILL OPEN — per-REGION/per-face painting (paint zones inside a single solid, true
-    MMU/`mmu_segmentation`): big, separate feature (face segmentation + painted regions
-    → per-triangle 3MF paint data). Treat as its own roadmap item.
+    share a neutral default filament (slot 1).
+    Per-FACE MMU paint (Bambu Colour-Painting): SHIPPED MVP (#128). Paint tool in the
+    canvas rail (`IconPaint`) with a filament palette + smart-fill angle slider + "Erase
+    all". Click a face → crease-aware flood-fill (`paintFillRegion`, reuses the
+    face-select `smoothRegion`/`faceRegion`) → those triangles fill the active filament;
+    rendered live via a de-indexed RGBA vertex-colour overlay on the model (`s.paintMesh`
+    / `s.triColor` in Viewer.tsx). Persisted as `Project.facePaint = {count, b64}` (base64
+    of a per-triangle palette-index Uint8Array; `count` guards a reshaped mesh → paint
+    dropped, not mispainted). Export (`platesToProject3MF`) writes bare `paint_color` on
+    each `<triangle>` — the VERIFIED Bambu/Orca hex-segmentation codec `encodePaintColorWhole`
+    (slot1="4", slot2="8", slotK≥3=hex(K−3)+"C"; string is REVERSED vs emission — root
+    nibble last; keyed POSITIONALLY to triangle document order, which matches three.js
+    `faceIndex` and the exporter's loop). Painted colours fold into the SAME filament
+    palette as whole-part colours (`buildFilaments`), so `filament_colour` covers every
+    painted slot (dodges Bambu's silent `max_ebt` clamp). Tests: `harness/facepaint-3mf-e2e.mjs`
+    (codec vectors + round-trip decode + export unzip/positional-keying + UI paint→persist→erase).
+    ⚠️ NOT yet confirmed in real Bambu Studio — codec is source-verified but the full
+    import chain (paint_color + filament_colour + object extruder) needs a smoke test there.
+    STILL OPEN (future phases): brush (paint-on-drag), per-region eraser + same-colour
+    bucket + eyedropper, paint on ATTACHMENTS (MVP paints the model mesh only), gap-fill,
+    section view, and CAD-edit-resilient spatial paint replay (MVP paint is guaranteed
+    correct on stable meshes — STL/GLB/gen; a CAD fillet/chamfer reshuffles triangles and
+    the `count` guard drops the paint on the next export).
   - Wire the newer free HF Spaces (tencent/Hunyuan3D-2.1, microsoft/TRELLIS.2,
     stabilityai/stable-point-aware-3d) into `gen/providers/hf.ts` — researched and
     promising, but their Gradio endpoint signatures couldn't be verified from the

@@ -826,8 +826,10 @@ export default function App() {
   const [measureMode, setMeasureMode] = useState(false);
   // Per-face MMU paint tool (Bambu-style): pick a filament, click a face region to fill it.
   const [paintMode, setPaintModeState] = useState(false);
-  const [paintSlot, setPaintSlot] = useState(1); // active filament palette index (1-based)
+  const [paintTool, setPaintTool] = useState<"fill" | "brush">("fill"); // click-bucket vs paint-on-drag
+  const [paintSlot, setPaintSlot] = useState(1); // active filament palette index (1-based); 0 = eraser
   const [paintAngle, setPaintAngle] = useState(30); // smart-fill angle (deg)
+  const [brushSize, setBrushSize] = useState(8); // brush radius as % of the model's largest dimension
   const [facePaint, setFacePaint] = useState<Uint8Array | null>(null); // model's per-triangle paint
   /** Turn the Paint tool on/off; enabling it disables the other single-owner viewer tools. */
   const setPaintMode = (on: boolean) => {
@@ -3464,10 +3466,14 @@ export default function App() {
         paintCtl={{
           mode: paintMode,
           setMode: setPaintMode,
+          tool: paintTool,
+          setTool: setPaintTool,
           slot: paintSlot,
           setSlot: setPaintSlot,
           angle: paintAngle,
           setAngle: setPaintAngle,
+          brushSize,
+          setBrushSize,
           palette: FILAMENT_SWATCHES,
           facePaint,
           onStroke: onPaintStroke,

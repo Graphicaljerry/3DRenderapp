@@ -111,8 +111,10 @@ interface Props {
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   partColors?: Record<string, string>; // per-part fill colour (objectId → hex): "model" + attachment ids
   paintMode?: boolean; // Paint tool active: click a face region to fill it with the active filament
+  paintTool?: "fill" | "brush"; // fill = click bucket (smart-fill); brush = paint-on-drag
   paintSlot?: number; // active filament palette index (1-based); 0 = eraser
   paintAngle?: number; // smart-fill angle (deg) — how far a bucket fill flows across creases
+  brushSize?: number; // brush radius as a % of the model's largest dimension
   paintPalette?: string[]; // filament colours the paint tool assigns (hex); triColor indexes this
   facePaint?: Uint8Array | null; // persisted per-triangle paint to restore on load
   onPaintStroke?: (triColor: Uint8Array) => void; // a stroke committed — App persists it
@@ -256,11 +258,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintSlot, paintAngle, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintSlot, paintAngle, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintSlot, paintAngle, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -741,9 +743,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (at) holeIx.current.place.onPlace(at);
         return;
       }
-      // Paint tool: click a face → smart-fill the region → set it to the active filament
+      // Paint/Fill tool: click a face → smart-fill the region → set it to the active filament
       // slot (0 = eraser), update the overlay live, and hand the stroke to App to persist.
-      if (cb.current.paintMode) {
+      // (Brush is drag-driven in onDown/onMove/onUp, not here.)
+      if (cb.current.paintMode && cb.current.paintTool !== "brush") {
         if (!s2.mesh || !ensureTri(s2) || !s2.tri) return;
         if (!s2.paintMesh) rebuildPaintMesh(s2, cb.current.paintPalette ?? []);
         if (!s2.triColor) return;
@@ -838,6 +841,26 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s2.box = null;
     };
     let downAt: { x: number; y: number } | null = null;
+    // Brush paint: a left-press-drag in Paint/Brush mode paints a circular dab under the
+    // cursor along the whole drag (owns the pointer so orbit can't fight it).
+    let paintDrag: number | null = null; // active pointerId, or null
+    const brushPaintAt = (clientX: number, clientY: number) => {
+      const s2 = st.current;
+      if (!s2 || !s2.mesh || !s2.tri || !s2.triColor) return;
+      const rect = canvasRect();
+      rc.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1), camera);
+      const hit = rc.intersectObject(s2.mesh, false)[0];
+      if (!hit || hit.faceIndex == null) return;
+      s2.mesh.geometry.computeBoundingBox();
+      const sz = s2.mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+      const radius = (Math.max(sz.x, sz.y, sz.z) || 40) * (cb.current.brushSize ?? 8) / 100;
+      const local = s2.mesh.worldToLocal(hit.point.clone()); // tri positions are in mesh-local space
+      const region = brushRegion(s2.tri, hit.faceIndex, local, radius);
+      const slot = cb.current.paintSlot ?? 1;
+      const touched: number[] = [];
+      for (const t of region) if (s2.triColor[t] !== slot) { s2.triColor[t] = slot; touched.push(t); }
+      if (touched.length) updatePaintTris(s2, touched, cb.current.paintPalette ?? []);
+    };
     // Press-and-drag tape measure: press on the model pulls a live line; release commits
     // both (snapped) ends as one measurement. A press without movement falls back to the
     // classic click (first point / second point).
@@ -865,7 +888,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
-      if (axDrag || anchorDrag || measDrag) return;
+      if (axDrag || anchorDrag || measDrag || paintDrag !== null) return;
+      // Paint/Brush mode: a left press ON the model arms a paint drag (paints along the
+      // whole stroke, owns the pointer). Off the model, orbit proceeds as usual.
+      if (s2 && cb.current.paintMode && cb.current.paintTool === "brush" && s2.mesh && e.button === 0 && !inAxes(e)) {
+        if (!ensureTri(s2)) return;
+        const rect0 = canvasRect();
+        rc.setFromCamera(new THREE.Vector2(((e.clientX - rect0.left) / rect0.width) * 2 - 1, -((e.clientY - rect0.top) / rect0.height) * 2 + 1), camera);
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (hit) {
+          if (!s2.paintMesh) rebuildPaintMesh(s2, cb.current.paintPalette ?? []);
+          paintDrag = e.pointerId;
+          controls.enabled = false;
+          e.preventDefault();
+          try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+          brushPaintAt(e.clientX, e.clientY);
+          return;
+        }
+      }
       // Measure mode: a left press ON the model arms the tape drag (and owns the pointer
       // so orbit can't fight it). Off the model, orbit proceeds as usual.
       if (s2 && cb.current.measureMode && s2.mesh && e.button === 0 && !inAxes(e)) {
@@ -978,6 +1018,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
         return;
       }
+      if (paintDrag !== null) {
+        if (e.pointerId !== paintDrag) return;
+        paintDrag = null;
+        controls.enabled = true;
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
+        if (s2?.triColor) cb.current.onPaintStroke?.(s2.triColor.slice()); // persist the whole stroke once
+        return;
+      }
       if (measDrag) {
         if (e.pointerId !== measDrag.pointerId) return;
         const md = measDrag;
@@ -1054,6 +1102,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
+      // Brush paint drag: paint a dab under the cursor for the whole stroke.
+      if (paintDrag !== null) { if (e.pointerId !== paintDrag) return; e.preventDefault(); brushPaintAt(e.clientX, e.clientY); return; }
       // Orientation-gizmo drag: orbit the camera about the target (world Z stays up).
       if (axDrag) {
         if (e.pointerId !== axDrag.pointerId) return;
@@ -2472,6 +2522,34 @@ function smoothRegion(tri: TriData, start: number, cosThresh = Math.cos((33 * Ma
  *  (degrees). Angle is floored just above 0 so a perfectly flat face always fills at 0°. */
 function paintFillRegion(tri: TriData, seed: number, angleDeg: number): number[] {
   return smoothRegion(tri, seed, Math.cos((Math.max(0.5, angleDeg) * Math.PI) / 180));
+}
+
+/** Brush region: triangles reachable from `seed` across shared edges whose centroid lies
+ *  within `radius` (local units) of `center`. Adjacency-bounded growth keeps the dab on
+ *  the connected surface under the cursor instead of bleeding to the far side of the part. */
+function brushRegion(tri: TriData, seed: number, center: THREE.Vector3, radius: number): number[] {
+  const r2 = radius * radius;
+  const { pos, idx } = tri;
+  const c = new THREE.Vector3(), a = new THREE.Vector3();
+  const centroid = (t: number) => {
+    c.set(0, 0, 0);
+    for (let k = 0; k < 3; k++) { a.fromBufferAttribute(pos, idx ? idx.getX(t * 3 + k) : t * 3 + k); c.add(a); }
+    return c.multiplyScalar(1 / 3);
+  };
+  const seen = new Uint8Array(tri.count);
+  const out: number[] = [];
+  const stack = [seed];
+  seen[seed] = 1;
+  while (stack.length) {
+    const t = stack.pop()!;
+    out.push(t);
+    for (let e = 0; e < 3; e++) {
+      const nb = tri.adj[t * 3 + e];
+      if (nb < 0 || seen[nb]) continue;
+      if (centroid(nb).distanceToSquared(center) <= r2) { seen[nb] = 1; stack.push(nb); }
+    }
+  }
+  return out;
 }
 
 // ---- Per-face MMU paint overlay -----------------------------------------------------

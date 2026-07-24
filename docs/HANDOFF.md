@@ -124,11 +124,18 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
     (codec vectors + round-trip decode + export unzip/positional-keying + UI paint→persist→erase).
     ⚠️ NOT yet confirmed in real Bambu Studio — codec is source-verified but the full
     import chain (paint_color + filament_colour + object extruder) needs a smoke test there.
-    STILL OPEN (future phases): brush (paint-on-drag), per-region eraser + same-colour
-    bucket + eyedropper, paint on ATTACHMENTS (MVP paints the model mesh only), gap-fill,
-    section view, and CAD-edit-resilient spatial paint replay (MVP paint is guaranteed
-    correct on stable meshes — STL/GLB/gen; a CAD fillet/chamfer reshuffles triangles and
-    the `count` guard drops the paint on the next export).
+    Brush + per-region eraser: SHIPPED (#129). The Paint flyout now has a Fill|Brush
+    tool toggle: Fill = click bucket (smart-fill angle), Brush = press-drag freehand
+    (radius-bounded `brushRegion` BFS over adjacency, brush size = % of the model's
+    largest dim; drag owns the pointer like the tape-measure drag). An eraser swatch
+    (slot 0) removes paint with either tool. Works on CAD AND meshes (the earlier
+    screenshot was a CAD phone stand — Fill uses the B-rep faceId there for clean whole-
+    face fills; meshes use the dihedral flood-fill). Tests extended in facepaint-3mf-e2e.
+    STILL OPEN (future phases): same-colour bucket + eyedropper, paint on ATTACHMENTS
+    (MVP paints the model mesh only), gap-fill, section view, and CAD-edit-resilient
+    spatial paint replay (MVP paint is guaranteed correct on stable meshes — STL/GLB/gen;
+    a CAD fillet/chamfer reshuffles triangles and the `count` guard drops the paint on the
+    next export).
   - Wire the newer free HF Spaces (tencent/Hunyuan3D-2.1, microsoft/TRELLIS.2,
     stabilityai/stable-point-aware-3d) into `gen/providers/hf.ts` — researched and
     promising, but their Gradio endpoint signatures couldn't be verified from the

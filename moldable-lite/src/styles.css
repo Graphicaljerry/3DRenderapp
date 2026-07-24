@@ -536,6 +536,7 @@ button { font-family: inherit; cursor: pointer; }
 .paint-swatches .psw { width: 100%; aspect-ratio: 1; border-radius: 5px; border: none; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
 .paint-swatches .psw:hover { transform: scale(1.12); }
 .paint-swatches .psw.on { box-shadow: inset 0 0 0 1px rgba(0,0,0,.28), 0 0 0 2px var(--accent); }
+.paint-swatches .psw-erase { display: inline-flex; align-items: center; justify-content: center; color: var(--ink2); background: repeating-conic-gradient(var(--subt) 0% 25%, var(--bg) 0% 50%) 50% / 8px 8px; box-shadow: inset 0 0 0 1px var(--bord); }
 .paint-angle { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink2); }
 .paint-angle input[type="range"] { width: 100%; }
 .lp-empty { padding: 8px; color: var(--subt); font-size: 12px; }

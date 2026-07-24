@@ -32,6 +32,19 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
     paths), cloned specimens of every control, provenance badges, dark palette
     swatches.
   - The 2026-07-19 artboards are renamed with a "(v1)" suffix — superseded, kept.
+  - **Light-mode v208 set (added 2026-07-24, Jerry's request)**: every dark v208
+    artboard now has a light twin, built by cloning the dark node and running a
+    dark→light hex-remap pass (the styles.css `:root` vs `[data-theme=dark]` map)
+    over all descendant fills/strokes, then swapping the 3D-canvas image for a
+    light-theme render (`harness/canvas-clean.mjs THEME=light`). Light nodes:
+    `108:2` Workspace — light · v208, `109:2` Workspace — Settings open · light,
+    `110:2` Menus & panels — light, `112:2` UI kit — light (icons/controls/badges
+    recolored; the palette row was dropped — the dedicated Colors — Light board
+    covers it accurately, and the build plate stays dark slate in BOTH themes so a
+    recolored plate swatch would have been wrong). Re-run trick if more dark nodes
+    appear: scan for opaque solid fills with luminance < 0.28 that aren't the
+    theme's own ink (#18201E/#333D39) or the intentional dark plate (#363C42),
+    then remap the stragglers (dark-teal pills → #E7F5F2, dark neutrals → #EFF1F4).
 - Jerry asked (2026-07-23) for Figma MCP calls to auto-accept: `.claude/settings.json`
   now allowlists `mcp__Figma`. It loads at session start, so new sessions run
   prompt-free; a settings file created mid-session may not hot-load.

@@ -57,6 +57,17 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   `findAll`); text-match anchors must be exact ("◇ View", not "View" — that
   matches the "3D View" tab first).
 
+- **Engine switch is now three-way (#130)**: the composer toggle is **Auto ·
+  Precise (CAD) · Generative (AI mesh)**, `App.ModePref = "auto" | Mode`. `mode`
+  stays the RESOLVED engine (viewer/badge); `modePref` (persisted
+  `moldable_mode_pref`, **default "auto"**) is the user's choice. Auto is the
+  visible form of the routing that already existed — the send() classifier
+  (`classifyIntent` + ORGANIC_RE/CADISH_RE heuristics) is now gated on
+  `modePref === "auto"` (was the private `modeTouched` ref, removed). Picking
+  Precise/Generative pins the engine; the brain picker + web toggle show for
+  auto|precise, the engine picker for generative. Routing note reworded to "Auto
+  chose …". Test: `harness/automode-e2e.mjs`.
+
 ## Resuming in a new session — read me first
 
 - **Workflow (standing instruction from Jerry): everything ships to main.** Develop

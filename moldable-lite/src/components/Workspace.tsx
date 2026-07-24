@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
 import type { Pin } from "../store/types";
-import type { ChatMessage, Mode } from "../App";
+import type { ChatMessage, Mode, ModePref } from "../App";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
@@ -944,8 +944,9 @@ interface Props {
   onSignOut: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
-  mode: Mode;
-  setMode: (m: Mode) => void;
+  mode: Mode; // resolved engine (for badges / active-kind display)
+  modePref: ModePref; // the composer switch: "auto" | "precise" | "generative"
+  pickMode: (p: ModePref) => void;
   webMode: "auto" | "on" | "off";
   onCycleWeb: () => void;
   guided: boolean;
@@ -1350,15 +1351,16 @@ export function Workspace(p: Props) {
             <div className="modebar">
               <div className="modebar-row">
                 <div className="seg">
-                  <button className={p.mode === "precise" ? "on" : ""} onClick={() => p.setMode("precise")}>Precise (CAD)</button>
-                  <button className={p.mode === "generative" ? "on" : ""} onClick={() => p.setMode("generative")}>Generative (AI mesh)</button>
+                  <button className={p.modePref === "auto" ? "on" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
+                  <button className={p.modePref === "precise" ? "on" : ""} title="Precise (CAD) — exact, editable, dimensioned parts · STEP export" onClick={() => p.pickMode("precise")}>Precise (CAD)</button>
+                  <button className={p.modePref === "generative" ? "on" : ""} title="Generative (AI mesh) — organic / sculptural shapes from text or a photo" onClick={() => p.pickMode("generative")}>Generative (AI mesh)</button>
                 </div>
-                {p.mode === "precise" ? (
+                {p.modePref !== "generative" ? (
                   <BrainPicker brain={p.brain} hasKey={p.hasBrainKey} onPick={p.onPickBrain} />
                 ) : (
                   <EnginePicker provider={p.genProvider} model={p.genModel} hasKey={p.hasGenKey} onPick={p.onPickEngine} />
                 )}
-                {p.mode === "precise" && (
+                {p.modePref !== "generative" && (
                   <button
                     type="button"
                     className={`web-toggle web-${p.webMode}`}
@@ -1374,7 +1376,9 @@ export function Workspace(p: Props) {
               <span className="modehint">
                 {p.autoPick
                   ? p.autoPick
-                  : p.mode === "precise"
+                  : p.modePref === "auto"
+                  ? "Describe what you want to print — Auto picks exact CAD or AI mesh for you (tap Precise or Generative to choose yourself)"
+                  : p.modePref === "precise"
                   ? p.guided
                     ? "Replacement part — clearance is added to fitted features"
                     : p.imageUrl

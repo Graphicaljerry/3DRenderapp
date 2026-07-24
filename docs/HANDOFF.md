@@ -57,6 +57,19 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   `findAll`); text-match anchors must be exact ("◇ View", not "View" — that
   matches the "3D View" tab first).
 
+- **Native macOS app scaffold (#131)**: `moldable-lite/src-tauri/` wraps the
+  existing web `dist/` in **Tauri v2** → a tiny (~20-35 MB) Apple-Silicon `.dmg`.
+  Chosen over Electron because the app is WKWebView-safe (no SharedArrayBuffer/
+  threads; single-threaded WASM; same-origin ES module workers; one Supabase
+  origin). `vite.config.ts` edits are **env-gated on `TAURI_ENV_PLATFORM`** — the
+  web build is byte-identical (PWA on, absolute base); the Tauri build drops the
+  service worker + uses relative `./` base (verified: web has sw.js, tauri build
+  has none). CI: `.github/workflows/build-mac.yml` builds the `.dmg` on a `macos-14`
+  runner via `tauri-apps/tauri-action` on `v*` tags (unsigned beta; APPLE_* secrets
+  commented for later signing). The `.dmg` can ONLY be built on macOS — not on this
+  Linux box. Only the *optional* on-device WebLLM degrades (WebGPU, macOS 26+).
+  Fast-follow: `.3mf`/`.stl`/`.step` file associations via a small Rust addition +
+  tauri-plugin-fs/dialog. See `src-tauri/README.md`.
 - **Engine switch is now three-way (#130)**: the composer toggle is **Auto ·
   Precise (CAD) · Generative (AI mesh)**, `App.ModePref = "auto" | Mode`. `mode`
   stays the RESOLVED engine (viewer/badge); `modePref` (persisted

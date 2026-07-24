@@ -62,6 +62,7 @@ export interface Project {
   folder?: string; // library folder name (flat, user-defined); unset = unfiled
   pins?: Pin[]; // spatial notes / AI-edit markers on the model
   plates?: { count: number; of: Record<string, number>; names?: Record<number, string> }; // build plates: how many, which object prints where, user labels
+  partColors?: Record<string, string>; // per-object fill colour (objectId → hex): "model" + attachment ids. Exported as filament slots so Bambu/Orca pre-assign each part.
   genSource?: GenSource;
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest

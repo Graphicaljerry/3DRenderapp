@@ -107,6 +107,7 @@ interface Props {
   plateFor: (key: string) => number; // which plate an object ("model" or attachment id) is on
   showcase: boolean; // presentation mode: clean stage, studio light, slow turntable
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
+  partColors?: Record<string, string>; // per-part fill colour (objectId → hex): "model" + attachment ids
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   clay: boolean; // View > Grayscale: studio clay presentation (smooth display normals + neutral material)
   bed: { x: number; y: number }; // printer plate size (mm) — drives the solid build plate
@@ -245,7 +246,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
@@ -1523,6 +1524,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
   }, [attachments]);
 
+  // Per-part fill colour: tint each attachment mesh to what the user painted in the Objects
+  // panel, falling back to its own tint (separated parts = model grey, foreign objects = teal).
+  // Separated pieces carry per-vertex colours, which always win. Runs after the effect above
+  // so freshly-created meshes get their colour too.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    for (const [id, m] of s.attachMap) {
+      const mat = m.material as THREE.MeshStandardMaterial;
+      if (mat.vertexColors) continue;
+      const a = attachments.find((x) => x.id === id);
+      mat.color.set(partColors?.[id] ?? a?.tint ?? "#7fc4b9");
+      mat.needsUpdate = true;
+    }
+  }, [partColors, attachments]);
+
   // Bounding box around the selected whole part (layers panel / idle-mode tap / transform).
   useEffect(() => {
     const s = st.current;
@@ -1675,12 +1692,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       m.side = THREE.FrontSide;
       m.roughness = rough;
       m.metalness = metal;
+      // A painted model (Objects panel fill colour) shows as solid filament colour and
+      // drops the baked texture map — the user asked for a single print colour there.
+      const modelColor = partColors?.["model"];
       const hasUv = !!geometry?.getAttribute("uv");
-      m.map = texture && hasUv ? texture : null;
-      if (!m.vertexColors) m.color.set(m.map ? "#ffffff" : appearance.color);
+      m.map = modelColor ? null : (texture && hasUv ? texture : null);
+      if (!m.vertexColors) m.color.set(modelColor ?? (m.map ? "#ffffff" : appearance.color));
     }
     m.needsUpdate = true;
-  }, [appearance.color, appearance.finish, texture, clay, geometry]);
+  }, [appearance.color, appearance.finish, texture, clay, geometry, partColors]);
 
   // Clay presentation, part 2: AI mesh soups carry FLAT per-triangle normals — the
   // baked texture used to hide the faceting, so plain gray looked like a pencil

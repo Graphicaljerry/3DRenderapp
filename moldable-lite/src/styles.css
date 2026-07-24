@@ -516,6 +516,19 @@ button { font-family: inherit; cursor: pointer; }
 .lp-check { width: 14px; height: 14px; accent-color: var(--accent); flex: 0 0 auto; cursor: pointer; }
 .lp-dot { width: 12px; height: 12px; border-radius: 4px; flex: 0 0 auto; }
 .lp-dot.pin { width: 16px; height: 16px; border-radius: 999px; background: var(--accent-w); color: var(--accent-d); font-size: 9.5px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; }
+/* Per-part fill-colour swatch (Objects panel) — the interactive dot that opens the palette. */
+.lp-swatch { flex: 0 0 auto; padding: 2px; border: none; background: none; cursor: pointer; border-radius: 5px; line-height: 0; }
+.lp-swatch:hover { background: var(--surf); }
+.lp-swatch-dot { display: block; width: 13px; height: 13px; border-radius: 4px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
+.lp-swatch:not(.painted) .lp-swatch-dot { opacity: .5; box-shadow: inset 0 0 0 1.5px var(--bord); background: repeating-conic-gradient(var(--subt) 0% 25%, transparent 0% 50%) 50% / 7px 7px; }
+.swatch-head { font-size: 11px; font-weight: 600; color: var(--subt); padding: 2px 4px 6px; }
+.swatch-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; padding: 2px 2px 8px; }
+.swatch-grid .sw { width: 100%; aspect-ratio: 1; border-radius: 5px; border: none; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
+.swatch-grid .sw:hover { transform: scale(1.12); }
+.swatch-grid .sw.on { box-shadow: inset 0 0 0 1px rgba(0,0,0,.28), 0 0 0 2px var(--accent); }
+.swatch-custom { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 4px; font-size: 12px; color: var(--ink2); border-top: 1px solid var(--bord); }
+.swatch-custom input[type="color"] { width: 34px; height: 22px; padding: 1px; border: 1px solid var(--bord); border-radius: 5px; background: none; cursor: pointer; }
+.swatch-clear { font-size: 11.5px; color: var(--subt); }
 .lp-empty { padding: 8px; color: var(--subt); font-size: 12px; }
 
 /* Tools & gestures cheat sheet (the ? button) — tooltips don't exist on touch. */

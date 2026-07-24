@@ -56,8 +56,11 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   from `moldable-lite/` (`npm run dev` — it includes the /prox relay), run the
   suites touching your area, plus `npx tsc --noEmit` and `npm run build`.
 - **Standing product rules**: the house AI (sponsored-key relay) stays DORMANT
-  unless Jerry explicitly asks to enable it. Bambu multi-plate project 3MF is
-  awaiting confirmation in a real slicer — don't declare it done.
+  unless Jerry explicitly asks to enable it. Bambu multi-plate project 3MF AND the
+  new per-part colour→filament export (#126) are awaiting confirmation in a real
+  slicer — encoded to the documented Bambu/Orca dialect and unit-tested
+  (`harness/color3mf-e2e.mjs`), but not yet opened in Bambu Studio itself. Don't
+  declare the colour handoff "done" until Jerry confirms the AMS slots come through.
 - **Sandbox limits (Claude Code remote)**: shell/browser egress to huggingface.co,
   *.hf.space and api.meshy.ai is blocked — stub external APIs with Playwright
   route interception (see `harness/hf-fallback-e2e.mjs`, `harness/cost-e2e.mjs`);
@@ -84,8 +87,17 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
     (Meshy preview→refine continues the SAME task; Tripo draft→refine) so "preview
     then commit" wastes nothing, (3) an explicit opt-in "Compare engines" that runs
     untextured/preview stages only (~$0.16–0.35 total) and refines the winner.
-    Bambu-style per-region fill-color painting: big, separate feature (mesh face
-    segmentation + painted regions → 3MF color zones) — treat as its own roadmap item.
+    Per-part fill colour: SHIPPED (#126). Objects-panel swatch on the model + each
+    attachment (Bambu-Basic palette + custom picker + clear), rendered live in the
+    viewer, persisted per project (`Project.partColors`), and exported so the slicer
+    picks it up — distinct colours become filament slots: project 3MF writes per-object
+    `extruder` + `Metadata/project_settings.config` `filament_colour`; core per-plate
+    3MF writes `<basematerials>` displaycolor + object `pid/pindex`. Unpainted parts
+    share a neutral default filament (slot 1). Multi-colour WITHIN one solid = separate
+    it into parts first, then paint each.
+    STILL OPEN — per-REGION/per-face painting (paint zones inside a single solid, true
+    MMU/`mmu_segmentation`): big, separate feature (face segmentation + painted regions
+    → per-triangle 3MF paint data). Treat as its own roadmap item.
   - Wire the newer free HF Spaces (tencent/Hunyuan3D-2.1, microsoft/TRELLIS.2,
     stabilityai/stable-point-aware-3d) into `gen/providers/hf.ts` — researched and
     promising, but their Gradio endpoint signatures couldn't be verified from the

@@ -17,12 +17,64 @@ export function geometryToOBJ(geometry: THREE.BufferGeometry): Blob {
   return new Blob([text], { type: "model/obj" });
 }
 
+// ---- Per-part colour → filament mapping ----------------------------------------
+// A part the user painted in the Objects panel carries a hex colour. On export, every
+// DISTINCT colour becomes one filament slot (1-based). Unpainted parts share a neutral
+// default filament so a painted part never accidentally inherits another part's colour.
+// Bambu Studio / OrcaSlicer read the per-object extruder (project 3MF) or the object's
+// base material (core 3MF) to pre-assign each part to the matching filament.
+const DEFAULT_FILAMENT = "#D9D9D9"; // neutral gray for anything left unpainted
+
+/** Normalise a hex colour to upper-case #RRGGBB, or "" if absent/invalid. */
+function normHex(c?: string): string {
+  if (!c) return "";
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(c.trim());
+  return m ? `#${m[1].toUpperCase()}` : "";
+}
+
+/** Ordered filament palette (slot 1..N) + a colour→slot lookup for a set of parts. */
+function buildFilaments(parts: { color?: string }[]): { palette: string[]; slotOf: (c?: string) => number; painted: boolean } {
+  const anyUnpainted = parts.some((p) => !normHex(p.color));
+  const slot = new Map<string, number>();
+  const palette: string[] = [];
+  if (anyUnpainted) { palette.push(DEFAULT_FILAMENT); slot.set("", 1); } // slot 1 = default filament
+  for (const p of parts) {
+    const c = normHex(p.color);
+    if (!c || slot.has(c)) continue;
+    palette.push(c);
+    slot.set(c, palette.length);
+  }
+  const distinctPainted = palette.length - (anyUnpainted ? 1 : 0);
+  return { palette, slotOf: (c?: string) => slot.get(normHex(c)) ?? 1, painted: distinctPainted > 0 };
+}
+
+/** Bambu/Orca project filament settings — the file the slicer reads to show the AMS
+ *  slots pre-loaded with the exact colours the user painted. Parallel arrays, one entry
+ *  per slot; we fill the print-relevant ones and let the slicer default the rest. */
+function projectSettingsConfig(palette: string[]): string {
+  const n = palette.length;
+  const rep = <T,>(v: T) => Array.from({ length: n }, () => v);
+  return JSON.stringify({
+    filament_colour: palette,
+    filament_type: rep("PLA"),
+    filament_settings_id: rep("Generic PLA"),
+    filament_ids: rep("GFL99"),
+    version: "01.10.01.50",
+    from: "Moldable",
+  }, null, 1);
+}
+
 /** Minimal core-3MF (OPC zip). Carries mm units, unlike STL. */
 /** Several positioned solids → ONE 3MF with a real <object> per part, named — slicers
- *  (Bambu/Orca/Prusa) list them separately for arranging, painting, per-part settings. */
-export function geometriesTo3MF(parts: { geometry: THREE.BufferGeometry; name: string }[]): Blob {
+ *  (Bambu/Orca/Prusa) list them separately for arranging, painting, per-part settings.
+ *  A painted part carries its colour as a core-3MF base material (displaycolor), so any
+ *  conformant reader shows it in the right colour. */
+export function geometriesTo3MF(parts: { geometry: THREE.BufferGeometry; name: string; color?: string }[]): Blob {
+  const { palette, slotOf, painted } = buildFilaments(parts);
   const objects: string[] = [];
   const items: string[] = [];
+  // A single <basematerials> resource holds the palette; objects point at it by pindex.
+  const MAT_ID = parts.length + 1;
   parts.forEach((part, pi) => {
     const g = part.geometry;
     const pos = g.getAttribute("position") as THREE.BufferAttribute;
@@ -34,12 +86,16 @@ export function geometriesTo3MF(parts: { geometry: THREE.BufferGeometry; name: s
     else for (let i = 0; i < pos.count; i += 3) tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"/>`);
     const id = pi + 1;
     const safe = part.name.replace(/[<>&"]/g, "_");
-    objects.push(`<object id="${id}" type="model" name="${safe}"><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
+    const matAttr = painted ? ` pid="${MAT_ID}" pindex="${slotOf(part.color) - 1}"` : "";
+    objects.push(`<object id="${id}" type="model" name="${safe}"${matAttr}><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
     items.push(`<item objectid="${id}"/>`);
   });
+  const baseMats = painted
+    ? `<basematerials id="${MAT_ID}">${palette.map((c, i) => `<base name="Filament ${i + 1}" displaycolor="${c}FF"/>`).join("")}</basematerials>`
+    : "";
   const model = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
- <resources>${objects.join("")}</resources>
+ <resources>${baseMats}${objects.join("")}</resources>
  <build>${items.join("")}</build>
 </model>`;
   return zip3mf(model);
@@ -58,11 +114,12 @@ export function geometriesTo3MF(parts: { geometry: THREE.BufferGeometry; name: s
  *  Parts keep their relative placement per plate; each plate's group is centred on its
  *  bed and dropped to z=0. */
 export function platesToProject3MF(
-  parts: { geometry: THREE.BufferGeometry; name: string; plate: number }[],
+  parts: { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string }[],
   plateCount: number,
   bed: { x: number; y: number },
   plateNames?: Record<number, string>,
 ): Blob {
+  const { palette, slotOf, painted } = buildFilaments(parts);
   const stride = bed.x * 1.2;
   // Per-plate group bounds → one shared translation per plate (relative layout survives).
   const groups = new Map<number, { min: THREE.Vector3; max: THREE.Vector3 }>();
@@ -105,8 +162,9 @@ export function platesToProject3MF(
     const transform = `1 0 0 0 1 0 0 0 1 ${f(tx)} ${f(ty)} ${f(tz)}`;
     objects.push(`<object id="${id}" type="model" name="${safe}"><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
     items.push(`<item objectid="${id}" transform="${transform}" printable="1"/>`);
+    const ex = slotOf(part.color); // filament slot this painted part prints on (1 = default)
     settingsObjects.push(
-      `  <object id="${id}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="1"/>\n    <part id="1" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n    </part>\n  </object>`,
+      `  <object id="${id}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="1" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n  </object>`,
     );
     if (!instancesByPlate.has(part.plate)) instancesByPlate.set(part.plate, []);
     instancesByPlate.get(part.plate)!.push(
@@ -140,7 +198,11 @@ ${assembleItems.join("\n")}
  <resources>${objects.join("")}</resources>
  <build>${items.join("")}</build>
 </model>`;
-  return zip3mf(model, { "Metadata/model_settings.config": modelSettings });
+  const extras: Record<string, string> = { "Metadata/model_settings.config": modelSettings };
+  // Painted parts → hand Bambu/Orca the exact filament colours so the AMS slots open
+  // pre-loaded, and each object is already assigned to its slot via the extruder above.
+  if (painted) extras["Metadata/project_settings.config"] = projectSettingsConfig(palette);
+  return zip3mf(model, extras);
 }
 
 function zip3mf(model: string, extras?: Record<string, string>): Blob {

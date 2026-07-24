@@ -90,6 +90,7 @@ export type ChatMessage = {
   sources?: { url: string; title?: string }[]; // web pages a research lookup used
 };
 export type Mode = "precise" | "generative";
+export type ModePref = "auto" | Mode; // composer switch: Auto lets the app pick the engine
 
 export type SettingsPane = "ai" | "mesh" | "printer" | "appearance" | "sync";
 // User chat-bubble tint presets (mixed over the bubble base in CSS, both themes).
@@ -805,7 +806,7 @@ export default function App() {
     try { return { move: 0, rotate: 15, ...JSON.parse(localStorage.getItem("moldable_snap") ?? "{}") }; } catch { return { move: 0, rotate: 15 }; }
   });
   const setSnap = (v: { move: number; rotate: number }) => { setSnapState(v); try { localStorage.setItem("moldable_snap", JSON.stringify(v)); } catch { /* private mode */ } };
-  const modeTouched = useRef(false); // user clicked the Precise/Generative switch themselves
+  // (engine routing is gated on `modePref === "auto"` — see pickMode / send)
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
@@ -846,7 +847,21 @@ export default function App() {
   const [facesText, setFacesText] = useState("");
   const [faceText, setFaceText] = useState("");
 
-  const [mode, setMode] = useState<Mode>("precise");
+  const [mode, setMode] = useState<Mode>("precise"); // RESOLVED engine for the current build (what the viewer/engine use)
+  // The user's ENGINE preference: "auto" lets the app classify each new ask and pick
+  // Precise (CAD) vs Generative (mesh) for them; "precise"/"generative" force it.
+  const [modePref, setModePrefState] = useState<ModePref>(() => {
+    const v = localStorage.getItem("moldable_mode_pref");
+    return v === "precise" || v === "generative" || v === "auto" ? v : "auto";
+  });
+  /** Pick the engine preference from the composer switch. Auto re-enables classification;
+   *  an explicit choice pins the resolved engine and turns routing off. */
+  const pickMode = (pref: ModePref) => {
+    setModePrefState(pref);
+    try { localStorage.setItem("moldable_mode_pref", pref); } catch { /* ignore */ }
+    if (pref === "precise") setMode("precise");
+    else if (pref === "generative") setMode("generative");
+  };
   // Guided "fix a broken part" flow + FDM fit tolerance (applies to mating features).
   const [guided, setGuided] = useState(false);
   const [fit, setFit] = useState<FitId>("snug");
@@ -2566,7 +2581,7 @@ export default function App() {
     const brainKeys = { anthropic: key, ...llmKeys };
     let routedMode: Mode | null = null;
     let refineRoute = false; // routed to mesh specifically to refine the CURRENT model
-    if (!forceMode && !result && !modeTouched.current && (p || (image && !image.markup))) {
+    if (!forceMode && !result && modePref === "auto" && (p || (image && !image.markup))) {
       const organic = ORGANIC_RE.test(p) && !CADISH_RE.test(p);
       const cadish = CADISH_RE.test(p) && !ORGANIC_RE.test(p);
       if (mode === "precise" && organic) routedMode = "generative";
@@ -2592,8 +2607,8 @@ export default function App() {
         setMessages((m) => [...m, {
           id: mid(), role: "assistant",
           text: routedMode === "generative"
-            ? `${seen} organic/sculptural — I routed it to **Generative (AI mesh)**, which models freeform shapes far better than CAD. Tap Precise (CAD) above to override.`
-            : `${seen} like a dimensioned, functional part — I routed it to **Precise (CAD)** for exact measurements and STEP export. Tap Generative (AI mesh) above to override.`,
+            ? `${seen} organic/sculptural — **Auto** chose **Generative (AI mesh)**, which models freeform shapes far better than CAD. Switch engines anytime with the buttons above.`
+            : `${seen} like a dimensioned, functional part — **Auto** chose **Precise (CAD)** for exact measurements and STEP export. Switch engines anytime with the buttons above.`,
         }]);
       }
     }
@@ -3351,7 +3366,8 @@ export default function App() {
           });
         }}
         mode={mode}
-        setMode={(m) => { modeTouched.current = true; setMode(m); }}
+        modePref={modePref}
+        pickMode={pickMode}
         webMode={webMode}
         onCycleWeb={cycleWeb}
         guided={guided}

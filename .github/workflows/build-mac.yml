@@ -58,9 +58,13 @@ jobs:
         with:
           projectPath: moldable-lite # where src-tauri/ + package.json live
           args: --target aarch64-apple-darwin
+          # On a v* tag: publish a Release with the .dmg attached.
+          # On a manual run: leave BOTH empty so tauri-action just builds — the .dmg
+          # comes back as a run artifact (no public Release). tauri-action errors if
+          # releaseName is set without tagName, so they must be blank together.
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || '' }}
-          releaseName: "Moldable ${{ github.ref_name }}"
-          releaseBody: "Native macOS (Apple Silicon) build. Download the .dmg below and open it. (Beta builds are unsigned — right-click the app → Open the first time.)"
+          releaseName: ${{ github.ref_type == 'tag' && format('Moldable {0}', github.ref_name) || '' }}
+          releaseBody: ${{ github.ref_type == 'tag' && 'Native macOS (Apple Silicon) build. Download the .dmg below. (Unsigned beta — right-click the app → Open the first time.)' || '' }}
           releaseDraft: false
           prerelease: false
 

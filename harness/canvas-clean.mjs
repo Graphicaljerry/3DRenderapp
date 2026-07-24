@@ -4,7 +4,8 @@ import { chromium } from "playwright";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
-await page.addInitScript(() => { localStorage.setItem("moldable_entered", "1"); localStorage.setItem("moldable_theme", "dark"); });
+const THEME = process.env.THEME === "light" ? "light" : "dark";
+await page.addInitScript((t) => { localStorage.setItem("moldable_entered", "1"); localStorage.setItem("moldable_theme", t); }, THEME);
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".topbar", { timeout: 60_000 });
 
@@ -23,6 +24,7 @@ await page.addStyleTag({ content: ".canvas-rail,.zoom-ctl,.view-snaps,.mesh-stat
 await page.waitForTimeout(300);
 const canvas = page.locator(".viewer canvas").first();
 const box = await canvas.boundingBox();
-await canvas.screenshot({ path: "harness/canvas-clean.png" });
+const out = THEME === "light" ? "harness/canvas-clean-light.png" : "harness/canvas-clean.png";
+await canvas.screenshot({ path: out });
 await browser.close();
-console.log("saved harness/canvas-clean.png", JSON.stringify(box));
+console.log("saved " + out, JSON.stringify(box));

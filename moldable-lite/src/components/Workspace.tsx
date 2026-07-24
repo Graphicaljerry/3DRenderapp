@@ -306,6 +306,62 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGra
   );
 }
 
+// A Bambu-Basic-flavoured filament palette for quick per-part painting (+ a custom picker).
+const FILAMENT_SWATCHES = [
+  "#E02D2D", "#F5820F", "#F5C400", "#25B34B", "#1C8FE0", "#3B4CC0",
+  "#8E44AD", "#E85AAE", "#8B5A2B", "#111418", "#9AA0A6", "#F5F5F5",
+];
+
+/** Per-part fill-colour picker in the Objects panel — Bambu-Studio-style. A painted part
+    renders tinted in the viewer and exports as its own filament slot, so the slicer opens
+    with each part pre-assigned to the matching colour. */
+function ColorSwatch({ color, fallback, onPick, label }: { color?: string; fallback?: string; onPick: (hex: string | null) => void; label: string }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const close = () => setAnchor(null);
+  const shown = color ?? fallback ?? "#7fc4b9";
+  return (
+    <span onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btn}
+        className={`lp-swatch${color ? " painted" : ""}`}
+        title={color ? `${label}: ${color} — click to change or clear` : `${label}: pick a fill colour (prints as its own filament)`}
+        aria-haspopup="menu"
+        aria-expanded={!!anchor}
+        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}
+      >
+        <span className="lp-swatch-dot" style={{ background: shown }} />
+      </button>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={close} width={188}>
+          <div className="swatch-head" role="none">Fill colour</div>
+          <div className="swatch-grid" role="none">
+            {FILAMENT_SWATCHES.map((c) => (
+              <button
+                key={c}
+                className={`sw${color?.toLowerCase() === c.toLowerCase() ? " on" : ""}`}
+                style={{ background: c }}
+                title={c}
+                aria-label={`Paint ${c}`}
+                onClick={() => { onPick(c); close(); }}
+              />
+            ))}
+          </div>
+          <label className="swatch-custom">
+            <span>Custom</span>
+            <input type="color" value={color ?? "#7fc4b9"} onChange={(e) => onPick(e.target.value.toUpperCase())} aria-label="Custom fill colour" />
+          </label>
+          {color && (
+            <button role="menuitem" className="pmenu-item swatch-clear" onClick={() => { onPick(null); close(); }}>
+              Clear — use the default filament
+            </button>
+          )}
+        </AnchoredMenu>
+      )}
+    </span>
+  );
+}
+
 /** Pick which build plate an object prints on — a menu, not a blind cycle. */
 function PlateMenu({ value, count, names, onPick, onNewPlate }: { value: number; count: number; names?: Record<number, string>; onPick: (n: number) => void; onNewPlate: () => void }) {
   const btn = useRef<HTMLButtonElement>(null);
@@ -1000,6 +1056,8 @@ interface Props {
   setShowcase: (v: boolean) => void;
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
   setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void;
+  partColors: Record<string, string>;
+  setPartColor: (key: string, hex: string | null) => void;
   texture: THREE.Texture | null;
   onApplySurface: (pattern: SurfacePattern, scale: number, depth: number) => void;
   printer: PrinterDefaults;
@@ -1513,6 +1571,7 @@ export function Workspace(p: Props) {
                 onAttachSelect={p.onAttachSelect}
                 snap={p.snap}
                 appearance={p.appearance}
+                partColors={p.partColors}
                 texture={p.texture}
                 transformMode={p.transformCtl.mode}
                 measureMode={p.measureCtl.mode}
@@ -1776,6 +1835,7 @@ export function Workspace(p: Props) {
                         {p.modelBadge.label}
                       </span>
                     )}
+                    {p.geometry && <ColorSwatch label={p.projectName} color={p.partColors["model"]} onPick={(hex) => p.setPartColor("model", hex)} />}
                     {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
                     {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
                   </div>
@@ -1789,7 +1849,7 @@ export function Workspace(p: Props) {
                         <div key={a.id} className={`lp-row${on ? " on" : ""}${sub ? " sub" : ""}`} style={{ cursor: "pointer" }} title={`${a.name} — click to select, double-click the name to rename`} onClick={(e) => p.onAttachSelect(a.id, e.shiftKey)}>
                           {sub && <span className="lp-tie" aria-hidden="true">└</span>}
                           <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
-                          <span className="lp-dot" style={{ background: "#7fc4b9" }} />
+                          <ColorSwatch label={a.name} color={p.partColors[a.id]} fallback="#7fc4b9" onPick={(hex) => p.setPartColor(a.id, hex)} />
                           <EditableName name={a.name} className="lp-name" editing={renaming === a.id} onStartEdit={() => setRenaming(a.id)} onRename={(v) => p.onRenameAttachment(a.id, v)} onDone={() => setRenaming(null)} />
                           <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
                           <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>

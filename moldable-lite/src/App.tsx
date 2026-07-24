@@ -377,6 +377,17 @@ export default function App() {
   });
   const [activePlate, setActivePlate] = useState<number | 0>(0); // 0 = show all plates
   const [showcase, setShowcase] = useState(false); // presentation mode: clean stage + turntable
+  // Per-part fill colour (Bambu-style): objectId ("model" or an attachment id) → hex.
+  // Painted parts render tinted in the viewer and export as filament slots the slicer picks up.
+  const [partColors, setPartColors] = useState<Record<string, string>>({});
+  const colorFor = (key: string): string | undefined => partColors[key];
+  const setPartColor = (key: string, hex: string | null) =>
+    setPartColors((m) => {
+      const next = { ...m };
+      if (hex) next[key] = hex;
+      else delete next[key];
+      return next;
+    });
   const plateFor = (key: string) => Math.min(plateOf[key] ?? 1, plateCount);
   // No upper clamp here: "move to a plate I just added" arrives before plateCount's
   // re-render, so the raw value is stored and plateFor() clamps on read instead.
@@ -408,15 +419,15 @@ export default function App() {
     setActivePlate((a) => (a === 0 ? 0 : a === n ? 0 : a > n ? a - 1 : a));
   };
   /** Everything on the canvas, with its plate — the shared input for both plate exports. */
-  function collectPlateParts(): { geometry: THREE.BufferGeometry; name: string; plate: number }[] | null {
+  function collectPlateParts(): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string }[] | null {
     if (!geometry) return null;
-    const parts = [{ geometry, name: project?.name ?? "model", plate: plateFor("model") }];
+    const parts = [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model") }];
     for (const a of attachments) {
       const baked = viewer.current?.bakeAttachment(a.id);
       if (!baked) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(baked, 3));
-      parts.push({ geometry: g, name: a.name, plate: plateFor(a.id) });
+      parts.push({ geometry: g, name: a.name, plate: plateFor(a.id), color: colorFor(a.id) });
     }
     return parts;
   }
@@ -1023,6 +1034,21 @@ export default function App() {
     }, 600);
     return () => clearTimeout(t);
   }, [plateOf, plateCount, plateNames]);
+
+  // ---- per-part colours: save with the project (same debounced pattern) ----
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const pr = projectRef.current;
+      if (!pr) return;
+      if (JSON.stringify(pr.partColors ?? {}) === JSON.stringify(partColors)) return;
+      const next = { ...pr, partColors, updatedAt: Date.now() };
+      projectRef.current = next;
+      setProject(next);
+      void putProject(next);
+      scheduleSync();
+    }, 600);
+    return () => clearTimeout(t);
+  }, [partColors]);
 
   // ---- library thumbnail: refresh the saved preview whenever the model settles ----
   // Debounced so a slider drag (many rebuilds/sec) writes at most one thumb, and
@@ -3193,6 +3219,7 @@ export default function App() {
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);
     setPlateNames(p.plates?.names ?? {});
+    setPartColors(p.partColors ?? {});
     setActivePlate(0);
     separatedRef.current = null;
     setSeparated(false);
@@ -3215,6 +3242,7 @@ export default function App() {
     setPlateOf({});
     setPlateCount(1);
     setPlateNames({});
+    setPartColors({});
     setActivePlate(0);
     separatedRef.current = null;
     setSeparated(false);
@@ -3380,6 +3408,8 @@ export default function App() {
         setShowcase={setShowcase}
         appearance={appearance}
         setAppearance={setAppearance}
+        partColors={partColors}
+        setPartColor={setPartColor}
         texture={grayView ? null : result?.texture ?? null}
         gray={grayView}
         setGray={setGrayView}

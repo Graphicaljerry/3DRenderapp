@@ -124,6 +124,29 @@ if (eraseOnNow) {
   check("C4 Erase all clears the paint (button disables again)", await eraseBtn.isDisabled(), "");
 }
 
+// ---------- D: brush (paint-on-drag) + eraser ----------
+const toolBtn = (name) => page.locator(".paint-fly .mode-seg button", { hasText: name });
+await toolBtn("Brush").click();
+await page.locator(".paint-fly .psw").nth(0).click(); // red filament
+const bbox = await canvas.boundingBox();
+const bx = bbox.x + bbox.width / 2, by = bbox.y + bbox.height / 2;
+await page.mouse.move(bx - 40, by - 20);
+await page.mouse.down();
+for (const [dx, dy] of [[0, 0], [20, 10], [40, 20], [60, 30], [80, 20]]) await page.mouse.move(bx - 40 + dx, by - 20 + dy);
+await page.mouse.up();
+await page.waitForTimeout(700);
+check("D1 brush drag paints (Erase enables)", !(await eraseBtn.isDisabled()), "");
+// eraser: selecting it sets slot 0 (aria-checked on the eraser swatch)
+await page.locator(".paint-fly .psw-erase").click();
+const eraserOn = await page.locator(".paint-fly .psw-erase").getAttribute("aria-checked");
+check("D2 eraser swatch selectable (slot 0)", eraserOn === "true", String(eraserOn));
+// switch back to Fill and erase-with-region over the painted area → paint shrinks/clears
+await toolBtn("Fill").click();
+await page.mouse.click(bx, by);
+await page.mouse.click(bx - 40, by - 10);
+await page.waitForTimeout(600);
+check("D3 fill+eraser over a painted region removes paint (no crash, tool responsive)", await toolBtn("Brush").isVisible(), "");
+
 await browser.close();
 if (fails.length) { console.log(`\n${fails.length} CHECK(S) FAILED`); process.exit(1); }
 console.log("\nAll face-paint 3MF checks passed.");

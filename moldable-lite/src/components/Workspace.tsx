@@ -1061,8 +1061,10 @@ interface Props {
   setPartColor: (key: string, hex: string | null) => void;
   paintCtl: {
     mode: boolean; setMode: (v: boolean) => void;
+    tool: "fill" | "brush"; setTool: (t: "fill" | "brush") => void;
     slot: number; setSlot: (n: number) => void;
     angle: number; setAngle: (n: number) => void;
+    brushSize: number; setBrushSize: (n: number) => void;
     palette: string[];
     facePaint: Uint8Array | null;
     onStroke: (tc: Uint8Array) => void;
@@ -1584,8 +1586,10 @@ export function Workspace(p: Props) {
                 appearance={p.appearance}
                 partColors={p.partColors}
                 paintMode={p.paintCtl.mode}
+                paintTool={p.paintCtl.tool}
                 paintSlot={p.paintCtl.slot}
                 paintAngle={p.paintCtl.angle}
+                brushSize={p.paintCtl.brushSize}
                 paintPalette={p.paintCtl.palette}
                 facePaint={p.paintCtl.facePaint}
                 onPaintStroke={p.paintCtl.onStroke}
@@ -1810,6 +1814,10 @@ export function Workspace(p: Props) {
                     {p.paintCtl.mode && (
                       <div className="rail-fly">
                         <div className="paint-fly">
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Paint tool">
+                            <button className={p.paintCtl.tool === "fill" ? "on" : ""} role="radio" aria-checked={p.paintCtl.tool === "fill"} title="Fill: click a face region to flood-fill it" onClick={() => p.paintCtl.setTool("fill")}>Fill</button>
+                            <button className={p.paintCtl.tool === "brush" ? "on" : ""} role="radio" aria-checked={p.paintCtl.tool === "brush"} title="Brush: press and drag to paint" onClick={() => p.paintCtl.setTool("brush")}>Brush</button>
+                          </div>
                           <div className="paint-lbl">Filament</div>
                           <div className="paint-swatches" role="radiogroup" aria-label="Filament">
                             {p.paintCtl.palette.map((c, i) => (
@@ -1824,11 +1832,26 @@ export function Workspace(p: Props) {
                                 onClick={() => p.paintCtl.setSlot(i + 1)}
                               />
                             ))}
+                            <button
+                              role="radio"
+                              aria-checked={p.paintCtl.slot === 0}
+                              className={`psw psw-erase${p.paintCtl.slot === 0 ? " on" : ""}`}
+                              title="Eraser — remove paint from a region"
+                              aria-label="Eraser"
+                              onClick={() => p.paintCtl.setSlot(0)}
+                            ><IconX size={11} /></button>
                           </div>
-                          <label className="paint-angle">
-                            <span>Smart-fill angle — {p.paintCtl.angle}°</span>
-                            <input type="range" min={0} max={89} step={1} value={p.paintCtl.angle} onChange={(e) => p.paintCtl.setAngle(parseInt(e.target.value))} aria-label="Smart-fill angle" />
-                          </label>
+                          {p.paintCtl.tool === "fill" ? (
+                            <label className="paint-angle">
+                              <span>Smart-fill angle — {p.paintCtl.angle}°</span>
+                              <input type="range" min={0} max={89} step={1} value={p.paintCtl.angle} onChange={(e) => p.paintCtl.setAngle(parseInt(e.target.value))} aria-label="Smart-fill angle" />
+                            </label>
+                          ) : (
+                            <label className="paint-angle">
+                              <span>Brush size — {p.paintCtl.brushSize}%</span>
+                              <input type="range" min={1} max={30} step={1} value={p.paintCtl.brushSize} onChange={(e) => p.paintCtl.setBrushSize(parseInt(e.target.value))} aria-label="Brush size" />
+                            </label>
+                          )}
                           <button className="ghost sm" disabled={!p.paintCtl.hasPaint} title="Remove all painted regions from the model" onClick={p.paintCtl.onEraseAll}>Erase all painting</button>
                         </div>
                       </div>

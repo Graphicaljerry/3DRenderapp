@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Workspace } from "./components/Workspace";
+import { Workspace, FILAMENT_SWATCHES } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { MeasureModal } from "./components/MeasureModal";
 import type { SvgMode, SvgParams } from "./components/ExtrudeModal";
@@ -59,6 +59,21 @@ const ExtrudeModal = lazy(() => import("./components/ExtrudeModal").then((m) => 
 
 // GLB/STL parsing (GLTFLoader + friends) loads with the first mesh that needs it.
 const loadAnyMesh = async (f: Blob | File) => (await import("./gen/loadMesh")).loadAnyMesh(f);
+
+// Per-face paint persists as base64 of the per-triangle palette-index array — compact in
+// JSON (cloud sync) and structured-clone-safe in IndexedDB. Chunked to dodge the
+// String.fromCharCode spread limit on large meshes.
+function u8ToB64(u8: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+function b64ToU8(b64: string): Uint8Array {
+  const s = atob(b64);
+  const u8 = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) u8[i] = s.charCodeAt(i);
+  return u8;
+}
 
 // Run heavy, non-urgent work after the browser has painted the current frame — keeps the
 // model swap feeling instant. Uses requestIdleCallback where available, else a short timeout.
@@ -419,15 +434,19 @@ export default function App() {
     setActivePlate((a) => (a === 0 ? 0 : a === n ? 0 : a > n ? a - 1 : a));
   };
   /** Everything on the canvas, with its plate — the shared input for both plate exports. */
-  function collectPlateParts(): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string }[] | null {
+  function collectPlateParts(): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[] }[] | null {
     if (!geometry) return null;
-    const parts = [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model") }];
+    // The model's per-face paint rides along only when its triangle count still matches
+    // (a CAD edit reshuffles triangles → drop the stale paint rather than mispaint).
+    const triCount = geometry.index ? geometry.index.count / 3 : geometry.getAttribute("position").count / 3;
+    const modelPaint = facePaint && facePaint.length === triCount ? facePaint : undefined;
+    const parts = [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model"), paint: modelPaint, paintPalette: modelPaint ? FILAMENT_SWATCHES : undefined }];
     for (const a of attachments) {
       const baked = viewer.current?.bakeAttachment(a.id);
       if (!baked) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(baked, 3));
-      parts.push({ geometry: g, name: a.name, plate: plateFor(a.id), color: colorFor(a.id) });
+      parts.push({ geometry: g, name: a.name, plate: plateFor(a.id), color: colorFor(a.id), paint: undefined, paintPalette: undefined });
     }
     return parts;
   }
@@ -805,6 +824,18 @@ export default function App() {
   const [selectKind, setSelectKind] = useState<SelectKind>("face");
   const [transformMode, setTransformMode] = useState<TransformMode>("off");
   const [measureMode, setMeasureMode] = useState(false);
+  // Per-face MMU paint tool (Bambu-style): pick a filament, click a face region to fill it.
+  const [paintMode, setPaintModeState] = useState(false);
+  const [paintSlot, setPaintSlot] = useState(1); // active filament palette index (1-based)
+  const [paintAngle, setPaintAngle] = useState(30); // smart-fill angle (deg)
+  const [facePaint, setFacePaint] = useState<Uint8Array | null>(null); // model's per-triangle paint
+  /** Turn the Paint tool on/off; enabling it disables the other single-owner viewer tools. */
+  const setPaintMode = (on: boolean) => {
+    setPaintModeState(on);
+    if (on) { setSelectMode(false); setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setSelectedFeature(null); setSelectedFaces([]); }
+  };
+  /** A committed paint stroke (or erase) — store it; all-zero collapses to "no paint". */
+  const onPaintStroke = (tc: Uint8Array) => setFacePaint(tc.some((x) => x) ? tc : null);
   const [measurePending, setMeasurePending] = useState<[number, number, number] | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [liveDragMm, setLiveDragMm] = useState<number | null>(null); // arrow-drag value mirrored into the quick-edit box
@@ -1049,6 +1080,22 @@ export default function App() {
     }, 600);
     return () => clearTimeout(t);
   }, [partColors]);
+
+  // ---- per-face paint: save with the project (base64 of the per-triangle index array) ----
+  useEffect(() => {
+    const t = setTimeout(() => {
+      const pr = projectRef.current;
+      if (!pr) return;
+      const nextFp = facePaint ? { count: facePaint.length, b64: u8ToB64(facePaint) } : undefined;
+      if (JSON.stringify(pr.facePaint) === JSON.stringify(nextFp)) return;
+      const next = { ...pr, facePaint: nextFp, updatedAt: Date.now() };
+      projectRef.current = next;
+      setProject(next);
+      void putProject(next);
+      scheduleSync();
+    }, 700);
+    return () => clearTimeout(t);
+  }, [facePaint]);
 
   // ---- library thumbnail: refresh the saved preview whenever the model settles ----
   // Debounced so a slider drag (many rebuilds/sec) writes at most one thumb, and
@@ -3220,6 +3267,8 @@ export default function App() {
     setPlateCount(p.plates?.count ?? 1);
     setPlateNames(p.plates?.names ?? {});
     setPartColors(p.partColors ?? {});
+    setFacePaint(p.facePaint?.b64 ? b64ToU8(p.facePaint.b64) : null); // Viewer discards it if the triangle count no longer matches
+    setPaintModeState(false);
     setActivePlate(0);
     separatedRef.current = null;
     setSeparated(false);
@@ -3243,6 +3292,8 @@ export default function App() {
     setPlateCount(1);
     setPlateNames({});
     setPartColors({});
+    setFacePaint(null);
+    setPaintModeState(false);
     setActivePlate(0);
     separatedRef.current = null;
     setSeparated(false);
@@ -3410,6 +3461,19 @@ export default function App() {
         setAppearance={setAppearance}
         partColors={partColors}
         setPartColor={setPartColor}
+        paintCtl={{
+          mode: paintMode,
+          setMode: setPaintMode,
+          slot: paintSlot,
+          setSlot: setPaintSlot,
+          angle: paintAngle,
+          setAngle: setPaintAngle,
+          palette: FILAMENT_SWATCHES,
+          facePaint,
+          onStroke: onPaintStroke,
+          onEraseAll: () => viewer.current?.eraseFacePaint(),
+          hasPaint: !!facePaint,
+        }}
         texture={grayView ? null : result?.texture ?? null}
         gray={grayView}
         setGray={setGrayView}
@@ -3469,7 +3533,7 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
+          toggleMode: () => setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
           kind: selectKind,
           // Switching mode clears the other kind's selection so only one edit target is live.
           setKind: (k) => { setSelectKind(k); setSelectedFaces([]); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
@@ -3527,7 +3591,7 @@ export default function App() {
         transformCtl={{
           mode: transformMode,
           // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
-          setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
+          setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
           busy: status === "generating",
         }}
@@ -3545,7 +3609,7 @@ export default function App() {
           mode: measureMode,
           toggle: () => setMeasureMode((on) => {
             const next = !on;
-            if (next) { setSelectMode(false); setTransformMode("off"); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); }
+            if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); }
             else setMeasurePending(null);
             return next;
           }),

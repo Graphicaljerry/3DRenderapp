@@ -27,7 +27,7 @@ import type { SlicerTarget } from "../lib/slicer";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -307,7 +307,8 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGra
 }
 
 // A Bambu-Basic-flavoured filament palette for quick per-part painting (+ a custom picker).
-const FILAMENT_SWATCHES = [
+// Also the per-face Paint tool's filament list — triColor indexes exported.
+export const FILAMENT_SWATCHES = [
   "#E02D2D", "#F5820F", "#F5C400", "#25B34B", "#1C8FE0", "#3B4CC0",
   "#8E44AD", "#E85AAE", "#8B5A2B", "#111418", "#9AA0A6", "#F5F5F5",
 ];
@@ -1058,6 +1059,16 @@ interface Props {
   setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void;
   partColors: Record<string, string>;
   setPartColor: (key: string, hex: string | null) => void;
+  paintCtl: {
+    mode: boolean; setMode: (v: boolean) => void;
+    slot: number; setSlot: (n: number) => void;
+    angle: number; setAngle: (n: number) => void;
+    palette: string[];
+    facePaint: Uint8Array | null;
+    onStroke: (tc: Uint8Array) => void;
+    onEraseAll: () => void;
+    hasPaint: boolean;
+  };
   texture: THREE.Texture | null;
   onApplySurface: (pattern: SurfacePattern, scale: number, depth: number) => void;
   printer: PrinterDefaults;
@@ -1572,6 +1583,12 @@ export function Workspace(p: Props) {
                 snap={p.snap}
                 appearance={p.appearance}
                 partColors={p.partColors}
+                paintMode={p.paintCtl.mode}
+                paintSlot={p.paintCtl.slot}
+                paintAngle={p.paintCtl.angle}
+                paintPalette={p.paintCtl.palette}
+                facePaint={p.paintCtl.facePaint}
+                onPaintStroke={p.paintCtl.onStroke}
                 texture={p.texture}
                 transformMode={p.transformCtl.mode}
                 measureMode={p.measureCtl.mode}
@@ -1774,6 +1791,46 @@ export function Workspace(p: Props) {
                     {p.pins.length > 0 && (
                       <div className="rail-fly">
                         <button className="ghost sm" title={`Remove all ${p.pins.length} point${p.pins.length > 1 ? "s" : ""}`} onClick={p.pinCtl.clearAll}>Clear points ({p.pins.length})</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-tool">
+                    {/* Bambu-style colour painting: click a face region to fill it with a filament.
+                        Works on any solid (best on meshes/imports — stable triangles). */}
+                    <button
+                      className={`ghost sm iconbtn${p.paintCtl.mode ? " on" : ""}`}
+                      aria-pressed={p.paintCtl.mode}
+                      aria-label="Paint"
+                      disabled={!p.geometry || p.tab !== "3d"}
+                      title="Colour Painting: pick a filament, then click a region of the model to fill it — the slicer prints that region in that filament colour"
+                      onClick={() => p.paintCtl.setMode(!p.paintCtl.mode)}
+                    >
+                      <IconPaint />
+                    </button>
+                    {p.paintCtl.mode && (
+                      <div className="rail-fly">
+                        <div className="paint-fly">
+                          <div className="paint-lbl">Filament</div>
+                          <div className="paint-swatches" role="radiogroup" aria-label="Filament">
+                            {p.paintCtl.palette.map((c, i) => (
+                              <button
+                                key={c}
+                                role="radio"
+                                aria-checked={p.paintCtl.slot === i + 1}
+                                className={`psw${p.paintCtl.slot === i + 1 ? " on" : ""}`}
+                                style={{ background: c }}
+                                title={`Filament ${i + 1} · ${c}`}
+                                aria-label={`Filament ${i + 1}`}
+                                onClick={() => p.paintCtl.setSlot(i + 1)}
+                              />
+                            ))}
+                          </div>
+                          <label className="paint-angle">
+                            <span>Smart-fill angle — {p.paintCtl.angle}°</span>
+                            <input type="range" min={0} max={89} step={1} value={p.paintCtl.angle} onChange={(e) => p.paintCtl.setAngle(parseInt(e.target.value))} aria-label="Smart-fill angle" />
+                          </label>
+                          <button className="ghost sm" disabled={!p.paintCtl.hasPaint} title="Remove all painted regions from the model" onClick={p.paintCtl.onEraseAll}>Erase all painting</button>
+                        </div>
                       </div>
                     )}
                   </div>

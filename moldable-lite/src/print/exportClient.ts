@@ -32,20 +32,44 @@ function normHex(c?: string): string {
   return m ? `#${m[1].toUpperCase()}` : "";
 }
 
-/** Ordered filament palette (slot 1..N) + a colour→slot lookup for a set of parts. */
-function buildFilaments(parts: { color?: string }[]): { palette: string[]; slotOf: (c?: string) => number; painted: boolean } {
+/** Ordered filament palette (slot 1..N) + a colour→slot lookup for a set of parts.
+ *  Whole-part colours are folded FIRST (so existing per-part slot numbering is stable),
+ *  then any per-face PAINT palette colours join the SAME palette — a painted-red region
+ *  and a whole-red part resolve to the identical filament slot (keyed on normalised hex). */
+function buildFilaments(parts: { color?: string; paintPalette?: string[] }[]): { palette: string[]; slotOf: (c?: string) => number; painted: boolean } {
   const anyUnpainted = parts.some((p) => !normHex(p.color));
   const slot = new Map<string, number>();
   const palette: string[] = [];
   if (anyUnpainted) { palette.push(DEFAULT_FILAMENT); slot.set("", 1); } // slot 1 = default filament
-  for (const p of parts) {
-    const c = normHex(p.color);
-    if (!c || slot.has(c)) continue;
-    palette.push(c);
-    slot.set(c, palette.length);
-  }
+  const add = (raw?: string) => { const c = normHex(raw); if (!c || slot.has(c)) return; palette.push(c); slot.set(c, palette.length); };
+  for (const p of parts) add(p.color);                              // whole-part colours first
+  for (const p of parts) for (const c of p.paintPalette ?? []) add(c); // then painted-region colours
   const distinctPainted = palette.length - (anyUnpainted ? 1 : 0);
   return { palette, slotOf: (c?: string) => slot.get(normHex(c)) ?? 1, painted: distinctPainted > 0 };
+}
+
+/** Bambu/Orca per-triangle MMU paint code for a WHOLE (unsplit) triangle painted the
+ *  1-indexed filament slot `slot` (slot == the AMS slot shown in Bambu's palette, no
+ *  offset). Returns "" for slot ≤ 0 → the exporter then writes NO paint_color attribute,
+ *  so the triangle falls back to the object's base extruder.
+ *
+ *  Encoding (verified against BambuStudio TriangleSelector::serialize + Model.cpp
+ *  get_triangle_as_string): a leaf triangle's segmentation bitstream is emitted then read
+ *  back 4 bits at a time with each hex nibble PREPENDED, so the string is reversed vs
+ *  emission (root nibble = rightmost char). Whole-triangle cases:
+ *    slot 1 → "4", slot 2 → "8", slot K≥3 → hex(K−3) + "C"  (e.g. 3→"0C", 4→"1C", 18→"0FC").
+ *  Writing "C0" instead of "0C" decodes as a split node → garbage, so order matters. */
+export function encodePaintColorWhole(slot: number): string {
+  if (slot <= 0) return "";
+  if (slot === 1) return "4"; // leaf state 1: bits 0,0,1,0 → nibble 0b0100
+  if (slot === 2) return "8"; // leaf state 2: bits 0,0,0,1 → nibble 0b1000
+  // leaf state n≥3: marker nibble 0xC, then the prefix code of (n−3); string is reversed,
+  // so it reads as <remainder-nibble><F…F><C>.
+  let v = slot - 3;
+  let prefix = "";
+  while (v >= 15) { prefix = "F" + prefix; v -= 15; }
+  prefix = v.toString(16).toUpperCase() + prefix;
+  return prefix + "C";
 }
 
 /** Bambu/Orca project filament settings — the file the slicer reads to show the AMS
@@ -114,7 +138,7 @@ export function geometriesTo3MF(parts: { geometry: THREE.BufferGeometry; name: s
  *  Parts keep their relative placement per plate; each plate's group is centred on its
  *  bed and dropped to z=0. */
 export function platesToProject3MF(
-  parts: { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string }[],
+  parts: { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[] }[],
   plateCount: number,
   bed: { x: number; y: number },
   plateNames?: Record<number, string>,
@@ -153,16 +177,28 @@ export function platesToProject3MF(
     const idx = g.index;
     const verts: string[] = [];
     for (let i = 0; i < pos.count; i++) verts.push(`<vertex x="${f(pos.getX(i))}" y="${f(pos.getY(i))}" z="${f(pos.getZ(i))}"/>`);
+    const ex = slotOf(part.color); // object's base filament slot (1 = default); triangles fall back to it
+    // Per-face MMU paint: triangle t → paint palette index part.paint[t] (0 = unpainted) →
+    // that palette colour's filament slot → Bambu's paint_color code. paint_color binds
+    // POSITIONALLY to triangle document order, so the paint index MUST use the same t as
+    // the emitted <triangle> order (idx-driven or non-indexed — both step t by one triangle).
+    const paint = part.paint, pal = part.paintPalette;
+    const paintAttr = (t: number): string => {
+      if (!paint || !pal) return "";
+      const pi2 = paint[t]; // 1-based index into the paint palette, 0 = unpainted
+      if (!pi2) return "";
+      const s = slotOf(pal[pi2 - 1]);
+      return s && s !== ex ? ` paint_color="${encodePaintColorWhole(s)}"` : "";
+    };
     const tris: string[] = [];
-    if (idx) for (let i = 0; i < idx.count; i += 3) tris.push(`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i + 1)}" v3="${idx.getX(i + 2)}"/>`);
-    else for (let i = 0; i < pos.count; i += 3) tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"/>`);
+    if (idx) { let t = 0; for (let i = 0; i < idx.count; i += 3, t++) tris.push(`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i + 1)}" v3="${idx.getX(i + 2)}"${paintAttr(t)}/>`); }
+    else { let t = 0; for (let i = 0; i < pos.count; i += 3, t++) tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"${paintAttr(t)}/>`); }
     const id = pi + 1;
     const safe = part.name.replace(/[<>&"]/g, "_");
     const [tx, ty, tz] = shift(part.plate);
     const transform = `1 0 0 0 1 0 0 0 1 ${f(tx)} ${f(ty)} ${f(tz)}`;
     objects.push(`<object id="${id}" type="model" name="${safe}"><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
     items.push(`<item objectid="${id}" transform="${transform}" printable="1"/>`);
-    const ex = slotOf(part.color); // filament slot this painted part prints on (1 = default)
     settingsObjects.push(
       `  <object id="${id}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="1" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n  </object>`,
     );

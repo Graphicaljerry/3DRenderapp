@@ -207,6 +207,15 @@ export const IconHistory = ({ size = 14 }: { size?: number }) => (
   </svg>
 );
 
+/** Paint tool: a tilted paint bucket pouring a drop. */
+export const IconPaint = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M11.5 3.5 4 11l6.5 6.5a2 2 0 0 0 2.8 0L19 12 11.5 3.5Z" />
+    <path d="M4 11l7-1.5" opacity=".5" />
+    <path d="M20.5 15.5c0 1.1-.9 2-2 2s-2-.9-2-2 2-3 2-3 2 1.9 2 3Z" fill="currentColor" stroke="none" />
+  </svg>
+);
+
 export const IconTexturize = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <rect x="3.5" y="3.5" width="17" height="17" rx="3" />

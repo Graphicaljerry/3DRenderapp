@@ -17,6 +17,8 @@ export type TransformCommit =
 
 export interface ViewerHandle {
   resetView: () => void;
+  /** Clear all per-face MMU paint from the model. */
+  eraseFacePaint: () => void;
   /** Snap the camera to a standard view, framed on the model. */
   setView: (v: "top" | "front" | "right" | "iso") => void;
   /** An attachment's triangles with its current transform baked in (for Merge). */
@@ -108,6 +110,12 @@ interface Props {
   showcase: boolean; // presentation mode: clean stage, studio light, slow turntable
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   partColors?: Record<string, string>; // per-part fill colour (objectId → hex): "model" + attachment ids
+  paintMode?: boolean; // Paint tool active: click a face region to fill it with the active filament
+  paintSlot?: number; // active filament palette index (1-based); 0 = eraser
+  paintAngle?: number; // smart-fill angle (deg) — how far a bucket fill flows across creases
+  paintPalette?: string[]; // filament colours the paint tool assigns (hex); triColor indexes this
+  facePaint?: Uint8Array | null; // persisted per-triangle paint to restore on load
+  onPaintStroke?: (triColor: Uint8Array) => void; // a stroke committed — App persists it
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   clay: boolean; // View > Grayscale: studio clay presentation (smooth display normals + neutral material)
   bed: { x: number; y: number }; // printer plate size (mm) — drives the solid build plate
@@ -241,16 +249,21 @@ interface Internals {
   arrowHot: boolean; // pointer is over (or dragging) the push-pull arrow — drawn yellow
   selBox: THREE.Group | null; // selection chrome: bounding box + corner anchor dots
   analysisMesh: THREE.Mesh | null; // printability overlay (child of `mesh`, follows its transform)
+  paintMesh: THREE.Mesh | null; // per-face MMU paint overlay (de-indexed, vertex RGBA), child of `mesh`
+  triColor: Uint8Array | null; // per-triangle paint palette index (0 = unpainted), 1:1 with the model triangles
   axScene: THREE.Scene; // corner orientation gizmo (Blender-style): its own tiny scene…
   axCam: THREE.OrthographicCamera; // …rendered through an ortho cam into a corner viewport
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintSlot, paintAngle, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintSlot, paintAngle, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintSlot, paintAngle, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke };
+  // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
+  const facePaintRef = useRef(facePaint);
+  facePaintRef.current = facePaint;
   // Hole-tool interaction state, read imperatively by the pointer handlers (the ghost
   // follows the cursor at frame rate — no React re-render per mousemove).
   const holeIx = useRef<{ ghost: Props["holeGhost"]; place: Props["holePlace"] }>({ ghost: holeGhost, place: holePlace });
@@ -726,6 +739,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (holeIx.current.place?.active) {
         const at = holeHover(e);
         if (at) holeIx.current.place.onPlace(at);
+        return;
+      }
+      // Paint tool: click a face → smart-fill the region → set it to the active filament
+      // slot (0 = eraser), update the overlay live, and hand the stroke to App to persist.
+      if (cb.current.paintMode) {
+        if (!s2.mesh || !ensureTri(s2) || !s2.tri) return;
+        if (!s2.paintMesh) rebuildPaintMesh(s2, cb.current.paintPalette ?? []);
+        if (!s2.triColor) return;
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (!hit || hit.faceIndex == null) return;
+        const region = paintFillRegion(s2.tri, hit.faceIndex, cb.current.paintAngle ?? 30);
+        const slot = cb.current.paintSlot ?? 1;
+        for (const t of region) s2.triColor[t] = slot;
+        updatePaintTris(s2, region, cb.current.paintPalette ?? []);
+        cb.current.onPaintStroke?.(s2.triColor.slice());
         return;
       }
       if (cb.current.transformMode !== "off" || s2.transforming) {
@@ -1293,7 +1321,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
+    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, paintMesh: null, triColor: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -1475,6 +1503,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.mesh.add(m);
     s.analysisMesh = m;
   }, [analysisOverlay, geometry]);
+
+  // Paint overlay lifecycle: build it when the Paint tool is active OR the model already
+  // carries paint (so painted regions stay visible under any tool); tear it down when
+  // neither holds. Rebuilds on geometry change and reseeds from the persisted paint —
+  // keyed on geometry (NOT on facePaint) so a committed stroke never triggers a rebuild.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    const drop = () => { if (s.paintMesh) { s.paintMesh.removeFromParent(); s.paintMesh.geometry.dispose(); (s.paintMesh.material as THREE.Material).dispose(); s.paintMesh = null; } };
+    const fp = facePaintRef.current;
+    const hasPersisted = !!fp && fp.some((x) => x);
+    if (!paintMode && !hasPersisted) { drop(); s.triColor = null; return; }
+    if (!s.mesh || !ensureTri(s) || !s.tri) return;
+    s.triColor = fp && fp.length === s.tri.count ? fp.slice() : new Uint8Array(s.tri.count);
+    rebuildPaintMesh(s, paintPalette ?? []);
+  }, [geometry, paintMode, paintPalette]);
 
   // Toggle the transform gizmo on/off, switch rotate↔scale, and retarget to the attachment.
   useEffect(() => {
@@ -1959,6 +2003,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     resetView() {
       if (st.current) frameToObject(st.current);
     },
+    /** Clear all per-face paint from the model (the "Erase all painting" button). */
+    eraseFacePaint() {
+      const s = st.current;
+      if (!s || !s.triColor) return;
+      const touched: number[] = [];
+      for (let t = 0; t < s.triColor.length; t++) if (s.triColor[t]) { s.triColor[t] = 0; touched.push(t); }
+      if (s.paintMesh && touched.length) updatePaintTris(s, touched, cb.current.paintPalette ?? []);
+      cb.current.onPaintStroke?.(s.triColor.slice());
+    },
     setView(v) {
       if (st.current) snapView(st.current, v);
     },
@@ -2392,9 +2445,10 @@ function buildTriData(geo: THREE.BufferGeometry): TriData {
 }
 
 /** Flood-fill the connected smooth region (flat OR curved) around a triangle,
-    crossing shared edges only where the crease stays gentle — stops at sharp edges. */
-function smoothRegion(tri: TriData, start: number): number[] {
-  const COS = Math.cos((33 * Math.PI) / 180);
+    crossing shared edges only where the crease stays gentle — stops at sharp edges.
+    `cosThresh` is the min normal-dot to cross an edge; the default = cos(33°) drives
+    face-select, while the paint tool passes cos(smart-fill angle) for a wider/tighter fill. */
+function smoothRegion(tri: TriData, start: number, cosThresh = Math.cos((33 * Math.PI) / 180)): number[] {
   const seen = new Uint8Array(tri.count);
   const out: number[] = [];
   const stack = [start];
@@ -2408,10 +2462,77 @@ function smoothRegion(tri: TriData, start: number): number[] {
       const nb = tri.adj[t * 3 + e];
       if (nb < 0 || seen[nb] || tri.degen[nb]) continue;
       const dot = tx * tri.normals[nb * 3] + ty * tri.normals[nb * 3 + 1] + tz * tri.normals[nb * 3 + 2];
-      if (dot > COS) { seen[nb] = 1; stack.push(nb); }
+      if (dot >= cosThresh) { seen[nb] = 1; stack.push(nb); }
     }
   }
   return out;
+}
+
+/** Paint tool region: the smart-fill flood from `seed` bounded by the smart-fill angle
+ *  (degrees). Angle is floored just above 0 so a perfectly flat face always fills at 0°. */
+function paintFillRegion(tri: TriData, seed: number, angleDeg: number): number[] {
+  return smoothRegion(tri, seed, Math.cos((Math.max(0.5, angleDeg) * Math.PI) / 180));
+}
+
+// ---- Per-face MMU paint overlay -----------------------------------------------------
+function hexRgb(hex: string): [number, number, number] {
+  const h = hex.replace("#", "");
+  return [parseInt(h.slice(0, 2), 16) / 255, parseInt(h.slice(2, 4), 16) / 255, parseInt(h.slice(4, 6), 16) / 255];
+}
+
+/** Rewrite the paint overlay's per-vertex RGBA for the given triangle indices from
+ *  s.triColor + palette (slot 0 = unpainted → alpha 0). Marks only the touched range dirty. */
+function updatePaintTris(s: Internals, tris: number[], palette: string[]) {
+  const mesh = s.paintMesh, tc = s.triColor;
+  if (!mesh || !tc) return;
+  const col = mesh.geometry.getAttribute("color") as THREE.BufferAttribute;
+  const arr = col.array as Float32Array;
+  const rgb = palette.map(hexRgb);
+  let lo = Infinity, hi = -Infinity;
+  for (const t of tris) {
+    if (t < 0 || t >= tc.length) continue;
+    const slot = tc[t];
+    const c = slot ? rgb[slot - 1] ?? [0.5, 0.5, 0.5] : [0, 0, 0];
+    const a = slot ? 0.92 : 0;
+    for (let k = 0; k < 3; k++) {
+      const o = (t * 3 + k) * 4;
+      arr[o] = c[0]; arr[o + 1] = c[1]; arr[o + 2] = c[2]; arr[o + 3] = a;
+      lo = Math.min(lo, o); hi = Math.max(hi, o + 4);
+    }
+  }
+  if (hi > lo) { col.needsUpdate = true; if ((col as unknown as { addUpdateRange?: (a: number, b: number) => void }).addUpdateRange) (col as unknown as { addUpdateRange: (a: number, b: number) => void }).addUpdateRange(lo, hi - lo); }
+}
+
+/** (Re)build the de-indexed paint overlay covering every model triangle, coloured from
+ *  s.triColor. Built once per geometry (positions match display-triangle order exactly,
+ *  which is the SAME order the exporter writes, so paint_color lands on the right facet).
+ *  Painting afterwards only rewrites colours — cheap even on dense meshes. */
+function rebuildPaintMesh(s: Internals, palette: string[]) {
+  if (s.paintMesh) { s.paintMesh.removeFromParent(); s.paintMesh.geometry.dispose(); (s.paintMesh.material as THREE.Material).dispose(); s.paintMesh = null; }
+  const tri = ensureTri(s), mesh = s.mesh;
+  if (!tri || !mesh) return;
+  const count = tri.count;
+  if (!s.triColor || s.triColor.length !== count) s.triColor = new Uint8Array(count);
+  const pos = new Float32Array(count * 9);
+  const v = new THREE.Vector3();
+  for (let t = 0; t < count; t++) for (let k = 0; k < 3; k++) {
+    v.fromBufferAttribute(tri.pos, tri.idx ? tri.idx.getX(t * 3 + k) : t * 3 + k);
+    const o = (t * 3 + k) * 3; pos[o] = v.x; pos[o + 1] = v.y; pos[o + 2] = v.z;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute("color", new THREE.BufferAttribute(new Float32Array(count * 12), 4)); // RGBA → per-vertex alpha
+  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({
+    vertexColors: true, transparent: true, depthWrite: false, side: THREE.FrontSide,
+    polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3, toneMapped: false,
+  }));
+  m.renderOrder = 4;
+  m.raycast = () => {}; // display-only — never intercept picking rays
+  mesh.add(m);
+  s.paintMesh = m;
+  const painted: number[] = [];
+  for (let t = 0; t < count; t++) if (s.triColor[t]) painted.push(t);
+  if (painted.length) updatePaintTris(s, painted, palette); // restore any persisted paint
 }
 
 /** Triangles making up the face at `seed`. For CAD models we group by the exact

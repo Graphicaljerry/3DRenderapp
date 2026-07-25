@@ -24,6 +24,7 @@ import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
+import { IS_DESKTOP, checkDesktopUpdate, openDownload, type DesktopUpdate } from "../lib/desktopUpdate";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
@@ -2171,12 +2172,40 @@ export function Workspace(p: Props) {
             </button>
             {p.status === "generating" && <GenTimer />}
             <span className="build-tag" title="Deployed build number — it goes up with every update, so a bigger number after a refresh means the update landed">v{__BUILD_STAMP__}</span>
+            <DesktopUpdateChip />
             <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => p.setTab("print")} />
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />
           </div>
         </section>
       </main>
     </div>
+  );
+}
+
+// Desktop app only (never renders on the web): a status-bar chip when the rolling
+// desktop-latest release is ahead of this installed build. Clicking opens the right
+// installer in the system browser — the native app can't update itself in place
+// (that needs signed update artifacts), but it can always tell you and hand you
+// the download.
+function DesktopUpdateChip() {
+  const [u, setU] = useState<DesktopUpdate | null>(null);
+  useEffect(() => {
+    if (!IS_DESKTOP) return;
+    let dead = false;
+    const check = () => void checkDesktopUpdate(Number(__BUILD_STAMP__)).then((r) => { if (!dead && r) setU(r); });
+    check();
+    const id = setInterval(check, 6 * 3600_000); // long-lived windows still hear about updates
+    return () => { dead = true; clearInterval(id); };
+  }, []);
+  if (!u) return null;
+  return (
+    <button
+      className="update-chip"
+      title={`Moldable v${u.version} is out (you're on v${__BUILD_STAMP__}). Downloads the new installer — then drag Moldable to Applications (Mac) or run it (Windows) to update.`}
+      onClick={() => void openDownload(u.url)}
+    >
+      Update to v{u.version}
+    </button>
   );
 }
 

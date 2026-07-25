@@ -155,7 +155,8 @@ async function pushMeshes(c: any, uid: string, all: Project[]): Promise<{ meta: 
         uploaded++;
       }
       meta.set(p.id, { hash, src });
-    } catch {
+    } catch (e) {
+      console.warn(`mesh sync: upload failed for ${p.id}`, e); // diagnosable, never fatal
       if (p.cloudMesh) meta.set(p.id, p.cloudMesh); // the bucket still holds the older copy
     }
   }
@@ -174,11 +175,15 @@ async function pushMeshes(c: any, uid: string, all: Project[]): Promise<{ meta: 
 async function fetchMesh(c: any, uid: string, id: string, hash: string): Promise<Blob | null> {
   try {
     const { data, error } = await c.storage.from(MESH_BUCKET).download(`${uid}/${id}.bin`);
-    if (error || !data) return null;
+    if (error || !data) {
+      console.warn(`mesh sync: download failed for ${id}`, error);
+      return null;
+    }
     const plain = await decryptBytes(uid, new Uint8Array(await data.arrayBuffer()));
     localStorage.setItem(meshMark(id), hash);
     return new Blob([plain as BlobPart]);
-  } catch {
+  } catch (e) {
+    console.warn(`mesh sync: download failed for ${id}`, e);
     return null;
   }
 }

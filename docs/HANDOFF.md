@@ -673,6 +673,30 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   throws; openProjectById's catch surfaces errors instead of silently blanking).
   NOT verifiable in CI: the live bucket round-trip needs a real signed-in session —
   Jerry signing in on web + Mac and reopening the Lambo is the true test.
+  FIELD NOTE (first attempt failed, diagnosed server-side): Jerry synced from a
+  browser tab still running the PRE-mesh-sync build (PWA second-refresh takeover) —
+  sync_blobs row updated at 09:29 UTC but the bucket stayed EMPTY. The bucket
+  listing (`select … from storage.objects where bucket_id='mesh-sync'`) via the
+  Supabase MCP is the fastest way to tell "never uploaded" from "won't download".
+- **Mesh-sync self-healing + desktop update notifier (PR #137)**: three follow-ups
+  from that field failure. (1) `openProjectById` calls `scheduleSync()` — the opened
+  project's mesh uploads ~2.5 s later instead of waiting for the 45 s interval.
+  (2) A missing-mesh open does a ONE-SHOT on-demand `cloudSyncPull()` and retries the
+  rebuild before showing the error — after the other device uploads, just re-opening
+  the project fixes it (no app restart). (3) `pushMeshes`/`fetchMesh` console.warn on
+  failures instead of vanishing into catch{}. (4) The DESKTOP app (never the web)
+  shows a status-bar "Update to vN" chip when the rolling desktop-latest release is
+  ahead of the running build (`src/lib/desktopUpdate.ts` polls the GitHub release API
+  on boot + every 6 h, 60/h unauth rate limit is plenty); clicking opens the right
+  installer (dmg vs exe) in the system browser via @tauri-apps/plugin-opener (JS
+  package added; `opener:default` capability already allowed open_url). The installed
+  desktop app is a frozen bundle — silent in-place auto-update would need the Tauri
+  updater plugin + a signing keypair as a repo secret (Jerry must generate/add; offer
+  stands). GOTCHA fixed en route: vite `envPrefix: ["VITE_", "TAURI_ENV_*"]` (the
+  snippet in Tauri's docs) matches NOTHING — prefixes are literal startsWith, so the
+  desktop code saw no `import.meta.env.TAURI_ENV_PLATFORM` until it became
+  `"TAURI_ENV_"`. (`process.env.TAURI_ENV_PLATFORM` in vite.config.ts was unaffected
+  — that's node-side.)
 
 ## Conventions
 

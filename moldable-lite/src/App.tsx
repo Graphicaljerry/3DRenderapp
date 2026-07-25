@@ -3311,9 +3311,28 @@ export default function App() {
     try {
       await rebuildHead(p);
     } catch (err: any) {
+      // The mesh may have reached the account since this device last pulled (a full
+      // pull otherwise only runs at launch) — try once on demand before reporting.
+      if (accountEmailRef.current) {
+        const pulled = await cloudSyncPull().catch(() => null);
+        if (pulled?.meshes) {
+          const fresh = await getProject(p.id);
+          if (fresh && (fresh.glb || fresh.importFile)) {
+            setProject(fresh);
+            try {
+              await rebuildHead(fresh);
+              return;
+            } catch { /* fall through to the message below */ }
+          }
+        }
+      }
       // Say WHY the viewer is empty (mesh missing on this device, kernel error…) —
       // a silently blank canvas read as "the app can't open my project" (Mac audit).
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+    } finally {
+      // Prompt sync: if the account doesn't hold this project's mesh yet, the next
+      // push uploads it now — not whenever the 45 s interval happens to fire.
+      scheduleSync();
     }
   }
 

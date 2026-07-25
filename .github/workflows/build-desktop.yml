@@ -1,0 +1,186 @@
+# Builds the native desktop apps — macOS (Apple Silicon .dmg) and Windows (x64 .exe
+# installer) — automatically, from the same web build.
+#
+# Runs on EVERY push to main (docs/harness-only commits skipped). Both platforms build
+# in parallel, then ONE publish job refreshes the rolling "desktop-latest" pre-release
+# holding both installers. That gives the download page two permanent URLs:
+#
+#   .../releases/download/desktop-latest/Moldable_aarch64.dmg     (macOS, Apple Silicon)
+#   .../releases/download/desktop-latest/Moldable_x64-setup.exe   (Windows 10/11, x64)
+#
+# Publishing is a separate job on purpose: if each build published itself, the two
+# runners would race to recreate the same release and clobber each other's asset.
+#
+# Pushing a v* tag additionally cuts a normal versioned Release with both installers.
+#
+# Both are UNSIGNED (free). First run: macOS → right-click → Open; Windows → SmartScreen
+# "More info" → "Run anyway". Add the signing secrets to remove those prompts.
+name: Build desktop apps (macOS + Windows)
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    # Commits that can't change the app. NOTE: path filters also apply to tag pushes,
+    # so if you tag a docs-only commit, start the build by hand from the Actions tab.
+    paths-ignore:
+      - "docs/**"
+      - "harness/**"
+      - "**/*.md"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write # create/refresh the Release
+
+concurrency:
+  group: build-desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    strategy:
+      fail-fast: false # a Windows failure must not throw away a good macOS build
+      matrix:
+        include:
+          - label: macOS (Apple Silicon)
+            os: macos-14
+            rust_target: aarch64-apple-darwin
+            bundles: dmg
+            bundle_glob: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            asset: Moldable_aarch64.dmg
+          - label: Windows (x64)
+            os: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            bundles: nsis
+            bundle_glob: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            asset: Moldable_x64-setup.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history: the app's status-bar version is the COMMIT COUNT, and the
+          # installer is stamped from it. A shallow clone would ship the app as "v1".
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: moldable-lite/package-lock.json
+
+      - name: Setup Rust (${{ matrix.rust_target }})
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache cargo build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: moldable-lite/src-tauri -> target
+          key: ${{ matrix.rust_target }}
+
+      - name: Install JS deps
+        working-directory: moldable-lite
+        run: npm ci
+
+      # The installer's version mirrors the app's own status-bar number (the commit
+      # count), so a download is traceable to a deploy: app v220 → Moldable 0.2.220.
+      - name: Stamp the app version onto the bundle
+        working-directory: moldable-lite
+        shell: bash
+        run: |
+          set -euo pipefail
+          export N=$(git rev-list --count HEAD)
+          node -e "
+            const fs = require('fs'), f = 'src-tauri/tauri.conf.json';
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            j.version = '0.2.' + process.env.N;
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+          "
+          echo "Stamped Moldable 0.2.$N"
+
+      - name: Build the app + installer
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ---- macOS signing + notarization (uncomment once the Apple account exists) ----
+          # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          # APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          projectPath: moldable-lite
+          # No tagName — publishing happens once, in the job below, so the assets keep
+          # STABLE filenames (a versioned name would break the permanent download URLs).
+          args: --target ${{ matrix.rust_target }} --bundles ${{ matrix.bundles }}
+
+      - name: Give the installer a stable filename
+        working-directory: moldable-lite
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC=$(ls ${{ matrix.bundle_glob }} | head -1)
+          cp "$SRC" "../${{ matrix.asset }}"
+          ls -lh "../${{ matrix.asset }}"
+
+      - name: Upload for the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: ${{ matrix.asset }}
+          if-no-files-found: error
+
+  publish:
+    name: Publish the downloads
+    needs: build
+    if: always() && contains(needs.build.result, 'success') # publish whatever built
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # commit count → the release title
+
+      - name: Collect the installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          N=$(git rev-list --count HEAD)
+          ls -lh installers/
+          FILES=$(find installers -type f \( -name '*.dmg' -o -name '*.exe' \) | tr '\n' ' ')
+          NOTES="Native desktop builds of Moldable (v${N}).
+
+          **macOS** (Apple Silicon) — \`Moldable_aarch64.dmg\`
+          Drag Moldable to Applications, then **right-click the app → Open** the first time.
+          If macOS says the app is \"damaged\": \`xattr -cr /Applications/Moldable.app\`
+
+          **Windows 10/11** (x64) — \`Moldable_x64-setup.exe\`
+          Run the installer. SmartScreen may warn on first run — click **More info → Run anyway**.
+
+          Both are unsigned beta builds, which is why those one-time prompts appear."
+
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            gh release create "$TAG" --title "Moldable $TAG" --notes "$NOTES" $FILES \
+              || gh release upload "$TAG" $FILES --clobber
+          else
+            # Rolling build: recreate so the tag follows main and the permanent
+            # /download/desktop-latest/ URLs serve this build.
+            gh release delete desktop-latest --yes --cleanup-tag 2>/dev/null || true
+            gh release create desktop-latest \
+              --prerelease \
+              --target "$GITHUB_SHA" \
+              --title "Moldable — latest desktop builds (v${N})" \
+              --notes "$NOTES" \
+              $FILES
+          fi

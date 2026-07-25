@@ -64,14 +64,21 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   origin). `vite.config.ts` edits are **env-gated on `TAURI_ENV_PLATFORM`** — the
   web build is byte-identical (PWA on, absolute base); the Tauri build drops the
   service worker + uses relative `./` base (verified: web has sw.js, tauri build
-  has none). CI: `.github/workflows/build-mac.yml` builds the `.dmg` on a `macos-14`
-  runner via `tauri-apps/tauri-action` **automatically on every push to main**
-  (docs/harness-only commits skipped), refreshing a rolling **`mac-latest`**
-  pre-release so the download page has ONE permanent URL
-  (`/releases/download/mac-latest/Moldable_aarch64.dmg`). The asset filename is
-  fixed; build identity is the stamped version `0.2.<commit count>` = the app's own
-  v-number. `v*` tags additionally cut a versioned Release. **`fetch-depth: 0` is
-  REQUIRED** — without it the commit count is 1 and the bundled app reports "v1".
+  has none). CI: `.github/workflows/build-desktop.yml` builds **BOTH** macOS
+  (`macos-14`, aarch64 `.dmg`) and Windows (`windows-latest`, x64 NSIS `.exe`) via a
+  matrix + `tauri-apps/tauri-action`, **automatically on every push to main**
+  (docs/harness-only commits skipped). A SEPARATE `publish` job then refreshes the
+  rolling **`desktop-latest`** pre-release with both installers — separate because
+  two runners self-publishing would race to recreate the same release and clobber
+  each other's asset. Permanent URLs:
+  `/releases/download/desktop-latest/Moldable_aarch64.dmg` and
+  `…/Moldable_x64-setup.exe`. Asset filenames are fixed; build identity is the
+  stamped version `0.2.<commit count>` = the app's own v-number. `v*` tags
+  additionally cut a versioned Release. **`fetch-depth: 0` is REQUIRED** — without it
+  the commit count is 1 and the bundled app reports "v1". Windows uses **WebView2
+  (Chromium)** so WebGPU/WebLLM DOES work there; only macOS WKWebView lacks it
+  (<26). First run is unsigned on both: macOS right-click→Open, Windows SmartScreen
+  →Run anyway.
   Unsigned beta; APPLE_* secrets commented for later signing. The `.dmg` can ONLY
   be built on macOS — not on this Linux box. NOTE: the GitHub App token in these
   sessions CANNOT trigger `workflow_dispatch` (403 "Resource not accessible by

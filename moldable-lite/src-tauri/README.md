@@ -12,33 +12,37 @@ download with no compatibility work. The only feature that degrades is the *opti
 on-device LLM (needs WebGPU, only in WKWebView on macOS 26+); the default cloud brains
 are plain https and always work.
 
-## Build the DMG
+## Build the DMG — automatic
 
-The `.dmg` can only be built on **macOS** (it needs Apple's WebKit + bundler). Two ways:
-
-**A · GitHub Actions (no Mac needed).** Push a tag — the `Build macOS DMG` workflow
-builds on a free Apple-Silicon runner and attaches the `.dmg` to a Release:
-
-```bash
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-Or run it manually from the Actions tab (`workflow_dispatch`) to get the `.dmg` as a
-run artifact. The website "Download for Mac" button then points at the Release asset:
+The `.dmg` can only be built on **macOS** (Apple's WebKit + bundler), so CI does it on
+a free Apple-Silicon runner. **No manual step:** `.github/workflows/build-mac.yml` runs
+on **every push to `main`** (docs/harness-only commits are skipped) and refreshes a
+rolling `mac-latest` pre-release. That gives the download page one permanent URL:
 
 ```html
-<a href="https://github.com/Graphicaljerry/3DRenderapp/releases/latest/download/Moldable_aarch64.dmg">
+<a href="https://github.com/Graphicaljerry/3DRenderapp/releases/download/mac-latest/Moldable_aarch64.dmg">
   Download for Mac (Apple Silicon)
 </a>
 ```
 
-**B · On a Mac locally:**
+The asset filename is deliberately **stable** (`Moldable_aarch64.dmg`) so that link
+never breaks; the build's identity lives in the version instead — the bundle is stamped
+`0.2.<commit count>`, matching the app's own status-bar number (app `v218` →
+`Moldable 0.2.218`).
+
+Extras:
+- **Versioned release:** `git tag v0.2.0 && git push origin v0.2.0` also cuts a normal
+  Release with the same DMG attached (for milestone builds worth keeping).
+- **Ad-hoc build:** Actions tab → *Build macOS DMG* → *Run workflow* (also uploads the
+  `.dmg` as a run artifact).
+
+**On a Mac locally:**
 
 ```bash
 cd moldable-lite
 npm ci
 npm run tauri dev     # hot-reloading dev window
-npm run tauri build   # → src-tauri/target/release/bundle/dmg/Moldable_0.2.0_aarch64.dmg
+npm run tauri build   # → src-tauri/target/release/bundle/dmg/Moldable_*.dmg
 ```
 
 ## Signing + notarization (for a clean public download)

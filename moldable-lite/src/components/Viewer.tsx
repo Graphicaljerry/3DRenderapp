@@ -275,7 +275,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
   useEffect(() => {
     const el = mount.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    // No preserveDrawingBuffer: every capture path (mark-region shots, thumbnails)
+    // renders to its own offscreen WebGLRenderTarget, so nothing reads the live
+    // canvas. Keeping it on forced WebKit (the Mac app's WKWebView) to copy the
+    // framebuffer every frame instead of the fast swap — a real drag-lag report.
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
     const FULL_DPR = Math.min(window.devicePixelRatio, 2);
     const LOW_DPR = Math.min(window.devicePixelRatio, 1); // motion resolution: on a 2× panel this ~quarters the fill cost
     renderer.setPixelRatio(FULL_DPR);
@@ -459,6 +463,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // handle wins EXCLUSIVELY, with the primary (translate) winning near-ties. Runs in the
     // capture phase so the winner is decided before either control sees the event. ----
     const rcG = new THREE.Raycaster();
+    // WebKit (the Mac app's WKWebView) fires pointermove at input rate — often 2× the
+    // frame rate — where Chrome coalesces to one per frame. Each raycasting move handler
+    // is therefore gated to one run per RENDERED frame (`frame` advances once per
+    // animate()), and the newest skipped event is replayed from the animate loop so a
+    // pause never leaves hover/enable state stale at the stroke's true end position.
+    let arbTick = -1;
+    let arbPending: PointerEvent | null = null;
     const pickerOf = (t: TransformControls): THREE.Object3D | null => {
       const root: any = t.getHelper();
       const gz = root?.children?.find((c: any) => c.isTransformControlsGizmo);
@@ -472,6 +483,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         s.tc.enabled = true;
         s.tcR.enabled = true;
         return;
+      }
+      // Two raycasts per event below — cap at frame rate. pointerdown stays ungated:
+      // it's the grab decision and must always see the real event.
+      if (e.type === "pointermove") {
+        if (arbTick === frame) { arbPending = e; return; }
+        arbTick = frame;
+        arbPending = null;
       }
       const rect = renderer.domElement.getBoundingClientRect();
       rcG.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
@@ -612,6 +630,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         const sv = st.current;
         if (sv && sv.pushArrow.visible && !sv.pushDrag) keepArrowReachable(sv, camera, cb.current.units);
       }
+      // Replay the newest move each frame-gated handler skipped last frame, so hover,
+      // gizmo arbitration and the brush all settle on the TRUE final pointer position
+      // even when WebKit's last burst of events landed inside a single frame.
+      if (arbPending) { const ev = arbPending; arbPending = null; arbitrate(ev); }
+      if (hoverPending) { const ev = hoverPending; hoverPending = null; onMove(ev); }
+      if (paintPending) { const ev = paintPending; paintPending = null; onMove(ev); }
       // Keep dimension labels at a constant, readable on-screen size (clamped to
       // a 12–40pt band) regardless of zoom, so they never balloon or vanish.
       const s = st.current;
@@ -844,6 +868,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // Brush paint: a left-press-drag in Paint/Brush mode paints a circular dab under the
     // cursor along the whole drag (owns the pointer so orbit can't fight it).
     let paintDrag: number | null = null; // active pointerId, or null
+    // Per-frame gates for the two raycasting paths in onMove (see arbTick above for why):
+    // one run per rendered frame, newest skipped event replayed from the animate loop.
+    let paintTick = -1;
+    let paintPending: PointerEvent | null = null;
+    let hoverTick = -1;
+    let hoverPending: PointerEvent | null = null;
     const brushPaintAt = (clientX: number, clientY: number) => {
       const s2 = st.current;
       if (!s2 || !s2.mesh || !s2.tri || !s2.triColor) return;
@@ -1020,6 +1050,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
       if (paintDrag !== null) {
         if (e.pointerId !== paintDrag) return;
+        // Land the frame-gated final dab first so the stroke ends exactly under the cursor.
+        if (paintPending) { brushPaintAt(paintPending.clientX, paintPending.clientY); paintPending = null; }
         paintDrag = null;
         controls.enabled = true;
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
@@ -1102,8 +1134,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
-      // Brush paint drag: paint a dab under the cursor for the whole stroke.
-      if (paintDrag !== null) { if (e.pointerId !== paintDrag) return; e.preventDefault(); brushPaintAt(e.clientX, e.clientY); return; }
+      // Brush paint drag: paint a dab under the cursor for the whole stroke — one dab
+      // per rendered frame (the stroke can't appear any faster; WebKit sends more).
+      if (paintDrag !== null) {
+        if (e.pointerId !== paintDrag) return;
+        e.preventDefault();
+        if (paintTick === frame) { paintPending = e; return; }
+        paintTick = frame;
+        paintPending = null;
+        brushPaintAt(e.clientX, e.clientY);
+        return;
+      }
       // Orientation-gizmo drag: orbit the camera about the target (world Z stays up).
       if (axDrag) {
         if (e.pointerId !== axDrag.pointerId) return;
@@ -1224,6 +1265,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         return;
       }
       if (!s2 || downAt) return; // don't fight an orbit drag
+      // Everything below is hover feedback driven by raycasts — once per rendered
+      // frame is all the screen can show, so extra WebKit input-rate events wait.
+      if (hoverTick === frame) { hoverPending = e; return; }
+      hoverTick = frame;
+      hoverPending = null;
       // Hole hover-placement: slide the drill ghost (and its guide lines) along the
       // target plane under the cursor. Purely imperative — the draft's position only
       // commits on click, so hovering costs no React re-renders.

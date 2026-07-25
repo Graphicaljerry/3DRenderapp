@@ -46,15 +46,23 @@ jobs:
           - label: macOS (Apple Silicon)
             os: macos-14
             rust_target: aarch64-apple-darwin
-            bundles: dmg
+            bundles: app,dmg
             bundle_glob: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
             asset: Moldable_aarch64.dmg
+            # Silent-update payload: the .app tarball the updater swaps in, + its signature.
+            updater_glob: src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app.tar.gz
+            updater_asset: Moldable_aarch64.app.tar.gz
+            platform_key: darwin-aarch64
           - label: Windows (x64)
             os: windows-latest
             rust_target: x86_64-pc-windows-msvc
             bundles: nsis
             bundle_glob: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
             asset: Moldable_x64-setup.exe
+            # On Windows the updater runs the NSIS installer itself — same file, signed.
+            updater_glob: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            updater_asset: Moldable_x64-setup.exe
+            platform_key: windows-x86_64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -101,10 +109,33 @@ jobs:
           "
           echo "Stamped Moldable 0.2.$N"
 
+      # Signed update artifacts need the private key. Until it exists as a secret the
+      # build must still succeed — so turn the updater artifacts off for that run and
+      # ship installers only (the app falls back to "download the installer").
+      - name: Skip updater artifacts when no signing key is configured
+        env:
+          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        if: ${{ env.SIGNING_KEY == '' }}
+        working-directory: moldable-lite
+        shell: bash
+        run: |
+          set -euo pipefail
+          node -e "
+            const fs = require('fs'), f = 'src-tauri/tauri.conf.json';
+            const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+            j.bundle.createUpdaterArtifacts = false;
+            fs.writeFileSync(f, JSON.stringify(j, null, 2) + '\n');
+          "
+          echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set — building without silent-update artifacts."
+
       - name: Build the app + installer
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update payload so the installed app will accept it (the public
+          # half is baked into tauri.conf.json). Absent → the step above disabled them.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # ---- macOS signing + notarization (uncomment once the Apple account exists) ----
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           # APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -127,11 +158,39 @@ jobs:
           cp "$SRC" "../${{ matrix.asset }}"
           ls -lh "../${{ matrix.asset }}"
 
+      # The updater payload + its detached signature, plus a tiny json describing this
+      # platform's entry. The publish job merges those into one latest.json.
+      - name: Collect the silent-update payload
+        shell: bash
+        working-directory: moldable-lite
+        run: |
+          set -euo pipefail
+          SIG=$(ls ${{ matrix.updater_glob }}.sig 2>/dev/null | head -1 || true)
+          if [ -z "$SIG" ]; then
+            echo "No signed update artifact this run — installers only."
+            exit 0
+          fi
+          PAYLOAD=$(ls ${{ matrix.updater_glob }} | head -1)
+          cp "$PAYLOAD" "../${{ matrix.updater_asset }}"
+          node -e "
+            const fs = require('fs');
+            fs.writeFileSync('../updater-${{ matrix.platform_key }}.json', JSON.stringify({
+              '${{ matrix.platform_key }}': {
+                signature: fs.readFileSync(process.argv[1], 'utf8').trim(),
+                url: 'https://github.com/${{ github.repository }}/releases/download/desktop-latest/${{ matrix.updater_asset }}',
+              },
+            }));
+          " "$SIG"
+          ls -lh "../${{ matrix.updater_asset }}" "../updater-${{ matrix.platform_key }}.json"
+
       - name: Upload for the publish job
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.asset }}
-          path: ${{ matrix.asset }}
+          path: |
+            ${{ matrix.asset }}
+            ${{ matrix.updater_asset }}
+            updater-${{ matrix.platform_key }}.json
           if-no-files-found: error
 
   publish:
@@ -155,9 +214,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          N=$(git rev-list --count HEAD)
+          export N=$(git rev-list --count HEAD) # exported: the node script below reads it
           ls -lh installers/
-          FILES=$(find installers -type f \( -name '*.dmg' -o -name '*.exe' \) | tr '\n' ' ')
+          # Merge each platform's signed entry into ONE latest.json — the manifest the
+          # installed app polls to update itself. Absent when no signing key is set,
+          # in which case the app falls back to offering the installer download.
+          node -e "
+            const fs = require('fs');
+            const parts = fs.readdirSync('installers').filter((f) => /^updater-.*\.json\$/.test(f));
+            if (!parts.length) { console.log('no signed update entries — installers only'); process.exit(0); }
+            const platforms = Object.assign({}, ...parts.map((f) => JSON.parse(fs.readFileSync('installers/' + f, 'utf8'))));
+            fs.writeFileSync('installers/latest.json', JSON.stringify({
+              version: '0.2.' + process.env.N,
+              notes: 'Moldable v' + process.env.N + ' — see the release notes.',
+              pub_date: new Date().toISOString(),
+              platforms,
+            }, null, 2));
+            console.log('latest.json covers:', Object.keys(platforms).join(', '));
+          "
+          FILES=$(find installers -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.app.tar.gz' -o -name 'latest.json' \) | tr '\n' ' ')
           NOTES="Native desktop builds of Moldable (v${N}).
 
           **macOS** (Apple Silicon) — \`Moldable_aarch64.dmg\`

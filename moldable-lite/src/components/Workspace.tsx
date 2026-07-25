@@ -24,7 +24,7 @@ import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramRange, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
-import { IS_DESKTOP, checkDesktopUpdate, openDownload, type DesktopUpdate } from "../lib/desktopUpdate";
+import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type UpdateState } from "../lib/desktopUpdate";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
@@ -2182,26 +2182,32 @@ export function Workspace(p: Props) {
   );
 }
 
-// Desktop app only (never renders on the web): a status-bar chip when the rolling
-// desktop-latest release is ahead of this installed build. Clicking opens the right
-// installer in the system browser — the native app can't update itself in place
-// (that needs signed update artifacts), but it can always tell you and hand you
-// the download.
+// Desktop app only (never renders on the web, which is a self-updating PWA): the app
+// installs new builds in the background and this chip narrates it. Only the restart is
+// the user's call — nothing interrupts work mid-model.
 function DesktopUpdateChip() {
-  const [u, setU] = useState<DesktopUpdate | null>(null);
+  const [u, setU] = useState<UpdateState | null>(null);
   useEffect(() => {
-    if (!IS_DESKTOP) return;
-    let dead = false;
-    const check = () => void checkDesktopUpdate(Number(__BUILD_STAMP__)).then((r) => { if (!dead && r) setU(r); });
-    check();
-    const id = setInterval(check, 6 * 3600_000); // long-lived windows still hear about updates
-    return () => { dead = true; clearInterval(id); };
+    const build = Number(__BUILD_STAMP__);
+    const off = watchDesktopUpdate(build, setU);
+    const id = setInterval(() => void checkForUpdate(build), 6 * 3600_000); // long-lived windows still pick updates up
+    return () => { off(); clearInterval(id); };
   }, []);
   if (!u) return null;
+  if (u.phase === "installing") {
+    return <span className="update-chip installing" title="Downloading and installing the new version in the background — keep working, nothing will interrupt you.">Updating…</span>;
+  }
+  if (u.phase === "ready") {
+    return (
+      <button className="update-chip" title={`Moldable ${u.version} is installed. Restart to start using it — your work is saved.`} onClick={() => void restartApp()}>
+        Restart to update
+      </button>
+    );
+  }
   return (
     <button
       className="update-chip"
-      title={`Moldable v${u.version} is out (you're on v${__BUILD_STAMP__}). Downloads the new installer — then drag Moldable to Applications (Mac) or run it (Windows) to update.`}
+      title={`Moldable v${u.version} is out (you're on v${__BUILD_STAMP__}). Downloads the installer — then drag Moldable to Applications (Mac) or run it (Windows).`}
       onClick={() => void openDownload(u.url)}
     >
       Update to v{u.version}

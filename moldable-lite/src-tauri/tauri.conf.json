@@ -26,9 +26,19 @@
       "assetProtocol": { "enable": false }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/Graphicaljerry/3DRenderapp/releases/download/desktop-latest/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJBQjE4Mjc5QUUwNDBBODYKUldTR0NnU3VlWUt4S3VQN250NHhHMitQQ0hiUjBEL1pTSzRFUjM5c0xFVGdldk5LN29EOXBGUmkK",
+      "windows": { "installMode": "passive" }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

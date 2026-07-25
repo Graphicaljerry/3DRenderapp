@@ -190,7 +190,10 @@ export default defineConfig({
   ],
   worker: { format: "es" },
   // Tauri reads TAURI_ENV_* during `tauri dev/build`; expose them to import.meta.env.
-  envPrefix: ["VITE_", "TAURI_ENV_*"],
+  // Prefixes are literal startsWith matches — "TAURI_ENV_*" (the snippet in Tauri's
+  // docs) matches NOTHING because no var starts with a literal asterisk. The fixed
+  // prefix exposes TAURI_ENV_PLATFORM to import.meta.env for the desktop-only code.
+  envPrefix: ["VITE_", "TAURI_ENV_"],
   optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },
   build: {
     target: "esnext",

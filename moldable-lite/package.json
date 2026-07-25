@@ -13,6 +13,7 @@
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.84",
     "@supabase/supabase-js": "^2.110.0",
+    "@tauri-apps/plugin-opener": "^2.5.4",
     "comlink": "^4.4.1",
     "fflate": "^0.8.2",
     "idb": "^8.0.3",

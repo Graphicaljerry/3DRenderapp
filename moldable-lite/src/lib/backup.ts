@@ -42,12 +42,19 @@ export const LOCAL_ONLY_KEYS = new Set([
   "moldable_spend_v1", // per-device spend estimates, appended on every paid run
 ]);
 
+/** Device-local key test: the exact names above plus per-project prefixes. The mesh
+    markers record which blob bytes THIS device already holds — syncing them would
+    make every other device skip downloads it actually needs. */
+export function isLocalOnlyKey(k: string): boolean {
+  return LOCAL_ONLY_KEYS.has(k) || k.startsWith("moldable_meshhash_");
+}
+
 /** Everything the app stores in localStorage (keys, providers, printer, units…), minus device-local keys. */
 export function gatherSettings(): Record<string, string> {
   const out: Record<string, string> = {};
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i)!;
-    if (k.startsWith("moldable_") && !LOCAL_ONLY_KEYS.has(k)) out[k] = localStorage.getItem(k)!;
+    if (k.startsWith("moldable_") && !isLocalOnlyKey(k)) out[k] = localStorage.getItem(k)!;
   }
   return out;
 }
@@ -97,6 +104,49 @@ export async function decryptPayload(passphrase: string, envelope: string): Prom
   }
   const bytes = payload.gz ? await gz(new Uint8Array(plain), "gunzip") : new Uint8Array(plain); // v1 envelopes are plain
   return new TextDecoder().decode(bytes);
+}
+
+// ---- Binary envelope (mesh blobs → Storage objects, not text columns) ----
+// Layout: "MB1" magic · flags byte (bit0 = gzipped) · 16-byte salt · 12-byte IV ·
+// AES-GCM ciphertext. Same key derivation as the text envelopes above, so the same
+// account passphrase opens both.
+
+/** Encrypt raw bytes for the account's Storage bucket. */
+export async function encryptBytes(passphrase: string, data: Uint8Array): Promise<Uint8Array> {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKey(passphrase, salt);
+  let bytes = data;
+  let flags = 0;
+  if (typeof CompressionStream !== "undefined") {
+    try {
+      const packed = await gz(data, "gzip");
+      if (packed.length < bytes.length) { bytes = packed; flags |= 1; } // text STL shrinks a lot; GLB barely
+    } catch { /* compression is an optimisation only */ }
+  }
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: iv as BufferSource }, key, bytes as BufferSource));
+  const out = new Uint8Array(3 + 1 + 16 + 12 + ct.length);
+  out.set([0x4d, 0x42, 0x31], 0); // "MB1"
+  out[3] = flags;
+  out.set(salt, 4);
+  out.set(iv, 20);
+  out.set(ct, 32);
+  return out;
+}
+
+/** Decrypt an envelope produced by encryptBytes. Throws on wrong key / not an envelope. */
+export async function decryptBytes(passphrase: string, envelope: Uint8Array): Promise<Uint8Array> {
+  if (envelope.length < 33 || envelope[0] !== 0x4d || envelope[1] !== 0x42 || envelope[2] !== 0x31) {
+    throw new Error("Not a Moldable mesh blob.");
+  }
+  const key = await deriveKey(passphrase, envelope.subarray(4, 20));
+  let plain: ArrayBuffer;
+  try {
+    plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: envelope.subarray(20, 32) as BufferSource }, key, envelope.subarray(32) as BufferSource);
+  } catch {
+    throw new Error("Wrong key for this mesh blob.");
+  }
+  return envelope[3] & 1 ? gz(new Uint8Array(plain), "gunzip") : new Uint8Array(plain);
 }
 
 export async function exportSettings(passphrase: string): Promise<Blob> {

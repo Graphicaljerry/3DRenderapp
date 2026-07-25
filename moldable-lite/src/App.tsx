@@ -3196,6 +3196,13 @@ export default function App() {
     clearImage();
     if (next.engine === "generative" && next.glb) {
       await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
+    } else if (next.engine === "generative") {
+      // No mesh bytes on THIS device (falling through would "build" empty code and
+      // fail with a bare kernel error). Meshes sync through the account's Storage
+      // bucket — say what's missing and how to get it instead of an empty viewer.
+      throw new Error(
+        "This project's 3D mesh isn't stored on this device yet. Meshes sync through your account: sign in on both devices, open the project once where it was made so it uploads, then reopen it here. (Or re-generate / re-import the model.)",
+      );
     } else {
       // Boot-on-demand (don't skip the rebuild when a resume/open races the deferred
       // kernel warm-up — that left the viewer empty until the next interaction).
@@ -3303,8 +3310,10 @@ export default function App() {
     setMode(p.engine === "generative" ? "generative" : "precise");
     try {
       await rebuildHead(p);
-    } catch {
-      /* leave viewer empty if HEAD doesn't rebuild */
+    } catch (err: any) {
+      // Say WHY the viewer is empty (mesh missing on this device, kernel error…) —
+      // a silently blank canvas read as "the app can't open my project" (Mac audit).
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     }
   }
 

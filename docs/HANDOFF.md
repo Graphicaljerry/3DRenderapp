@@ -639,6 +639,40 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   Effective CSS floor: iOS 16.2+ (color-mix, @container). Playwright WebKit can NOT be
   downloaded in the CCR sandbox (CDN 403) — engine-level Safari testing happens on
   real devices only.
+- **Mac-app audit (WKWebView parity, PR #135)**: from Jerry's real-device report.
+  (1) Drag lag: `preserveDrawingBuffer` removed (all captures render to their own
+  offscreen `WebGLRenderTarget`; keeping it forced WebKit to full-copy the framebuffer
+  every frame), and the raycasting pointermove handlers (gizmo `arbitrate`, the
+  hover tail of `onMove`, brush painting) are FRAME-GATED: WebKit fires pointermove at
+  input rate (~2× frame rate; Chrome coalesces), so each handler runs once per
+  rendered frame and the newest skipped event replays from the animate loop (a pause
+  never leaves hover/enable state stale; pointerup flushes the last brush dab before
+  the stroke commits). Separate tick vars per handler — arbitrate (capture) and onMove
+  (bubble) see the SAME event, one shared stamp would starve the second. (2) Objects
+  panel now docks top-RIGHT (`.layers-panel`): the tool rail + flyouts own the left
+  edge and drew over the rows; stats yield while it's open; height stops above the
+  zoom cluster. Fixed the invisible row names too — fixed pills (badge/swatch/plate)
+  squeezed the flex name to 0px (`.lp-name` min-width 56 + ellipsis, `.lp-sub` yields,
+  panel 240→264). This 0px bug was silently failing sandbox-e2e. (3) Select no longer
+  vanishes when a CAD model is separated: rail shows it disabled ("Regroup parts to
+  use it", gated on new `separatedKind` prop) and separateParts turns select mode off.
+- **Mesh cloud sync (Storage bucket, PR #136)**: fixes "mesh project synced to another
+  device opens empty" (the Lambo-on-Mac report). Each project's HEAD mesh (generated
+  `glb` or imported STEP/STL) uploads to the private `mesh-sync` Storage bucket at
+  `<uid>/<projectId>.bin`, AES-GCM encrypted client-side (`encryptBytes`/`decryptBytes`
+  in backup.ts: "MB1" magic + gz flag + salt + iv + ct, same key derivation as the row
+  payloads). Owner-scoped RLS policies (migration `mesh_sync_bucket`, 50 MB/file).
+  Push: sha-256 hash per blob, skips upload when the device-local marker
+  (`moldable_meshhash_<id>`, excluded from settings sync via prefix-aware
+  `isLocalOnlyKey`) already matches; injects `cloudMesh: {hash, src}` into the synced
+  JSON; deletes bucket objects for removed projects. Pull: downloads when the marker
+  doesn't match (or bytes are missing), attaches to `glb`/`importFile`; a local-newer
+  project missing its mesh still restores. Version-history blobs stay on-device —
+  undo into an old mesh snapshot on another device explains itself. Opening a
+  generative project with no mesh now posts an honest chat message (rebuildHead
+  throws; openProjectById's catch surfaces errors instead of silently blanking).
+  NOT verifiable in CI: the live bucket round-trip needs a real signed-in session —
+  Jerry signing in on web + Mac and reopening the Lambo is the true test.
 
 ## Conventions
 

@@ -65,9 +65,18 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   web build is byte-identical (PWA on, absolute base); the Tauri build drops the
   service worker + uses relative `./` base (verified: web has sw.js, tauri build
   has none). CI: `.github/workflows/build-mac.yml` builds the `.dmg` on a `macos-14`
-  runner via `tauri-apps/tauri-action` on `v*` tags (unsigned beta; APPLE_* secrets
-  commented for later signing). The `.dmg` can ONLY be built on macOS — not on this
-  Linux box. Only the *optional* on-device WebLLM degrades (WebGPU, macOS 26+).
+  runner via `tauri-apps/tauri-action` **automatically on every push to main**
+  (docs/harness-only commits skipped), refreshing a rolling **`mac-latest`**
+  pre-release so the download page has ONE permanent URL
+  (`/releases/download/mac-latest/Moldable_aarch64.dmg`). The asset filename is
+  fixed; build identity is the stamped version `0.2.<commit count>` = the app's own
+  v-number. `v*` tags additionally cut a versioned Release. **`fetch-depth: 0` is
+  REQUIRED** — without it the commit count is 1 and the bundled app reports "v1".
+  Unsigned beta; APPLE_* secrets commented for later signing. The `.dmg` can ONLY
+  be built on macOS — not on this Linux box. NOTE: the GitHub App token in these
+  sessions CANNOT trigger `workflow_dispatch` (403 "Resource not accessible by
+  integration") — a push to main is how builds start. Only the *optional* on-device
+  WebLLM degrades (WebGPU, macOS 26+).
   Fast-follow: `.3mf`/`.stl`/`.step` file associations via a small Rust addition +
   tauri-plugin-fs/dialog. See `src-tauri/README.md`.
 - **Engine switch is now three-way (#130)**: the composer toggle is **Auto ·

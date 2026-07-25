@@ -327,13 +327,18 @@ button { font-family: inherit; cursor: pointer; }
 .marquee { position: absolute; z-index: 7; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); pointer-events: none; border-radius: 2px; }
 /* Sits ABOVE the Top/Front/Right/3D view pills (bottom: 12px, ~28px tall) — both are
    bottom-centred, so anything lower overlaps and the hint text reads through the pills. */
-.box-hint { position: absolute; left: 50%; bottom: 50px; transform: translateX(-50%); z-index: 5; padding: 5px 11px; font-size: 12px; color: var(--ink2); background: color-mix(in srgb, var(--bg) 85%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); pointer-events: none; white-space: nowrap; max-width: calc(100% - 24px); text-overflow: ellipsis; overflow: hidden; }
+.box-hint { position: absolute; left: 50%; bottom: 50px; transform: translateX(-50%); z-index: 5; padding: 5px 11px; font-size: 12px; color: var(--ink2); background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); pointer-events: none; white-space: nowrap; max-width: calc(100% - 24px); text-overflow: ellipsis; overflow: hidden; }
 .viewer-overlay { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px; color: var(--ink2); font-size: 14px; text-align: center; pointer-events: none; }
 .viewer-overlay.muted { color: var(--subt); }
 .viewer-overlay small { color: var(--subt); font-size: 11px; }
 
 /* Mesh + print stats overlay, top-left of the 3D view (Meshy-style, print-framed). */
-.mesh-stats { position: absolute; top: 12px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
+/* Canvas overlays are deliberately OPAQUE and blur-free. `backdrop-filter: blur()`
+   over a continuously animating canvas makes the compositor re-blur that region on
+   every rendered frame — cheap in Chrome, expensive in WKWebView (the Mac app), where
+   it dominated an otherwise ~0.6 ms frame. Solid panels read better over a 3D scene
+   anyway; the blur only existed to make translucency legible. */
+.mesh-stats { position: absolute; top: 12px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
 .ms-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11.5px; }
 .ms-row span { color: var(--mut); }
 .ms-row b { font-weight: 600; color: var(--ink2); font-variant-numeric: tabular-nums; }
@@ -377,7 +382,7 @@ button { font-family: inherit; cursor: pointer; }
 .has-modes.on::after { opacity: .8; }
 
 /* Standard-view snaps, floated at the bottom centre of the canvas (Spline-style). */
-.view-snaps { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; display: flex; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.view-snaps { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 6; display: flex; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 .view-snaps button { border: none; background: none; padding: 4px 11px; font-size: 11.5px; font-weight: 600; color: var(--mut); border-radius: 999px; }
 .view-snaps button:hover { background: var(--surf); color: var(--ink); }
 
@@ -445,7 +450,7 @@ button { font-family: inherit; cursor: pointer; }
 .update-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .update-chip.installing { color: var(--mut); border-color: var(--bord); background: none; font-weight: 500; }
 
-.zoom-ctl { position: absolute; right: 12px; bottom: 118px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.zoom-ctl { position: absolute; right: 12px; bottom: 118px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 .zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
 .zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
 /* hole tool panel */
@@ -460,7 +465,7 @@ button { font-family: inherit; cursor: pointer; }
 .hole-panel .ghost.on { border-color: var(--accent); color: var(--accent-d); }
 
 /* AI change preview: proposal held on canvas, Apply/Discard bar */
-.ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(8px); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow); }
+.ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow); }
 .apb-text { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
 .apb-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mut); }
 .apb-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
@@ -473,7 +478,7 @@ button { font-family: inherit; cursor: pointer; }
 /* "circle it and ask" draw overlay */
 .mark-overlay { position: absolute; inset: 0; z-index: 12; cursor: crosshair; }
 .mark-overlay canvas { width: 100%; height: 100%; display: block; touch-action: none; }
-.mark-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 7px 12px; max-width: calc(100% - 24px); background: color-mix(in srgb, var(--bg) 92%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); font-size: 12px; color: var(--ink2); pointer-events: none; }
+.mark-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 7px 12px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); font-size: 12px; color: var(--ink2); pointer-events: none; }
 .mark-hint button { pointer-events: auto; flex: 0 0 auto; }
 
 /* plate tab labels + inline rename */
@@ -484,7 +489,7 @@ button { font-family: inherit; cursor: pointer; }
 .lp-export:disabled { opacity: .4; }
 
 /* ---------- build plates: Bambu-style tabs over the 3D view + assignment menus ---------- */
-.plate-bar { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; max-width: min(46%, calc(100% - 24px)); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(6px); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.plate-bar { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; max-width: min(46%, calc(100% - 24px)); background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 .pb-tabs { display: flex; align-items: center; gap: 3px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .pb-tabs::-webkit-scrollbar { display: none; }
 .pb-tab { flex: 0 0 auto; }
@@ -1011,8 +1016,7 @@ details.guide { margin-top: 10px; }
   flex-direction: column;
   gap: 2px;
   padding: 5px;
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  backdrop-filter: blur(6px);
+  background: var(--bg);
   border: 1px solid var(--bord);
   border-radius: 12px;
   box-shadow: var(--shadow-md);

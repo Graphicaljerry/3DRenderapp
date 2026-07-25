@@ -272,6 +272,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   holeIx.current = { ghost: holeGhost, place: holePlace };
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
+  // Set by the mount effect: "the scene changed, draw again" (see render-on-demand).
+  const invalidateRef = useRef<(frames?: number) => void>(() => {});
 
   useEffect(() => {
     const el = mount.current!;
@@ -279,7 +281,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // renders to its own offscreen WebGLRenderTarget, so nothing reads the live
     // canvas. Keeping it on forced WebKit (the Mac app's WKWebView) to copy the
     // framebuffer every frame instead of the fast swap — a real drag-lag report.
-    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+    // alpha:false — the scene always paints an opaque background, so an alpha channel
+    // only buys the compositor a per-frame blend of the canvas layer against the page.
+    // Opaque layers take WebKit's cheaper path (and cost nothing in Chrome).
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     const FULL_DPR = Math.min(window.devicePixelRatio, 2);
     const LOW_DPR = Math.min(window.devicePixelRatio, 1); // motion resolution: on a 2× panel this ~quarters the fill cost
     renderer.setPixelRatio(FULL_DPR);
@@ -622,8 +627,46 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
     let raf = 0;
     let frame = 0;
+    // ---- Render on demand ----------------------------------------------------
+    // Drawing a frame costs the app ~0.6ms of JS but makes the BROWSER raster and
+    // composite the canvas — by far the expensive half, and the half that shows up as
+    // heat (then thermal throttling, then a less smooth drag) when we do it 60-120×
+    // a second while nothing is moving. So: render when the camera moved, when
+    // something marked the scene dirty, or on a slow heartbeat as a safety net —
+    // never just because another frame arrived.
+    let dirty = 3; // frames still owed; decremented per render
+    let lastDraw = 0;
+    const HEARTBEAT_MS = 500; // bounds any missed invalidation to half a second
+    const invalidate = (frames = 2) => { dirty = Math.max(dirty, frames); };
+    invalidateRef.current = invalidate;
+    // Any pointer/wheel work can move or highlight something — the handlers below are
+    // many and imperative, so cover them all at the source instead of one by one.
+    for (const ev of ["pointerdown", "pointermove", "pointerup", "wheel"] as const) {
+      renderer.domElement.addEventListener(ev, () => invalidate(3), { passive: true });
+    }
     const animate = () => {
-      controls.update();
+      // update() returns true while the camera is still moving (damping included).
+      const moving = controls.update();
+      const now = performance.now();
+      // A frame-gated pointer event still owed a run counts as work pending.
+      const owed = !!(arbPending || hoverPending || paintPending);
+      const beat = now - lastDraw >= HEARTBEAT_MS;
+      if (import.meta.env.DEV) {
+        const st2 = ((window as any).__viewerStats ??= { drawn: 0, skipped: 0, moving: 0, dirty: 0, owed: 0, beat: 0 });
+        if (moving || owed || dirty > 0 || beat) {
+          st2.drawn++;
+          if (moving) st2.moving++;
+          if (owed) st2.owed++;
+          if (!moving && !owed && dirty > 0) st2.dirty++;
+          if (!moving && !owed && dirty <= 0 && beat) st2.beat++;
+        } else st2.skipped++;
+      }
+      if (!(moving || owed || dirty > 0 || beat)) {
+        raf = requestAnimationFrame(animate);
+        return;
+      }
+      if (dirty > 0) dirty--;
+      lastDraw = now;
       // A selected feature's arrow can sit outside the viewport when zoomed in — re-anchor
       // it to a visible point of the highlighted feature so it's always grabbable.
       if (++frame % 15 === 0) {
@@ -1414,6 +1457,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       camera.aspect = w / h;
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
+      invalidate(2); // a resize clears the canvas: repaint now, don't wait for the heartbeat
     });
     ro.observe(el);
 
@@ -2095,7 +2139,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.tcR.setRotationSnap(snap.rotate > 0 ? THREE.MathUtils.degToRad(snap.rotate) : null);
   }, [snap.move, snap.rotate]);
 
-  useImperativeHandle(ref, () => ({
+  // Catch-all for render-on-demand: this component only re-renders when something
+  // about the scene changed (geometry, selection, palette, view flags…), and every
+  // scene-mutating effect below has already run by now. One dependency-free effect
+  // therefore covers all of them — no per-effect bookkeeping to forget. A few frames,
+  // not one, so effects that settle asynchronously (texture decode, label layout)
+  // still land on screen.
+  useEffect(() => { invalidateRef.current(4); });
+
+  useImperativeHandle(ref, () => wakeOnCall({
     resetView() {
       if (st.current) frameToObject(st.current);
     },
@@ -2243,6 +2295,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       return st.current ? captureThumbnail(st.current, { W: 768, H: 768, png: true }) : null;
     },
   }));
+
+  /** Every imperative call can mutate the scene outside React's knowledge (snap the
+      view, erase paint, drop a pin…), so each one also asks for a redraw — otherwise
+      render-on-demand could leave the change unpainted until the heartbeat. Wrapping
+      the whole surface means a method added later can't forget to do it. */
+  function wakeOnCall(api: ViewerHandle): ViewerHandle {
+    const out = {} as Record<string, unknown>;
+    for (const [k, v] of Object.entries(api)) {
+      out[k] = typeof v === "function"
+        ? (...args: unknown[]) => { const r = (v as (...a: unknown[]) => unknown)(...args); invalidateRef.current(4); return r; }
+        : v;
+    }
+    return out as unknown as ViewerHandle;
+  }
 
   return <div ref={mount} className="viewerCanvas" />;
 });

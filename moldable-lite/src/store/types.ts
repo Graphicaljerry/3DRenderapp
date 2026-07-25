@@ -54,6 +54,7 @@ export interface Project {
   ops?: CadOp[]; // HEAD direct fillet/chamfer ops
   spec?: unknown; // HEAD primitive spec
   glb?: Blob; // HEAD generative mesh
+  cloudMesh?: { hash: string; src: "glb" | "import" }; // the account's Storage bucket holds the HEAD mesh (sha-256 of the raw bytes) — other devices fetch it on pull
   meshXform?: number[]; // HEAD baked mesh transform (see Version.meshXform)
   importFile?: Blob; // HEAD imported STEP/STL (the `imported` arg for the code)
   importKind?: "step" | "stl"; // HEAD import parser kind (see Version.importKind)

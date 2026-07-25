@@ -4,11 +4,16 @@
 //   account — no passphrase, no manual push. Rows are private to the owner via
 //   row-level security; payloads are AES-GCM encrypted at rest with a key
 //   derived from the account id (defence-in-depth against a raw DB read).
-//   Meshes/STEP blobs stay on-device (too large for a text column).
+// - Meshes/STEP blobs are too large for the text column, so each project's HEAD
+//   mesh syncs as an encrypted object in the private "mesh-sync" Storage bucket
+//   (path "<uid>/<project id>.bin", owner-scoped policies). Without this, a mesh
+//   project opened on another device had chat + history but no geometry — the
+//   real "my Lambo won't open on the Mac" report. Older version snapshots stay
+//   on-device; undoing into them on another device explains itself instead.
 // - The same Supabase project hosts the relay edge function that unlocks
 //   Tripo/Meshy/fal on the hosted site (DEFAULT_RELAY).
 
-import { encryptPayload, decryptPayload, gatherSettings, LOCAL_ONLY_KEYS } from "./backup";
+import { encryptPayload, decryptPayload, encryptBytes, decryptBytes, gatherSettings, isLocalOnlyKey } from "./backup";
 import { listProjects, getProject, putProject } from "../store/projects";
 import type { Project } from "../store/types";
 
@@ -115,7 +120,72 @@ async function currentUid(): Promise<string | null> {
   return data?.session?.user?.id ?? null;
 }
 
-/** Meshes/STEP blobs stay on-device; everything else about a project syncs.
+// ---- Mesh blob sync (Storage bucket) ----
+const MESH_BUCKET = "mesh-sync";
+/** localStorage marker: the sha-256 of the mesh bytes THIS device knows are in the
+    bucket for a project (set after an upload or a download). Device-local by design —
+    isLocalOnlyKey excludes the prefix from settings sync. */
+const meshMark = (id: string) => `moldable_meshhash_${id}`;
+
+async function sha256Hex(b: Blob): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", await b.arrayBuffer());
+  return [...new Uint8Array(d)].map((x) => x.toString(16).padStart(2, "0")).join("");
+}
+
+/** Upload each project's HEAD mesh (generated glb, or the imported STEP/STL a CAD
+    program references) that the bucket doesn't have yet. Returns per-project metadata
+    to embed in the synced JSON so other devices know a blob exists to fetch. Encrypted
+    with the same account-derived key as the row payloads; a failed upload skips that
+    project (the JSON keeps any metadata a previous successful upload published) rather
+    than failing the whole sync. */
+async function pushMeshes(c: any, uid: string, all: Project[]): Promise<{ meta: Map<string, NonNullable<Project["cloudMesh"]>>; uploaded: number }> {
+  const meta = new Map<string, NonNullable<Project["cloudMesh"]>>();
+  let uploaded = 0;
+  for (const p of all) {
+    const blob = p.glb ?? p.importFile;
+    if (!blob) continue;
+    const src: "glb" | "import" = p.glb ? "glb" : "import";
+    try {
+      const hash = await sha256Hex(blob);
+      if (localStorage.getItem(meshMark(p.id)) !== hash) {
+        const enc = await encryptBytes(uid, new Uint8Array(await blob.arrayBuffer()));
+        const { error } = await c.storage.from(MESH_BUCKET).upload(`${uid}/${p.id}.bin`, enc, { upsert: true, contentType: "application/octet-stream" });
+        if (error) throw new Error(error.message);
+        localStorage.setItem(meshMark(p.id), hash);
+        uploaded++;
+      }
+      meta.set(p.id, { hash, src });
+    } catch {
+      if (p.cloudMesh) meta.set(p.id, p.cloudMesh); // the bucket still holds the older copy
+    }
+  }
+  // Housekeeping: drop bucket objects for projects that no longer exist.
+  try {
+    const { data } = await c.storage.from(MESH_BUCKET).list(uid, { limit: 1000 });
+    const live = new Set(all.map((p) => `${p.id}.bin`));
+    const stale = (data ?? []).map((f: any) => f.name).filter((n: string) => n.endsWith(".bin") && !live.has(n));
+    if (stale.length) await c.storage.from(MESH_BUCKET).remove(stale.map((n: string) => `${uid}/${n}`));
+  } catch { /* cleanup is best-effort */ }
+  return { meta, uploaded };
+}
+
+/** Download + decrypt a project's mesh from the bucket; null on any failure (the
+    caller keeps whatever it had). Marks the device as holding these bytes. */
+async function fetchMesh(c: any, uid: string, id: string, hash: string): Promise<Blob | null> {
+  try {
+    const { data, error } = await c.storage.from(MESH_BUCKET).download(`${uid}/${id}.bin`);
+    if (error || !data) return null;
+    const plain = await decryptBytes(uid, new Uint8Array(await data.arrayBuffer()));
+    localStorage.setItem(meshMark(id), hash);
+    return new Blob([plain as BlobPart]);
+  } catch {
+    return null;
+  }
+}
+
+/** Meshes/STEP blobs never ride in the JSON row — the HEAD blob syncs through the
+    Storage bucket instead (cloudSyncPush injects `cloudMesh` pointing at it) and
+    version-history blobs stay on-device. Everything else about a project syncs.
     Inline data-URL images get a size budget: model thumbnails (~10-30 KB) pass,
     full camera photos / marked screenshots in chat (often multi-MB) do not —
     unbounded images inflated the single-row payload past the server's statement
@@ -136,34 +206,38 @@ function sanitizeProject(p: Project, lean = false): Project {
 }
 
 /** Upload settings (incl. keys) + projects to the account. No-op when signed out. */
-export async function cloudSyncPush(): Promise<{ projects: number } | null> {
+export async function cloudSyncPush(): Promise<{ projects: number; meshes: number } | null> {
   const uid = await currentUid();
   if (!uid) return null;
   await pushBlob("settings", await encryptPayload(uid, JSON.stringify(gatherSettings())));
   const all = await listProjects();
+  // Meshes go FIRST so the JSON that other devices merge already points at blobs
+  // that exist in the bucket (never the other way round).
+  const { meta, uploaded } = await pushMeshes(await supa(), uid, all);
   const attempt = async (lean: boolean) => {
-    const projects = all.map((p) => sanitizeProject(p, lean));
+    const projects = all.map((p) => ({ ...sanitizeProject(p, lean), cloudMesh: meta.get(p.id) }));
     await pushBlob("projects", await encryptPayload(uid, JSON.stringify(projects)));
     return projects.length;
   };
   try {
-    return { projects: await attempt(false) };
+    return { projects: await attempt(false), meshes: uploaded };
   } catch (e: any) {
     // The server kills oversized upserts mid-statement — retry once without any
     // inline images rather than failing the whole sync.
     if (!/statement timeout|57014/i.test(String(e?.message ?? e))) throw e;
-    return { projects: await attempt(true) };
+    return { projects: await attempt(true), meshes: uploaded };
   }
 }
 
 /** Pull the account's data into this device (idempotent — merges projects by
  *  updatedAt, only adopts settings that differ). Returns counts of what changed;
  *  null when signed out. */
-export async function cloudSyncPull(): Promise<{ settings: number; projects: number } | null> {
+export async function cloudSyncPull(): Promise<{ settings: number; projects: number; meshes: number } | null> {
   const uid = await currentUid();
   if (!uid) return null;
   let settings = 0;
   let projects = 0;
+  let meshes = 0;
   const dec = async (blob: string | null) => {
     if (!blob) return null;
     try {
@@ -179,7 +253,7 @@ export async function cloudSyncPull(): Promise<{ settings: number; projects: num
       // Never adopt device-local keys — adopting a stale cloud copy of a
       // per-sync-changing key (moldable_last_sync) would keep flagging a change
       // and reload forever. (Legacy blobs may still contain them.)
-      if (k.startsWith("moldable_") && !LOCAL_ONLY_KEYS.has(k) && localStorage.getItem(k) !== v) {
+      if (k.startsWith("moldable_") && !isLocalOnlyKey(k) && localStorage.getItem(k) !== v) {
         localStorage.setItem(k, v);
         settings++;
       }
@@ -187,11 +261,23 @@ export async function cloudSyncPull(): Promise<{ settings: number; projects: num
   }
   const pJson = await dec(await pullBlob("projects"));
   if (pJson) {
+    const c = await supa();
     const remote = JSON.parse(pJson) as Project[];
     for (const r of remote) {
       const local = await getProject(r.id);
-      if (local && local.updatedAt >= r.updatedAt) continue; // local is newer/equal
-      await putProject({
+      if (local && local.updatedAt >= r.updatedAt) {
+        // Local wins on content — but a mesh the bucket holds and this device lacks
+        // still restores (the "synced project opens empty on another device" fix).
+        if (!local.glb && !local.importFile && r.cloudMesh) {
+          const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
+          if (m) {
+            await putProject(r.cloudMesh.src === "glb" ? { ...local, glb: m, cloudMesh: r.cloudMesh } : { ...local, importFile: m, cloudMesh: r.cloudMesh });
+            meshes++;
+          }
+        }
+        continue;
+      }
+      const merged: Project = {
         ...r,
         glb: local?.glb,
         importFile: local?.importFile,
@@ -199,9 +285,20 @@ export async function cloudSyncPull(): Promise<{ settings: number; projects: num
           const lv = local?.versions.find((x) => x.id === v.id);
           return { ...v, glb: lv?.glb, importFile: lv?.importFile };
         }),
-      });
+      };
+      // Adopting the remote project: fetch its mesh unless this device already holds
+      // exactly those bytes (marker matches AND a blob is actually present).
+      if (r.cloudMesh && !(localStorage.getItem(meshMark(r.id)) === r.cloudMesh.hash && (merged.glb || merged.importFile))) {
+        const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
+        if (m) {
+          if (r.cloudMesh.src === "glb") merged.glb = m;
+          else merged.importFile = m;
+          meshes++;
+        }
+      }
+      await putProject(merged);
       projects++;
     }
   }
-  return { settings, projects };
+  return { settings, projects, meshes };
 }

@@ -518,6 +518,13 @@ export default function App() {
     const sz = main.boundingBox!.getSize(new THREE.Vector3());
     const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
     const prior = result;
+    // The canvas is about to show plain part meshes — CAD feature-select can't act on
+    // them, so switch it off (the rail keeps the tool visible but disabled until Regroup).
+    setSelectMode(false);
+    setActivePinId(null);
+    setPinText("");
+    setSelectedFeature(null);
+    setSelectedFaces([]);
     applyResultNoCommit({
       kind: "generative",
       geometry: main,
@@ -3445,6 +3452,7 @@ export default function App() {
         partCount={partCount}
         separated={separated}
         separatedIds={separatedRef.current?.ids ?? []}
+        separatedKind={separated ? separatedRef.current?.result.kind ?? null : null}
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onCheckFit={(ids) => void checkFit(ids)}

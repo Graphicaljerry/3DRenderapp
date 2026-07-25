@@ -1026,6 +1026,7 @@ interface Props {
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
   separated: boolean; // the dry-fit sandbox is open (model was split into parts)
   separatedIds: string[]; // which objects came out of the split (shown grouped under the model)
+  separatedKind: EngineKind | null; // engine kind of the model the split came from (Select shows disabled, not gone)
   onSeparateParts: () => void;
   onRegroup: () => void;
   onCheckFit: (ids: string[]) => void;
@@ -1720,20 +1721,25 @@ export function Workspace(p: Props) {
               })()}
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
-                  {p.activeKind === "replicad" && (
+                  {(p.activeKind === "replicad" || p.separatedKind === "replicad") && (
                     <div className="rail-tool">
                       {/* Select feeds CAD feature edits (fillet/extrude/hole on picked faces/edges) —
-                          meshes can't take those ops, so the tool hides for them. */}
+                          meshes can't take those ops, so the tool hides for them. While a CAD model
+                          is split into parts the canvas shows plain part meshes, but the tool stays
+                          VISIBLE and disabled — vanishing mid-session read as a bug. */}
                       <button
                         className={`ghost sm iconbtn${p.featureCtl.mode ? " on" : ""}`}
                         aria-pressed={p.featureCtl.mode}
                         aria-label="Select"
-                        title="Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"
+                        disabled={p.activeKind !== "replicad"}
+                        title={p.activeKind !== "replicad"
+                          ? "Select works on the whole CAD model — Regroup parts to use it"
+                          : "Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"}
                         onClick={p.featureCtl.toggleMode}
                       >
                         <IconPointer />
                       </button>
-                      {p.featureCtl.mode && (
+                      {p.featureCtl.mode && p.activeKind === "replicad" && (
                         <div className="rail-fly">
                           <div className="seg sm mode-seg">
                             {SELECT_MODES.map((m, i) => (
@@ -1873,7 +1879,8 @@ export function Workspace(p: Props) {
                   <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
                 </div>
               )}
-              {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
+              {/* The Objects panel docks over this corner — stats yield while it's open. */}
+              {p.tab === "3d" && showStats && !showLayers && p.geometry && p.report && <MeshStats report={p.report} />}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (p.attachments.length > 0 || p.plateCtl.count > 1) && (
                 <PlateBar
                   count={p.plateCtl.count}

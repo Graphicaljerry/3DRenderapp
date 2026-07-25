@@ -23,7 +23,7 @@ check("no top-level Wireframe/Stats/Dimensions buttons",
   (await page.getByRole("button", { name: "Wireframe", exact: true }).count()) === 0 &&
   (await page.getByRole("button", { name: "Stats", exact: true }).count()) === 0 &&
   (await page.getByRole("button", { name: "Dimensions", exact: true }).count()) === 0);
-await page.getByRole("button", { name: /View options/ }).click();
+await page.getByRole("button", { name: "View", exact: true }).click(); // accessible name = the btn-label text
 await page.waitForSelector(".pmenu");
 const viewItems = await page.locator(".pmenu .pmenu-item").allInnerTexts();
 check("View menu holds dims/wireframe/stats/showcase/units/reset",
@@ -102,7 +102,8 @@ for (const pos of [[0.6, 0.55], [0.7, 0.5], [0.65, 0.65], [0.5, 0.6]]) {
   await page.keyboard.press("Escape");
 }
 await page.locator(".pmenu .pmenu-item", { hasText: /^Copy$/ }).click();
-await canvas.click({ button: "right", position: { x: box.width * 0.92, y: box.height * 0.15 } });
+// Top-middle: clear of the model, the left tool rail AND the right-docked Objects panel.
+await canvas.click({ button: "right", position: { x: box.width * 0.55, y: box.height * 0.12 } });
 await page.waitForSelector(".pmenu");
 const emptyItems = await page.locator(".pmenu .pmenu-item").allInnerTexts();
 check("empty-space menu offers Paste", emptyItems.some((v) => v.startsWith("Paste")), emptyItems.join(" | "));

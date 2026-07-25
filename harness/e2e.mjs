@@ -15,10 +15,11 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await page.getByText("Or start from a template").click();
 await page.waitForSelector(".overlay .tpl-grid", { timeout: 30_000 });
 check("keycard link opens gallery", true);
+// Count isn't pinned — templates get added; every card having a real thumbnail is.
 const cards = await page.locator(".overlay .tpl-card").count();
-check("gallery shows 10 cards", cards === 10, `${cards}`);
+check("gallery shows the template cards", cards >= 10, `${cards}`);
 const thumbs = await page.locator(".overlay .tpl-thumb img").count();
-check("cards have real thumbnails", thumbs === 10, `${thumbs}`);
+check("every card has a real thumbnail", thumbs === cards, `${thumbs}/${cards}`);
 
 // 2) Tap "Wall hook" → parametric model builds, chat + project + sliders present.
 await page.locator(".overlay").getByTitle("Build the wall hook template").click();

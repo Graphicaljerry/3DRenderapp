@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
@@ -2424,6 +2424,21 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     setEditingId(null);
     if (t) onChip(t, m.mode);
   }
+  // Identity-stable handlers for the memoised rows below: the parent hands us fresh
+  // closures on every keystroke, so route through a ref instead of passing them down
+  // (a changing function prop would defeat the memo for every row).
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey };
+  const rowApi = useMemo(() => ({
+    startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
+    submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
+    cancelEdit: () => rowCb.current.setEditingId(null),
+    setEditText: (s: string) => rowCb.current.setEditText(s),
+    onRetryModel: (text: string, mode: Mode, value: string) => rowCb.current.onRetryModel(text, mode, value),
+    // App rebuilds these arrows every render; the rows must not see that churn.
+    hasBrainKey: (p: LlmProviderId) => rowCb.current.hasBrainKey(p),
+    hasGenKey: (p: string) => rowCb.current.hasGenKey(p),
+  }), []);
 
   return (
     <div className="messages">
@@ -2450,9 +2465,53 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
         </div>
       )}
       {messages.map((m) => (
-        <div key={m.id} className={`msg ${m.role} ${m.error ? "err" : ""}`}>
+        <MessageRow
+          key={m.id}
+          m={m}
+          // Narrowed on purpose: only the row being edited sees editText, and only the
+          // streaming row sees `thinking` — so a keystroke or a token re-renders ONE
+          // bubble instead of re-parsing every message's markdown.
+          editing={editingId === m.id}
+          editText={editingId === m.id ? editText : ""}
+          thinking={m.streaming ? thinking : ""}
+          busy={busy}
+          // Primitives, not the `brain` object App rebuilds on every render.
+          brainProvider={brain.provider}
+          brainModel={brain.model}
+          genProvider={genProvider}
+          genModel={genModel}
+          api={rowApi}
+        />
+      ))}
+      <div ref={endRef} />
+    </div>
+  );
+}
+
+/** One chat bubble. Memoised: chat history is immutable once written, so a row only
+    re-renders when something about THAT message changes. */
+const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, api }: {
+  m: ChatMessage; editing: boolean; editText: string; thinking: string; busy: boolean;
+  brainProvider: LlmProviderId; brainModel: string; genProvider: string; genModel: string;
+  api: {
+    startEdit: (m: ChatMessage) => void; submitEdit: (m: ChatMessage) => void;
+    cancelEdit: () => void; setEditText: (s: string) => void;
+    onRetryModel: (text: string, mode: Mode, value: string) => void;
+    hasBrainKey: (p: LlmProviderId) => boolean; hasGenKey: (p: string) => boolean;
+  };
+}) {
+  const setEditingId = api.cancelEdit;
+  const setEditText = api.setEditText;
+  const submitEdit = api.submitEdit;
+  const startEdit = api.startEdit;
+  const onRetryModel = api.onRetryModel;
+  const brain = useMemo(() => ({ provider: brainProvider, model: brainModel }), [brainProvider, brainModel]);
+  const hasBrainKey = api.hasBrainKey;
+  const hasGenKey = api.hasGenKey;
+  return (
+        <div className={`msg ${m.role} ${m.error ? "err" : ""}`}>
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
-          {editingId === m.id ? (
+          {editing ? (
             <div className="bubble-edit">
               <textarea
                 autoFocus
@@ -2460,11 +2519,11 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
                 onChange={(e) => setEditText(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitEdit(m); }
-                  if (e.key === "Escape") setEditingId(null);
+                  if (e.key === "Escape") setEditingId();
                 }}
               />
               <div className="edit-actions">
-                <button className="ghost sm" onClick={() => setEditingId(null)}>Cancel</button>
+                <button className="ghost sm" onClick={() => setEditingId()}>Cancel</button>
                 <button className="primary sm" disabled={!editText.trim() || busy} onClick={() => submitEdit(m)}>Send</button>
               </div>
             </div>
@@ -2515,11 +2574,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
             </>
           )}
         </div>
-      ))}
-      <div ref={endRef} />
-    </div>
   );
-}
+});
 
 /** Domain label for a source chip ("support.apple.com" → "apple.com"). */
 function hostOf(url: string): string {

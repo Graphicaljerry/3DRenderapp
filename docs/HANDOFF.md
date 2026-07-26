@@ -735,6 +735,30 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   measurable here; and OrbitControls' inertia decays 5% per FRAME, so at low frame
   rates the post-drag glide legitimately lasts many seconds (measure idle BEFORE
   touching the canvas, not after).
+- **Multi-view photos + shortcuts (PR #146)**: MULTI-VIEW — `MultiViewRow` (left/back/
+  right slots) already existed but rendered only for `mode === "generative"`, so nobody
+  in Auto ever saw it. Now shown whenever a photo is attached (not for markup edits,
+  where the screenshot IS the subject) and, crucially, the CAD path now SENDS them:
+  `sendInner` appends each view to the vision message as a labelled text+image pair
+  ("Additional reference — the left side…"), and VISION_ADDENDUM tells the model to
+  cross-read views. Content is already a parts array, so this works for both Anthropic
+  and OpenAI-compatible providers. `harness/multiview-e2e.mjs` asserts both images
+  reach the request.
+  SHORTCUTS — ⌘/Ctrl+Z undo, ⌘⇧Z **and Ctrl+Y** redo, Esc = dismiss, V/G/M/B tools,
+  F re-frame, 1–4 select kinds. PAINT IS NOW UNDOABLE: strokes aren't model versions
+  (no geometry change) so they get their own `paintPast`/`paintFuture` stacks in App
+  plus `ViewerHandle.restoreFacePaint(tc)` to repaint the overlay imperatively. A model
+  commit calls `clearPaintHistory()` — paint is keyed to the triangle list and can't
+  replay onto new geometry, which ALSO makes "stack non-empty" mean "your last action
+  was a stroke", giving ⌘Z last-in-first-out order without tracking a global action log.
+  DISMISS — tapping EMPTY canvas (primary button only; right-click must still open the
+  context menu, and ux-e2e caught that) or pressing Esc runs one shared
+  `dismissOverlays()`. Canvas pointerdown also blurs a focused input so ⌘Z means "undo
+  my model edit" once you're working on the canvas. GOTCHA: the rail buttons had their
+  exclusive one-tool-at-a-time logic written INLINE in the props object; the keyboard
+  used raw setters and left two tools armed. Both now call shared
+  `toggleSelectTool`/`toggleMeasureTool`/`toggleTransformTool` — put any new tool
+  toggle there, not inline. `harness/shortcuts-e2e.mjs` covers all of it.
 - **Double-submit + canvas overlay layering (PR #145)**: from an iPad report of "two
   thinking bubbles at once" plus a VPN/ad-blocker error. ROOT CAUSE of both: `send()`
   guarded with `if (status === "generating") return` — REACT STATE, which doesn't

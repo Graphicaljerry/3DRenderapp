@@ -537,11 +537,12 @@ function ProjectTitle({ name, onRename }: { name: string; onRename: (n: string) 
 }
 
 /** Extra reference angles for multi-view mesh generation (front is the main photo). */
-function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
+function MultiViewRow({ views, onPick, onClear, multiViewEngine, mode }: {
   views: Partial<Record<"left" | "back" | "right", string>>;
   onPick: (slot: "left" | "back" | "right", f: File) => void;
   onClear: (slot: "left" | "back" | "right") => void;
   multiViewEngine: boolean;
+  mode: Mode;
 }) {
   const slots: ("left" | "back" | "right")[] = ["left", "back", "right"];
   const label = { left: "Left", back: "Back", right: "Right" } as const;
@@ -566,9 +567,11 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine }: {
         )}
       </div>
       <p className="mv-hint">
-        {multiViewEngine
-          ? "More angles → a more accurate mesh. This engine uses them."
-          : <>More angles improve accuracy — but this engine uses only the front. Switch to <b>fal · Rodin</b> or <b>Tripo</b> to use them.</>}
+        {mode === "precise"
+          ? "More angles → truer proportions. Every photo you add is read, and the far side stops being guesswork."
+          : multiViewEngine
+            ? "More angles → a more accurate mesh. This engine uses them."
+            : <>More angles improve accuracy — but this engine uses only the front. Switch to <b>fal · Rodin</b> or <b>Tripo</b> to use them.</>}
       </p>
     </div>
   );
@@ -863,7 +866,9 @@ function HelpSheet({ onClose }: { onClose: () => void }) {
     { icon: <IconRuler />, text: "Measure: tap two points to read the distance between them." },
     { icon: <IconFaceSel />, text: "Drill holes: Select a face → Hole… — type exact offsets, snap to a magnet grid, or align with another hole (pick its rim, then zero a Δ or type the spacing)." },
     { icon: <IconMarker />, text: "Mark: draw around a part of the model — the marked screenshot attaches to the chat, so \"make this thicker\" needs no coordinates." },
-    { icon: <IconUndo />, text: "Undo ⌘/Ctrl+Z · Redo ⇧⌘/Ctrl+Shift+Z. Every edit is a restorable version in History." },
+    { icon: <IconUndo />, text: "Undo ⌘/Ctrl+Z · Redo ⇧⌘Z or Ctrl+Y — including paint strokes. Every edit is a restorable version in History." },
+    { icon: <IconPointer />, text: "Keys: V Select · G Transform · M Measure · B Paint · F re-frame the model · 1–4 pick Face/Edge/Corner/Point." },
+    { icon: <IconX />, text: "Esc — or a click on empty canvas — puts the current tool down and closes any open panel." },
     { icon: <IconPrinter />, text: "The bottom bar shows your printer's plate — tap it to switch printers or bed size." },
   ];
   return (
@@ -1093,6 +1098,7 @@ interface Props {
   units: "mm" | "in";
   setUnits: (f: (u: "mm" | "in") => "mm" | "in") => void;
   viewerRef: RefObject<ViewerHandle>;
+  onEmptyTap: () => void; // tap on empty canvas — put the tool down, close popups
   tab: "3d" | "code" | "params" | "print" | "history";
   setTab: (t: "3d" | "code" | "params" | "print" | "history") => void;
   codeText: string;
@@ -1418,8 +1424,11 @@ export function Workspace(p: Props) {
               </div>
             )}
 
-            {p.mode === "generative" && p.imageUrl && (
-              <MultiViewRow views={p.views} onPick={p.onPickView} onClear={p.onClearView} multiViewEngine={p.multiViewEngine} />
+            {/* Shown for ANY engine now: extra angles help the CAD path just as much
+                as the mesh engines (one photo leaves the far side to guesswork), and
+                hiding this in Generative meant nobody in Auto ever found it. */}
+            {p.imageUrl && !p.imageMarkup && (
+              <MultiViewRow views={p.views} onPick={p.onPickView} onClear={p.onClearView} multiViewEngine={p.multiViewEngine} mode={p.mode} />
             )}
 
             <form
@@ -1564,6 +1573,14 @@ export function Workspace(p: Props) {
             <div style={{ display: p.tab === "3d" || p.tab === "params" ? "block" : "none", height: "100%" }}>
               <Viewer
                 ref={p.viewerRef}
+                // Click empty canvas = "put it down": closes this panel's own popups
+                // and hands off to the app for the tools and selection.
+                onEmptyTap={() => {
+                  setMarkMode(false);
+                  setShowLayers(false);
+                  setShowHelp(false);
+                  p.onEmptyTap();
+                }}
                 geometry={p.geometry}
                 analysisOverlay={p.analysisOverlay}
                 wireframe={p.wireframe}

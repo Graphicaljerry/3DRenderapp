@@ -845,7 +845,48 @@ export default function App() {
     if (on) { setSelectMode(false); setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setSelectedFeature(null); setSelectedFaces([]); }
   };
   /** A committed paint stroke (or erase) — store it; all-zero collapses to "no paint". */
-  const onPaintStroke = (tc: Uint8Array) => setFacePaint(tc.some((x) => x) ? tc : null);
+  // Paint strokes get their own undo stack. They aren't model versions (no geometry
+  // changes, so the history/rebuild machinery doesn't apply) but they are absolutely
+  // something ⌘Z should take back. A model edit clears the stack: paint is keyed to
+  // the triangle list, so those states can't be replayed onto new geometry — which
+  // also means "stack non-empty" == "the most recent thing you did was paint", giving
+  // ⌘Z the last-in-first-out behaviour people expect without tracking global order.
+  const facePaintRef = useRef<Uint8Array | null>(null);
+  facePaintRef.current = facePaint; // the stacks below read this, never the stale state
+  const paintPast = useRef<(Uint8Array | null)[]>([]);
+  const paintFuture = useRef<(Uint8Array | null)[]>([]);
+  const [paintSteps, setPaintSteps] = useState(0); // re-render so canUndo/canRedo track it
+  const syncPaintSteps = () => setPaintSteps(paintPast.current.length * 1000 + paintFuture.current.length);
+  const clearPaintHistory = () => {
+    paintPast.current = [];
+    paintFuture.current = [];
+    syncPaintSteps();
+  };
+  const onPaintStroke = (tc: Uint8Array) => {
+    paintPast.current.push(facePaintRef.current ? facePaintRef.current.slice() : null);
+    if (paintPast.current.length > 60) paintPast.current.shift(); // bounded — each is one byte per triangle
+    paintFuture.current = [];
+    syncPaintSteps();
+    setFacePaint(tc.some((x) => x) ? tc : null);
+  };
+  const undoPaint = () => {
+    const prev = paintPast.current.pop();
+    if (prev === undefined) return false;
+    paintFuture.current.push(facePaintRef.current ? facePaintRef.current.slice() : null);
+    setFacePaint(prev);
+    viewer.current?.restoreFacePaint(prev);
+    syncPaintSteps();
+    return true;
+  };
+  const redoPaint = () => {
+    const next = paintFuture.current.pop();
+    if (next === undefined) return false;
+    paintPast.current.push(facePaintRef.current ? facePaintRef.current.slice() : null);
+    setFacePaint(next);
+    viewer.current?.restoreFacePaint(next);
+    syncPaintSteps();
+    return true;
+  };
   const [measurePending, setMeasurePending] = useState<[number, number, number] | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [liveDragMm, setLiveDragMm] = useState<number | null>(null); // arrow-drag value mirrored into the quick-edit box
@@ -1512,6 +1553,7 @@ export default function App() {
 
   function applyResult(res: EngineResult, name: string, summary: string, promptText: string) {
     dissolveSeparation(); // a committed result replaces the model — the dry-fit sandbox's floating parts must not linger
+    clearPaintHistory(); // strokes are keyed to the old triangle list; they can't replay onto new geometry
     applyResultNoCommit(res);
 
     const base = project ?? newProject(name, res.kind);
@@ -2984,11 +3026,32 @@ export default function App() {
       // Anchor every turn to what's on the canvas — requests like "add a hole in the
       // center" refer to THIS part; never ask the user what the part is.
       (partContext ? `\n\nCurrent canvas: the user is working on ${partContext}. Edit requests refer to this part.` : "");
+    // Extra angles the user attached (left / back / right). One photo leaves depth and
+    // the far side to guesswork — the model invents them. Handing the vision model
+    // every view it has makes proportions and hidden features observed rather than
+    // imagined. Labelled so it knows which side it's looking at. Skipped for a markup
+    // edit, where the screenshot IS the subject.
+    const extraViews: { label: string; blob: Blob }[] = markupEdit
+      ? []
+      : (["left", "back", "right"] as const)
+          .filter((s) => views[s])
+          .map((s) => ({ label: s, blob: views[s]!.blob }));
+    const extraViewParts = (await Promise.all(extraViews.map(async (v) => {
+      const b64 = (await blobToDataURL(v.blob)).split(",")[1];
+      return [
+        { type: "text" as const, text: `Additional reference — the ${v.label} side of the same object:` },
+        { type: "image" as const, mediaType: v.blob.type || "image/png", dataBase64: b64 },
+      ];
+    }))).flat();
+    if (extraViews.length) {
+      pushStep(`Reading ${extraViews.length + 1} reference photos (front, ${extraViews.map((v) => v.label).join(", ")})`);
+    }
     const userMsg: ApiMsg = visionImage
       ? {
           role: "user",
           content: [
             { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
+            ...extraViewParts,
             {
               type: "text",
               text: markupEdit
@@ -3256,8 +3319,8 @@ export default function App() {
   // appending — so a redo stays available until the next real edit.
   const hIdx = project ? headIndex(project) : -1;
   // While the dry-fit sandbox is open, Undo means "regroup" — that's the last action.
-  const canUndo = separated || (!!project && hIdx > 0);
-  const canRedo = !!project && hIdx >= 0 && hIdx < project.versions.length - 1;
+  const canUndo = paintPast.current.length > 0 || separated || (!!project && hIdx > 0);
+  const canRedo = paintFuture.current.length > 0 || (!!project && hIdx >= 0 && hIdx < project.versions.length - 1);
   const [navBusy, setNavBusy] = useState(false);
   async function stepHead(dir: -1 | 1) {
     if (!project || navBusy) return;
@@ -3278,11 +3341,37 @@ export default function App() {
       setNavBusy(false);
     }
   }
+  // One tool at a time. The rail buttons and the keyboard shortcuts both call these,
+  // so a key can never leave two tools armed the way a raw setter would.
+  const toggleSelectTool = () => setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; });
+  const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } else setMeasurePending(null); return next; });
+  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } };
+
   const undo = () => {
+    if (undoPaint()) return; // strokes come off first — they're the newest thing you did
     if (separatedRef.current) regroupParts(); // un-separate first; history stays untouched
     else void stepHead(-1);
   };
-  const redo = () => stepHead(1);
+  const redo = () => {
+    if (redoPaint()) return;
+    void stepHead(1);
+  };
+
+  /** Tap on empty canvas, or Escape: put down whatever tool is out and close what's
+      open. The same routine backs both, so they can never drift apart. */
+  const dismissOverlays = () => {
+    setSelectMode(false);
+    setTransformMode("off");
+    setMeasureMode(false);
+    setMeasurePending(null);
+    setPaintModeState(false);
+    setActivePinId(null);
+    setPinText("");
+    setSelectedFeature(null);
+    setSelectedFaces([]);
+    setModelSelected(false);
+    setHoleDraft(null); // drop any un-drilled hole draft
+  };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement | null;
@@ -3294,16 +3383,37 @@ export default function App() {
         else if (canUndo) undo();
         return;
       }
+      // Ctrl+Y — the Windows redo, and muscle memory for plenty of Mac users too.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "y") {
+        e.preventDefault();
+        if (canRedo) redo();
+        return;
+      }
+      if (e.metaKey || e.ctrlKey || e.altKey) return; // leave every other combo to the OS
+      // Escape mirrors clicking empty canvas: put the tool down, close what's open.
+      if (e.key === "Escape") { dismissOverlays(); return; }
       // 1–4 switch the Select tool's mode (Face / Edge / Corner / Point) while it's on.
-      if (selectMode && !e.metaKey && !e.ctrlKey && !e.altKey && ["1", "2", "3", "4"].includes(e.key)) {
+      if (selectMode && ["1", "2", "3", "4"].includes(e.key)) {
         const k = (["face", "edge", "vertex", "point"] as SelectKind[])[Number(e.key) - 1];
         setSelectKind(k);
         if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); }
+        return;
       }
+      // Single-key tools, like every 3D app. Each toggles, and the setters below
+      // already enforce one-tool-at-a-time.
+      switch (e.key.toLowerCase()) {
+        case "v": toggleSelectTool(); break;
+        case "g": toggleTransformTool(); break;
+        case "m": toggleMeasureTool(); break;
+        case "b": setPaintMode(!paintMode); break;
+        case "f": viewer.current?.resetView(); break;
+        default: return;
+      }
+      e.preventDefault();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canUndo, canRedo, hIdx, navBusy, project, selectMode]);
+  }, [canUndo, canRedo, hIdx, navBusy, project, selectMode, transformMode, paintMode, paintSteps]);
 
   async function openProjectById(p: Project) {
     setShowLibrary(false);
@@ -3316,6 +3426,7 @@ export default function App() {
     setPlateNames(p.plates?.names ?? {});
     setPartColors(p.partColors ?? {});
     setFacePaint(p.facePaint?.b64 ? b64ToU8(p.facePaint.b64) : null); // Viewer discards it if the triangle count no longer matches
+    clearPaintHistory();
     setPaintModeState(false);
     setActivePlate(0);
     separatedRef.current = null;
@@ -3362,6 +3473,7 @@ export default function App() {
     setPlateNames({});
     setPartColors({});
     setFacePaint(null);
+    clearPaintHistory();
     setPaintModeState(false);
     setActivePlate(0);
     separatedRef.current = null;
@@ -3568,6 +3680,7 @@ export default function App() {
         units={units}
         setUnits={setUnits}
         viewerRef={viewer}
+        onEmptyTap={dismissOverlays}
         tab={tab}
         setTab={setTab}
         codeText={codeBuffer}
@@ -3608,7 +3721,7 @@ export default function App() {
         }}
         featureCtl={{
           mode: selectMode,
-          toggleMode: () => setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }),
+          toggleMode: toggleSelectTool,
           kind: selectKind,
           // Switching mode clears the other kind's selection so only one edit target is live.
           setKind: (k) => { setSelectKind(k); setSelectedFaces([]); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
@@ -3682,12 +3795,7 @@ export default function App() {
         genTexCtl={{ on: genTexture === "on", toggle: toggleGenTexture }}
         measureCtl={{
           mode: measureMode,
-          toggle: () => setMeasureMode((on) => {
-            const next = !on;
-            if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); }
-            else setMeasurePending(null);
-            return next;
-          }),
+          toggle: toggleMeasureTool,
           pending: measurePending,
           items: measurements,
           point: onMeasurePoint,

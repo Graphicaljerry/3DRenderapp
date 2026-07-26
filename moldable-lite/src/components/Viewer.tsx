@@ -19,6 +19,9 @@ export interface ViewerHandle {
   resetView: () => void;
   /** Clear all per-face MMU paint from the model. */
   eraseFacePaint: () => void;
+  /** Restore a whole per-triangle paint state (undo/redo of a stroke). Ignored when
+      it doesn't match the current mesh — paint is keyed to the triangle list. */
+  restoreFacePaint: (tc: Uint8Array | null) => void;
   /** Snap the camera to a standard view, framed on the model. */
   setView: (v: "top" | "front" | "right" | "iso") => void;
   /** An attachment's triangles with its current transform baked in (for Merge). */
@@ -136,6 +139,7 @@ interface Props {
   // Manifold boolean live preview — present only for extrude drags with a captured cap.
   onPushPullLive: (distance: number, solid?: Float32Array | null) => void;
   onContext: (hit: ContextHit) => void; // right-click (without dragging) → quick-action menu
+  onEmptyTap?: () => void; // tap on empty space — the app closes open tools/panels
   /** AI change preview: ghost overlays for what the proposal adds (green) / removes (red). */
   diff: { added: Float32Array | null; removed: Float32Array | null } | null;
   /** Hole tool ghost: the drill shown in place before committing, plus an alignment
@@ -258,11 +262,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -802,6 +806,19 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         -((e.clientY - rect.top) / rect.height) * 2 + 1,
       );
       rc.setFromCamera(ndc, camera);
+      // A tap on EMPTY space is the universal "put it down" gesture: the app closes
+      // whatever tool or panel is open. Only empty space — tapping the model has to
+      // keep working as the active tool's click (pick a face, paint, measure).
+      // Primary button only: a right-click is opening the context menu, and closing
+      // everything out from under that menu is the opposite of what it's for.
+      if (!holeIx.current.place?.active && (e as PointerEvent).button !== 2) {
+        const anything =
+          (s2.mesh && rc.intersectObject(s2.mesh, false).length > 0) ||
+          rc.intersectObjects([...s2.attachMap.values()], false).length > 0 ||
+          (s2.pins && rc.intersectObjects(s2.pins.children, false).length > 0) ||
+          (s2.pushArrow.visible && rc.intersectObject(s2.pushGrab, false).length > 0);
+        if (!anything) cb.current.onEmptyTap?.();
+      }
       // Hole placement owns the tap: a click on the target plane moves the hole there,
       // and clicks anywhere else do nothing — the open panel must never lose its draft
       // to a stray deselect underneath.
@@ -958,6 +975,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const onDown = (e: PointerEvent) => {
       const s2 = st.current;
       dropRect(); // a gesture may follow a layout shift that moved the canvas without scroll/resize
+      // Touching the canvas takes focus off the composer, so ⌘Z/⌘Y from here on mean
+      // "undo my model edit", not "undo my typing" — the canvas is where you are now.
+      const ae = document.activeElement as HTMLElement | null;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA" || ae.isContentEditable)) ae.blur();
       // A drag already owns the pointer (push-pull, marquee, or the gizmo) — ignore any second
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
@@ -2159,6 +2180,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       for (let t = 0; t < s.triColor.length; t++) if (s.triColor[t]) { s.triColor[t] = 0; touched.push(t); }
       if (s.paintMesh && touched.length) updatePaintTris(s, touched, cb.current.paintPalette ?? []);
       cb.current.onPaintStroke?.(s.triColor.slice());
+    },
+    restoreFacePaint(tc) {
+      const s = st.current;
+      if (!s) return;
+      if (!s.triColor && !ensureTri(s)) return;
+      if (!s.triColor) return;
+      // A stroke can only be undone onto the mesh it was painted on.
+      if (tc && tc.length !== s.triColor.length) return;
+      if (!s.paintMesh) rebuildPaintMesh(s, cb.current.paintPalette ?? []);
+      const touched: number[] = [];
+      for (let t = 0; t < s.triColor.length; t++) {
+        const want = tc ? tc[t] : 0;
+        if (s.triColor[t] !== want) { s.triColor[t] = want; touched.push(t); }
+      }
+      if (touched.length) updatePaintTris(s, touched, cb.current.paintPalette ?? []);
     },
     setView(v) {
       if (st.current) snapView(st.current, v);

@@ -831,6 +831,41 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   54.7→32.2 ms per keystroke-frame. Library open (~390 ms for 25 cards here, ~37 ms of
   it thumbnail decode) was left alone — a store-schema meta index isn't worth it yet.
 
+- **Orbit damping was frame-rate dependent (PR #150)** — the last piece of Jerry's
+  "Mac app drags worse than the web" report, still present after the WKWebView work
+  (#136/#139). three.js OrbitControls applies damping once per `update()` **call**,
+  with no notion of elapsed time: `theta += delta * f`, then `delta *= (1 - f)`, with
+  `f = 0.05`. So catch-up speed is tied to the frame RATE, not the clock — the same
+  gesture settles in half the wall-clock time at 120 Hz that it does at 60 Hz, and the
+  slower one visibly trails the cursor. Jerry's panel is ProMotion 120 Hz, so any
+  build that doesn't achieve 120 (a WKWebView that didn't get the high rate, a thermal
+  dip, a heavy mesh, or a ProMotion downshift while the render-on-demand loop is idle)
+  trails proportionally MORE while running identical code. `animate()` now rescales the
+  factor by real measured dt — `f = 1 - (1 - 0.05)^(dt·120/1000)`, dt clamped to 100 ms
+  so a long stall catches up over a few frames instead of snapping — giving a constant
+  ~400 ms settle at any rate. `harness/damping-e2e.mjs` proves it by patching `rAF` to
+  a controllable clock and driving one identical orbit at two rates: 414 ms vs 396 ms
+  coast (0.96×) where a per-call damper gives ~2.8×; measured factors match theory
+  (20 Hz predicted 0.2649, measured 0.2651). THREE traps in writing that harness, all
+  of which produced confident-looking wrong numbers first: (1) `setInterval` cannot
+  synthesise 120 Hz — it lands ~74 Hz under load, so the test compares 60 vs 20 Hz, a
+  strictly harder 3× spread; (2) "settled" must NOT mean OrbitControls' numeric rest —
+  its residual decays to a 1e-6 epsilon over ~1.3 s of imperceptible drift at every
+  rate, which measures nothing about feel, so use time-to-90%-of-travel over a FIXED
+  window; (3) a stop detector with an absolute movement threshold truncates whichever
+  run releases with the gentler residual, which faked a 7.35× ratio. Pace the gesture
+  slow enough (40 ms/step) that the slow clock gets ~10 frames during the drag, or the
+  two runs release from physically different states. `Viewer` also gained a dev-only
+  `window.__viewerCam()` probe (position + live damping factor) for that harness.
+  UNRESOLVED: whether the Mac app actually achieves 120 Hz. `BuildTag` now measures the
+  real rAF cadence and shows it in the version chip's tooltip (hover re-samples) —
+  the packaged desktop app has no devtools console, so that is the only way to read it.
+  If it reports well under 120 while idle but ~120 during a drag, the render-on-demand
+  idle skipping is letting ProMotion downshift and the ramp-back is the remaining lag.
+- **Known, pre-existing, unfixed**: `ui-overlap-sweep` reports `.pmenu ∩ .viewer-head`
+  = 230×7 px at 1366×1024 only. Verified present on clean HEAD before #150. Cosmetic —
+  the menu is z-80 over a z-0 header, so nothing is obscured or unclickable.
+
 ## Conventions
 
 - Ship each feature as its own PR to `main` (squash-merge; Pages auto-deploys ~2 min).

@@ -928,6 +928,40 @@ function HelpSheet({ onClose }: { onClose: () => void }) {
   );
 }
 
+// Sample the real requestAnimationFrame cadence over ~40 frames and report it in Hz.
+function sampleDisplayRate(done: (hz: number) => void) {
+  let n = 0;
+  let t0 = 0;
+  const step = (t: number) => {
+    if (!t0) t0 = t;
+    if (++n < 40) { requestAnimationFrame(step); return; }
+    if (t > t0) done(Math.round(((n - 1) * 1000) / (t - t0)));
+  };
+  requestAnimationFrame(step);
+}
+
+// How the viewer FEELS tracks the display's real refresh rate, and a WKWebView (the Mac
+// app) does not always get the same rate a browser gets on the very same panel. The
+// packaged desktop app has no devtools console to check that from, so surface the
+// measured rate in the build tag's tooltip — hovering it is the whole diagnostic.
+function BuildTag() {
+  const [hz, setHz] = useState(0);
+  // Sample once the app has settled; start-up work would depress the reading.
+  useEffect(() => {
+    const id = window.setTimeout(() => sampleDisplayRate(setHz), 3000);
+    return () => clearTimeout(id);
+  }, []);
+  return (
+    <span
+      className="build-tag"
+      onMouseEnter={() => sampleDisplayRate(setHz)}
+      title={`Deployed build number — it goes up with every update, so a bigger number after a refresh means the update landed.\nDisplay: ${hz ? `${hz} Hz` : "measuring…"} · ${window.devicePixelRatio}× pixel ratio`}
+    >
+      v{__BUILD_STAMP__}
+    </span>
+  );
+}
+
 function MeshStats({ report }: { report: PrintabilityReport }) {
   const heavy = report.triangleCount > HEAVY_TRIANGLES;
   const wt = report.manifold.isWatertight;
@@ -2247,7 +2281,7 @@ export function Workspace(p: Props) {
               <span>{p.printer.bed.x}×{p.printer.bed.y} mm</span>
             </button>
             {p.status === "generating" && <GenTimer />}
-            <span className="build-tag" title="Deployed build number — it goes up with every update, so a bigger number after a refresh means the update landed">v{__BUILD_STAMP__}</span>
+            <BuildTag />
             <DesktopUpdateChip />
             <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => p.setTab("print")} />
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />

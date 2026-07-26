@@ -333,6 +333,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       controls.addEventListener("start", qualityDown);
       controls.addEventListener("end", qualityUp);
     }
+    // Dev-only probe: lets the frame-rate-independence harness watch the camera coast to
+    // a stop after a gesture, which is the observable the damping fix is defined by.
+    if (import.meta.env.DEV) {
+      (window as any).__viewerCam = () => [...camera.position.toArray(), controls.dampingFactor];
+    }
 
     // Right-CLICK (no drag) → quick-action context menu on whatever is under the cursor.
     // Right-DRAG stays a pan: suppress the menu once the pointer moved past a few px.
@@ -648,10 +653,28 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     for (const ev of ["pointerdown", "pointermove", "pointerup", "wheel"] as const) {
       renderer.domElement.addEventListener(ev, () => invalidate(3), { passive: true });
     }
+    // ---- Frame-rate-independent damping --------------------------------------
+    // OrbitControls applies damping once per update() CALL, with no notion of elapsed
+    // time: `theta += delta * f`, then `delta *= (1 - f)`. So how fast the camera
+    // catches up to the pointer is tied to the frame RATE, not the clock — the same
+    // gesture settles in half the wall-clock time at 120Hz that it does at 60Hz. That
+    // is the drag-lag gap between the Mac app and the web build on a ProMotion panel:
+    // identical code, but whichever one runs at the lower rate visibly trails the
+    // cursor. Rescale the factor by real elapsed time so the settle time is a constant
+    // ~170ms regardless of refresh rate, thermal dips, or a heavy mesh pulling the
+    // frame rate down mid-drag.
+    const DAMP_HZ = 120; // reference rate the feel is tuned at
+    const DAMP_BASE = 0.05; // OrbitControls' default — one frame's worth at DAMP_HZ
+    let dampPrev = 0;
     const animate = () => {
+      const now = performance.now();
+      // Clamp dt so a long stall (mesh load, waking a hidden tab) catches up over a few
+      // frames instead of snapping the camera the entire remaining distance at once.
+      const dt = dampPrev ? Math.min(now - dampPrev, 100) : 1000 / DAMP_HZ;
+      dampPrev = now;
+      controls.dampingFactor = 1 - Math.pow(1 - DAMP_BASE, (dt * DAMP_HZ) / 1000);
       // update() returns true while the camera is still moving (damping included).
       const moving = controls.update();
-      const now = performance.now();
       // A frame-gated pointer event still owed a run counts as work pending.
       const owed = !!(arbPending || hoverPending || paintPending);
       const beat = now - lastDraw >= HEARTBEAT_MS;

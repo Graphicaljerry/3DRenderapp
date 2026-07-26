@@ -108,6 +108,7 @@ THE USER ATTACHED A PICTURE of the part they want — a photo of a physical part
 4) At the top of the code, add a comment listing every key dimension and whether it was GIVEN or ESTIMATED.
 5) Rebuild the part as clean, simple, printable geometry — capture function (holes, slots, mounting faces), not cosmetic detail. Add FDM tolerance (0.2–0.3 mm) at mating surfaces.
 6) If a critical dimension is unknowable from the picture, choose the nearest standard size and say so in the summary.
+IF MORE THAN ONE PHOTO IS ATTACHED: they are the SAME object from different sides (each is labelled). Cross-read them — take depth and width from whichever view shows them squarely, resolve anything hidden in one view from another, and never model a feature twice because it appears in two views. Where views disagree, trust the one facing that feature head-on.
 IF IT IS A SKETCH: drawn outlines are the part's edges — build the solid they describe, not a plaque of the drawing. READ every handwritten dimension, arrow and label and use those numbers exactly (they are GIVEN). Treat circles as holes or bosses from context, hatched areas as cut-outs, and a side/top view pair as one part seen from two angles. Straighten wobbly freehand lines to clean geometry (parallel, perpendicular, symmetric) unless the sketch clearly intends an angle or curve; when no sizes are written, scale from any one stated measurement or pick sensible printable proportions and say so.`;
 
 // Appended when the user MARKED a region on a screenshot of the CURRENT model

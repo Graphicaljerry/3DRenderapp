@@ -697,6 +697,56 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   desktop code saw no `import.meta.env.TAURI_ENV_PLATFORM` until it became
   `"TAURI_ENV_"`. (`process.env.TAURI_ENV_PLATFORM` in vite.config.ts was unaffected
   — that's node-side.)
+- **Silent desktop auto-update (PR #138)**: superseded the manual chip above.
+  tauri-plugin-updater + tauri-plugin-process; `watchDesktopUpdate()` checks the
+  rolling release on launch + every 6 h, `downloadAndInstall()`s in the background,
+  then the chip offers "Restart to update" (only the restart is the user's call).
+  Updates carry NO Gatekeeper prompt — bytes fetched by the app never get the
+  quarantine flag, unlike a browser download. Signature-checked in Rust against the
+  pubkey in tauri.conf.json. **Key setup (done)**: keypair generated with an EMPTY
+  password; the private half is repo secret `TAURI_SIGNING_PRIVATE_KEY`. There is
+  deliberately NO `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` secret — GitHub refuses empty
+  secret values, and an unset secret resolves to `""`, which IS the password. Never
+  regenerate the keypair casually: the pubkey is baked into shipped bundles, so a new
+  key orphans every installed app (they'd reject all future updates and need a manual
+  re-download). CI builds `.app.tar.gz` + `.sig` (macOS) / signed NSIS (Windows) and
+  the publish job merges per-platform entries into one `latest.json`; when the signing
+  secret is absent a guard step flips `createUpdaterArtifacts` off so builds still
+  pass and the app falls back to offering the installer. State lives module-level
+  (listener set + last state + in-flight promise) so a re-mount joins the running
+  check instead of starting a second download — a naive `running` boolean broke this
+  under React's double-invoked dev effects (state emitted to a dead listener).
+- **Viewer perf, WKWebView parity (PR #139)**: measured FIRST with the new
+  `harness/viewer-frames.mjs` — during a drag the app spends **0.63 ms of JS per
+  frame** while frames take ~26 ms, i.e. our code was never the bottleneck; the cost
+  is browser raster + composite. So: (1) ALL 8 `backdrop-filter: blur()` overlays over
+  the canvas removed (panels are opaque now) — a blurred layer above an animating
+  canvas makes the compositor re-blur that region every frame, cheap in Chrome and
+  expensive in WKWebView; do NOT reintroduce blur on anything above `.viewerCanvas`.
+  (2) `alpha: false` on the context. (3) **Render on demand**: draw only when
+  `controls.update()` reports motion, when something invalidated, or on a 500 ms
+  heartbeat — idle went 104 → **4** drawn frames per 2 s (measured). Invalidation is
+  belt-and-braces: one dependency-free effect covers every prop-driven change, the
+  imperative handle is wrapped by `wakeOnCall` so every method (including future ones)
+  redraws, canvas pointer/wheel events invalidate at the source, ResizeObserver
+  repaints immediately, and the heartbeat bounds anything missed. A dev-only
+  `window.__viewerStats` records drawn/skipped with the reason. NOTE for future
+  measuring: this container renders with SwiftShader, so compositing wins are NOT
+  measurable here; and OrbitControls' inertia decays 5% per FRAME, so at low frame
+  rates the post-drag glide legitimately lasts many seconds (measure idle BEFORE
+  touching the canvas, not after).
+- **Chat render cost (PR #140)**: `harness/load-perf.mjs` seeds a realistic library
+  (25 projects, long chats with images, 30-version stacks, 6 MB meshes). The store is
+  NOT the problem (listProjects ~30 ms; opening a mesh project = 2 ms record + 7 ms
+  blob). Every keystroke re-rendered every bubble and re-parsed every message's
+  markdown — same on every streamed token. Fixed with a memoised `MessageRow` whose
+  props are narrowed (only the edited row sees `editText`, only the streaming row sees
+  `thinking`). CRITICAL: App rebuilds `brain={{…}}` and the `hasBrainKey`/`hasGenKey`
+  arrows every render, which defeated the memo entirely — measured no better until
+  handlers were routed through a ref-backed stable object and `brain` passed as
+  primitives. Typing is now FLAT with history: 40 turns 33.8→30.6 ms, 120 turns
+  54.7→32.2 ms per keystroke-frame. Library open (~390 ms for 25 cards here, ~37 ms of
+  it thumbnail decode) was left alone — a store-schema meta index isn't worth it yet.
 
 ## Conventions
 

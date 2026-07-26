@@ -135,6 +135,11 @@ jobs:
           # Signs the update payload so the installed app will accept it (the public
           # half is baked into tauri.conf.json). Absent → the step above disabled them.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # The key was generated WITHOUT a password. GitHub refuses to store an empty
+          # secret value, so this secret intentionally does not exist — an unset secret
+          # resolves to "", which is the password. Don't "fix" this by inventing one:
+          # the password must match the key, and changing the key changes the pubkey in
+          # tauri.conf.json, which would orphan every already-installed app.
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # ---- macOS signing + notarization (uncomment once the Apple account exists) ----
           # APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}

@@ -16,10 +16,32 @@
 import { encryptPayload, decryptPayload, encryptBytes, decryptBytes, gatherSettings, isLocalOnlyKey } from "./backup";
 import { listProjects, getProject, putProject } from "../store/projects";
 import type { Project } from "../store/types";
+import { IS_DESKTOP } from "./desktopUpdate";
 
 export const SUPA_URL = "https://prtpakaxzdmrehpndimy.supabase.co";
 const SUPA_KEY = "sb_publishable_S2OH_PP7MxCzk0e14-yIwg_7pvLAw5a"; // publishable by design
 export const DEFAULT_RELAY = `${SUPA_URL}/functions/v1/relay`;
+
+/** Where the desktop app keeps its session. The web app uses localStorage, which the
+    browser preserves; the Mac/Windows app's WebView storage is not a promise anyone
+    makes — WKWebView in particular can hand the app a clean slate — and being asked to
+    sign in again every launch is exactly what that looks like. A real file in the app's
+    data directory doesn't have that problem. Supabase accepts an async storage
+    adapter, so this drops straight in. */
+function desktopSessionStorage() {
+  const load = import("@tauri-apps/plugin-store").then((m) => m.load("auth.json", { autoSave: true }));
+  return {
+    async getItem(key: string) {
+      try { return (await (await load).get<string>(key)) ?? null; } catch { return null; }
+    },
+    async setItem(key: string, value: string) {
+      try { await (await load).set(key, value); } catch { /* fall back to being signed out */ }
+    },
+    async removeItem(key: string) {
+      try { await (await load).delete(key); } catch { /* nothing to remove */ }
+    },
+  };
+}
 
 let clientP: Promise<any> | null = null;
 function supa(): Promise<any> {
@@ -27,10 +49,28 @@ function supa(): Promise<any> {
     clientP = import("@supabase/supabase-js").then(({ createClient }) =>
       // PKCE: the safe OAuth/magic-link flow for a static site; the client
       // auto-exchanges the ?code= in the URL when it initializes.
-      createClient(SUPA_URL, SUPA_KEY, { auth: { flowType: "pkce" } }),
+      createClient(SUPA_URL, SUPA_KEY, {
+        auth: {
+          flowType: "pkce",
+          persistSession: true,
+          autoRefreshToken: true, // a months-old session refreshes instead of expiring
+          ...(IS_DESKTOP ? { storage: desktopSessionStorage() } : {}),
+        },
+      }),
     );
   }
   return clientP;
+}
+
+/** Give this account a password, so the desktop app can sign in. OAuth and magic-link
+    sign-in both hand control to a browser and expect a redirect back to a web address —
+    the desktop app has no such address, so neither can ever complete there. A password
+    needs no redirect. Requires being signed in (i.e. do this on the web, once). */
+export async function cloudSetPassword(password: string): Promise<string> {
+  const c = await supa();
+  const { error } = await c.auth.updateUser({ password });
+  if (error) throw new Error(error.message);
+  return "Password set — sign in with your email and this password in the Mac or Windows app.";
 }
 
 /** The exact page URL OAuth/magic links must return to (works on Pages + localhost). */

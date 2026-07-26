@@ -48,7 +48,8 @@ import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
-import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { IS_DESKTOP } from "./lib/desktopUpdate";
+import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 // On-demand UI (code-split): the SVG modal's svg/extrude graph carries
 // three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
@@ -4121,7 +4122,7 @@ function SettingsModal({
     if (/failed to fetch|network/i.test(raw)) return "Couldn't reach the sync server — check your connection and any ad-blocker (allow supabase.co).";
     return raw;
   }
-  async function doCloud(op: "signup" | "signin" | "signout" | "sync" | "github" | "google" | "magic") {
+  async function doCloud(op: "signup" | "signin" | "signout" | "sync" | "github" | "google" | "magic" | "setpw") {
     setCloudBusy(true);
     setSyncErr(false);
     setSyncMsg(
@@ -4129,12 +4130,14 @@ function SettingsModal({
       : op === "signin" ? "Signing in…"
       : op === "github" || op === "google" ? `Taking you to ${op === "github" ? "GitHub" : "Google"}…`
       : op === "magic" ? "Sending your login link…"
+      : op === "setpw" ? "Setting your password…"
       : op === "sync" ? "Syncing…"
       : "",
     );
     try {
       if (op === "github" || op === "google") await cloudOAuth(op); // navigates away on success
       if (op === "magic") setSyncMsg(await cloudMagicLink(email.trim()));
+      if (op === "setpw") { setSyncMsg(await cloudSetPassword(pw)); setPw(""); }
       if (op === "signup") setSyncMsg(await cloudSignUp(email.trim(), pw));
       if (op === "signin") {
         await cloudSignIn(email.trim(), pw);
@@ -4653,11 +4656,36 @@ function SettingsModal({
                   <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>
                 </div>
                 <details className="adv">
+                  <summary>Set a password (for the Mac / Windows app)</summary>
+                  <p className="fine">Google, GitHub and login links all sign you in by returning to a web address. The desktop app isn't one, so it can't use them — give the account a password here and sign in with it there. You'll stay signed in.</p>
+                  <label>New password</label>
+                  <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
+                  <div className="param-actions">
+                    <button className="primary sm" disabled={cloudBusy || pw.length < 6} onClick={() => doCloud("setpw")}>Set password</button>
+                  </div>
+                </details>
+                <details className="adv">
                   <summary>What syncs, exactly?</summary>
                   <p className="fine">Projects (their code, versions, chats, thumbnails), plus your settings and keys — encrypted in your browser before upload, private to your account. 3D meshes and imported STEP files stay on each device (they're big; CAD models rebuild from their code). On another device, just sign in the same way.</p>
                 </details>
               </>
             ) : (
+              IS_DESKTOP ? (
+              <>
+                {/* Google/GitHub and login links all finish by redirecting to a web
+                    address. This app isn't one, so they can never complete here —
+                    offering them would just fail. Password sign-in needs no redirect. */}
+                <label>Email</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+                <label>Password</label>
+                <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="your password" />
+                <div className="param-actions">
+                  <button className="primary sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signin")}>Sign in</button>
+                  <button className="ghost sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signup")}>Create account</button>
+                </div>
+                <p className="fine">Signed in on the web with Google or a login link? Those finish in a browser, so they can't complete in this app. Open Moldable on the web → Settings → Sync → <b>Set a password</b>, then use it here. You'll stay signed in after that.</p>
+              </>
+              ) : (
               <>
                 <div className="social-col">
                   <button className="ghost block social" disabled={cloudBusy} onClick={() => doCloud("github")}>
@@ -4682,6 +4710,7 @@ function SettingsModal({
                   </div>
                 </details>
               </>
+              )
             )}
 
             </SGroup>

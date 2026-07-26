@@ -3,7 +3,11 @@
 // runs the webview. File-open / .3mf associations would be added here as a fast-follow.
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init());
+    let builder = tauri::Builder::default()
+        .plugin(tauri_plugin_opener::init())
+        // Auth sessions live here rather than in WKWebView's localStorage, which the
+        // system can clear out from under the app — signing in should stick.
+        .plugin(tauri_plugin_store::Builder::new().build());
 
     // Silent updates (desktop only): the frontend checks the rolling release, then
     // downloads + installs in the background and offers a restart. Signature checking

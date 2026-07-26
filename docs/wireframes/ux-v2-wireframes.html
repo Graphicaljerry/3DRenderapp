@@ -1,0 +1,968 @@
+<title>Moldable — UX Workflow & Wireframes v2</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  /* ============================================================
+     MOLDABLE — UX WIREFRAME SHEET v2
+     Palette derived from the app's own tokens (src/styles.css):
+     teal #14b8a6 brand · orange #ff6a2c = the ONE attention signal
+     Neutrals are teal-biased, not pure grey — chosen, not inherited.
+     ============================================================ */
+  :root {
+    --paper:   #eef2f1;
+    --panel:   #fbfcfc;
+    --well:    #e4eae8;
+    --ink:     #18201e;
+    --ink2:    #333d39;
+    --mut:     #5f6b66;
+    --subt:    #8d9994;
+    --rule:    #c9d5d1;
+    --rule-2:  #dde5e3;
+    --accent:  #14b8a6;
+    --accent-d:#0b7d71;
+    --accent-w:#e2f3f0;
+    --live:    #d94a12;
+    --live-w:  #fdeee7;
+    --ok:      #2f8f5b;
+    --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #101111; --panel: #1b1c1d; --well: #141516;
+      --ink: #ececed; --ink2: #c6c7c9; --mut: #8d8e90; --subt: #6d6e70;
+      --rule: #333536; --rule-2: #262728;
+      --accent: #19c8b5; --accent-d: #4fd8c8; --accent-w: #10312d;
+      --live: #ff7a43; --live-w: #3a1f14;
+      --ok: #4ec27e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #101111; --panel: #1b1c1d; --well: #141516;
+    --ink: #ececed; --ink2: #c6c7c9; --mut: #8d8e90; --subt: #6d6e70;
+    --rule: #333536; --rule-2: #262728;
+    --accent: #19c8b5; --accent-d: #4fd8c8; --accent-w: #10312d;
+    --live: #ff7a43; --live-w: #3a1f14;
+    --ok: #4ec27e;
+  }
+  :root[data-theme="light"] {
+    --paper: #eef2f1; --panel: #fbfcfc; --well: #e4eae8;
+    --ink: #18201e; --ink2: #333d39; --mut: #5f6b66; --subt: #8d9994;
+    --rule: #c9d5d1; --rule-2: #dde5e3;
+    --accent: #14b8a6; --accent-d: #0b7d71; --accent-w: #e2f3f0;
+    --live: #d94a12; --live-w: #fdeee7;
+    --ok: #2f8f5b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: 15px; line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .sheet { max-width: 1180px; margin: 0 auto; padding: 40px 24px 96px; }
+
+  /* ---------- drafting title block ---------- */
+  .tb { border: 1.5px solid var(--ink); background: var(--panel); margin-bottom: 40px; }
+  .tb-main { padding: 26px 26px 20px; border-bottom: 1.5px solid var(--ink); }
+  .tb h1 {
+    margin: 0; font-size: clamp(27px, 4.6vw, 42px); font-weight: 700;
+    letter-spacing: -0.032em; line-height: 1.05; text-wrap: balance;
+  }
+  .tb .lede { margin: 12px 0 0; color: var(--ink2); font-size: 16px; max-width: 64ch; }
+  .tb-meta {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: .07em;
+  }
+  .tb-meta > div { padding: 10px 14px; border-right: 1px solid var(--rule); }
+  .tb-meta > div:last-child { border-right: 0; }
+  .tb-meta b { display: block; color: var(--subt); font-weight: 400; font-size: 10px; margin-bottom: 3px; }
+
+  /* ---------- sections ---------- */
+  .sec { margin: 56px 0 0; }
+  .sec-head { display: flex; align-items: baseline; gap: 14px; border-bottom: 1.5px solid var(--ink); padding-bottom: 8px; margin-bottom: 8px; }
+  .sec-head .code { font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent-d); letter-spacing: .08em; }
+  .sec-head h2 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -0.02em; }
+  .sec-note { color: var(--mut); font-size: 14px; margin: 0 0 26px; max-width: 74ch; }
+
+  p { max-width: 74ch; }
+  a { color: var(--accent-d); }
+
+  /* ---------- callout box ---------- */
+  .note {
+    border-left: 3px solid var(--accent); background: var(--accent-w);
+    padding: 14px 16px; margin: 20px 0; font-size: 14.5px;
+  }
+  .note.warn { border-left-color: var(--live); background: var(--live-w); }
+  .note.taste { border-left-color: var(--subt); background: var(--well); }
+  .note p { margin: 0; max-width: none; }
+  .note p + p { margin-top: 8px; }
+  .note .lbl {
+    font-family: var(--mono); font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .09em; display: block; margin-bottom: 5px; color: var(--accent-d);
+  }
+  .note.warn .lbl { color: var(--live); }
+  .note.taste .lbl { color: var(--mut); }
+
+  /* ---------- frame (one wireframe) ---------- */
+  .frames { display: grid; gap: 26px; }
+  .frames.two { grid-template-columns: repeat(auto-fit, minmax(430px, 1fr)); }
+  .frame { border: 1.5px solid var(--ink); background: var(--panel); display: flex; flex-direction: column; }
+  .fb {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px;
+    border-bottom: 1.5px solid var(--ink); font-family: var(--mono); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .06em; flex-wrap: wrap;
+  }
+  .fb .no { font-weight: 700; color: var(--panel); background: var(--ink); padding: 2px 7px; }
+  .fb .nm { font-weight: 700; letter-spacing: .04em; }
+  .fb .st { color: var(--mut); }
+  .fb .spacer { flex: 1; }
+  .fb .tag { border: 1px solid var(--rule); padding: 2px 7px; color: var(--mut); }
+  .fb .tag.new { border-color: var(--accent); color: var(--accent-d); }
+  .fb .tag.del { border-color: var(--live); color: var(--live); }
+  .fbody { padding: 18px; }
+
+  /* ---------- wireframe primitives ---------- */
+  .wf { background: var(--well); border: 1px solid var(--rule); padding: 14px; }
+  .wf-row { display: flex; align-items: center; gap: 8px; }
+  .wf-col { display: flex; flex-direction: column; gap: 8px; }
+  .wf-bar {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px;
+    background: var(--panel); border: 1px solid var(--rule); font-size: 11.5px; flex-wrap: wrap;
+  }
+  .wf-btn {
+    border: 1px solid var(--rule); background: var(--panel); padding: 5px 11px;
+    font-size: 11.5px; white-space: nowrap; font-family: var(--sans);
+  }
+  .wf-btn.pri { background: var(--accent); border-color: var(--accent); color: #05231f; font-weight: 600; }
+  :root[data-theme="dark"] .wf-btn.pri, :root:not([data-theme="light"]) .wf-btn.pri { color: #05231f; }
+  .wf-btn.ghost { color: var(--mut); }
+  .wf-btn.on { border-color: var(--accent); color: var(--accent-d); }
+  .wf-chip {
+    border: 1px solid var(--rule); background: var(--panel); border-radius: 999px;
+    padding: 4px 11px; font-size: 11.5px; white-space: nowrap;
+  }
+  .wf-chip.on { border-color: var(--accent); color: var(--accent-d); }
+  .wf-input {
+    background: var(--panel); border: 1px solid var(--rule); padding: 12px 14px;
+    color: var(--subt); font-size: 12.5px; flex: 1; min-width: 0;
+  }
+  .wf-input.hero { padding: 18px 16px; border-color: var(--accent); border-width: 1.5px; font-size: 13.5px; }
+  .wf-ph {
+    border: 1px dashed var(--rule); color: var(--subt); font-family: var(--mono);
+    font-size: 10.5px; display: flex; align-items: center; justify-content: center;
+    text-align: center; padding: 10px; letter-spacing: .04em;
+  }
+  .wf-h { font-size: 19px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
+  .wf-sub { font-size: 12px; color: var(--mut); margin: 0; max-width: 52ch; }
+  .wf-eyebrow {
+    font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: .1em;
+    color: var(--subt);
+  }
+  .wf-fine { font-size: 10.5px; color: var(--mut); }
+  .wf-card { background: var(--panel); border: 1px solid var(--rule); padding: 8px; min-width: 132px; }
+  .wf-card .thumb { height: 62px; margin-bottom: 6px; }
+  .wf-card .t { font-size: 11px; font-weight: 600; line-height: 1.3; }
+  .wf-card .m { font-family: var(--mono); font-size: 9.5px; color: var(--subt); margin-top: 3px; }
+  .wf-scroll { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+
+  /* studio split */
+  .studio { display: grid; grid-template-columns: 34% 1fr; gap: 0; border: 1px solid var(--rule); background: var(--panel); }
+  .studio.dock { grid-template-columns: 28% 1fr 26%; }
+  .studio > * { padding: 10px; }
+  .studio .chat { border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 8px; }
+  .studio .stage { background: var(--well); display: flex; flex-direction: column; gap: 8px; min-height: 210px; }
+  .studio .insp { border-left: 1px solid var(--rule); display: flex; flex-direction: column; gap: 7px; }
+  .bubble { border: 1px solid var(--rule); padding: 6px 9px; font-size: 11px; background: var(--panel); }
+  .bubble.u { background: var(--accent-w); border-color: var(--accent); align-self: flex-end; max-width: 88%; }
+  .bubble.a { align-self: flex-start; max-width: 92%; }
+  .printbar {
+    display: flex; gap: 10px; flex-wrap: wrap; align-items: center; background: var(--panel);
+    border: 1px solid var(--accent); padding: 6px 10px; font-family: var(--mono); font-size: 10.5px;
+  }
+  .printbar .ok { color: var(--ok); }
+  .printbar .warnv { color: var(--live); }
+  .model {
+    flex: 1; border: 1px dashed var(--rule); display: flex; align-items: center; justify-content: center;
+    color: var(--subt); font-family: var(--mono); font-size: 10.5px; min-height: 80px; position: relative;
+  }
+  .ctxbar {
+    display: inline-flex; gap: 5px; background: var(--panel); border: 1.5px solid var(--accent);
+    padding: 4px 6px; flex-wrap: wrap;
+  }
+  .ctxbar .wf-btn { font-size: 10.5px; padding: 3px 8px; }
+  .statusbar {
+    display: flex; align-items: center; gap: 8px; background: var(--panel); border: 1px solid var(--rule);
+    padding: 5px 9px; font-family: var(--mono); font-size: 10px; color: var(--mut);
+  }
+  .viewcube {
+    position: absolute; top: 8px; right: 8px; width: 46px; height: 46px;
+    border: 1px solid var(--rule); background: var(--panel);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-size: 9px; color: var(--mut);
+  }
+
+  /* ---------- callouts under a frame ---------- */
+  .co { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px 22px; margin-top: 16px; }
+  .co > div { display: flex; gap: 9px; font-size: 13px; line-height: 1.45; }
+  .co .n {
+    flex: 0 0 auto; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--paper);
+    font-family: var(--mono); font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; margin-top: 1px;
+  }
+  .co .n.acc { background: var(--accent); color: #05231f; }
+  .co .n.warn { background: var(--live); color: #fff; }
+
+  /* ---------- tables ---------- */
+  .tw { overflow-x: auto; margin: 20px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; min-width: 520px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--rule-2); vertical-align: top; }
+  th {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+    color: var(--mut); border-bottom: 1.5px solid var(--ink); font-weight: 400;
+  }
+  td code, p code, li code, .co code { font-family: var(--mono); font-size: .88em; background: var(--well); padding: 1px 5px; }
+  .num-col { font-variant-numeric: tabular-nums; }
+  .del { color: var(--live); text-decoration: line-through; }
+  .add { color: var(--accent-d); font-weight: 600; }
+
+  /* ---------- flow diagram ---------- */
+  pre.flow {
+    font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--panel);
+    border: 1px solid var(--rule); padding: 16px; overflow-x: auto; margin: 20px 0;
+  }
+
+  ul, ol { max-width: 74ch; }
+  li { margin-bottom: 5px; }
+  h3 { font-size: 16.5px; letter-spacing: -0.01em; margin: 30px 0 8px; }
+  .kicker {
+    font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .09em;
+    color: var(--subt); margin: 26px 0 6px;
+  }
+  .footer { margin-top: 64px; padding-top: 18px; border-top: 1.5px solid var(--ink); font-size: 12.5px; color: var(--mut); }
+
+  @media (max-width: 720px) {
+    .frames.two { grid-template-columns: 1fr; }
+    .studio, .studio.dock { grid-template-columns: 1fr; }
+    .studio .chat { border-right: 0; border-bottom: 1px solid var(--rule); }
+    .studio .insp { border-left: 0; border-top: 1px solid var(--rule); }
+  }
+</style>
+
+<div class="sheet">
+
+<!-- ============ TITLE BLOCK ============ -->
+<div class="tb">
+  <div class="tb-main">
+    <h1>Moldable — navigation redesign, workflows &amp; wireframes</h1>
+    <p class="lede">Sheet v2. Every screen below is grounded in the shipped code or in cited research.
+    Where something is a taste call rather than a finding, it is marked as one.</p>
+  </div>
+  <div class="tb-meta">
+    <div><b>Drawn</b>2026-07-26</div>
+    <div><b>Supersedes</b>WIREFRAMES.md §nav</div>
+    <div><b>Spec</b>docs/UX_WORKFLOW.md</div>
+    <div><b>Controls now</b>~54 visible</div>
+    <div><b>Controls after</b>~22 visible</div>
+    <div><b>Status</b>For review</div>
+  </div>
+</div>
+
+<div class="note warn">
+  <span class="lbl">Read this before anything else</span>
+  <p>This redesign <strong>adds ~15 components and removes ~20</strong>. The simplification is real,
+  but it is entirely contingent on the removals shipping in the <em>same release</em> as the additions.
+  If the additions land and the removals slip, the app is measurably worse than it is today.</p>
+</div>
+
+<!-- ============ SECTION A ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">A</span><h2>What's hard to navigate today</h2></div>
+  <p class="sec-note">Not opinion — counted from the source. This is the case for the redesign.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Finding</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td><strong>~54 interactive controls visible at once</strong> in the default workspace, across 8 spatially independent clusters</td><td class="num-col">167 <code>&lt;button&gt;</code> in <code>Workspace.tsx</code> alone</td></tr>
+      <tr><td><strong>Reset view has 5 entry points.</strong> Plate assignment has 5. Theme has 3. Export has 4 surfaces that don't know about each other</td><td>View menu, context menu ×2, zoom pod, gizmo</td></tr>
+      <tr><td><strong>The best feature in the app is unreachable after your first message.</strong> "Fix a broken part" and the Fit tolerance control it unlocks exist only at <code>messages.length === 0</code></td><td><code>Workspace.tsx:2526</code>; reset by <code>App.tsx:3438</code></td></tr>
+      <tr><td><strong>The tool rail renders on top of the panels it opens.</strong> <code>.canvas-rail</code> (z-index 30) covers the left ~49px and the heading of all four inspectors</td><td><code>styles.css:1047</code> vs <code>793</code></td></tr>
+      <tr><td><strong>Two panels share one slot.</strong> <code>.plate-bar</code> and <code>.split-panel</code> are both <code>left:12 bottom:12 z-index:6</code> — split a model while plates exist and they stack</td><td><code>styles.css:512</code> and <code>799</code></td></tr>
+      <tr><td><strong><code>--shadow</code> is used 5× and never defined.</strong> Five surfaces render shadowless in both themes</td><td><code>.inspector .layers-panel .help-sheet .pmenu .ai-preview-bar</code></td></tr>
+      <tr><td><strong>Every OAuth user lands on a broken empty state.</strong> <code>completeAuthReturn</code> appends a chat message; the empty state is gated on zero messages — so they see no templates, no CTA, no chips</td><td><code>App.tsx:1238</code></td></tr>
+      <tr><td><strong>Four tabs unmount the 3D view.</strong> Printability's "Overhang heatmap" changes what is drawn in a viewport that same tab has just hidden</td><td><code>Workspace.tsx:2761</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="fb"><span class="no">A1</span><span class="nm">The first screen today</span><span class="st">KeyCard · as shipped</span><span class="spacer"></span><span class="tag del">delete</span></div>
+      <div class="fbody">
+        <div class="wf" style="max-width:470px;margin:0 auto">
+          <div class="wf-col">
+            <div class="wf-row" style="justify-content:center"><span class="wf-eyebrow">⬡ MOLDABLE</span></div>
+            <p class="wf-sub" style="text-align:center;margin:2px auto 6px">Turn a description — or a photo — into a 3D-printable model.</p>
+            <div class="wf-btn pri" style="text-align:center">① Start free — no account needed</div>
+            <p class="wf-fine" style="text-align:center;margin:0">Free photo/text → 3D via Hugging Face…</p>
+            <div class="wf-eyebrow" style="margin-top:6px">SIGN IN — SYNC YOUR PROJECTS &amp; KEYS</div>
+            <div class="wf-btn">② Continue with GitHub</div>
+            <div class="wf-btn">③ Continue with Google</div>
+            <div class="wf-row"><span class="wf-input">you@example.com</span><span class="wf-btn">④ Email me a link</span></div>
+            <div class="wf-btn ghost">▸ ⑤⑥ Or use a password — Create account / Sign in</div>
+            <div class="wf-btn ghost">▸ ⑦ Advanced — add an Anthropic key now</div>
+            <div class="wf-fine" style="color:var(--live)">⑧ Or start from a template… →</div>
+            <div class="wf-fine" style="color:var(--live)">⑨ Or view the built-in example model →</div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Eight competing actions</strong>, three hierarchies, two nested <code>&lt;details&gt;</code>. Hick's Law violation on the first impression.</span></div>
+          <div><span class="n warn">!</span><span>The two fastest paths to a model — <strong>Templates and the example</strong> — are plain text links at the very bottom.</span></div>
+          <div><span class="n warn">!</span><span><strong>You cannot make anything here.</strong> There is no input field. It is a gate, not a workspace.</span></div>
+          <div><span class="n warn">!</span><span>GitHub / Google / magic-link are shown on <strong>desktop where they structurally cannot complete</strong> — no <code>IS_DESKTOP</code> branch, unlike Settings.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="lbl">The doctrine, reconciled</span>
+    <p><code>WIREFRAMES.md:37</code> says <em>"There is no home page and no login. The workspace IS the front door."</em>
+    That stopped being true when auth shipped. <strong>So the comparison isn't "splash screen vs. pure canvas" — it's
+    "splash screen vs. the worst screen in the app."</strong></p>
+    <p>Proposed rewrite: <em>"Apple-simple. No screen exists that you cannot work from. Whatever opens first
+    accepts a description and starts making something. An account is never required to make something."</em></p>
+  </div>
+</section>
+
+<!-- ============ SECTION B ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">B</span><h2>Fix the vocabulary before drawing anything</h2></div>
+  <p class="sec-note">The word <strong>"fit" currently carries seven unrelated meanings</strong>. This is the most
+  damaging thing in the UI and it costs nothing to fix.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Today</th><th>Actually means</th><th>Rename to</th></tr></thead>
+    <tbody>
+      <tr><td class="del">⤢ Fit</td><td>Frame the selection in the camera</td><td class="add">Frame</td></tr>
+      <tr><td class="del">F key</td><td>Same</td><td class="add">Frame selection</td></tr>
+      <tr><td class="del">Fits P1 ✓</td><td>Fits build <em>plate 1</em></td><td class="add">Fits your bed ✓</td></tr>
+      <tr><td class="del">Fit to plate</td><td>Scale the model down to fit the bed</td><td class="add">Scale to fit bed</td></tr>
+      <tr><td class="del">Check fit / Make it fit</td><td>Boolean clearance between two parts</td><td class="add">Check clearance / Cut to fit</td></tr>
+      <tr><td>Fit: Snug</td><td>FDM clearance tolerance</td><td class="add">Fit — the only survivor</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note warn">
+    <span class="lbl">The single most dangerous label in the app</span>
+    <p><strong>"Fits P1 ✓"</strong> — to this audience, P1 <em>is</em> the Bambu Lab P1S. A user reading this will
+    believe the app has checked their printer. It has checked build plate 1.</p>
+  </div>
+
+  <p class="kicker">De-jargon the verbs once, then propagate</p>
+  <div class="tw"><table>
+    <thead><tr><th>CAD word</th><th>Say instead</th><th>CAD word</th><th>Say instead</th></tr></thead>
+    <tbody>
+      <tr><td class="del">Fillet</td><td class="add">Round</td><td class="del">Extrude / Offset</td><td class="add">Push / Pull</td></tr>
+      <tr><td class="del">Chamfer</td><td class="add">Bevel</td><td class="del">Precise vs Generative</td><td class="add">Exact millimetres vs Organic shape</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ============ SECTION C ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">C</span><h2>The navigation model</h2></div>
+  <p class="sec-note">Three routes and one dock. Everything that behaves like a destination today —
+  Source, Params, Printability, History, Objects — stops being one.</p>
+
+  <pre class="flow">Moldable
+│
+├── /            LAUNCHPAD ── the only front door
+│   ├── Composer ....... "A wall bracket for a 32 mm pipe…"   [📎] [⏎]
+│   ├── Start-from row . 4 template chips (real templates · no key · no AI call)
+│   ├── Fix a broken part .. permanent CTA — no longer one-shot
+│   ├── Recents ........ thumbnail cards (returning users only)
+│   └── Quiet row ...... Sign in to sync · Skip
+│
+├── /m/:id      STUDIO ── chat-left / stage-right (shell unchanged)
+│   ├── Topbar ......... ⬡ Moldable / «Project title»      New · Library · Account
+│   ├── CHAT COLUMN .... messages · composer
+│   ├── STAGE .......... the WebGL canvas — never unmounts, never replaced
+│   │   ├── PRINT BAR ....... 78 × 70 × 78 mm · Fits your bed ✓ · No supports ✓ · Fit: Snug ⌄
+│   │   ├── CONTEXTUAL TOOLBAR ... appears at the selection, resolves from it
+│   │   ├── VIEW CLUSTER ......... ViewCube · ⌂ Home · ⤢ Frame · View ⌄
+│   │   ├── PLATES STRIP ......... All · P1 · P2 · +      [filters only]
+│   │   └── STATUSBAR ............ Design ─ Check ─ Print ready · Export ⌄
+│   └── INSPECTOR (right dock — exactly ONE panel open at a time)
+│       └── Selection · Objects · Parameters · Printability · Source · History
+│
+├── /library    LIBRARY ── projects grid + Templates tab
+├── SETTINGS (overlay) ── AI · 3D engine · Printer · Appearance · Account
+└── EXPORT (overlay) ──── the ONLY export surface</pre>
+
+  <h3>The disclosure ladder — three questions, no fourth tier</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Ask</th><th>Then it is</th><th>Contents</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Does it tell me where I am, what I'm making, or is it needed with <em>nothing</em> selected?</td>
+        <td><strong>Tier 1 — always visible</strong><br><span class="num-col">~22 controls</span></td>
+        <td>Topbar · Print Bar · View cluster · Statusbar · chat composer · Inspector selector · Undo/Redo · Plates strip at ≥2 plates</td>
+      </tr>
+      <tr>
+        <td>Does it operate on the current selection?</td>
+        <td><strong>Tier 2 — on selection</strong></td>
+        <td>The contextual toolbar, anchored at the geometry (Fitts's Law: pointer travel ≈ 0)</td>
+      </tr>
+      <tr>
+        <td>Otherwise</td>
+        <td><strong>Tier 3 — one named surface</strong></td>
+        <td>Inspector panels · Settings panes · Export · Library. Every one has a real word on it, never a bare chevron.</td>
+      </tr>
+    </tbody>
+  </table></div>
+
+  <div class="note">
+    <span class="lbl">Tier 1 gains two things that are unreachable today</span>
+    <p>The <strong>Fit clearance control</strong>, and a <strong>permanent route to the guided flow</strong>.
+    Both currently vanish forever after your first chat message.</p>
+  </div>
+
+  <h3>Escape — one contract</h3>
+  <pre class="flow">open menu/overlay  →  tool sub-mode  →  selection  →  armed tool  →  Showcase
+
+It never navigates. It does NOT close the Inspector (a dock you opened deliberately).
+It is NOT bound to "skip" on the Launchpad.</pre>
+  <p><code>App.tsx:3394</code> claims in a comment that Escape mirrors clicking empty canvas. It does not —
+  it can't reach <code>markMode</code>, <code>showLayers</code> or <code>showHelp</code>. And no modal in the app
+  closes on Escape at all.</p>
+
+  <div class="note warn">
+    <span class="lbl">Nobody knows how to move the camera</span>
+    <p>The most-cited novice failure in 3D tools (Autodesk's own ViewCube study) is ending up
+    <em>"looking off into space where no data existed, or inside parts of the 3D model and/or upside down."</em>
+    Nothing in the app currently teaches pan or zoom.</p>
+    <p>One hint under the first model: <strong>"Drag to orbit · two fingers to pan · scroll to zoom · F to frame"</strong>.
+    <code>⌂ Home</code> gets a permanent visible label, not just a glyph.</p>
+  </div>
+</section>
+
+<!-- ============ SECTION D — LAUNCHPAD ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">D</span><h2>The Launchpad</h2></div>
+  <p class="sec-note"><strong>Moldable does not gain a splash screen — it loses one.</strong> The KeyCard is already
+  a full-screen gate; it just can't make anything. This replaces it with a surface you can type into in the
+  first painted frame. It is a <em>route</em>, not a modal, not a timed state.</p>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="fb"><span class="no">D1</span><span class="nm">Launchpad — cold, signed out, zero projects</span><span class="st">the default first impression</span><span class="spacer"></span><span class="tag new">new</span><span class="tag">8 elements</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-bar" style="background:transparent;border:0;padding:0 0 16px">
+            <span class="wf-eyebrow">⬡ MOLDABLE</span><span class="spacer" style="flex:1"></span>
+            <span class="wf-btn ghost">◐</span><span class="wf-btn ghost">Sign in</span>
+          </div>
+          <div class="wf-col" style="max-width:640px;margin:0 auto;gap:12px">
+            <div class="wf-eyebrow" style="color:var(--accent-d)">② SET YOUR PRINTER — SIZES ARE CHECKED AGAINST IT</div>
+            <h3 class="wf-h" style="font-size:26px">What do you want to make?</h3>
+            <p class="wf-sub">Describe a part in plain language — real millimetres, checked against your
+              printer, exported as the files your slicer wants.</p>
+            <div class="wf-row" style="align-items:stretch">
+              <div class="wf-input hero">📎 &nbsp; A wall bracket for a 32 mm pipe…</div>
+              <div class="wf-col" style="justify-content:flex-end;gap:4px">
+                <span class="wf-chip">Auto · mm</span><span class="wf-btn pri">⏎</span>
+              </div>
+            </div>
+            <p class="wf-fine">⑥ Sizes are AI-generated — check the fit before a long print.</p>
+            <div class="wf-eyebrow" style="margin-top:6px">OR START FROM A TEMPLATE — ONE TAP, NO KEY NEEDED</div>
+            <div class="wf-row" style="flex-wrap:wrap;gap:7px">
+              <span class="wf-chip on">Wall hook</span><span class="wf-chip on">Cable clip</span>
+              <span class="wf-chip on">Box with lid</span><span class="wf-chip on">Phone stand</span>
+              <span class="wf-chip">More…</span>
+            </div>
+            <div class="wf-bar" style="border-color:var(--accent);flex-direction:column;align-items:flex-start;gap:2px">
+              <b style="font-size:13px">Fix a broken part</b>
+              <span class="wf-fine">Photo in → a replacement that actually fits</span>
+            </div>
+            <div class="wf-row" style="justify-content:space-between;padding-top:10px;border-top:1px solid var(--rule)">
+              <span class="wf-fine">Runs in your browser. Your designs and keys stay on this device. <u>Sign in to sync</u></span>
+              <span class="wf-fine"><u>Skip</u></span>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">1</span><span><strong>The composer is the only filled, high-contrast object</strong> on the screen. One primary action, preserved.</span></div>
+          <div><span class="n warn">2</span><span><strong>Never render "BAMBU LAB P1S".</strong> <code>DEFAULT_PRINTER</code> is a bare 256mm bed with <em>no brand and no model</em>. Until the user picks one, this is a call to action, not a readout.</span></div>
+          <div><span class="n acc">3</span><span>Chips map to <strong>templates that actually exist</strong> — see the warning below. Free, no key, no AI call.</span></div>
+          <div><span class="n acc">6</span><span>The honest caveat sits <strong>under the composer</strong>, not pinned to the floor in 10.5px. You can't make anti-misrepresentation your positioning and then hide your one honest sentence.</span></div>
+          <div><span class="n">8</span><span><strong>"Fix a broken part" is permanent here</strong> — today it's destroyed by the first message, taking the Fit control with it.</span></div>
+          <div><span class="n">↓</span><span><code>Skip</code> is a <strong>visible link only</strong> — not bound to Esc. One Escape contract means one contract.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">The chips must map to templates that exist</span>
+    <p><code>src/cad/templates.ts</code> contains: <code>phone-stand · cable-clip · wall-hook · box-with-lid ·
+    desk-hook · plant-pot · coaster · bag-clip · cable-winder · spacer · tolerance-coupon</code>.</p>
+    <p>There is <strong>no bracket, enclosure, adapter or organiser template.</strong> Chips named for those would
+    route every keyless first-timer straight into the provider wall — breaking the "a model on screen is
+    guaranteed regardless of key state" promise. Keep the dimensioned <em>sentences</em> as text examples marked
+    "needs an AI key", never as a hero chip.</p>
+  </div>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">D2</span><span class="nm">Returning — ≥1 project</span><span class="st">same DOM, three deltas</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:11px">
+            <h3 class="wf-h" style="font-size:21px">What do you want to make <span style="color:var(--accent-d)">next?</span></h3>
+            <div class="wf-input hero" style="padding:14px">📎 &nbsp; Describe a part…</div>
+            <div class="wf-row" style="justify-content:space-between">
+              <span class="wf-eyebrow">PICK UP WHERE YOU LEFT OFF</span><span class="wf-fine"><u>All projects →</u></span>
+            </div>
+            <div class="wf-scroll">
+              <div class="wf-card"><div class="wf-ph thumb">render</div><div class="t">Wall bracket · v6</div><div class="m">clearance 0.3 · CAD</div></div>
+              <div class="wf-card"><div class="wf-ph thumb">render</div><div class="t">Wall bracket · v4</div><div class="m">clearance 0.2 · CAD</div></div>
+              <div class="wf-card"><div class="wf-ph thumb">render</div><div class="t">Duct adapter · v2</div><div class="m">100→60×120 · CAD</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">1</span><span>Headline gains <strong>one word</strong>. Costs no personalization data, reads fine cold.</span></div>
+          <div><span class="n warn">2</span><span>Title cards <strong><code>prompt · version · differing dimension</code></strong> — not the raw first prompt. Six iterations of one bracket all start from the same sentence.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">D3</span><span class="nm">No provider — intercepted inline</span><span class="st">the biggest first-run failure, fixed</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:10px">
+            <div class="wf-input hero" style="padding:14px;color:var(--ink)">A wall bracket for a 32 mm pipe, 4 mm wall…</div>
+            <div class="wf-bar" style="border-color:var(--accent);background:var(--accent-w);flex-direction:column;align-items:flex-start;gap:7px">
+              <b style="font-size:12.5px">Precise CAD needs an AI provider.</b>
+              <span class="wf-fine"><u>Add a free Google Gemini key — takes a minute</u></span>
+              <span class="wf-btn">or build this as a mesh instead</span>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span>Today this force-opens the <strong>Settings modal</strong> (<code>App.tsx:2892</code>) on whatever pane was last used.</span></div>
+          <div><span class="n acc">✓</span><span><strong>The typed prompt stays in the field.</strong> Two live exits. Neither is a dead end.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <h3>Submit — the load-bearing behaviour</h3>
+  <pre class="flow">const text = draft.trim(); if (!text) return;
+setEntered(true);              // folds in the old enterFree()
+setView("workspace");          // the route change
+void send(text, forceMode);    // App.tsx:2618 — UNCHANGED</pre>
+  <p>The string goes <strong>straight to the existing <code>send()</code></strong>. It is never written into the
+  workspace composer, never round-tripped. The first thing you see in the workspace is your own sentence as a
+  bubble, already streaming. <strong>Nothing is re-typed.</strong></p>
+
+  <div class="note">
+    <span class="lbl">The screen that "delays" you is what removes the wait</span>
+    <p><code>App.tsx:1034</code> reads <code>if (!entered || sel) return;</code> — so the <strong>~11 MB
+    OpenCascade WASM download doesn't begin until the gate is dismissed.</strong> Change it to
+    <code>if (sel) return;</code> and the kernel compiles while you read the headline and type a sentence with
+    three measurements in it. <strong>Net time-to-first-model goes down.</strong></p>
+  </div>
+
+  <div class="note taste">
+    <span class="lbl">Taste call — labelled, not a finding</span>
+    <p>The background is a <strong>build plate in five CSS gradient layers</strong>: an isometric ±30° hairline
+    grid masked to the bottom of the viewport, a low off-centre teal bloom, a cool counter-wash, a dark-mode-only
+    key light, and FDM layer lines at 2.4% in the bottom 160px. Zero JS, zero network bytes, no
+    <code>backdrop-filter</code> (the <code>styles.css:344</code> ban stands).</p>
+    <p><em>No research says a printer-bed backdrop increases trust.</em> It's defensible as design — on-brand,
+    free, and not the generic AI-purple gradient — but it is a judgment. Not: aurora gradient (the AI tell),
+    autoplay video (LCP killer), animated canvas (the app ships a <em>real</em> 3D viewport 200 ms later — a
+    second fake one is a lie), or a photograph (this community has organised <em>against</em> beauty renders).</p>
+  </div>
+</section>
+
+<!-- ============ SECTION E — STUDIO ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">E</span><h2>The Studio</h2></div>
+  <p class="sec-note">The shell is unchanged — chat left, stage right. The surface area is radically thinned.
+  <strong>The 3D view never leaves.</strong></p>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="fb"><span class="no">E1</span><span class="nm">Studio — model on stage, nothing selected</span><span class="st">the control-count proof shot</span><span class="spacer"></span><span class="tag">~22 controls</span></div>
+      <div class="fbody">
+        <div class="wf-bar" style="border-bottom:0">
+          <span class="wf-eyebrow">⬡ MOLDABLE</span><span style="color:var(--subt)">/</span>
+          <span style="font-size:12px">Wall bracket · 32 mm</span>
+          <span class="spacer" style="flex:1"></span>
+          <span class="wf-btn ghost">New</span><span class="wf-btn ghost">Library</span><span class="wf-btn ghost">◍</span>
+        </div>
+        <div class="studio dock">
+          <div class="chat">
+            <div class="bubble u">A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart</div>
+            <div class="bubble a">Built it — 78 × 70 × 78 mm. Two M4 clearance holes at 40 mm centres. ▸ Thought process</div>
+            <div style="flex:1"></div>
+            <div class="wf-bar" style="flex-direction:column;align-items:stretch;gap:6px">
+              <div class="wf-row"><span class="wf-chip on">Auto</span><span class="wf-chip">Exact mm</span><span class="wf-chip">Organic</span></div>
+              <div class="wf-input" style="padding:8px 10px">📎 Describe a change…</div>
+            </div>
+          </div>
+          <div class="stage">
+            <div class="printbar">
+              <span>78 × 70 × 78 mm</span><span style="color:var(--rule)">·</span>
+              <span class="ok">Fits your bed ✓</span><span style="color:var(--rule)">·</span>
+              <span class="ok">No supports ✓</span><span style="color:var(--rule)">·</span>
+              <span style="color:var(--accent-d)">Fit: Snug ⌄</span>
+            </div>
+            <div class="model">
+              [ 3D model ]
+              <div class="viewcube">cube<br>⌂ Home</div>
+            </div>
+            <div class="wf-fine" style="text-align:center">Drag to orbit · two fingers to pan · scroll to zoom · F to frame</div>
+            <div class="statusbar"><span>Design ── Check ── Print ready</span><span class="spacer" style="flex:1"></span><span>Export ⌄</span></div>
+          </div>
+          <div class="insp">
+            <div class="wf-eyebrow">INSPECTOR</div>
+            <div class="wf-btn on" style="text-align:left">Selection</div>
+            <div class="wf-btn ghost" style="text-align:left">Objects</div>
+            <div class="wf-btn ghost" style="text-align:left">Parameters</div>
+            <div class="wf-btn ghost" style="text-align:left">Printability</div>
+            <div class="wf-btn ghost" style="text-align:left">Source</div>
+            <div class="wf-btn ghost" style="text-align:left">History</div>
+            <div class="wf-ph" style="flex:1;margin-top:6px">Click a face or an<br>edge to see what you<br>can do with it</div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">1</span><span><strong>Print Bar is permanent chrome</strong> — physical truth about the part lives in the frame, not down a tab. This is the differentiator.</span></div>
+          <div><span class="n acc">2</span><span><strong>One dock, one panel open at a time.</strong> Replaces the five-tab strip, four of which unmount the viewport.</span></div>
+          <div><span class="n acc">3</span><span>The empty Selection panel <strong>teaches the selection-driven model itself</strong>. Empty states are the teaching surface — there is no product tour.</span></div>
+          <div><span class="n">4</span><span>The brand mark <strong>no longer discards your session.</strong> Today it and "+ New chat" are the same destructive action with different labels.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">Print Bar v1 — ship only what exists</span>
+    <p>Content is <code>dimensions · fits your bed · needs supports · Fit ⌄</code>. <strong>Supports is backed</strong>
+    — <code>src/print/overhang.ts</code> + <code>overhangThresholdDeg</code> already compute it, and for a hobbyist
+    "will this need supports" outranks everything else.</p>
+    <p><strong>The wall-vs-nozzle readout waits.</strong> "Walls 2.4 mm = 6× nozzle ✓" is computed from a setting
+    that <em>does not exist</em> — <code>PrinterDefaults</code> is <code>{bed, overhangThresholdDeg, name}</code> and
+    <code>thinwalls.ts</code> hardcodes 0.8 mm. Don't put unbuilt capability in the hero chrome.</p>
+    <p><strong>Print time and filament estimates are not available</strong> and shouldn't be promised — they require
+    actually slicing. <code>src/lib/slicer.ts</code> is a deep-link handoff only; that number comes from Bambu Studio
+    or OrcaSlicer <em>after</em> the handoff.</p>
+  </div>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">E2</span><span class="nm">Face selected</span><span class="st">contextual toolbar + Selection panel</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="model" style="min-height:120px;background:var(--panel)">
+            [ model — top face highlighted ]
+            <div style="position:absolute;top:34%;left:12%">
+              <div class="ctxbar">
+                <span class="wf-btn pri">Round</span><span class="wf-btn">Bevel</span>
+                <span class="wf-btn">Push/Pull</span><span class="wf-btn">Hole…</span>
+                <span class="wf-btn">Paint</span><span class="wf-btn">Measure</span>
+              </div>
+            </div>
+          </div>
+          <div class="wf-bar" style="margin-top:8px">
+            <span class="wf-chip on">editing: top face · 62 × 24 mm ✕</span>
+            <span class="wf-input" style="padding:7px 9px">e.g. add two 4 mm screw holes…</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">1</span><span>Anchored <strong>at the selection</strong> — Fitts's Law, pointer travel ≈ 0. Every button carries a text label.</span></div>
+          <div><span class="n warn">2</span><span><strong>"Ask AI" is deliberately NOT here.</strong> Selection routes to the AI through exactly one mechanism: the scope chip in the composer. Two mechanisms for one concept is the duplication this redesign exists to remove.</span></div>
+          <div><span class="n acc">3</span><span><code>Hole…</code> is promoted to a first-class verb. Today it's <strong>four levels deep</strong> and is the sole entry to a 15-control feature.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">E3</span><span class="nm">Printability — docked, live</span><span class="st">the stage never unmounts</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-row" style="align-items:stretch;gap:8px">
+            <div class="model" style="min-height:150px;background:var(--panel);flex:1.3">[ model — overhang face glowing ]</div>
+            <div class="wf-col" style="flex:1;gap:5px">
+              <div class="wf-eyebrow">PRINTABILITY</div>
+              <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><span class="ok">✓</span> Watertight</div>
+              <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><span class="ok">✓</span> Fits your bed</div>
+              <div class="wf-bar" style="padding:5px 8px;font-size:10.5px;border-color:var(--live)">
+                <span style="color:var(--live)">▲</span> Overhang 62°
+                <span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Auto-orient</span>
+              </div>
+              <div class="wf-bar" style="padding:5px 8px;font-size:10.5px;border-color:var(--live)">
+                <span style="color:var(--live)">▲</span> Wall 1.2 mm
+                <span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Thicken</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span>Today Printability <strong>replaces the 3D view</strong> — so its own "Overhang heatmap" changes what is drawn in a viewport that tab has just hidden.</span></div>
+          <div><span class="n acc">✓</span><span>Hover a failed check → <strong>the offending geometry highlights live</strong>. One primary fix per row, with its consequence in numbers.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SECTION F — FLOWS ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">F</span><h2>The workflows</h2></div>
+  <p class="sec-note">Ten flows. Two are drawn in full here; the rest are specified in
+  <code>docs/UX_WORKFLOW.md</code>.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>#</th><th>Flow</th><th>Success metric</th></tr></thead>
+    <tbody>
+      <tr><td>F1</td><td><strong>First run</strong> — cold open to first model</td><td>TTFM p75 ≤15 s from a chip, ≤45 s typed. <strong>0% hit a hard wall.</strong></td></tr>
+      <tr><td>F2</td><td>Returning &amp; resume</td><td>≤2 clicks to resume</td></tr>
+      <tr><td>F3</td><td>Describe → part → refine by chat</td><td>Median AI calls per exported part ≤3</td></tr>
+      <tr><td>F4</td><td>Photo / sketch / SVG → model</td><td>% of photo starts reaching export</td></tr>
+      <tr><td>F5</td><td>Refine — direct manipulation + chat</td><td>Selection→edit without opening a menu</td></tr>
+      <tr><td>F6</td><td><strong>Print readiness</strong> → export</td><td>% of exports passing preflight with zero warnings</td></tr>
+      <tr><td>F7</td><td>Organic / mesh, and the engine switch</td><td>Switch followed by switch-back within one message</td></tr>
+      <tr><td>F8</td><td>Projects, versions, library</td><td>Correct-project open rate</td></tr>
+      <tr><td>F9</td><td>Settings / keys without derailing work</td><td>Return-to-work without losing the prompt</td></tr>
+      <tr><td>F10</td><td>Errors &amp; recovery</td><td>% of failures with a taken recovery action</td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>F1 — first run. Every branch ends in geometry.</h3>
+  <pre class="flow">cold open
+   │  pre-paint script stamps theme+bg (index.html:21-33) — no white flash
+   ▼
+LAUNCHPAD ─────────────────────────── composer focusable in frame 1
+   │                                  OCCT kernel begins warming (App.tsx:1034 guard change)
+   ├── tap a template chip ──► prefills + focuses ──┐   free · no key · no AI call
+   ├── type a description ─────────────────────────┤
+   └── attach a photo ─────────────────────────────┤
+                                                   ▼
+                                              press ⏎
+                                                   │
+                     ┌─────────────────────────────┴──────────────┐
+              needs AI, no key?                              has what it needs
+                     │                                            │
+                     ▼                                            ▼
+        INLINE card, prompt preserved                    220 ms cross-fade → STUDIO
+        ├─ free Gemini key (1 min)                       your sentence already a bubble
+        └─ build it as a mesh now  ──────────────────►   generation streaming
+                                                              │
+                                                              ▼
+                                              FIRST GEOMETRY + Print Bar + one camera hint
+
+   There is no dead end. That is the whole design.</pre>
+
+  <h3>F6 — print readiness</h3>
+  <pre class="flow">model on stage
+   │
+   ▼
+PRINT BAR (always on) ── 78 × 70 × 78 mm · Fits your bed ✓ · No supports ✓ · Fit: Snug ⌄
+   │        each item clicks through to ▼
+   ▼
+INSPECTOR → Printability  (docked beside the LIVE stage — the model never leaves)
+   │        hover a failed check → the offending geometry highlights
+   ├── thin wall     → Fix (thicken to 2.4 mm)
+   ├── overhang 62°  → Auto-orient  ·  or accept supports
+   ├── too tall      → Scale to fit bed  ·  or Split into pieces
+   └── all clear
+        ▼
+   EXPORT (ONE surface — replaces four that don't know about each other)
+   ├── ✓ watertight   ✓ fits bed   ✓ walls ≥ 2 perimeters   ✓ no floating islands
+   ├── Files ....... 3MF (default) · STL · STEP · OBJ
+   ├── Plates ...... one .3mf per plate
+   ├── Pieces ...... per piece · all as .zip
+   └── Open in Bambu Studio · Open in OrcaSlicer
+        ▼
+   "Attach a photo when it's printed"  →  proof-of-print badge on the Library card</pre>
+
+  <h3>Cross-cutting rules</h3>
+  <ul>
+    <li><strong>Feedback lands where the action happened.</strong> Direct manipulation on the right no longer
+    posts its explanation into the chat on the left (<code>App.tsx:744-760</code> — and it fires once
+    <em>per device</em>, so the second user of a shared machine gets nothing).</li>
+    <li><strong>One popup, always.</strong> Five menus opt out of the app's own documented solo-menu invariant
+    (<code>Workspace.tsx:67-71</code>). Two close <em>only</em> on <code>onMouseLeave</code> — impossible to
+    dismiss on touch, on a product that ships for iPad.</li>
+    <li><strong>Settings save on change.</strong> Today a stray backdrop click silently discards a freshly typed
+    API key. Exception: secrets get an explicit Save and a dirty-close prompt.</li>
+    <li><strong>Every AI result is forkable, not overwriting.</strong> Add <code>Try again, differently</code> so
+    both candidates sit in History. "Regeneration overwrites the previous result" is a real failure mode today
+    with no escape.</li>
+  </ul>
+</section>
+
+<!-- ============ SECTION G — DIFFERENTIATION ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">G</span><h2>What sets this apart</h2></div>
+
+  <div class="note">
+    <span class="lbl">Positioning</span>
+    <p>The only design tool where every dimension has a visible source, every clearance is calibrated to
+    <strong>your</strong> printer, and the app <strong>proves the parts fit before anything is printed.</strong></p>
+    <p>Not "AI that makes 3D models" — that's commoditised by Meshy and Tripo, and actively <em>stigmatised</em> by
+    this audience (a Feb 2026 r/3Dprinting thread against AI models hit 2.4k upvotes; MakerWorld's Exclusive
+    Program now excludes AI content outright). <strong>A fit-and-tolerance instrument that happens to use AI to
+    draw.</strong></p>
+  </div>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="fb"><span class="no">G1</span><span class="nm">The Fit Check — the signature moment</span><span class="st">20 seconds, one shot, no cuts</span><span class="spacer"></span><span class="tag new">the demo</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="model" style="min-height:130px;background:var(--panel)">[ a box, and its lid dragged onto it ]</div>
+          <div class="wf-bar" style="margin-top:8px;border-color:var(--accent);flex-direction:column;align-items:flex-start;gap:4px">
+            <b style="font-size:12.5px">Lid clears the box everywhere · tightest gap 0.18 mm at the front-left corner</b>
+            <span class="wf-fine">On your printer that's a <b>snug</b> fit — calibrated from your printed coupon</span>
+            <div class="wf-row" style="margin-top:5px"><span class="wf-chip">Loose</span><span class="wf-chip on">Snug</span><span class="wf-chip">Press</span></div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">→</span><span>Tap <strong>Loose</strong>. Both mating faces re-cut. The number becomes 0.38 mm. Export.</span></div>
+          <div><span class="n">✓</span><span>Meshy tells you the mesh is watertight. Zoo regenerates the whole part and overwrites the old one. <strong>Neither knows there are two parts that must mate</strong>, has computed the gap, or knows what your printer does to 0.18 mm.</span></div>
+          <div><span class="n">✓</span><span><strong>Every reviewed competitor is single-part.</strong> Assemblies are the unclaimed ground.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tw"><table>
+    <thead><tr><th>Differentiator</th><th>What exists today</th><th>Real effort</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Nozzle as a real setting</strong></td><td>❌ Nothing. <code>thinwalls.ts</code> hardcodes 0.8 mm</td><td><strong>S</strong> — one field. Do it first; it unblocks everything</td></tr>
+      <tr><td>Fit control made permanent</td><td>Segment exists, gated on <code>guided</code></td><td><strong>M</strong> — see warning</td></tr>
+      <tr><td>Print-honest viewport</td><td>Printability exists but <em>replaces</em> the 3D view</td><td><strong>M</strong> — IA surgery</td></tr>
+      <tr><td><strong>Fit Check</strong> (two-part clearance)</td><td>Boolean machinery ships (<code>checkFit</code>)</td><td><strong>M</strong></td></tr>
+      <tr><td>Point-at-it editing</td><td>Selection state exists</td><td><strong>S</strong> — routing only</td></tr>
+      <tr><td>Measure-from-photo</td><td>Ships, math is correct — but returns a <em>string</em> appended to the composer</td><td><strong>M</strong> — needs structured output</td></tr>
+      <tr><td>The print receipt (one export)</td><td>Four disconnected export surfaces</td><td><strong>S–M</strong></td></tr>
+      <tr><td>Dimensions panel with provenance</td><td>⚠️ See warning</td><td><strong>L</strong>, in three phases</td></tr>
+      <tr><td>Proof-of-print photo</td><td>Nothing</td><td><strong>S</strong></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note warn">
+    <span class="lbl">Two corrections to the obvious plan</span>
+    <p><strong>The Dimensions panel is L, not M — split it.</strong> <code>CadParams = Record&lt;string, number&gt;</code>,
+    populated by regex. There is <em>no unit, label, min/max or origin on any parameter</em>;
+    <code>grep -rn provenance src/</code> returns zero hits. <em>Phase A (S):</em> render existing params + dims in
+    one table, replacing the MeshStats / Selection Inspector / Set-size three-way overlap — <strong>ship
+    this</strong>. <em>Phase B (L):</em> new prompt contract emitting <code>{name, value, unit, role, source}</code>,
+    schema change, migration. <em>Phase C:</em> predicted printed size — needs nozzle <em>and</em> asymmetric
+    hole/shaft compensation.</p>
+    <p><strong>Making Fit permanent is a prompt-contract change, not a UI move.</strong> <code>App.tsx:3017</code>
+    is <code>const fitLine = guided ? fitDirective(fit) : ""</code>. Fit is injected into <em>guided prompts
+    only</em>. Making it permanent changes what the model is told on <em>every</em> precise build, and requires
+    unpicking <code>guided</code> from four other behaviours it gates. <strong>Decide explicitly whether
+    <code>guided</code> survives and what it still gates</strong> — three documents currently assume different
+    answers.</p>
+  </div>
+</section>
+
+<!-- ============ SECTION H — BUILD ORDER ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">H</span><h2>Build order</h2></div>
+
+  <h3>Ship first — these are defects today, independent of the redesign</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Fix</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Tool rail renders <em>over</em> the four inspectors it opens</td><td><code>styles.css:1047</code> (z 30) vs <code>793</code> (z 6)</td></tr>
+      <tr><td><code>.plate-bar</code> and <code>.split-panel</code> share one slot</td><td><code>styles.css:512</code> and <code>799</code></td></tr>
+      <tr><td><code>--shadow</code> used 5×, never defined</td><td>5 surfaces render shadowless</td></tr>
+      <tr><td>Error boundary is hardcoded light-theme — white flash in dark mode</td><td><code>main.tsx:29-57</code></td></tr>
+      <tr><td>Every OAuth user lands on a broken empty state</td><td><code>App.tsx:1238</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <h3>Then, in order</h3>
+  <ol>
+    <li><strong>Vocabulary pass</strong> (§B). Free, and everything downstream depends on it.</li>
+    <li><strong>Nozzle as a real setting.</strong> One field. Unblocks the print-readiness story.</li>
+    <li><strong>Launchpad</strong> — delete <code>KeyCard</code>, move the kernel warm-up, de-duplicate the empty state.</li>
+    <li><strong>One dock</strong> — five tabs → the Inspector; the stage stops unmounting.</li>
+    <li><strong>Contextual toolbar</strong> — replaces the rail and the four colliding pin-panels.</li>
+    <li><strong>Print Bar</strong> (v1 content only) + <strong>one Export surface</strong>.</li>
+    <li><strong>Fit Check</strong> — the signature moment.</li>
+    <li>Dimensions Phase A → Measure-from-photo structured output → Phase B.</li>
+  </ol>
+
+  <div class="note">
+    <span class="lbl">Deliberately deferred, and deliberately cut</span>
+    <p><strong>⌘K command palette → v2.</strong> Every research note in the corpus warns against a palette before
+    the IA is fixed — <em>a palette that is the sole route to a feature is a junk drawer with a search box.</em>
+    Ship the IA, instrument it, then use real telemetry to decide what earns promotion.</p>
+    <p><strong>The two-phase "Plan card" → cut, not deferred.</strong> A confirmation step between prompt and
+    geometry. No research backs it, it doubles AI calls against the ≤3 target, and it delays first geometry
+    against the TTFM target. Its actual job — catching wrong numbers cheaply — is better served by the Dimensions
+    panel being editable <em>after</em> the first build, with no AI call.</p>
+  </div>
+
+  <h3>Metrics you can actually observe</h3>
+  <div class="tw"><table>
+    <thead><tr><th>Don't measure</th><th>Measure instead</th></tr></thead>
+    <tbody>
+      <tr><td class="del">"≥95% of exports open in a slicer with zero errors" — the app has no visibility into the slicer</td><td class="add">% of exports passing preflight with zero warnings; % of projects that gain a print photo</td></tr>
+      <tr><td class="del">"undo surprise rate"</td><td class="add">Undo followed by redo within 5 s</td></tr>
+      <tr><td class="del">"engine-switch regret &lt;10%"</td><td class="add">Switches followed by a switch-back within one message</td></tr>
+    </tbody>
+  </table></div>
+  <p>Chips fire <strong>named</strong> events (<code>lp_chip_wall_hook</code>, not <code>chip_clicked</code>) and are
+  measured on <strong>export completion</strong>, not clicks. A chip that gets tapped but never reaches an export
+  is worse than no chip.</p>
+</section>
+
+<!-- ============ SECTION I — REMAINING ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">I</span><h2>Still to wireframe</h2></div>
+  <p class="sec-note">Drawn above: A1, D1–D3, E1–E3, G1. These remain, ordered by how much they'd change the build.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Priority</th><th>Screen / state</th></tr></thead>
+    <tbody>
+      <tr><td><strong>P0</strong></td><td>Launchpad — narrow/stacked ≤900 px and ≤430 px touch · composer focused/typed/multi-line · attachment chip present · kernel-warming inline status</td></tr>
+      <tr><td><strong>P0</strong></td><td>Contextual toolbar — the remaining five resolutions (edge · multi-face · whole body · attachment · <strong>mesh object</strong>, which is currently missing from the ladder entirely)</td></tr>
+      <tr><td><strong>P0</strong></td><td>Export — readiness checklist opening state (all-pass, and with failures + inline fixes) · format list · blocked &amp; export-anyway override</td></tr>
+      <tr><td><strong>P1</strong></td><td>Errors — build failed with previous geometry retained · self-heal exhausted with three ranked recoveries · kernel-failed banner with working Retry · offline · <strong>themed crash boundary, both themes</strong></td></tr>
+      <tr><td><strong>P1</strong></td><td>Inspector — Selection (how uniform-vs-per-axis scaling is resolved) · Parameters (bounds labelled honestly as heuristic) · History (fork-on-restore) · collapsed selector strip</td></tr>
+      <tr><td><strong>P1</strong></td><td><strong>The wrong-but-built path</strong> — how you say "not that" and keep both candidates side by side. Currently unspecified and it's the most common real failure.</td></tr>
+      <tr><td><strong>P1</strong></td><td>Calibration — print the coupon → tap the tightest fit → value written back. Plus the <em>uncalibrated middle state</em>: "using typical FDM clearances", never "fits are guesses"</td></tr>
+      <tr><td><strong>P2</strong></td><td>Import card — file-type detected · SVG four-mode · photo blocked on scale</td></tr>
+      <tr><td><strong>P2</strong></td><td>Measure-from-photo — place reference → drag dimensions → named editable chips</td></tr>
+      <tr><td><strong>P2</strong></td><td>Library — grid with inline rename · Templates tab with search · bulk select · empty state</td></tr>
+      <tr><td><strong>P2</strong></td><td>Settings — five panes save-on-change · secrets pane with explicit Save · inline interception in chat</td></tr>
+      <tr><td><strong>P2</strong></td><td>Fit Check — collision state · single-part empty state · AI preview Apply/Discard coexisting with the Print Bar</td></tr>
+      <tr><td><strong>P3</strong></td><td>iPad portrait &amp; landscape at 834/1194 — <em>every</em> label and hit-area rule in this document is justified by iPad, and no layout here is drawn for it</td></tr>
+      <tr><td><strong>P3</strong></td><td>Showcase with Exit chip · plates drag-to-assign · proof-of-print capture · first-run corner progress widget</td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note warn">
+    <span class="lbl">Open questions for you</span>
+    <p><strong>1.</strong> Does <code>guided</code> survive as a flag? This blocks the Fit work.<br>
+    <strong>2.</strong> Is iPad a real target or an aspiration? Every layout here is desktop three-column.<br>
+    <strong>3.</strong> <code>README.md</code> still says <em>"Status: Planning. No code yet"</em> after 149 merged PRs.<br>
+    <strong>4.</strong> <code>NAMING.md</code> flags "retire Moldable before public launch" — the Launchpad is
+    deliberately brand-light because of it. If the name is settled, the hero can carry more.</p>
+  </div>
+</section>
+
+<div class="footer">
+  Moldable · UX workflow &amp; wireframe sheet v2 · 2026-07-26 · companion to <code>docs/UX_WORKFLOW.md</code>
+</div>
+
+</div>

@@ -7,6 +7,12 @@ the specific content that belongs in each. You don't need design skill to use it
 Figma, Excalidraw, or tldraw and sketch boxes for each item below. The goal is to agree on
 **layout and content**, not visuals (colors/fonts come later).
 
+> ⚠️ **Partly superseded (2026-07-26).** The **app flow, navigation and first-run sections below are
+> out of date** — they describe a product with no login, which stopped being true when Supabase auth
+> shipped. See [`UX_WORKFLOW.md`](UX_WORKFLOW.md) and
+> [`wireframes/ux-v2-wireframes.html`](wireframes/ux-v2-wireframes.html) for the current direction.
+> The per-screen content outlines further down remain useful.
+
 > Scope note: Screens marked **[P1]** are needed for the Phase 1 Parametric MVP. Screens marked
 > **[P2+]** come later. Sketch the [P1] ones first.
 >

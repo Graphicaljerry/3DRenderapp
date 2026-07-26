@@ -39,4 +39,6 @@ can dream up freeform shapes.
 ## Quick links
 
 - 📋 [Project plan, goals & roadmap](docs/PLAN.md)
-- 🖼️ [Wireframe content outline](docs/WIREFRAMES.md)
+- 🧭 [**UX workflow & navigation redesign**](docs/UX_WORKFLOW.md) — the current design direction
+- 📐 [**Wireframe sheet v2**](docs/wireframes/ux-v2-wireframes.html) — every screen, drawn
+- 🖼️ [Wireframe content outline](docs/WIREFRAMES.md) _(navigation sections superseded by UX_WORKFLOW.md)_

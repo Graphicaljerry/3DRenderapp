@@ -109,13 +109,42 @@ jobs:
           "
           echo "Stamped Moldable 0.2.$N"
 
+      # The signing key is one long base64 line. Pasting it into the GitHub secrets box
+      # can introduce a line break (it did once: the build died with "failed to decode
+      # base64 key: Invalid symbol 10" — symbol 10 being a newline). Base64 carries no
+      # whitespace, so stripping it is always safe and makes the secret paste-proof.
+      - name: Normalise the update-signing key
+        env:
+          RAW_SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          CLEAN=$(printf '%s' "${RAW_SIGNING_KEY:-}" | tr -d '[:space:]')
+          if [ -z "$CLEAN" ]; then
+            echo "HAS_SIGNING_KEY=false" >> "$GITHUB_ENV"
+            echo "No signing key configured — this build ships installers only."
+            exit 0
+          fi
+          echo "::add-mask::$CLEAN"   # never let the cleaned key surface in a log
+          # Fail loudly and specifically HERE rather than two minutes later inside the
+          # bundler, which reports only a byte offset. Uses node (the `base64` CLI
+          # differs across the macOS and Windows runners; node is set up above).
+          if ! CLEAN="$CLEAN" node -e "
+            const t = Buffer.from(process.env.CLEAN, 'base64').toString('utf8');
+            process.exit(/rsign encrypted secret key/.test(t.split('\n')[0]) ? 0 : 1);
+          "; then
+            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not a valid rsign key. Paste the entire contents of the .key file."
+            exit 1
+          fi
+          echo "TAURI_SIGNING_PRIVATE_KEY=$CLEAN" >> "$GITHUB_ENV"
+          echo "HAS_SIGNING_KEY=true" >> "$GITHUB_ENV"
+          echo "Update signing key OK."
+
       # Signed update artifacts need the private key. Until it exists as a secret the
       # build must still succeed — so turn the updater artifacts off for that run and
       # ship installers only (the app falls back to "download the installer").
       - name: Skip updater artifacts when no signing key is configured
-        env:
-          SIGNING_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        if: ${{ env.SIGNING_KEY == '' }}
+        if: ${{ env.HAS_SIGNING_KEY != 'true' }}
         working-directory: moldable-lite
         shell: bash
         run: |
@@ -132,9 +161,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Signs the update payload so the installed app will accept it (the public
-          # half is baked into tauri.conf.json). Absent → the step above disabled them.
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # TAURI_SIGNING_PRIVATE_KEY is NOT set here on purpose — the normalise step
+          # above exported the whitespace-stripped key through $GITHUB_ENV, and a
+          # step-level env entry would shadow it with the raw (possibly wrapped) secret.
+          #
           # The key was generated WITHOUT a password. GitHub refuses to store an empty
           # secret value, so this secret intentionally does not exist — an unset secret
           # resolves to "", which is the password. Don't "fix" this by inventing one:

@@ -1873,15 +1873,6 @@ export function Workspace(p: Props) {
                   <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
                 </div>
               )}
-              {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
-                <div className="zoom-ctl" role="group" aria-label="Zoom">
-                  <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>
-                  <button title="Zoom to fit — re-frame the model" aria-label="Zoom to fit" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
-                  <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
-                </div>
-              )}
-              {/* The Objects panel docks over this corner — stats yield while it's open. */}
-              {p.tab === "3d" && showStats && !showLayers && p.geometry && p.report && <MeshStats report={p.report} />}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (p.attachments.length > 0 || p.plateCtl.count > 1) && (
                 <PlateBar
                   count={p.plateCtl.count}
@@ -1905,11 +1896,14 @@ export function Workspace(p: Props) {
                   ))}
                 </div>
               )}
-              {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
-                <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
-              )}
-              {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
-              {showLayers && (p.tab === "3d" || p.tab === "params") && (
+              {/* Everything that docks to the canvas's top-right corner lives in ONE
+                  stack. They used to be four independently absolute-positioned panels
+                  all pinned to the same 10px corner, so any two open at once sat on
+                  top of each other (Objects over the selection inspector, most
+                  visibly). A flex column can't overlap itself. */}
+              <div className="right-dock">
+                {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
+                {showLayers && (p.tab === "3d" || p.tab === "params") && (
                 <div className="layers-panel" role="region" aria-label="Objects on the canvas">
                   <div className="lp-head"><b>Objects</b><button className="x" aria-label="Close objects" onClick={() => setShowLayers(false)}><IconX /></button></div>
                   <div className="lp-plates">
@@ -2013,7 +2007,21 @@ export function Workspace(p: Props) {
                   ))}
                   {!p.geometry && <div className="lp-empty">Nothing on the canvas yet</div>}
                 </div>
-              )}
+                )}
+                {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
+                {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
+                  <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
+                )}
+                {/* Last in the stack, pinned to the bottom by CSS — the panels above
+                    shrink and scroll rather than growing down over it. */}
+                {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
+                  <div className="zoom-ctl" role="group" aria-label="Zoom">
+                    <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>
+                    <button title="Zoom to fit — re-frame the model" aria-label="Zoom to fit" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
+                    <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
+                  </div>
+                )}
+              </div>
               {p.pinCtl.active && (
                 <div className="pin-panel">
                   <div className="pin-head">

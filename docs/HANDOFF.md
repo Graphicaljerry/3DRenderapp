@@ -735,6 +735,33 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   measurable here; and OrbitControls' inertia decays 5% per FRAME, so at low frame
   rates the post-drag glide legitimately lasts many seconds (measure idle BEFORE
   touching the canvas, not after).
+- **Double-submit + canvas overlay layering (PR #145)**: from an iPad report of "two
+  thinking bubbles at once" plus a VPN/ad-blocker error. ROOT CAUSE of both: `send()`
+  guarded with `if (status === "generating") return` — REACT STATE, which doesn't
+  update until a render, and sendInner awaits (intent routing, engine boot) before it
+  ever calls setStatus. Two taps in the same tick both passed the guard → two user
+  messages, two placeholders, two API calls; the losing request surfaced as a network
+  error. Fixed with a `sendingRef` set synchronously in a thin `send()` wrapper around
+  the renamed `sendInner`. `harness/double-send-e2e.mjs` proves it (old code: 2
+  requests / 2 replies; new: 1). Any future guard on an async user action must use a
+  ref, not state. `friendlyNet` also stopped blaming the user's ad-blocker for what is
+  usually a dropped connection (and reports offline separately).
+  LAYERING: `.mesh-stats`, `.inspector`, `.help-sheet`, `.layers-panel` each pinned
+  themselves to the SAME top-right 10px corner, so any two open at once overlapped
+  (Objects over the selection inspector, 172×154px, made worse when the Objects panel
+  moved right in #135). They now live in one `.right-dock` flex column that also holds
+  `.zoom-ctl` (pinned to its bottom via margin-top:auto, dock ends 112px up to clear
+  the corner orientation gizmo). ORDER MATTERS: stats, Objects, help, inspector, zoom —
+  the inspector appears on every model click, so it goes BELOW the panels; putting it
+  above shifted the Objects panel mid-double-click and broke rename. `.paint-fly` had
+  no background at all — the palette floated on the model (his "transparent colour
+  picker"); it's a real panel now. `.canvas-rail` must NEVER get an overflow value:
+  its flyouts are absolutely-positioned children extending right, and even
+  `overflow-y` alone makes the other axis compute to auto and clips them (wrapping to
+  two columns instead pushed flyouts off-screen — also rejected).
+  `harness/ui-overlap-sweep.mjs` opens every panel/menu at four REAL device sizes and
+  reports overlaps; use it after any canvas-overlay change. Test at real sizes — a
+  square 834×834 viewport invents overlaps that don't exist on a real iPad portrait.
 - **Chat render cost (PR #140)**: `harness/load-perf.mjs` seeds a realistic library
   (25 projects, long chats with images, 30-version stacks, 6 MB meshes). The store is
   NOT the problem (listProjects ~30 ms; opening a mesh project = 2 ms record + 7 ms

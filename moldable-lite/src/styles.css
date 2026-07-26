@@ -306,6 +306,14 @@ button { font-family: inherit; cursor: pointer; }
   .viewer-tools { gap: 3px; flex: 1 1 auto; }
   .viewer-tools .ghost.sm { padding: 5px 6px; }
   .viewer-tools .seg button, .tabs button { padding: 5px 6px; }
+  /* Give a cramped canvas its space back: a compact rail and a bounded dock, so the
+     overlays never take more than they need. (The rail can't scroll or wrap to fit —
+     either would clip or displace its flyouts.) */
+  .canvas-rail { gap: 0; padding: 3px; }
+  .canvas-rail .ghost.sm.iconbtn { height: 30px; min-height: 30px; padding: 4px; }
+  .canvas-rail .rail-sep { margin: 2px 4px; }
+  /* The Objects panel would otherwise take most of a narrow canvas. */
+  .right-dock { max-width: calc(100% - 74px); }
 }
 /* The Face/Edge/Corner/Point control eases in when you click Select. */
 .mode-seg { animation: seg-in .22s cubic-bezier(.23,1,.32,1); transform-origin: left center; }
@@ -338,7 +346,19 @@ button { font-family: inherit; cursor: pointer; }
    every rendered frame — cheap in Chrome, expensive in WKWebView (the Mac app), where
    it dominated an otherwise ~0.6 ms frame. Solid panels read better over a 3D scene
    anyway; the blur only existed to make translucency legible. */
-.mesh-stats { position: absolute; top: 12px; right: 12px; z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
+/* One stack for everything docked to the canvas's top-right corner (mesh stats,
+   selection inspector, help sheet, Objects panel). Each used to pin itself to the
+   same 10px corner, so any two open at once overlapped — most visibly the Objects
+   panel sitting on top of the selection inspector. Children keep their own widths;
+   the column keeps them apart and inside the canvas. It runs the full height and
+   ends above the corner orientation gizmo, with the zoom cluster pinned to its
+   bottom — so a tall Objects panel shrinks and scrolls instead of growing down over
+   the zoom buttons. */
+.right-dock { position: absolute; top: 10px; right: 10px; bottom: 112px; z-index: 9; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100% - 20px); pointer-events: none; }
+.right-dock > * { pointer-events: auto; position: static; flex: 0 1 auto; min-height: 0; }
+.right-dock > .zoom-ctl { margin-top: auto; flex: 0 0 auto; } /* always last, always clear */
+.right-dock:empty { display: none; }
+.mesh-stats { z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
 .ms-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11.5px; }
 .ms-row span { color: var(--mut); }
 .ms-row b { font-weight: 600; color: var(--ink2); font-variant-numeric: tabular-nums; }
@@ -387,7 +407,7 @@ button { font-family: inherit; cursor: pointer; }
 .view-snaps button:hover { background: var(--surf); color: var(--ink); }
 
 /* Docked selection inspector (top-right, under the stats card if both show). */
-.inspector { position: absolute; top: 10px; right: 10px; z-index: 8; width: 172px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px 10px 10px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.inspector { z-index: 8; width: 172px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px 10px 10px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .ins-row { display: flex; align-items: center; gap: 7px; margin: 5px 0; }
 .ins-lab { width: 14px; font-size: 11px; font-weight: 700; color: var(--subt); }
 .ins-row input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 7px; background: var(--bg); color: var(--ink); font-size: 12.5px; font-variant-numeric: tabular-nums; }
@@ -415,7 +435,7 @@ button { font-family: inherit; cursor: pointer; }
 /* Docked top-RIGHT: the tool rail + its flyouts own the canvas's left edge, and a
    left-docked panel sat underneath them (rail z 30 vs panel z 9) — tools drew on top
    of the object rows. Height stops above the bottom-right zoom cluster. */
-.layers-panel { position: absolute; top: 10px; right: 10px; z-index: 9; width: min(264px, calc(100% - 20px)); max-height: max(200px, calc(100% - 170px)); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.layers-panel { z-index: 9; width: min(264px, 100%); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .lp-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 7px; color: var(--ink); }
 .lp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; border-radius: 7px; background: none; color: var(--ink2); text-align: left; font-size: 12.5px; }
 .lp-row:not(.static):hover { background: var(--surf); color: var(--ink); }
@@ -450,7 +470,7 @@ button { font-family: inherit; cursor: pointer; }
 .update-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .update-chip.installing { color: var(--mut); border-color: var(--bord); background: none; font-weight: 500; }
 
-.zoom-ctl { position: absolute; right: 12px; bottom: 118px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+.zoom-ctl { z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 .zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
 .zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
 /* hole tool panel */
@@ -545,7 +565,11 @@ button { font-family: inherit; cursor: pointer; }
 .swatch-custom input[type="color"] { width: 34px; height: 22px; padding: 1px; border: 1px solid var(--bord); border-radius: 5px; background: none; cursor: pointer; }
 .swatch-clear { font-size: 11.5px; color: var(--subt); }
 /* Paint tool flyout — filament palette + smart-fill angle + erase, in the rail. */
-.paint-fly { display: flex; flex-direction: column; gap: 9px; padding: 4px; min-width: 176px; }
+/* A real panel, not loose controls floating on the model: the swatches, labels and
+   slider used to sit directly on the 3D view, so light parts swallowed the text and
+   the palette read as broken. (Its children carry their own fills; the WRAPPER had
+   none.) */
+.paint-fly { display: flex; flex-direction: column; gap: 9px; padding: 10px; min-width: 176px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
 .paint-lbl { font-size: 11px; font-weight: 600; color: var(--subt); }
 .paint-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .paint-swatches .psw { width: 100%; aspect-ratio: 1; border-radius: 5px; border: none; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
@@ -557,7 +581,7 @@ button { font-family: inherit; cursor: pointer; }
 .lp-empty { padding: 8px; color: var(--subt); font-size: 12px; }
 
 /* Tools & gestures cheat sheet (the ? button) — tooltips don't exist on touch. */
-.help-sheet { position: absolute; top: 10px; right: 10px; z-index: 9; width: min(360px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink2); animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.help-sheet { z-index: 9; width: min(360px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink2); animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--ink); }
 .help-row { display: flex; gap: 9px; align-items: flex-start; padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--bord) 55%, transparent); }
 .help-row svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent-d); }
@@ -1014,6 +1038,12 @@ details.guide { margin-top: 10px; }
   position: absolute;
   left: 10px;
   top: 12px;
+  /* No overflow here: the tool flyouts are absolutely-positioned children that
+     extend to the RIGHT of the rail, and any overflow value other than visible
+     (even overflow-y alone — the other axis then computes to auto) would clip them.
+     A short canvas (iPad portrait with the chat open) is therefore left alone
+     rather than clipped: wrapping to two columns pushed the flyouts off-screen,
+     which is worse than the rail reaching the status bar. */
   z-index: 30;
   display: flex;
   flex-direction: column;

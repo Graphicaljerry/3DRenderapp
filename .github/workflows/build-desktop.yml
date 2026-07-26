@@ -291,6 +291,13 @@ jobs:
             console.log('latest.json covers:', Object.keys(platforms).join(', '));
           "
           FILES=$(find installers -type f \( -name '*.dmg' -o -name '*.exe' -o -name '*.app.tar.gz' -o -name 'latest.json' \) | tr '\n' ' ')
+          # Say on the release itself whether this build can update itself, so it's
+          # visible at a glance rather than only in the workflow log.
+          if [ -f installers/latest.json ]; then
+            UPDATES="Installed copies update themselves from this release — no re-download."
+          else
+            UPDATES="Unsigned build: installed copies will offer the installer instead of self-updating."
+          fi
           NOTES="Native desktop builds of Moldable (v${N}).
 
           **macOS** (Apple Silicon) — \`Moldable_aarch64.dmg\`
@@ -300,7 +307,9 @@ jobs:
           **Windows 10/11** (x64) — \`Moldable_x64-setup.exe\`
           Run the installer. SmartScreen may warn on first run — click **More info → Run anyway**.
 
-          Both are unsigned beta builds, which is why those one-time prompts appear."
+          Both are unsigned beta builds, which is why those one-time prompts appear.
+
+          ${UPDATES}"
 
           if [ "${{ github.ref_type }}" = "tag" ]; then
             TAG="${{ github.ref_name }}"

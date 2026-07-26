@@ -735,6 +735,19 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   measurable here; and OrbitControls' inertia decays 5% per FRAME, so at low frame
   rates the post-drag glide legitimately lasts many seconds (measure idle BEFORE
   touching the canvas, not after).
+- **Toolbar placement + one popup at a time (PR #149)**: "Set size" and the snapping
+  magnet were rendered as bare siblings inside the Transform rail flyout — no panel of
+  their own, so they floated loose on the 3D canvas, and they were buried behind a tool
+  even though both are settings you change at any time. Both moved to the horizontal
+  `.viewer-tools` toolbar; the flyout is now just the Move/Rotate/Scale seg (which has
+  its own background). ONE POPUP AT A TIME: `useSoloMenu(open, close)` keeps a
+  module-level set of close functions — opening any menu closes the rest. AnchoredMenu
+  calls it unconditionally (mounted == open) so every portal menu gets it free;
+  SnapMenu and ResizeMenu manage their own dropdowns, so they call it directly and also
+  gained `useOutsideClose` (outside click / Escape) which they never had — that's why
+  two of them could sit open on top of each other. Any NEW self-managed dropdown must
+  call both hooks, or it will stack again. `harness/menus-e2e.mjs` covers placement,
+  the flyout's contents, cross-menu dismissal and that both still work where they moved.
 - **Staying signed in on the desktop app (PR #147)**: TWO separate problems, and the
   second is the one that actually bites. (1) STORAGE — supabase-js persists its session
   in localStorage; the web keeps that, a WKWebView data store is not guaranteed to.

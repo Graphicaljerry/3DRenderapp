@@ -64,8 +64,46 @@ const EXPORT_FORMATS: { f: ExportFormat; label: string; desc: string }[] = [
 /** A dropdown that can never be clipped or buried: portaled to <body>, fixed-position,
     anchored to its trigger, flipped above when there's no room below, clamped to the
     viewport, and closed by outside-click / Esc / scroll / resize. */
+/** Only ONE popup open at a time, anywhere in the app. Each menu registers its own
+    close function while it's open, and opening a new one closes the rest — otherwise
+    two dropdowns sit on top of each other (the Set size panel over the snapping panel
+    was the reported case). Menus that use AnchoredMenu get this for free; the couple
+    that manage their own dropdown call the hook directly. */
+/** Close a self-managed dropdown on an outside click or Escape (AnchoredMenu already
+    does this for the portal-based menus). */
+function useOutsideClose(ref: RefObject<HTMLElement>, open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const t = setTimeout(() => {
+      document.addEventListener("mousedown", onDown);
+      document.addEventListener("keydown", onKey);
+    }, 0);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open, ref, close]);
+}
+
+const openMenus = new Set<() => void>();
+function useSoloMenu(open: boolean, close: () => void) {
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!open) return;
+    const self = () => closeRef.current();
+    for (const other of [...openMenus]) other(); // stand down, everyone else
+    openMenus.add(self);
+    return () => { openMenus.delete(self); };
+  }, [open]);
+}
+
 function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
   const ref = useRef<HTMLDivElement>(null);
+  useSoloMenu(true, onClose); // mounted == open
   const [h, setH] = useState(0);
   useLayoutEffect(() => setH(ref.current?.offsetHeight ?? 0), []);
   useEffect(() => {
@@ -700,8 +738,11 @@ function SurfaceMenu({ disabled, isCad, onApply }: { disabled: boolean; isCad: b
 function SnapMenu({ snap, setSnap }: { snap: { move: number; rotate: number }; setSnap: (s: { move: number; rotate: number }) => void }) {
   const [open, setOpen] = useState(false);
   const active = snap.move > 0 || snap.rotate > 0;
+  const box = useRef<HTMLDivElement>(null);
+  useSoloMenu(open, () => setOpen(false));
+  useOutsideClose(box, open, () => setOpen(false));
   return (
-    <div style={{ position: "relative", display: "inline-flex" }}>
+    <div ref={box} style={{ position: "relative", display: "inline-flex" }}>
       <button className={`ghost sm iconbtn has-modes${active ? " on" : ""}`} aria-label="Snapping" aria-expanded={open} title="Snapping — grid steps for Move, angle steps for Rotate" onClick={() => setOpen((v) => !v)}>
         <IconMagnet />
       </button>
@@ -732,6 +773,9 @@ function SnapMenu({ snap, setSnap }: { snap: { move: number; rotate: number }; s
  *  plus one-tap "Fit to plate". Mesh models may stretch per-axis; CAD scales uniformly. */
 function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
   const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useSoloMenu(open, () => setOpen(false));
+  useOutsideClose(box, open, () => setOpen(false));
   const [vals, setVals] = useState({ x: "", y: "", z: "", pct: "100" });
   const [uniform, setUniform] = useState(true);
   const d = ctl.dims;
@@ -771,7 +815,7 @@ function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
     </label>
   );
   return (
-    <div style={{ position: "relative", display: "inline-flex" }}>
+    <div ref={box} style={{ position: "relative", display: "inline-flex" }}>
       <button
         className={`ghost sm iconbtn${open ? " on" : ""}`}
         aria-label="Set size"
@@ -1540,6 +1584,15 @@ export function Workspace(p: Props) {
                     <button className="iconbtn" title="Undo (⌘/Ctrl+Z)" aria-label="Undo" disabled={!p.undoCtl.canUndo || p.undoCtl.busy} onClick={p.undoCtl.undo}><IconUndo /></button>
                     <button className="iconbtn" title="Redo (⌘/Ctrl+Shift+Z)" aria-label="Redo" disabled={!p.undoCtl.canRedo || p.undoCtl.busy} onClick={p.undoCtl.redo}><IconRedo /></button>
                   </div>
+                  {/* Size and snapping live here, not in the Transform flyout: they're
+                      settings you change at any time, so they shouldn't be buried behind
+                      a tool (and they used to float loose on the canvas). */}
+                  {(p.tab === "3d" || p.tab === "params") && (
+                    <>
+                      <ResizeMenu ctl={p.resizeCtl} />
+                      <SnapMenu snap={p.snap} setSnap={p.setSnap} />
+                    </>
+                  )}
                   <ViewMenu
                     dimsMode={p.dimsMode}
                     setDimsMode={p.setDimsMode}
@@ -1788,8 +1841,6 @@ export function Workspace(p: Props) {
                           <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
                           <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                         </div>
-                        <ResizeMenu ctl={p.resizeCtl} />
-                        <SnapMenu snap={p.snap} setSnap={p.setSnap} />
                       </div>
                     )}
                   </div>

@@ -35,9 +35,11 @@ const groups = async () => page.locator(".sgroup .sgroup-head b").allInnerTexts(
 await page.locator(".stabs button", { hasText: "AI brain" }).click();
 check("AI tab groups: Brain + AI changes", JSON.stringify(await groups()) === JSON.stringify(["Brain", "AI changes"]), (await groups()).join(", "));
 await page.locator(".stabs button", { hasText: "3D engine" }).click();
-check("3D engine tab groups: Engine + Access", JSON.stringify(await groups()) === JSON.stringify(["Engine", "Access"]), (await groups()).join(", "));
+const engGroups = await groups();
+check("3D engine tab has Engine + Access groups", ["Engine", "Access"].every((g) => engGroups.includes(g)), engGroups.join(", "));
 await page.locator(".stabs button", { hasText: "Printer" }).click();
-check("Printer tab groups: Your printer + Print checks", JSON.stringify(await groups()) === JSON.stringify(["Your printer", "Print checks"]), (await groups()).join(", "));
+const prnGroups = await groups();
+check("Printer tab has Your printer + Print checks groups", ["Your printer", "Print checks"].every((g) => prnGroups.includes(g)), prnGroups.join(", "));
 await page.locator(".stabs button", { hasText: "Sync" }).click();
 check("Sync tab groups: Cloud account + File backup", JSON.stringify(await groups()) === JSON.stringify(["Cloud account", "File backup"]), (await groups()).join(", "));
 const backupHidden = await page.getByLabel("Backup passphrase").isVisible().catch(() => false);

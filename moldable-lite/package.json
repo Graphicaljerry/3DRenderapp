@@ -15,6 +15,7 @@
     "@supabase/supabase-js": "^2.110.0",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-store": "^2.4.4",
     "@tauri-apps/plugin-updater": "^2.10.1",
     "comlink": "^4.4.1",
     "fflate": "^0.8.2",

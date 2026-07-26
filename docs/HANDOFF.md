@@ -735,6 +735,25 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   measurable here; and OrbitControls' inertia decays 5% per FRAME, so at low frame
   rates the post-drag glide legitimately lasts many seconds (measure idle BEFORE
   touching the canvas, not after).
+- **Staying signed in on the desktop app (PR #147)**: TWO separate problems, and the
+  second is the one that actually bites. (1) STORAGE — supabase-js persists its session
+  in localStorage; the web keeps that, a WKWebView data store is not guaranteed to.
+  `IS_DESKTOP` now swaps in an async storage adapter backed by tauri-plugin-store
+  (`auth.json` in the app data dir, autoSave), plus explicit persistSession +
+  autoRefreshToken. (2) SIGN-IN CAN'T COMPLETE — OAuth and magic links finish by
+  REDIRECTING to a web address; `appUrl()` in the desktop app is `tauri://localhost/`,
+  which no provider will redirect to and no mail client can open. So on desktop those
+  options are hidden (offering them would only fail) and email+password — the one
+  method with no redirect — is the whole form. For accounts created via Google/link,
+  Settings → Sync → "Set a password" (`cloudSetPassword`, `auth.updateUser`) on the WEB
+  gives them one. Proper OAuth on desktop needs tauri-plugin-deep-link + a `moldable://`
+  redirect URL added to Supabase's allow-list (dashboard only — no MCP tool for auth
+  config); not done, offer stands. `harness/desktop-auth-e2e.mjs` stubs the store IPC
+  and asserts the desktop build reads its session through the plugin while the web build
+  keeps social + link sign-in and never touches it.
+  Also fixed two STALE settings-e2e assertions that pinned exact setting-group lists
+  ("Cost & balance" and "Fit calibration" had been added since) — they were failing on
+  main and hiding real regressions; they now assert the required groups are present.
 - **Multi-view photos + shortcuts (PR #146)**: MULTI-VIEW — `MultiViewRow` (left/back/
   right slots) already existed but rendered only for `mode === "generative"`, so nobody
   in Auto ever saw it. Now shown whenever a photo is attached (not for markup edits,

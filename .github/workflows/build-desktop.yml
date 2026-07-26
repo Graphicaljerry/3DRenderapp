@@ -119,26 +119,45 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          CLEAN=$(printf '%s' "${RAW_SIGNING_KEY:-}" | tr -d '[:space:]')
-          if [ -z "$CLEAN" ]; then
+          if [ -z "${RAW_SIGNING_KEY:-}" ]; then
             echo "HAS_SIGNING_KEY=false" >> "$GITHUB_ENV"
             echo "No signing key configured — this build ships installers only."
             exit 0
           fi
-          echo "::add-mask::$CLEAN"   # never let the cleaned key surface in a log
-          # Fail loudly and specifically HERE rather than two minutes later inside the
-          # bundler, which reports only a byte offset. Uses node (the `base64` CLI
-          # differs across the macOS and Windows runners; node is set up above).
-          if ! CLEAN="$CLEAN" node -e "
-            const t = Buffer.from(process.env.CLEAN, 'base64').toString('utf8');
-            process.exit(/rsign encrypted secret key/.test(t.split('\n')[0]) ? 0 : 1);
-          "; then
-            echo "::error::TAURI_SIGNING_PRIVATE_KEY is not a valid rsign key. Paste the entire contents of the .key file."
-            exit 1
-          fi
-          echo "TAURI_SIGNING_PRIVATE_KEY=$CLEAN" >> "$GITHUB_ENV"
-          echo "HAS_SIGNING_KEY=true" >> "$GITHUB_ENV"
-          echo "Update signing key OK."
+          # Written to a file through a QUOTED heredoc: bash performs no substitution,
+          # so the program below is verbatim JS. (Inlining it in `node -e "…"` meant
+          # YAML, bash and JS escaping all applied at once — that broke silently.)
+          cat > "$RUNNER_TEMP/normalise-key.cjs" <<'NORMALISE_KEY'
+          const raw = process.env.RAW_SIGNING_KEY || "";
+          const MARK = "rsign encrypted secret key";
+          // Tauri wants base64-of-the-.key-file. Accept either thing a human might
+          // paste — that base64 (wrapped or not), or the decoded file text — and
+          // normalise. Only shapes are logged, never key material.
+          console.log(`secret as stored: ${raw.length} chars, ${(raw.match(/\s/g) || []).length} whitespace`);
+          const stripped = raw.replace(/\s+/g, "");
+          const decoded = Buffer.from(stripped, "base64").toString("utf8");
+          let out = null, how = "";
+          if (decoded.includes(MARK)) {
+            out = stripped;                       // A) base64 of the key file
+            how = "base64-wrapped key file";
+          } else if (raw.includes(MARK)) {        // B) the key file pasted as text
+            const line = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+              .find((l) => !l.startsWith("untrusted comment:"));
+            if (line) {
+              out = Buffer.from(`untrusted comment: ${MARK}\n${line}\n`, "utf8").toString("base64");
+              how = "raw key file text";
+            }
+          }
+          if (!out) {
+            console.log("decoded first line:", JSON.stringify(decoded.split("\n")[0].slice(0, 40)));
+            console.log("::error::TAURI_SIGNING_PRIVATE_KEY does not look like an rsign private key (neither base64-wrapped nor raw text). Re-copy the whole .key file.");
+            process.exit(1);
+          }
+          console.log("::add-mask::" + out);      // before it can reach any later log
+          console.log("recognised as:", how);
+          require("fs").appendFileSync(process.env.GITHUB_ENV, `TAURI_SIGNING_PRIVATE_KEY=${out}\nHAS_SIGNING_KEY=true\n`);
+          NORMALISE_KEY
+          node "$RUNNER_TEMP/normalise-key.cjs"
 
       # Signed update artifacts need the private key. Until it exists as a secret the
       # build must still succeed — so turn the updater artifacts off for that run and

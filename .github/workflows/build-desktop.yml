@@ -148,13 +148,17 @@ jobs:
               how = "raw key file text";
             }
           }
+          // 8 hex of a SHA-256 — enough to tell "this is the right key file" apart from
+          // "this is a mangled copy", useless to anyone else.
+          const fp = (s) => require("crypto").createHash("sha256").update(s).digest("hex").slice(0, 8);
           if (!out) {
             console.log("decoded first line:", JSON.stringify(decoded.split("\n")[0].slice(0, 40)));
-            console.log("::error::TAURI_SIGNING_PRIVATE_KEY does not look like an rsign private key (neither base64-wrapped nor raw text). Re-copy the whole .key file.");
+            console.log("fingerprint of what is stored:", fp(stripped));
+            console.log("::error::TAURI_SIGNING_PRIVATE_KEY is not a valid rsign private key — most likely a copy that lost or altered a character. Set it straight from the file instead of pasting: `gh secret set TAURI_SIGNING_PRIVATE_KEY < moldable-updater.key`, or `pbcopy < moldable-updater.key` and paste that.");
             process.exit(1);
           }
           console.log("::add-mask::" + out);      // before it can reach any later log
-          console.log("recognised as:", how);
+          console.log("recognised as:", how, "· fingerprint:", fp(out));
           require("fs").appendFileSync(process.env.GITHUB_ENV, `TAURI_SIGNING_PRIVATE_KEY=${out}\nHAS_SIGNING_KEY=true\n`);
           NORMALISE_KEY
           node "$RUNNER_TEMP/normalise-key.cjs"

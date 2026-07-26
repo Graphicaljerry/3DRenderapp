@@ -2565,7 +2565,24 @@ export default function App() {
     if (key) void applyParams({ ...paramValues, [key]: fitClearance(next) });
   }
 
+  // One request at a time, enforced SYNCHRONOUSLY. The `status === "generating"`
+  // check inside sendInner reads React state, which doesn't update until a render —
+  // and sendInner awaits (intent routing, engine boot) before it ever calls
+  // setStatus. So two taps in the same tick both saw "idle" and both ran: two
+  // "Thinking…" bubbles side by side, two API calls, and the loser of the race
+  // surfacing as a network error. A ref flips the instant the first call enters.
+  const sendingRef = useRef(false);
   async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
+    if (sendingRef.current) return;
+    sendingRef.current = true;
+    try {
+      await sendInner(promptText, forceMode, override);
+    } finally {
+      sendingRef.current = false;
+    }
+  }
+
+  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
     if (pendingRef.current) discardPending(true); // a new ask supersedes the held proposal
     const p = promptText.trim();
     if (status === "generating") return;
@@ -3745,9 +3762,16 @@ export default function App() {
 
 /** Never show a bare "Failed to fetch" — but leave already-crafted messages alone. */
 function friendlyNet(msg: string): string {
-  return /^(typeerror:?\s*)?(failed to fetch|networkerror.*|load failed)\.?$/i.test(msg.trim())
-    ? "Couldn't reach the AI provider from this browser — check your internet/VPN and any ad-blocker (allow the provider's domain for this site), then try again."
-    : msg;
+  // Safari says "Load failed", Chrome "Failed to fetch" — both are the SAME opaque
+  // browser error for "the request didn't complete", which covers being offline, the
+  // connection dropping mid-flight, and a blocker. Leading with "check your
+  // ad-blocker" blamed the user for what is usually just a dropped connection, so
+  // say what we actually know and put the likeliest cause first.
+  if (!/^(typeerror:?\s*)?(failed to fetch|networkerror.*|load failed)\.?$/i.test(msg.trim())) return msg;
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    return "You're offline — reconnect and try again. (Templates, direct edits, measuring and export all work without a connection.)";
+  }
+  return "The request to the AI provider didn't get through — usually a dropped connection, so trying again often works. If it keeps failing, check any VPN or ad-blocker (allow the provider's domain for this site).";
 }
 
 /** "…, seen from the front-right and above" — orients a marked screenshot for the AI. */

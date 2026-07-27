@@ -412,7 +412,7 @@ machines first.
 
 ## 5 · Core workflows
 
-Ten flows. Full step-by-step diagrams are drawn in the wireframe sheet; this is the spine.
+Ten flows. F1 and F6 — the two load-bearing ones — are drawn step by step in the wireframe sheet; the other eight are governed by the spine below plus the cross-cutting rules at the end of this section.
 
 | # | Flow | Job story | Success metric |
 | --- | --- | --- | --- |

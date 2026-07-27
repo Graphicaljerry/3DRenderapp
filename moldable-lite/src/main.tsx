@@ -16,7 +16,7 @@ const App = React.lazy(() => appPromise);
 function BootSplash() {
   return (
     <div className="boot-splash" aria-hidden="true">
-      <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="#14b8a6" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+      <svg viewBox="0 0 24 24" width="46" height="46" fill="none" stroke="#498a6f" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
         <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" />
         <path d="M3 7 12 12 21 7" />
         <path d="M12 12V22" />

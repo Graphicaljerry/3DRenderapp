@@ -95,8 +95,9 @@ export type ModePref = "auto" | Mode; // composer switch: Auto lets the app pick
 
 export type SettingsPane = "ai" | "mesh" | "printer" | "appearance" | "sync";
 // User chat-bubble tint presets (mixed over the bubble base in CSS, both themes).
-export const DEFAULT_USER_TINT = "#14b8a6";
+export const DEFAULT_USER_TINT = "#498a6f";
 export const BUBBLE_TINTS: { label: string; color: string }[] = [
+  { label: "Green", color: "#498a6f" },
   { label: "Teal", color: "#14b8a6" },
   { label: "Green", color: "#22c55e" },
   { label: "Blue", color: "#3b82f6" },
@@ -1545,7 +1546,7 @@ export default function App() {
       const plain: Record<string, string> = { import: "imported file", svg: "SVG", split: "split", separate: "separated", orient: "auto-orient", scale: "resized" };
       return { label: plain[src.provider] ?? src.provider, color: "#64748b" };
     }
-    return { label: result.kind === "replicad" ? "CAD" : "CSG", color: "#0e9488" };
+    return { label: result.kind === "replicad" ? "CAD" : "CSG", color: "#376b55" };
   }, [result]);
 
   function computeReport(geo: THREE.BufferGeometry): PrintabilityReport | null {

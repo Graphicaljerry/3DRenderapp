@@ -1793,7 +1793,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       box.expandByObject(t);
     }
     const group = new THREE.Group();
-    const helper = new THREE.Box3Helper(box, new THREE.Color(0x14b8a6));
+    const helper = new THREE.Box3Helper(box, new THREE.Color(0x498a6f));
     (helper.material as THREE.LineBasicMaterial).transparent = true;
     (helper.material as THREE.LineBasicMaterial).opacity = 0.9;
     helper.renderOrder = 4;
@@ -1802,7 +1802,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const size = box.getSize(new THREE.Vector3());
     const r = Math.max(0.5, Math.max(size.x, size.y, size.z) * 0.012);
     const dotGeo = new THREE.SphereGeometry(r, 10, 8);
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0x14b8a6, depthTest: false });
+    const dotMat = new THREE.MeshBasicMaterial({ color: 0x498a6f, depthTest: false });
     for (const fx of [box.min.x, box.max.x]) for (const fy of [box.min.y, box.max.y]) for (const fz of [box.min.z, box.max.z]) {
       const d = new THREE.Mesh(dotGeo, dotMat.clone());
       d.position.set(fx, fy, fz);
@@ -2116,7 +2116,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const ref = new THREE.Vector3(...g.ref);
     const dashed = new THREE.Line(
       new THREE.BufferGeometry().setFromPoints([at, ref]),
-      new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.4, depthTest: false }),
+      new THREE.LineDashedMaterial({ color: 0x498a6f, dashSize: 2, gapSize: 1.4, depthTest: false }),
     );
     dashed.computeLineDistances();
     dashed.renderOrder = 4;
@@ -2135,7 +2135,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       p2.setComponent(b, Math.max(at.getComponent(b), ref.getComponent(b)) + 12);
       const guide = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints([p1, p2]),
-        new THREE.LineBasicMaterial({ color: 0x14b8a6, depthTest: false }),
+        new THREE.LineBasicMaterial({ color: 0x498a6f, depthTest: false }),
       );
       guide.renderOrder = 5;
       s.scene.add(guide);

@@ -897,6 +897,66 @@ function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }
 
 /** Tools-and-gestures cheat sheet — the toolbar's hover tooltips don't exist on touch
  *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
+/* The Inspector dock. One panel at a time, docked beside a stage that stays live —
+   replacing the tab strip's habit of hiding the canvas to show a full-width panel.
+   The top tab strip and this list are two views of the SAME state (TAB_PANEL maps
+   between them), so "3D View" reads as active exactly when "Selection" does. */
+function DockRow({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="dock-row">
+      <span className="dock-k">{k}</span>
+      <span className="dock-v">{v}</span>
+    </div>
+  );
+}
+
+/* Reads whatever is currently selected. Three truthful states rather than one
+   invented one: a picked feature, the whole body, or nothing picked yet — the
+   empty state is where the selection-driven model gets taught. */
+function DockSelection({ feature, dims, units, modelSelected }: {
+  feature: PickedFeature | null;
+  dims: { x: number; y: number; z: number } | null;
+  units: "mm" | "in";
+  modelSelected: boolean;
+}) {
+  const n = (v: number) => (units === "in" ? (v / 25.4).toFixed(2) : String(Math.round(v * 10) / 10));
+  const u = units === "in" ? "in" : "mm";
+  if (feature) {
+    const kind = feature.kind === "face" ? "Face" : feature.kind === "edge" ? "Edge" : "Corner";
+    const detail = feature.kind === "face" ? `${feature.label} · ${feature.curved ? "curved" : "planar"}` : feature.label;
+    const size =
+      feature.kind === "face" && feature.w != null && feature.h != null ? `${n(feature.w)} × ${n(feature.h)} ${u}`
+      : feature.kind === "edge" && feature.len != null ? `${n(feature.len)} ${u} long`
+      : null;
+    return (
+      <div className="dock-panel">
+        <p className="dock-sub">Selection</p>
+        <DockRow k={kind} v={detail} />
+        {size && <DockRow k="Size" v={size} />}
+        <DockRow k="Position" v={`X ${n(feature.cx)}   Y ${n(feature.cy)}   Z ${n(feature.cz)}`} />
+      </div>
+    );
+  }
+  if (modelSelected && dims) {
+    return (
+      <div className="dock-panel">
+        <p className="dock-sub">Selection</p>
+        <DockRow k="Object" v="Whole part" />
+        <DockRow k="Size" v={`${n(dims.x)} × ${n(dims.y)} × ${n(dims.z)} ${u}`} />
+        <p className="dock-note">Edit any size from Set size… — the whole part rescales to match.</p>
+      </div>
+    );
+  }
+  return <p className="dock-empty">Click a face, an edge or a corner to see what you can do with it.</p>;
+}
+
+type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history";
+const DOCK_ITEMS: ReadonlyArray<readonly [DockPanel, string]> = [
+  ["selection", "Selection"], ["objects", "Objects"], ["params", "Parameters"],
+  ["print", "Printability"], ["code", "Source"], ["history", "History"],
+];
+const TAB_PANEL = { "3d": "selection", code: "code", params: "params", print: "print", history: "history" } as const;
+
 function HelpSheet({ onClose }: { onClose: () => void }) {
   const rows: { icon: JSX.Element; text: string }[] = [
     { icon: <IconCube />, text: "Orbit: drag rotates, pinch or scroll zooms, middle- or right-drag (two fingers) pans." },
@@ -1310,7 +1370,9 @@ export function Workspace(p: Props) {
   const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
-  const [showLayers, setShowLayers] = useState(false); // objects/layers side list
+  const [showLayers, setShowLayers] = useState(false); // legacy gate: context-menu Rename still opens Objects
+  const [dockPanel, setDockPanel] = useState<DockPanel>("selection");
+  void showLayers; void setShowLayers; // retained: context-menu Rename still drives this
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
   const [markMode, setMarkMode] = useState(false); // "circle it and ask" draw overlay
@@ -1353,6 +1415,112 @@ export function Workspace(p: Props) {
     const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
     if (f) p.onPickImage(f);
   }
+
+  const objectsPanel = (
+                <div className="layers-panel" role="region" aria-label="Objects on the canvas">
+                  <div className="lp-head"><b>Objects</b><button className="x" aria-label="Close objects" onClick={() => setDockPanel("selection")}><IconX /></button></div>
+                  <div className="lp-plates">
+                    {[0, ...Array.from({ length: p.plateCtl.count }, (_, i) => i + 1)].map((n) => (
+                      <button key={n} className={p.activePlate === n ? "on" : ""} title={n === 0 ? "Show every plate" : `Show only plate ${n}`} onClick={() => p.setActivePlate(n)}>{n === 0 ? "All" : `P${n}`}</button>
+                    ))}
+                    <button className="lp-add" title="Add a build plate" onClick={() => p.plateCtl.add()}>+</button>
+                    <PlateExportMenu compact exportEach={p.plateCtl.exportEach} exportProject={p.plateCtl.exportProject} disabled={!p.geometry} />
+                  </div>
+                  <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box) — double-click the name to rename" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
+                    <IconCube />
+                    <EditableName name={p.projectName} className="lp-name" editing={renaming === "model"} onStartEdit={() => setRenaming("model")} onRename={p.onRename} onDone={() => setRenaming(null)} />
+                    {p.modelBadge && p.geometry && (
+                      <span className="lp-badge" style={{ color: p.modelBadge.color, borderColor: p.modelBadge.color }} title={`Made by ${p.modelBadge.label}`}>
+                        {p.modelBadge.label}
+                      </span>
+                    )}
+                    {p.geometry && <ColorSwatch label={p.projectName} color={p.partColors["model"]} onPick={(hex) => p.setPartColor("model", hex)} />}
+                    {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
+                    {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
+                  </div>
+                  {(() => {
+                    const sepSet = new Set(p.separatedIds);
+                    const grouped = p.attachments.filter((a) => sepSet.has(a.id));
+                    const loose = p.attachments.filter((a) => !sepSet.has(a.id));
+                    const row = (a: { id: string; name: string }, sub: boolean) => {
+                      const on = p.selAttachIds.includes(a.id);
+                      return (
+                        <div key={a.id} className={`lp-row${on ? " on" : ""}${sub ? " sub" : ""}`} style={{ cursor: "pointer" }} title={`${a.name} — click to select, double-click the name to rename`} onClick={(e) => p.onAttachSelect(a.id, e.shiftKey)}>
+                          {sub && <span className="lp-tie" aria-hidden="true">└</span>}
+                          <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
+                          <ColorSwatch label={a.name} color={p.partColors[a.id]} fallback="#7fc4b9" onPick={(hex) => p.setPartColor(a.id, hex)} />
+                          <EditableName name={a.name} className="lp-name" editing={renaming === a.id} onStartEdit={() => setRenaming(a.id)} onRename={(v) => p.onRenameAttachment(a.id, v)} onDone={() => setRenaming(null)} />
+                          <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
+                          <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
+                        </div>
+                      );
+                    };
+                    return (
+                      <>
+                        {grouped.length > 0 && <div className="lp-group">Separated from the model — Regroup or Merge rejoins them</div>}
+                        {grouped.map((a) => row(a, true))}
+                        {(p.splitCtl.pieces ?? []).map((pc, i) => (
+                          <div key={`pc${i}`} className="lp-row static">
+                            <span className="lp-dot" style={{ background: pc.color }} /><span className="lp-name">Piece {i + 1}</span>
+                            <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
+                          </div>
+                        ))}
+                        {loose.map((a) => row(a, false))}
+                      </>
+                    );
+                  })()}
+                  {p.geometry && (p.separated ? (
+                    <button
+                      className="ghost sm"
+                      style={{ width: "100%", marginTop: 6 }}
+                      title="Put the model back exactly as it was before separating (same as Undo while parts are separated)"
+                      onClick={p.onRegroup}
+                    >
+                      Regroup parts
+                    </button>
+                  ) : p.partCount > 1 ? (
+                    <button
+                      className="ghost sm"
+                      style={{ width: "100%", marginTop: 6 }}
+                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge to keep it or Undo to regroup"
+                      onClick={p.onSeparateParts}
+                    >
+                      Separate {p.partCount} parts
+                    </button>
+                  ) : null)}
+                  {p.selAttachIds.length > 0 && (
+                    <div className="lp-fitrow">
+                      <button className="ghost sm" title="Does it fit here? Computes the real overlap between the selected part(s) and the model — zero overlap means no collision at this position" onClick={() => p.onCheckFit(p.selAttachIds)}>
+                        Check fit
+                      </button>
+                      <button className="ghost sm" title="For parts that nest into each other: carve the selected part's shape (+0.2 mm clearance) out of the model at its current position, so it can slot in" onClick={() => p.onMakeFit(p.selAttachIds)}>
+                        Make it fit
+                      </button>
+                      <button className="ghost sm" title="Settle the selected part(s) back down onto the build plate (keeps position and rotation)" onClick={() => p.onDropToPlate(p.selAttachIds)}>
+                        Drop to plate
+                      </button>
+                    </div>
+                  )}
+                  {p.attachments.length > 0 && (
+                    <button className="primary sm" style={{ width: "100%", marginTop: 6 }} title="Fuse into ONE printable solid (Undo brings the pieces back)" onClick={() => p.onMergeAttachments(p.selAttachIds.length > 1 ? p.selAttachIds : undefined)}>
+                      {p.selAttachIds.length > 1 ? `Merge selected (${p.selAttachIds.length})` : "Merge all into model"}
+                    </button>
+                  )}
+                  {p.pins.map((pin, i) => (
+                    <button key={pin.id} className={`lp-row${p.pinCtl.active?.pin.id === pin.id ? " on" : ""}`} title="Select this point marker" onClick={() => p.pinCtl.select(pin.id)}>
+                      <span className="lp-dot pin">{i + 1}</span><span className="lp-name">{pin.text ? pin.text.slice(0, 26) : `Point ${i + 1}`}</span>
+                    </button>
+                  ))}
+                  {p.measureCtl.items.map((mm, i) => (
+                    <div key={mm.id} className="lp-row static">
+                      <IconRuler /><span className="lp-name">Measure {i + 1}</span>
+                      <span className="lp-sub">{Math.round(Math.hypot(mm.b[0] - mm.a[0], mm.b[1] - mm.a[1], mm.b[2] - mm.a[2]) * 10) / 10} mm</span>
+                      <button className="x" aria-label="Delete measurement" onClick={() => p.measureCtl.remove(mm.id)}><IconX /></button>
+                    </div>
+                  ))}
+                  {!p.geometry && <div className="lp-empty">Nothing on the canvas yet</div>}
+                </div>
+  );
 
   return (
     <div className="app">
@@ -1615,7 +1783,7 @@ export function Workspace(p: Props) {
                 const label = t === "3d" ? "3D View" : t === "code" ? "Source" : t === "params" ? "Params" : t === "print" ? "Printability" : "History";
                 const Ic = t === "3d" ? IconCube : t === "code" ? IconCode : t === "params" ? IconSliders : t === "print" ? IconPrinter : IconHistory;
                 return (
-                  <button key={t} className={`iconbtn${p.tab === t ? " on" : ""}`} aria-label={label} title={label} onClick={() => p.setTab(t)}>
+                  <button key={t} className={`iconbtn${TAB_PANEL[t] === dockPanel ? " on" : ""}`} aria-label={label} title={label} onClick={() => { setDockPanel(TAB_PANEL[t]); p.setTab("3d"); }}>
                     <Ic /><span className="btn-label">{label}</span>
                   </button>
                 );
@@ -1655,7 +1823,7 @@ export function Workspace(p: Props) {
                     toggleOverhang={p.printPrep.toggleOverhang}
                     onResetView={() => p.viewerRef.current?.resetView()}
                   />
-                  <button className={`ghost sm iconbtn${showLayers ? " on" : ""}`} aria-pressed={showLayers} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setShowLayers((v) => !v)}>
+                  <button className={`ghost sm iconbtn${dockPanel === "objects" ? " on" : ""}`} aria-pressed={dockPanel === "objects"} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setDockPanel((v) => (v === "objects" ? "selection" : "objects"))}>
                     <IconLayers /><span className="btn-label">Objects</span>
                   </button>
                   <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
@@ -1666,7 +1834,8 @@ export function Workspace(p: Props) {
           </div>
 
           <div className="viewer-body">
-            <div style={{ display: p.tab === "3d" || p.tab === "params" ? "block" : "none", height: "100%" }}>
+            {/* The stage is never hidden: every panel now docks beside it. */}
+            <div style={{ display: "block", height: "100%" }}>
               <Viewer
                 ref={p.viewerRef}
                 // Click empty canvas = "put it down": closes this panel's own popups
@@ -2014,111 +2183,6 @@ export function Workspace(p: Props) {
                   visibly). A flex column can't overlap itself. */}
               <div className="right-dock">
                 {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
-                {showLayers && (p.tab === "3d" || p.tab === "params") && (
-                <div className="layers-panel" role="region" aria-label="Objects on the canvas">
-                  <div className="lp-head"><b>Objects</b><button className="x" aria-label="Close objects" onClick={() => setShowLayers(false)}><IconX /></button></div>
-                  <div className="lp-plates">
-                    {[0, ...Array.from({ length: p.plateCtl.count }, (_, i) => i + 1)].map((n) => (
-                      <button key={n} className={p.activePlate === n ? "on" : ""} title={n === 0 ? "Show every plate" : `Show only plate ${n}`} onClick={() => p.setActivePlate(n)}>{n === 0 ? "All" : `P${n}`}</button>
-                    ))}
-                    <button className="lp-add" title="Add a build plate" onClick={() => p.plateCtl.add()}>+</button>
-                    <PlateExportMenu compact exportEach={p.plateCtl.exportEach} exportProject={p.plateCtl.exportProject} disabled={!p.geometry} />
-                  </div>
-                  <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box) — double-click the name to rename" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
-                    <IconCube />
-                    <EditableName name={p.projectName} className="lp-name" editing={renaming === "model"} onStartEdit={() => setRenaming("model")} onRename={p.onRename} onDone={() => setRenaming(null)} />
-                    {p.modelBadge && p.geometry && (
-                      <span className="lp-badge" style={{ color: p.modelBadge.color, borderColor: p.modelBadge.color }} title={`Made by ${p.modelBadge.label}`}>
-                        {p.modelBadge.label}
-                      </span>
-                    )}
-                    {p.geometry && <ColorSwatch label={p.projectName} color={p.partColors["model"]} onPick={(hex) => p.setPartColor("model", hex)} />}
-                    {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
-                    {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
-                  </div>
-                  {(() => {
-                    const sepSet = new Set(p.separatedIds);
-                    const grouped = p.attachments.filter((a) => sepSet.has(a.id));
-                    const loose = p.attachments.filter((a) => !sepSet.has(a.id));
-                    const row = (a: { id: string; name: string }, sub: boolean) => {
-                      const on = p.selAttachIds.includes(a.id);
-                      return (
-                        <div key={a.id} className={`lp-row${on ? " on" : ""}${sub ? " sub" : ""}`} style={{ cursor: "pointer" }} title={`${a.name} — click to select, double-click the name to rename`} onClick={(e) => p.onAttachSelect(a.id, e.shiftKey)}>
-                          {sub && <span className="lp-tie" aria-hidden="true">└</span>}
-                          <input type="checkbox" className="lp-check" checked={on} aria-label={`Group-select ${a.name}`} onClick={(e) => e.stopPropagation()} onChange={() => p.onAttachSelect(a.id, true)} />
-                          <ColorSwatch label={a.name} color={p.partColors[a.id]} fallback="#7fc4b9" onPick={(hex) => p.setPartColor(a.id, hex)} />
-                          <EditableName name={a.name} className="lp-name" editing={renaming === a.id} onStartEdit={() => setRenaming(a.id)} onRename={(v) => p.onRenameAttachment(a.id, v)} onDone={() => setRenaming(null)} />
-                          <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
-                          <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
-                        </div>
-                      );
-                    };
-                    return (
-                      <>
-                        {grouped.length > 0 && <div className="lp-group">Separated from the model — Regroup or Merge rejoins them</div>}
-                        {grouped.map((a) => row(a, true))}
-                        {(p.splitCtl.pieces ?? []).map((pc, i) => (
-                          <div key={`pc${i}`} className="lp-row static">
-                            <span className="lp-dot" style={{ background: pc.color }} /><span className="lp-name">Piece {i + 1}</span>
-                            <span className="lp-sub">{pc.dims.x}×{pc.dims.y}×{pc.dims.z}</span>
-                          </div>
-                        ))}
-                        {loose.map((a) => row(a, false))}
-                      </>
-                    );
-                  })()}
-                  {p.geometry && (p.separated ? (
-                    <button
-                      className="ghost sm"
-                      style={{ width: "100%", marginTop: 6 }}
-                      title="Put the model back exactly as it was before separating (same as Undo while parts are separated)"
-                      onClick={p.onRegroup}
-                    >
-                      Regroup parts
-                    </button>
-                  ) : p.partCount > 1 ? (
-                    <button
-                      className="ghost sm"
-                      style={{ width: "100%", marginTop: 6 }}
-                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge to keep it or Undo to regroup"
-                      onClick={p.onSeparateParts}
-                    >
-                      Separate {p.partCount} parts
-                    </button>
-                  ) : null)}
-                  {p.selAttachIds.length > 0 && (
-                    <div className="lp-fitrow">
-                      <button className="ghost sm" title="Does it fit here? Computes the real overlap between the selected part(s) and the model — zero overlap means no collision at this position" onClick={() => p.onCheckFit(p.selAttachIds)}>
-                        Check fit
-                      </button>
-                      <button className="ghost sm" title="For parts that nest into each other: carve the selected part's shape (+0.2 mm clearance) out of the model at its current position, so it can slot in" onClick={() => p.onMakeFit(p.selAttachIds)}>
-                        Make it fit
-                      </button>
-                      <button className="ghost sm" title="Settle the selected part(s) back down onto the build plate (keeps position and rotation)" onClick={() => p.onDropToPlate(p.selAttachIds)}>
-                        Drop to plate
-                      </button>
-                    </div>
-                  )}
-                  {p.attachments.length > 0 && (
-                    <button className="primary sm" style={{ width: "100%", marginTop: 6 }} title="Fuse into ONE printable solid (Undo brings the pieces back)" onClick={() => p.onMergeAttachments(p.selAttachIds.length > 1 ? p.selAttachIds : undefined)}>
-                      {p.selAttachIds.length > 1 ? `Merge selected (${p.selAttachIds.length})` : "Merge all into model"}
-                    </button>
-                  )}
-                  {p.pins.map((pin, i) => (
-                    <button key={pin.id} className={`lp-row${p.pinCtl.active?.pin.id === pin.id ? " on" : ""}`} title="Select this point marker" onClick={() => p.pinCtl.select(pin.id)}>
-                      <span className="lp-dot pin">{i + 1}</span><span className="lp-name">{pin.text ? pin.text.slice(0, 26) : `Point ${i + 1}`}</span>
-                    </button>
-                  ))}
-                  {p.measureCtl.items.map((mm, i) => (
-                    <div key={mm.id} className="lp-row static">
-                      <IconRuler /><span className="lp-name">Measure {i + 1}</span>
-                      <span className="lp-sub">{Math.round(Math.hypot(mm.b[0] - mm.a[0], mm.b[1] - mm.a[1], mm.b[2] - mm.a[2]) * 10) / 10} mm</span>
-                      <button className="x" aria-label="Delete measurement" onClick={() => p.measureCtl.remove(mm.id)}><IconX /></button>
-                    </div>
-                  ))}
-                  {!p.geometry && <div className="lp-empty">Nothing on the canvas yet</div>}
-                </div>
-                )}
                 {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
                 {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
                   <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
@@ -2241,25 +2305,6 @@ export function Workspace(p: Props) {
               {p.tab === "3d" && p.splitCtl.pieces && p.splitCtl.pieces.length > 0 && (
                 <SplitPiecesPanel splitCtl={p.splitCtl} />
               )}
-              {/* Parameters dock over the 3D view so you can watch the model update live — close returns to the plain 3D view. */}
-              {p.tab === "params" && (
-                <div className="side-panel">
-                  <div className="side-head">
-                    <span>Parameters</span>
-                    <button className="x" aria-label="Close parameters" onClick={() => p.setTab("3d")}><IconX /></button>
-                  </div>
-                  <div className="side-body">
-                    <ParamsPanel
-                      defaults={p.cadDefaults}
-                      values={p.paramValues}
-                      busy={p.status === "generating"}
-                      isCad={p.activeKind === "replicad"}
-                      onApply={p.onApplyParams}
-                      onSave={p.onSaveParams}
-                    />
-                  </div>
-                </div>
-              )}
               {p.booting && (
                 <div className="viewer-overlay">
                   <Spinner /> Starting the CAD engine…
@@ -2269,13 +2314,35 @@ export function Workspace(p: Props) {
               )}
               {!p.booting && !p.geometry && <div className="viewer-overlay muted">Describe something or drop a photo to see it here.</div>}
             </div>
-            {p.tab === "code" && (
-              <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
-            )}
-            {p.tab === "print" && (
-              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
-            )}
-            {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
+            {/* Sibling of .right-dock, never a child: `.right-dock:empty { display: none }`
+                is the only thing that hides that stack, so an always-rendered child there
+                would leave an invisible box capturing clicks over the canvas. */}
+            <aside className="inspector-dock" role="region" aria-label="Inspector">
+              <p className="dock-eyebrow">Inspector — one panel at a time</p>
+              <div className="dock-list">
+                {DOCK_ITEMS.map(([key, label]) => (
+                  <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key} onClick={() => setDockPanel(key)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="dock-body">
+                {dockPanel === "selection" && (
+                  <DockSelection feature={p.featureCtl.selected} dims={p.dims} units={p.units} modelSelected={p.modelSelected} />
+                )}
+                {dockPanel === "objects" && objectsPanel}
+                {dockPanel === "params" && (
+                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} />
+                )}
+                {dockPanel === "print" && (
+                  <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
+                )}
+                {dockPanel === "code" && (
+                  <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
+                )}
+                {dockPanel === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
+              </div>
+            </aside>
           </div>
 
           <div className="statusbar">
@@ -2292,7 +2359,7 @@ export function Workspace(p: Props) {
             {p.status === "generating" && <GenTimer />}
             <BuildTag />
             <DesktopUpdateChip />
-            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => p.setTab("print")} />
+            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => setDockPanel("print")} />
             <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />
           </div>
         </section>

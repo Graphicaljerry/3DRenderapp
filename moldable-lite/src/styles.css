@@ -2,18 +2,24 @@
   /* Native form controls (textarea/select/scrollbars) follow the app theme, not the OS. */
   color-scheme: light;
   /* Neutrals carry a faint teal cast (not dead grays) — hue ~180, very low chroma. */
-  --ink: #18201e;
-  --ink2: #333d39;
-  --mut: #5f6b66;
-  --subt: #8d9994;
-  --bord: #dbe2e0;        /* default hairline */
-  --bord-subtle: #e4e9e7; /* dividers */
-  --bord-strong: #c9d3cf; /* hover / focus edges */
-  --surf: #e9edec;        /* app background / recessed — dimmed off-white: easier on the eyes than pure white in a dark room */
-  --bg: #f8faf9;          /* panels & cards — off-white, not stark #fff */
-  --accent: #14b8a6;      /* brand teal */
-  --accent-d: #0e9488;    /* teal hover */
-  --accent-w: #e7f5f2;    /* faint teal wash */
+  --ink: #15181e;
+  --ink2: #2a2e35;
+  --mut: #6b7280;
+  --subt: #9aa0a8;
+  --bord: #e3e6ea;        /* default hairline */
+  --bord-subtle: #ececf0; /* dividers */
+  --bord-strong: #c9c9c9; /* hover / focus edges — the input border in the design */
+  --surf: #efefef;        /* canvas / recessed app background */
+  --bg: #ffffff;          /* panels & cards */
+  --chrome: #f7f7f7;      /* topbar + chat column — one step off the canvas */
+  --bubble-a: #d2d2d2;    /* assistant bubble */
+  --bubble-a-ink: #252525;
+  --accent: #498a6f;      /* brand green */
+  --accent-d: #376b55;    /* darker green — text on light, hover */
+  --accent-w: #eef3f0;    /* faint green wash */
+  --on-accent: #f9f9f9;   /* text/icon on an accent fill */
+  --ink-invert: #121212;  /* active pill fill (tabs, mode) */
+  --on-invert: #dcdcdc;   /* text on that fill */
   --live: #ff6a2c;        /* sparing orange — the ONE live/attention signal */
   --warn: #b7791f;
   --danger: #e5484d;
@@ -67,14 +73,20 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
   --ink2: #c6c7c9;
   --mut: #8d8e90;
   --subt: #666769;
+  --chrome: #171718;      /* topbar + chat column */
+  --bubble-a: #2a2b2d;
+  --bubble-a-ink: #d8d9db;
+  --on-accent: #06120d;   /* text/icon on an accent fill */
+  --ink-invert: #ececed;  /* active pill fill inverts in dark */
+  --on-invert: #121212;
   --bord: #2c2d2f;
   --bord-subtle: #212123;
   --bord-strong: #3b3c3e;
   --surf: #121213;        /* app background — near-black, not pure black */
   --bg: #1c1c1e;          /* panels — lighter than surf: elevation by lightness */
-  --accent: #14b8a6;      /* brand teal — same hue & saturation as light mode */
-  --accent-d: #109b8c;    /* hover */
-  --accent-w: #202124;    /* neutral wash (pills / assistant bubbles); teal stays in the text/fill */
+  --accent: #5aa082;      /* brand green, lifted for a dark background */
+  --accent-d: #74b89a;    /* hover — brighter in dark, not darker */
+  --accent-w: #202124;    /* neutral wash (pills / assistant bubbles); green stays in the text/fill */
   --live: #ff7a43;
   --warn: #d9a441;
   --danger: #ff7076;
@@ -92,14 +104,11 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
 *::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--mut) 55%, transparent); border: 2px solid transparent; background-clip: padding-box; }
 *::-webkit-scrollbar-corner { background: transparent; }
 
-[data-theme="dark"] .bubble { background: #27282b; }
-[data-theme="dark"] .msg.user .bubble { background: color-mix(in srgb, var(--user-tint, #14b8a6) 28%, #2b2c2f); color: var(--ink); }
-[data-theme="dark"] .msg.assistant .bubble { background: var(--accent-w); }
 [data-theme="dark"] .msg.err .bubble { background: #392629; color: #ff9ba0; }
 [data-theme="dark"] .banner { background: #33290f; color: #e3b568; border-bottom-color: #443a22; }
 [data-theme="dark"] .code { background: #16191d; color: #cfd4da; }
 [data-theme="dark"] .prow, [data-theme="dark"] .param-row { border-bottom-color: #27282b; }
-[data-theme="dark"] .tabs button.on { background: var(--bord); color: var(--ink); box-shadow: none; }
+[data-theme="dark"] .tabs button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; }
 [data-theme="dark"] .sync-status { border-color: var(--bord-strong); }
 [data-theme="dark"] .sync-status.err { background: #392629; color: #ff9ba0; border-color: #553338; }
 [data-theme="dark"] .pill-warn { background: #33290f; }
@@ -154,7 +163,7 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---------- app shell ---------- */
 .app { height: 100%; display: flex; flex-direction: column; background: var(--surf); }
-.topbar { height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: var(--bg); border-bottom: 1px solid var(--bord); }
+.topbar { height: 58px; flex: 0 0 58px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; background: var(--chrome); border-bottom: 1px solid var(--bord); }
 .brand { display: flex; align-items: center; gap: 8px; }
 .wordmark { font-weight: 700; font-size: 17px; letter-spacing: 0.2px; }
 .lite { font-size: 10px; font-weight: 600; color: var(--mut); background: var(--surf); border: 1px solid var(--bord); border-radius: 6px; padding: 1px 5px; text-transform: uppercase; }
@@ -187,14 +196,18 @@ button { font-family: inherit; cursor: pointer; }
 /* ---------- split ---------- */
 /* --chat-w is set inline by the resize handle; the divider column sits between chat
    and viewer. The ≤900px stacked layout overrides all of this and hides the handle. */
-.split { flex: 1; display: grid; grid-template-columns: var(--chat-w, 400px) 8px 1fr; gap: 8px; padding: 12px; min-height: 0; }
+.split { flex: 1; display: grid; grid-template-columns: var(--chat-w, 369px) 6px 1fr; gap: 0; padding: 0; min-height: 0; }
 .chat-resize { cursor: col-resize; touch-action: none; position: relative; align-self: stretch; margin: 0 -6px; padding: 0 6px; z-index: 5; }
-.chat-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 3px; transform: translateX(-50%); border-radius: 2px; background: var(--bord); transition: background-color .15s ease; }
+.chat-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: transparent; transition: background-color .15s ease; }
 .chat-resize:hover::after, .chat-resize:active::after { background: var(--accent); }
 /* min-width:0 lets the 1fr viewer column shrink back below the WebGL canvas'
    explicit pixel width — without it, collapsing then reopening the chat leaves
    the canvas propping the column open and overflowing the viewport. */
-.chat, .viewer { background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.chat, .viewer { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+/* Chat is chrome; the viewer is the recessed canvas. Flush to the window edges —
+   the floating-card treatment competed with the panels that actually float. */
+.chat { background: var(--chrome); border-right: 1px solid var(--bord); }
+.viewer { background: var(--surf); }
 
 /* ---------- chat ---------- */
 .messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
@@ -213,8 +226,8 @@ button { font-family: inherit; cursor: pointer; }
 .gc-sub { font-size: 11.5px; opacity: .85; }
 .msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
 .msg.user { align-self: flex-end; align-items: flex-end; }
-.who { font-size: 10px; font-weight: 600; color: var(--subt); }
-.bubble { font-size: 13px; line-height: 1.45; color: var(--ink2); background: #eff1f4; border-radius: 12px; padding: 10px 12px; white-space: pre-wrap; }
+.who { font-size: 10.5px; font-weight: 500; color: var(--ink2); }
+.bubble { font-size: 12.5px; line-height: 1.45; color: var(--bubble-a-ink); background: var(--bubble-a); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
 /* ---- assistant markdown, live thinking, sources, model attribution ---- */
 .md p { margin: 0 0 8px; } .md p:last-child { margin-bottom: 0; }
 .md .md-h { margin: 10px 0 6px; font-size: 13.5px; font-weight: 700; color: var(--ink); }
@@ -246,42 +259,52 @@ button { font-family: inherit; cursor: pointer; }
 /* The user's own messages: a tint of --user-tint (default teal accent) over a base a
    touch darker than the assistant bubble, so they stand out and read as "yours".
    The tint colour is user-configurable in Settings › Appearance. */
-.msg.user .bubble { background: color-mix(in srgb, var(--user-tint, #14b8a6) 22%, #e2e6e9); color: var(--ink); }
+.msg.user .bubble { background: var(--user-tint, var(--accent)); color: var(--on-accent); }
 .bubble-img { display: block; max-width: 180px; max-height: 180px; width: auto; border-radius: 8px; margin-bottom: 6px; }
 .bubble-img:last-child { margin-bottom: 0; }
-.msg.assistant .bubble { background: var(--accent-w); }
+.msg.assistant .bubble { background: var(--bubble-a); }
 .msg.err .bubble { background: #fbeaea; color: #a23a3a; }
 .bubble.muted { color: var(--mut); }
-.composer { display: flex; align-items: flex-end; gap: 8px; padding: 12px; border-top: 1px solid var(--bord); min-width: 0; }
+.composer { display: flex; align-items: flex-end; gap: 6px; padding: 12px 14px; border-top: 1px solid var(--bord); min-width: 0; }
 /* min-width:0 lets the input shrink below its intrinsic width — without it the Send
    button gets pushed out of the panel on narrow chat widths. Buttons never shrink. */
 /* Auto-growing message box: wraps long requests instead of scrolling them off-screen. */
-.composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 132px; padding: 10.5px 12px; border: 1px solid var(--bord); border-radius: 10px; font: inherit; font-size: 13px; line-height: 1.4; resize: none; overflow-y: auto; background: var(--bg); color: var(--ink); }
+.composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 132px; padding: 10.5px 46px 10.5px 14px; border: 1px solid var(--bord-strong); border-radius: 20px; font: inherit; font-size: 12.5px; line-height: 1.4; resize: none; overflow-y: auto; background: var(--bg); color: var(--ink); }
 .composer > button { flex: 0 0 auto; }
-.send { width: 44px; height: 40px; border: none; border-radius: 10px; background: var(--accent); color: #fff; display: inline-flex; align-items: center; justify-content: center; }
+/* Send rides inside the field's right edge (negative margin, textarea keeps the
+   matching right padding) so the composer reads as one pill, not three controls.
+   flex `order` puts it there without re-ordering the DOM, which would move it in
+   the tab sequence away from the field it submits. */
+.send { order: 1; position: relative; z-index: 1; margin-left: -40px; margin-bottom: 4px; width: 32px; height: 32px; border: none; border-radius: 999px; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
+.composer .attach { order: 2; }
+.composer .mic { order: 3; }
 /* Dictation mic — quiet next to Send; pulses while listening. */
-.mic { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
-.mic:hover { color: var(--ink); border-color: var(--accent); }
+.mic { width: 34px; height: 34px; margin-bottom: 3px; border: none; border-radius: 9px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
+.mic:hover { color: var(--ink); background: var(--surf); }
 .mic.on { background: var(--accent); border-color: var(--accent); color: #fff; animation: mic-pulse 1.6s ease-in-out infinite; }
 @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
 @media (prefers-reduced-motion: reduce) { .mic.on { animation: none; } }
 .send:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- viewer ---------- */
-.viewer-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--bord); gap: 8px; }
+.viewer-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; gap: 8px; }
 /* The tab pill NEVER wraps internally (a lone icon on a second row inside the pill
    read as a broken overlay at iPad widths) — when the head runs out of room the
    whole tools cluster drops to its own row instead (see the 680px tier). */
-.tabs { display: flex; gap: 2px; flex-wrap: nowrap; flex: 0 0 auto; background: var(--surf); padding: 3px; border-radius: var(--r-md); }
+.tabs { display: flex; gap: 2px; flex-wrap: nowrap; flex: 0 0 auto; background: var(--bg); padding: 3px; border-radius: 9px; box-shadow: 0 2px 9.3px rgba(0,0,0,.05); }
 /* Right cluster rides at the tabs pill's exact height for one clean optical row. */
 .viewer-head .viewer-tools { align-items: stretch; }
 .viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 32px; box-sizing: border-box; }
 .viewer-head .viewer-tools .seg.sm { align-items: stretch; }
 .viewer-head .viewer-tools .seg.sm .iconbtn { height: 100%; }
-.tabs button { border: 1px solid transparent; background: transparent; border-radius: var(--r-sm); padding: 5px 12px; font-size: 13px; font-weight: 500; color: var(--mut); }
+.tabs button { border: 1px solid transparent; background: transparent; border-radius: 7px; padding: 5px 12px; font-size: 13px; font-weight: 500; color: var(--mut); }
 .tabs button:hover:not(.on) { color: var(--ink2); }
-.tabs button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
+.tabs button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
+/* The head cluster reads as one raised object, like the tab strip opposite it. */
+.viewer-head .viewer-tools { background: var(--bg); border-radius: 11px; box-shadow: 0 2px 9.3px rgba(0,0,0,.05); padding: 3px; gap: 2px; flex-wrap: nowrap; }
+.viewer-head .viewer-tools .ghost { border-color: transparent; background: transparent; }
+.viewer-head .viewer-tools .ghost:hover { background: var(--surf); border-color: transparent; }
 /* Toolbar buttons carry an icon + a text label; the label collapses when the viewer
    COLUMN (not the viewport — the chat width matters) gets narrow, so on iPad the row
    stays on one line instead of wrapping and squashing the 3D view. */
@@ -696,11 +719,15 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 
 /* ---------- composer: mode switch + image upload ---------- */
 .composer-wrap { border-top: 1px solid var(--bord); }
-.modebar { display: flex; flex-direction: column; gap: 6px; padding: 8px 12px 0; }
+.modebar { display: flex; flex-direction: column; gap: 6px; padding: 10px 14px 0; }
 /* wrap the model picker to its own line when the toggle + picker won't fit —
    avoids the picker overflowing/overlapping in a narrow chat panel. */
 .modebar-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 6px; }
 .seg { display: inline-flex; background: var(--surf); border: 1px solid var(--bord); border-radius: 9px; padding: 2px; }
+/* Mode rail: an outlined track, dark pill on the active mode. */
+.modebar .seg { background: transparent; border-color: var(--bord-strong); border-radius: 999px; padding: 3px; }
+.modebar .seg button { border-radius: 999px; padding: 5px 12px; color: var(--ink2); }
+.modebar .seg button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; font-weight: 600; }
 .seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); white-space: nowrap; }
 .seg button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
 .seg.sm button { padding: 3px 9px; font-size: 11px; }
@@ -779,19 +806,66 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .mv-x { position: absolute; top: 2px; right: 2px; z-index: 2; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; padding: 0; }
 .mv-hint { font-size: 11px; color: var(--subt); margin: 6px 0 0; line-height: 1.4; }
 .composer { border-top: none; }
-.attach { width: 40px; height: 40px; border: 1px solid var(--bord); border-radius: 10px; background: var(--bg); color: var(--ink2); display: inline-flex; align-items: center; justify-content: center; }
+.attach { width: 34px; height: 34px; margin-bottom: 3px; border: none; border-radius: 9px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
+.attach:hover { background: var(--surf); color: var(--ink2); }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
 
 /* ---------- collapsible chat ---------- */
-.chat-bar { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--bord); flex: 0 0 auto; }
-.chat-title { font-size: 12px; font-weight: 600; color: var(--mut); }
+.chat-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--bord); flex: 0 0 auto; }
+.chat-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+/* Scoped: .ghost.sm is shared app-wide, so the chat header's chip is styled here only. */
+.chat-bar .ghost.sm { background: var(--bubble-a); border-color: transparent; border-radius: 4px; color: var(--bubble-a-ink); padding: 5px 10px; }
+.chat-bar .ghost.sm:hover { background: var(--bord-strong); border-color: transparent; color: var(--ink); }
 .split.chat-collapsed { grid-template-columns: 40px 1fr; }
 .chat-rail { border: 1px solid var(--bord); border-radius: 12px; background: var(--bg); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
 .chat-rail:hover { background: var(--surf); }
 .chat-rail-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 600; color: var(--mut); letter-spacing: .04em; }
 
 /* ---------- docked side panel (Parameters over the 3D view) ---------- */
+/* ---------- Inspector dock ----------
+   A real column beside the stage, not an overlay that replaces it. Sibling of
+   .right-dock (never a child — that stack relies on :empty to disappear). */
+.inspector-dock {
+  position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 7;
+  width: 262px; max-width: calc(100% - 24px);
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 12px; background: var(--bg); border: 1px solid var(--bord);
+  border-radius: 10px; box-shadow: var(--shadow-md); overflow: hidden;
+}
+.dock-eyebrow {
+  margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--subt);
+}
+.dock-list { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
+.dock-item {
+  width: 100%; text-align: left; padding: 9px 12px; border-radius: 8px;
+  border: 1px solid transparent; background: none; font-size: 13px; color: var(--ink2);
+}
+.dock-item:hover:not(.on) { background: var(--surf); }
+.dock-item.on { background: var(--accent-w); border-color: var(--accent); color: var(--accent-d); font-weight: 500; }
+.dock-body {
+  flex: 1; min-height: 0; overflow: auto; margin-top: 3px;
+  background: var(--surf); border-radius: 8px;
+}
+.dock-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; }
+.dock-sub { margin: 0; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); }
+.dock-row {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: var(--bg); border: 1px solid var(--bord); border-radius: 6px;
+}
+.dock-k { font-size: 12px; font-weight: 600; color: var(--mut); flex: 0 0 auto; }
+.dock-v { font-size: 13px; color: var(--ink); margin-left: auto; text-align: right; white-space: pre; }
+.dock-note, .dock-empty { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--mut); }
+.dock-empty { padding: 16px 12px; text-align: center; }
+/* Panels written for a full-width tab or a floating card, re-homed in a 238px column. */
+.dock-body > .panel, .dock-body > .layers-panel { height: auto; width: auto; border: 0; border-radius: 0; box-shadow: none; background: none; animation: none; padding: 12px 10px; }
+.dock-body .lp-head { padding-top: 0; }
+/* The docked stage keeps its own room: the dock is opaque, so shift canvas
+   furniture that would otherwise sit underneath it. */
+.viewer-body:has(.inspector-dock) .right-dock { right: 286px; }
+.viewer-body:has(.inspector-dock) .export-menu { right: 286px; }
+
 .side-panel { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 6; width: 300px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); overflow: hidden; }
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--bord); font-size: 13px; font-weight: 600; color: var(--ink); }
 .side-head .x { background: none; border: none; color: var(--subt); font-size: 14px; padding: 0; cursor: pointer; }

@@ -33,13 +33,26 @@ export interface PrintabilityReport {
 export interface PrinterDefaults {
   bed: { x: number; y: number; z: number };
   overhangThresholdDeg: number;
+  /** Nozzle diameter in mm. Drives the wall-thickness limit (2 perimeters). */
+  nozzleMM: number;
   name?: string; // selected printer preset ("Brand Model"), if any
 }
 
 export const DEFAULT_PRINTER: PrinterDefaults = {
   bed: { x: 256, y: 256, z: 256 },
   overhangThresholdDeg: 45,
+  nozzleMM: 0.4,
 };
+
+/**
+ * Minimum printable wall = two perimeters at the configured nozzle. This was a
+ * hardcoded 0.8 in three places (the findThinWalls default, its one caller, and
+ * the button tooltip), which silently lied to anyone running a 0.6 or 0.25 nozzle.
+ */
+export function thinWallLimitMM(printer: Pick<PrinterDefaults, "nozzleMM">): number {
+  const nozzle = printer.nozzleMM > 0 ? printer.nozzleMM : DEFAULT_PRINTER.nozzleMM;
+  return Math.round(nozzle * 2 * 100) / 100;
+}
 
 export interface PrintabilityOptions {
   bed?: { x: number; y: number; z: number };

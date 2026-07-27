@@ -33,7 +33,7 @@ import { TemplatesModal } from "./components/TemplatesModal";
 import type { Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX } from "./components/icons";
-import { analyzePrintability, DEFAULT_PRINTER, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
+import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
 import type { ThinWallReport } from "./print/thinwalls";
@@ -1451,7 +1451,7 @@ export default function App() {
     setTimeout(async () => {
       try {
         const { findThinWalls } = await import("./print/thinwalls"); // three-mesh-bvh loads on demand
-        const rep = findThinWalls(geometry, 0.8);
+        const rep = findThinWalls(geometry, thinWallLimitMM(printer));
         setThinReport(rep);
         setThinShow(rep.thinSamples > 0);
       } catch (err: any) {
@@ -4232,6 +4232,7 @@ function SettingsModal({
   // Printer
   const [bed, setBed] = useState(printer.bed);
   const [oh, setOh] = useState(printer.overhangThresholdDeg);
+  const [nozzle, setNozzle] = useState(printer.nozzleMM);
   const [fitCal, setFitCalState] = useState<number | null>(() => fitCalibration());
   const [preset, setPreset] = useState(printer.name ?? "custom");
 
@@ -4246,7 +4247,7 @@ function SettingsModal({
       );
     }
     onSaveGen(keys, gp, gm, proxy.trim());
-    onSavePrinter({ bed, overhangThresholdDeg: oh, name: preset === "custom" ? undefined : preset });
+    onSavePrinter({ bed, overhangThresholdDeg: oh, nozzleMM: nozzle, name: preset === "custom" ? undefined : preset });
     onClose();
   }
 
@@ -4618,6 +4619,12 @@ function SettingsModal({
               </div>
             </SGroup>
             <SGroup title="Print checks">
+              <label>Nozzle diameter (mm)</label>
+              <input type="number" min={0.1} max={2} step={0.05} value={nozzle} onChange={(e) => setNozzle(+e.target.value)} />
+              <p className="fine">
+                Sets the wall-thickness limit: two perimeters, so a {nozzle || 0.4} mm nozzle flags walls under{" "}
+                <b>{Math.round((nozzle || 0.4) * 2 * 100) / 100} mm</b>. Most printers ship 0.4 mm.
+              </p>
               <label>Overhang warning threshold (°)</label>
               <input type="number" value={oh} onChange={(e) => setOh(+e.target.value)} />
               <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
@@ -4638,7 +4645,7 @@ function SettingsModal({
                 }}
               />
               <p className="fine">
-                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Its notch count × 0.1 mm (+0.05) is your number. Snug/loose/press fits in every future part then use YOUR printer's reality instead of the 0.2 mm default.
+                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: the clearance is 0.05 mm for one notch, then +0.1 mm per extra notch. Snug/loose/press fits in every future part then use YOUR printer's reality instead of the 0.2 mm default.
               </p>
             </SGroup>
           </>

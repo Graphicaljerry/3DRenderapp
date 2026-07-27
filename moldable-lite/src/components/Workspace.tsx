@@ -2239,7 +2239,7 @@ export function Workspace(p: Props) {
               <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
             )}
             {p.tab === "print" && (
-              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} />
+              <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
             )}
             {p.tab === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
           </div>
@@ -2716,7 +2716,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep, nozzleMM }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl; nozzleMM: number }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const sug = prep.orient.suggestion;
   const thin = prep.thin.report;
@@ -2773,7 +2773,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
         <button className="ghost sm" disabled={busy} onClick={prep.orient.run} title="Try laying each big face on the bed and score support needs — suggests the best rotation">
           Suggest orientation
         </button>
-        <button className="ghost sm" disabled={busy || prep.thin.busy} onClick={prep.thin.run} title="Sample the surface and measure wall thickness by ray-casting — flags walls under 0.8 mm (2 perimeters at a 0.4 mm nozzle)">
+        <button className="ghost sm" disabled={busy || prep.thin.busy} onClick={prep.thin.run} title={`Sample the surface and measure wall thickness by ray-casting — flags walls under ${Math.round(nozzleMM * 2 * 100) / 100} mm (2 perimeters at your ${nozzleMM} mm nozzle)`}>
           {prep.thin.busy ? "Checking walls…" : "Check wall thickness"}
         </button>
         {prep.chamfer.can && (
@@ -2800,7 +2800,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
         <div className="prow-note">
           <p className="fine" style={{ margin: "6px 0 4px" }}>
             {thin.thinSamples > 0
-              ? `⚠️ ${thin.thinSamples} of ${thin.sampled} sampled spots are under ${thin.thresholdMM} mm (thinnest ≈ ${thin.minThicknessMM} mm) — they may print fragile or vanish. Thicken them, or use a 0.25 mm nozzle.`
+              ? `⚠️ ${thin.thinSamples} of ${thin.sampled} sampled spots are under ${thin.thresholdMM} mm (thinnest ≈ ${thin.minThicknessMM} mm) — they may print fragile or vanish. Thicken them${nozzleMM > 0.25 ? ", or fit a smaller nozzle" : ""}.`
               : thin.sampled > 0
                 ? `Walls look healthy — thinnest sampled ≈ ${thin.minThicknessMM} mm (limit ${thin.thresholdMM} mm).`
                 : "Couldn't measure walls here (open surfaces) — run Fix model first."}

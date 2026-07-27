@@ -1084,6 +1084,11 @@ interface Props {
   bootError?: string;
   authNotice?: string | null;
   onDismissAuthNotice?: () => void;
+  providerWall?: string | null;
+  onWallDismiss?: () => void;
+  onWallAddKey?: () => void;
+  onWallRetry?: () => void;
+  onWallMesh?: () => void;
   booting: boolean;
   accountEmail: string | null;
   onOpenProfile: () => void;
@@ -1610,7 +1615,20 @@ export function Workspace(p: Props) {
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
             brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} />
 
-          <div className="composer-wrap">
+          {p.providerWall && (
+          <div className="wall-card" role="status">
+            <b>Precise CAD needs an AI provider.</b>
+            <p className="wall-prompt">“{p.providerWall}”</p>
+            <div className="wall-actions">
+              <button className="primary sm" onClick={p.onWallMesh}>Build it as a mesh now</button>
+              <button className="ghost sm" onClick={p.onWallAddKey}>Add a free Gemini key</button>
+              <button className="ghost sm" onClick={p.onWallRetry}>Try again</button>
+              <button className="x" aria-label="Dismiss" onClick={p.onWallDismiss}><IconX /></button>
+            </div>
+            <p className="fine">A mesh needs no key at all — you get geometry either way.</p>
+          </div>
+        )}
+        <div className="composer-wrap">
             <div className="modebar">
               <div className="modebar-row">
                 <div className="seg">

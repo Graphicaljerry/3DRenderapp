@@ -30,7 +30,7 @@ import { parseSpec } from "./cad/spec";
 import { extractParams, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
 import { TemplatesModal } from "./components/TemplatesModal";
-import type { Template } from "./cad/templates";
+import { TEMPLATES, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
@@ -1033,7 +1033,10 @@ export default function App() {
   // this — getEngineSelection() is memoized, so first caller wins and everyone
   // shares the same single boot.
   useEffect(() => {
-    if (!entered || sel) return;
+    // NOT gated on `entered`: the ~11 MB OpenCascade WASM compiles while the user is
+    // still reading the Launchpad and typing a sentence, so time-to-first-model drops
+    // rather than starting the clock at the moment they submit.
+    if (sel) return;
     let alive = true;
     let kicked = false;
     let idleId = 0;
@@ -1235,6 +1238,10 @@ export default function App() {
   // messages.length > 0, which unmounts the empty state (template strip, guided CTA,
   // suggestion chips) — so every OAuth user landed on a blank chat with nothing to do.
   const [authNotice, setAuthNotice] = useState<string | null>(null);
+  // The provider wall, kept as state rather than a dead-end chat line: the sentence the
+  // user typed is preserved and offered two live exits (a free key, or build it as a
+  // mesh right now). Every branch still ends in geometry.
+  const [providerWall, setProviderWall] = useState<string | null>(null);
   useEffect(() => {
     if (!hasAuthReturn()) return;
     void completeAuthReturn().then((u) => {
@@ -2895,16 +2902,9 @@ export default function App() {
       setAutoPick("");
     }
     if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
-      // Never fail silently: say why, and point at the free paths.
-      setMessages((m) => [
-        ...m,
-        {
-          id: mid(),
-          role: "assistant",
-          text: "Precise (CAD) mode needs an AI provider — set one in Settings → Precise CAD engine. Cheapest: a FREE Google Gemini key (aistudio.google.com/apikey). Best quality: an Anthropic Claude key. Or switch to Generative (AI mesh) above — free, no key at all.",
-        },
-      ]);
-      setShowSettings(true);
+      // Intercept inline instead of force-opening Settings on whatever pane was last
+      // used and throwing the prompt away. The card keeps the sentence and both exits.
+      setProviderWall(promptText);
       return;
     }
     // The kernel warm-up is deferred to post-paint idle — if a fast first message
@@ -3508,7 +3508,21 @@ export default function App() {
   const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");
 
   if (!entered) {
-    return <KeyCard model={model} onContinue={saveKey} onExample={loadExample} onTemplates={() => { setEntered(true); setShowTemplates(true); }} onFree={enterFree} />;
+    return (
+      <Launchpad
+        model={model}
+        theme={theme}
+        onToggleTheme={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
+        onContinue={saveKey}
+        onExample={loadExample}
+        onAllTemplates={() => { setEntered(true); setShowTemplates(true); }}
+        onTemplate={(t) => void loadTemplate(t)}
+        onGuided={() => { setEntered(true); startGuided(); }}
+        onSkip={() => setEntered(true)}
+        onFree={enterFree}
+        onSubmit={(text) => { setEntered(true); void send(text); }}
+      />
+    );
   }
 
   return (
@@ -3522,6 +3536,11 @@ export default function App() {
         bootError={sel?.bootError}
         authNotice={authNotice}
         onDismissAuthNotice={() => setAuthNotice(null)}
+        providerWall={providerWall}
+        onWallDismiss={() => setProviderWall(null)}
+        onWallAddKey={() => setShowSettings(true)}
+        onWallRetry={() => { const t = providerWall; setProviderWall(null); if (t) void send(t); }}
+        onWallMesh={() => { const t = providerWall; setProviderWall(null); setMode("generative"); if (t) void send(t, "generative"); }}
         booting={booting || (!sel && mode === "precise")}
         accountEmail={accountEmail}
         theme={theme}
@@ -3924,7 +3943,24 @@ function CubeMark({ size = 22 }: { size?: number }) {
   );
 }
 
-function KeyCard({ model, onContinue, onExample, onTemplates, onFree }: { model: string; onContinue: (k: string, m: string) => void; onExample: () => void; onTemplates: () => void; onFree: () => void }) {
+/* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
+   competing actions and no way to make anything. The primary element is a composer
+   that submits straight into the existing send(); sign-in is a link, not a wall. */
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit }: {
+  model: string;
+  theme: "light" | "dark";
+  onToggleTheme: () => void;
+  onContinue: (k: string, m: string) => void;
+  onExample: () => void;
+  onAllTemplates: () => void;
+  onTemplate: (t: Template) => void;
+  onGuided: () => void;
+  onSkip: () => void;
+  onFree: () => void;
+  onSubmit: (text: string) => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [showSignIn, setShowSignIn] = useState(false);
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
   const [email, setEmail] = useState("");
@@ -3965,17 +4001,57 @@ function KeyCard({ model, onContinue, onExample, onTemplates, onFree }: { model:
     }
   }
 
+  const submit = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onSubmit(text); // straight into send() — never re-typed into the workspace composer
+  };
+
   return (
-    <div className="gate">
-      <div className="card">
-        <div className="brand big">
+    <div className="launchpad">
+      <header className="launch-top">
+        <div className="brand">
           <CubeMark />
           <span className="wordmark">Moldable</span>
         </div>
-        <h1>Turn a description — or a photo — into a 3D-printable model.</h1>
-        <button className="primary block" onClick={onFree}>Start free — no account needed</button>
-        <p className="fine">Free photo/text → 3D via Hugging Face, free CAD via Gemini. Everything stays in this browser.</p>
+        <div className="launch-top-right">
+          <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? "☀" : "☾"}</button>
+          <button className="ghost sm" aria-expanded={showSignIn} onClick={() => setShowSignIn((v) => !v)}>Sign in</button>
+        </div>
+      </header>
 
+      <main className="launch-main">
+        <h1 className="launch-h1">What do you want to make?</h1>
+        <p className="launch-sub">Describe a part in plain language — real millimetres, checked against your printer, exported as the files your slicer wants.</p>
+
+        <form className="launch-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <textarea
+            autoFocus
+            rows={1}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
+            placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
+          />
+          <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim()}>↑</button>
+        </form>
+        <p className="launch-fine">Sizes are AI-generated — check the fit before a long print.</p>
+
+        <p className="launch-label">Or start from a template — one tap, no key needed</p>
+        <div className="launch-chips">
+          {TEMPLATES.slice(0, 4).map((t) => (
+            <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>{t.name}</button>
+          ))}
+          <button className="launch-chip subtle" onClick={onAllTemplates}>All {TEMPLATES.length} templates →</button>
+        </div>
+
+        <button className="guided-cta launch-guided" onClick={onGuided}>
+          <span className="gc-title">Fix a broken part</span>
+          <span className="gc-sub">Photo in → a replacement that actually fits</span>
+        </button>
+
+        {showSignIn && (
+        <div className="launch-signin">
         <div className="sect-label">Sign in — sync your projects &amp; keys across devices</div>
         {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
         <div className="social-col">
@@ -4012,9 +4088,22 @@ function KeyCard({ model, onContinue, onExample, onTemplates, onFree }: { model:
           <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
           <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
         </details>
-        <button className="link" onClick={onTemplates}>Or start from a template — phone stand, hooks, boxes… no key needed →</button>
         <button className="link" onClick={onExample}>Or view the built-in example model →</button>
-      </div>
+        </div>
+        )}
+
+        <footer className="launch-foot">
+          <span>
+            Runs in your browser. Your designs and keys stay on this device.{" "}
+            <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button>
+          </span>
+          <span className="launch-actions">
+            <button className="launch-free" onClick={onFree}>Start free in generative mode</button>
+            {/* A visible link only — deliberately not bound to Escape, so there is one Escape contract. */}
+            <button className="link" onClick={onSkip}>Skip</button>
+          </span>
+        </footer>
+      </main>
     </div>
   );
 }

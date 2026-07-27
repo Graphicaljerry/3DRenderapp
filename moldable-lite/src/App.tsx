@@ -1230,12 +1230,16 @@ export default function App() {
   }, [showLibrary]);
 
   // ---- finish an OAuth / magic-link return (?code=...) and greet the user ----
+  // The greeting is chrome, not conversation. Appending it to `messages` made
+  // messages.length > 0, which unmounts the empty state (template strip, guided CTA,
+  // suggestion chips) — so every OAuth user landed on a blank chat with nothing to do.
+  const [authNotice, setAuthNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!hasAuthReturn()) return;
     void completeAuthReturn().then((u) => {
       if (u) {
         setEntered(true);
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Signed in as ${u.email} — your settings and projects can now sync (Settings → Sync).` }]);
+        setAuthNotice(`Signed in as ${u.email} — your settings and projects can now sync (Settings → Sync).`);
       }
     });
   }, []);
@@ -3515,6 +3519,8 @@ export default function App() {
         genLabel={genEng.provider === "auto" ? "Auto — best engine" : getProvider(genEng.provider)?.label ?? genEng.provider}
         fellBack={sel?.fellBack ?? false}
         bootError={sel?.bootError}
+        authNotice={authNotice}
+        onDismissAuthNotice={() => setAuthNotice(null)}
         booting={booting || (!sel && mode === "precise")}
         accountEmail={accountEmail}
         theme={theme}

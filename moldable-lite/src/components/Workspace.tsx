@@ -988,6 +988,8 @@ interface Props {
   genLabel: string;
   fellBack: boolean;
   bootError?: string;
+  authNotice?: string | null;
+  onDismissAuthNotice?: () => void;
   booting: boolean;
   accountEmail: string | null;
   onOpenProfile: () => void;
@@ -1373,6 +1375,13 @@ export function Workspace(p: Props) {
         <div className="banner">
           3D CAD kernel unavailable — Precise mode is using the simple <b>primitive</b> engine (STEP export off).
           {p.bootError ? <span className="banner-detail"> ({p.bootError})</span> : null}
+        </div>
+      )}
+
+      {p.authNotice && (
+        <div className="banner ok" role="status">
+          {p.authNotice}
+          <button className="banner-x" aria-label="Dismiss" onClick={p.onDismissAuthNotice}>×</button>
         </div>
       )}
 

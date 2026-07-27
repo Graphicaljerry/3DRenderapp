@@ -18,6 +18,9 @@
   --warn: #b7791f;
   --danger: #e5484d;
   /* Layered elevation (ambient + key), tinted to the ink hue — barely visible. */
+  /* Tool-rail footprint: 19px icon + 9px*2 button padding + 1px*2 button border
+     + 5px*2 rail padding + 1px*2 rail border. Panels offset by this to clear it. */
+  --rail-w: 51px;
   --shadow-sm: 0 1px 2px rgba(18,40,36,.05), 0 1px 1px rgba(18,40,36,.04);
   --shadow-md: 0 2px 4px rgba(18,40,36,.05), 0 6px 16px rgba(18,40,36,.07);
   --shadow-lg: 0 6px 14px rgba(18,40,36,.07), 0 18px 40px rgba(18,40,36,.10);
@@ -174,6 +177,12 @@ button { font-family: inherit; cursor: pointer; }
 
 .banner { background: #f4efe2; color: #8a5a12; font-size: 13px; padding: 8px 16px; border-bottom: 1px solid #e8dcc0; }
 .banner-detail { color: var(--mut); }
+/* Sign-in confirmation. Lives in the chrome rather than the chat thread: appending it
+   as an assistant message set messages.length > 0, which silently destroyed the empty
+   state (templates, guided CTA, suggestion chips) for every OAuth/magic-link user. */
+.banner.ok { background: var(--accent-w); color: var(--accent-d); border-bottom: 1px solid var(--bord); display: flex; align-items: center; gap: 10px; }
+.banner.ok .banner-x { margin-left: auto; border: none; background: none; color: inherit; cursor: pointer; padding: 0 2px; font-size: 15px; line-height: 1; opacity: .7; }
+.banner.ok .banner-x:hover { opacity: 1; }
 
 /* ---------- split ---------- */
 /* --chat-w is set inline by the resize handle; the divider column sits between chat
@@ -407,7 +416,7 @@ button { font-family: inherit; cursor: pointer; }
 .view-snaps button:hover { background: var(--surf); color: var(--ink); }
 
 /* Docked selection inspector (top-right, under the stats card if both show). */
-.inspector { z-index: 8; width: 172px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px 10px 10px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.inspector { z-index: 8; width: 172px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 8px 10px 10px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .ins-row { display: flex; align-items: center; gap: 7px; margin: 5px 0; }
 .ins-lab { width: 14px; font-size: 11px; font-weight: 700; color: var(--subt); }
 .ins-row input { flex: 1; min-width: 0; height: 28px; padding: 0 8px; border: 1px solid var(--bord); border-radius: 7px; background: var(--bg); color: var(--ink); font-size: 12.5px; font-variant-numeric: tabular-nums; }
@@ -435,7 +444,7 @@ button { font-family: inherit; cursor: pointer; }
 /* Docked top-RIGHT: the tool rail + its flyouts own the canvas's left edge, and a
    left-docked panel sat underneath them (rail z 30 vs panel z 9) — tools drew on top
    of the object rows. Height stops above the bottom-right zoom cluster. */
-.layers-panel { z-index: 9; width: min(264px, 100%); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.layers-panel { z-index: 9; width: min(264px, 100%); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .lp-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 7px; color: var(--ink); }
 .lp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; border-radius: 7px; background: none; color: var(--ink2); text-align: left; font-size: 12.5px; }
 .lp-row:not(.static):hover { background: var(--surf); color: var(--ink); }
@@ -485,7 +494,7 @@ button { font-family: inherit; cursor: pointer; }
 .hole-panel .ghost.on { border-color: var(--accent); color: var(--accent-d); }
 
 /* AI change preview: proposal held on canvas, Apply/Discard bar */
-.ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow); }
+.ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow-md); }
 .apb-text { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
 .apb-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mut); }
 .apb-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
@@ -527,7 +536,7 @@ button { font-family: inherit; cursor: pointer; }
 .pb-export:hover { background: var(--surf); }
 /* small anchored menu shared by plate pickers + plate export — portaled to <body> and
    fixed-positioned by AnchoredMenu, so scroll containers can never clip or bury it */
-.pmenu { position: fixed; z-index: 80; max-height: min(46vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; display: flex; flex-direction: column; }
+.pmenu { position: fixed; z-index: 80; max-height: min(46vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; flex-direction: column; }
 .pmenu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: none; background: none; border-radius: 7px; padding: 6px 9px; font-size: 12px; color: var(--ink); }
 .pmenu-item b { font-size: 12px; font-weight: 600; }
 .pmenu-item span { font-size: 10.5px; color: var(--subt); }
@@ -581,7 +590,7 @@ button { font-family: inherit; cursor: pointer; }
 .lp-empty { padding: 8px; color: var(--subt); font-size: 12px; }
 
 /* Tools & gestures cheat sheet (the ? button) — tooltips don't exist on touch. */
-.help-sheet { z-index: 9; width: min(360px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink2); animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
+.help-sheet { z-index: 9; width: min(360px, calc(100% - 20px)); max-height: calc(100% - 20px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 12px 14px; font-size: 12.5px; line-height: 1.45; color: var(--ink2); animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .help-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; color: var(--ink); }
 .help-row { display: flex; gap: 9px; align-items: flex-start; padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--bord) 55%, transparent); }
 .help-row svg { flex: 0 0 auto; margin-top: 2px; color: var(--accent-d); }
@@ -790,13 +799,19 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .side-body .panel { height: auto; overflow: visible; padding: 14px; }
 
 /* ---------- pins & generation timer ---------- */
-.pin-panel { position: absolute; top: 12px; left: 12px; z-index: 6; width: 290px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: var(--shadow-md); }
+/* Clears the tool rail that opens these panels: the rail is left:10px, --rail-w wide,
+   at z-index 30, and these sat under it at left:12px z-index 6. top:64px also clears the
+   rail flyout (Face/Edge/Corner/Point), which stays open while a feature is selected and
+   otherwise lands exactly on this panel's header row. */
+.pin-panel { position: absolute; top: 64px; left: calc(10px + var(--rail-w) + 12px); z-index: 6; width: 290px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: var(--shadow-md); }
 .pin-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: 12px; font-weight: 600; color: var(--ink2); margin-bottom: 8px; }
 .pin-head .x { background: none; border: none; color: var(--subt); font-size: 14px; padding: 0; }
 .pin-panel textarea { width: 100%; border: 1px solid var(--bord); border-radius: 8px; padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; background: var(--bg); color: var(--ink); }
 .pin-panel .param-actions { margin-top: 10px; flex-wrap: wrap; }
 /* Split-pieces list: floats bottom-left so it clears the top-left pin/feature panel and top-right stats. */
-.split-panel { position: absolute; left: 12px; bottom: 12px; z-index: 6; width: 290px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: var(--shadow-md); }
+/* Sits above .plate-bar, which owns left:12px bottom:12px. Both render together
+   (a split model on a multi-plate project), and at bottom:12px they were exactly stacked. */
+.split-panel { position: absolute; left: 12px; bottom: 58px; z-index: 6; width: 290px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; padding: 12px; box-shadow: var(--shadow-md); }
 .split-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .split-list { max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .split-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
@@ -954,6 +969,8 @@ details.guide { margin-top: 10px; }
    the view-angle buttons — stack it just above them, centred, full available width. */
 @media (max-width: 900px) {
   .plate-bar { left: 50%; transform: translateX(-50%); bottom: 52px; max-width: calc(100% - 24px); }
+  /* plate bar moves up and centres here, so the split panel has to clear its new row */
+  .split-panel { bottom: 98px; }
 }
 /* Desktop: when the Parameters panel is docked (right, ~312px), open the export
    menu clear of it instead of stacking the two floating cards. */
@@ -974,6 +991,28 @@ details.guide { margin-top: 10px; }
   animation: boot-splash-in 0.4s ease-out 0.25s forwards;
 }
 .boot-splash svg { animation: boot-splash-pulse 1.4s ease-in-out 0.25s infinite; }
+
+/* ---------- crash boundary (main.tsx) ----------
+   Themed through the same tokens as the app. It previously used literal light-mode
+   hex inline, so a dark-mode crash flashed a full-screen white panel over the
+   #121213 root that index.html's pre-paint script had already painted. */
+.crash { min-height: 100vh; background: var(--surf); color: var(--ink); padding: 24px; }
+.crash-inner { max-width: 800px; margin: 0 auto; }
+.crash h2 { margin: 0 0 6px; font-size: 20px; color: var(--ink); }
+.crash p { margin: 0 0 12px; color: var(--mut); font-size: 13.5px; }
+.crash pre {
+  white-space: pre-wrap; word-break: break-word; background: var(--bg);
+  border: 1px solid var(--bord); border-radius: var(--r-md); padding: 12px;
+  font-size: 12px; color: var(--ink2); max-height: 46vh; overflow: auto; margin: 0;
+}
+.crash-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.crash-actions button {
+  padding: 8px 14px; border-radius: var(--r-md); font-size: 13px; font-weight: 600;
+  cursor: pointer; font-family: inherit;
+}
+.crash-actions .reload { border: none; background: var(--accent); color: #05231f; }
+.crash-actions .copy { border: 1px solid var(--bord); background: var(--bg); color: var(--ink2); }
+.crash-actions .copy:hover { border-color: var(--bord-strong); color: var(--ink); }
 @keyframes boot-splash-in { to { opacity: 1; } }
 @keyframes boot-splash-pulse {
   0%, 100% { opacity: 0.55; transform: scale(1); }

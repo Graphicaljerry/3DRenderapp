@@ -26,8 +26,11 @@ function BootSplash() {
 }
 
 // Shows the real error instead of a blank white screen if anything throws while rendering.
-class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err?: Error }> {
-  state: { err?: Error } = {};
+// Styling lives in styles.css (.crash) so it follows the app theme — inline light-mode
+// hex here used to flash a white full-screen panel over the dark root that the
+// index.html pre-paint script had already painted.
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err?: Error; copied: boolean }> {
+  state: { err?: Error; copied: boolean } = { copied: false };
   static getDerivedStateFromError(err: Error) {
     return { err };
   }
@@ -36,19 +39,29 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
   }
   render() {
     if (this.state.err) {
+      const detail = String(this.state.err?.stack || this.state.err?.message || this.state.err);
       return (
-        <div style={{ padding: 24, fontFamily: "Inter, system-ui, sans-serif", color: "#15181e", maxWidth: 800, margin: "0 auto" }}>
-          <h2>Something went wrong loading Moldable</h2>
-          <p style={{ color: "#6b7280" }}>Copy this if you need help; then click Reload.</p>
-          <pre style={{ whiteSpace: "pre-wrap", background: "#f6f7f9", border: "1px solid #e3e6ea", borderRadius: 8, padding: 12, fontSize: 12 }}>
-            {String(this.state.err?.stack || this.state.err?.message || this.state.err)}
-          </pre>
-          <button
-            onClick={() => location.reload()}
-            style={{ marginTop: 12, padding: "8px 14px", border: "none", borderRadius: 8, background: "#2f7a70", color: "#fff", fontWeight: 600, cursor: "pointer" }}
-          >
-            Reload
-          </button>
+        <div className="crash">
+          <div className="crash-inner">
+            <h2>Something went wrong loading Moldable</h2>
+            <p>Copy this if you need help; then click Reload.</p>
+            <pre>{detail}</pre>
+            <div className="crash-actions">
+              <button className="reload" onClick={() => location.reload()}>Reload</button>
+              {/* The copy above tells the user to "copy this" — so give them the button. */}
+              <button
+                className="copy"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(detail).then(
+                    () => this.setState({ copied: true }),
+                    () => {},
+                  );
+                }}
+              >
+                {this.state.copied ? "Copied" : "Copy details"}
+              </button>
+            </div>
+          </div>
         </div>
       );
     }

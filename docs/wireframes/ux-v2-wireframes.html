@@ -259,6 +259,7 @@
   </div>
   <div class="tb-meta">
     <div><b>Drawn</b>2026-07-26</div>
+    <div><b>Revised</b>2026-07-27 · §H–N</div>
     <div><b>Supersedes</b>WIREFRAMES.md §nav</div>
     <div><b>Spec</b>docs/UX_WORKFLOW.md</div>
     <div><b>Controls now</b>~54 visible</div>
@@ -650,9 +651,17 @@ void send(text, forceMode);    // App.tsx:2618 — UNCHANGED</pre>
 
   <div class="note warn">
     <span class="lbl">Print Bar v1 — ship only what exists</span>
-    <p>Content is <code>dimensions · fits your bed · needs supports · Fit ⌄</code>. <strong>Supports is backed</strong>
-    — <code>src/print/overhang.ts</code> + <code>overhangThresholdDeg</code> already compute it, and for a hobbyist
-    "will this need supports" outranks everything else.</p>
+    <p>Content is <code>dimensions · fits your bed · needs supports · Fit ⌄</code>. <strong>Supports is half-backed
+    — read this before drawing the tick.</strong> <code>src/print/overhang.ts</code> and
+    <code>overhangThresholdDeg</code> compute an overhang <em>ratio, triangle count and flagged area</em>; there is
+    <strong>no yes/no "needs supports" check anywhere in the codebase</strong>. A Print Bar that prints
+    <code>No supports ✓</code> is deriving a boolean from a ratio, and <em>the threshold at which that flips is a
+    product decision nobody has made yet</em>. Make it, write it down, or print the ratio instead.</p>
+    <p class="warnv" style="color:var(--live)"><strong>And fix the metric first.</strong> The Printability panel
+    computes <code>overhangFromHorizontal = PI - angleToUp</code> and flags a face when that exceeds the threshold —
+    which is <strong>inverted relative to both the overhang heatmap and physical reality</strong>
+    (<code>printability.ts:110-117</code> vs <code>overhang.ts</code>). The two surfaces disagree about which faces
+    need support, and the panel is the one that is wrong.</p>
     <p><strong>The wall-vs-nozzle readout waits.</strong> "Walls 2.4 mm = 6× nozzle ✓" is computed from a setting
     that <em>does not exist</em> — <code>PrinterDefaults</code> is <code>{bed, overhangThresholdDeg, name}</code> and
     <code>thinwalls.ts</code> hardcodes 0.8 mm. Don't put unbuilt capability in the hero chrome.</p>
@@ -781,7 +790,7 @@ INSPECTOR → Printability  (docked beside the LIVE stage — the model never le
    └── all clear
         ▼
    EXPORT (ONE surface — replaces four that don't know about each other)
-   ├── ✓ watertight   ✓ fits bed   ✓ walls ≥ 2 perimeters   ✓ no floating islands
+   ├── ✓ watertight   ✓ fits bed   ✓ scale sane   ✓ slicer-friendly   (the four that are computed)
    ├── Files ....... 3MF (default) · STL · STEP · OBJ
    ├── Plates ...... one .3mf per plate
    ├── Pieces ...... per piece · all as .zip
@@ -873,9 +882,724 @@ INSPECTOR → Printability  (docked beside the LIVE stage — the model never le
   </div>
 </section>
 
-<!-- ============ SECTION H — BUILD ORDER ============ -->
+<!-- ============ SECTION H — EXPORT ============ -->
 <section class="sec">
-  <div class="sec-head"><span class="code">H</span><h2>Build order</h2></div>
+  <div class="sec-head"><span class="code">H</span><h2>Export — one surface</h2></div>
+  <p class="sec-note">There are <strong>four export surfaces today speaking three different format vocabularies</strong>,
+  and the preflight that decides whether a file is printable runs on <strong>two of the six download paths</strong>.
+  Everything below collapses them into one surface that opens on a readiness checklist.</p>
+
+  <div class="tw"><table>
+    <thead><tr><th>Download path today</th><th>Formats it offers</th><th>Preflight</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td>Status-bar <code>Export ▾</code></td><td>3MF · STL · STEP · OBJ</td><td class="add">runs</td><td><code>App.tsx:3260</code></td></tr>
+      <tr><td>Slicer hand-off (same menu)</td><td>3MF only</td><td class="add">runs</td><td><code>App.tsx:1753</code></td></tr>
+      <tr><td>Plate bar <code>Export ▾</code></td><td>3MF only</td><td class="del">skipped</td><td><code>App.tsx:472-479</code></td></tr>
+      <tr><td>Objects-panel plate menu</td><td>3MF only</td><td class="del">skipped</td><td><code>App.tsx:456-469</code></td></tr>
+      <tr><td>Split-pieces “Download all”</td><td>STL · 3MF · <code>.zip</code></td><td class="del">skipped</td><td><code>App.tsx:1741</code></td></tr>
+      <tr><td>Per-piece row buttons</td><td>STL · 3MF</td><td class="del">skipped</td><td><code>App.tsx:1732</code></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="note warn">
+    <span class="lbl">The checklist may only claim what it actually computes</span>
+    <p>The F6 flow above sketches <code>✓ walls ≥ 2 perimeters</code> and <code>✓ no floating islands</code>.
+    <strong>Neither check exists on any export path.</strong> <code>findThinWalls</code> is reachable only by
+    manually clicking “Check wall thickness” in the Printability tab and its result never reaches preflight
+    (<code>Workspace.tsx:2767</code>); <code>separate.ts</code> computes connected components purely to unlock
+    “Separate parts” (<code>separate.ts:28-62</code>). <strong>Ship the check or don't print the tick.</strong>
+    The four below are real: <code>preflight.ts:44-63</code>.</p>
+  </div>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="fb"><span class="no">H1</span><span class="nm">Export — opens on readiness, all four checks pass</span><span class="st">one surface, one vocabulary</span><span class="spacer"></span><span class="tag new">new</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-row" style="align-items:stretch;gap:10px">
+            <div class="model" style="min-height:190px;background:var(--panel);flex:1">[ model stays on stage — export is a panel, not a route ]</div>
+            <div class="wf-col" style="flex:0 0 300px;gap:6px">
+              <div class="wf-row" style="justify-content:space-between">
+                <span class="wf-eyebrow">EXPORT</span><span class="wf-fine">✕</span>
+              </div>
+              <div class="wf-bar" style="border-color:var(--ok);flex-direction:column;align-items:flex-start;gap:3px">
+                <b style="font-size:12px;color:var(--ok)">Print-ready</b>
+                <span class="wf-fine">watertight · fits the bed · 60 × 40 × 30 mm</span>
+              </div>
+              <div class="wf-bar" style="padding:4px 8px;font-size:10.5px"><span class="ok" style="color:var(--ok)">✓</span> Watertight <span class="spacer" style="flex:1"></span><span style="color:var(--subt)">0 open edges</span></div>
+              <div class="wf-bar" style="padding:4px 8px;font-size:10.5px"><span class="ok" style="color:var(--ok)">✓</span> Fits your bed <span class="spacer" style="flex:1"></span><span style="color:var(--subt)">256×256 mm</span></div>
+              <div class="wf-bar" style="padding:4px 8px;font-size:10.5px"><span class="ok" style="color:var(--ok)">✓</span> Scale looks right <span class="spacer" style="flex:1"></span><span style="color:var(--subt)">&gt; 3 mm</span></div>
+              <div class="wf-bar" style="padding:4px 8px;font-size:10.5px"><span class="ok" style="color:var(--ok)">✓</span> Slicer-friendly <span class="spacer" style="flex:1"></span><span style="color:var(--subt)">184k tris</span></div>
+              <div class="wf-eyebrow" style="margin-top:6px">FILE</div>
+              <div class="wf-row" style="gap:5px;flex-wrap:wrap">
+                <span class="wf-chip on">3MF</span><span class="wf-chip">STL</span><span class="wf-chip">STEP</span><span class="wf-chip">OBJ</span>
+              </div>
+              <div class="wf-input" style="padding:7px 9px;font-size:11px">wall-bracket-v6<span style="color:var(--subt)">.3mf</span></div>
+              <div class="wf-row" style="gap:5px">
+                <span class="wf-btn pri" style="flex:1;text-align:center">Export</span>
+                <span class="wf-btn">Bambu ▾</span>
+              </div>
+              <span class="wf-fine">3MF carries real units and per-part colour. STL is universal and forgets both.</span>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">1</span><span><strong>One panel, one vocabulary.</strong> Plates and pieces become <em>rows in this panel</em>, not three other menus with three other format lists. STEP is reachable from exactly one place today; here it's reachable from the only place.</span></div>
+          <div><span class="n acc">2</span><span><strong>A filename field.</strong> Every path today derives the name from <code>project.name</code> via <code>safeFileName</code> with no rename — an unnamed project silently exports as <code>model.3mf</code> (<code>download.ts:14-17</code>).</span></div>
+          <div><span class="n warn">3</span><span>The readiness line <strong>renders nothing while <code>report</code> is null</strong>, and the report is computed in a deferred <code>scheduleIdle</code> callback — open the menu straight after a build and the formats appear with no verdict at all (<code>Workspace.tsx:2837</code>, <code>App.tsx:1595-1602</code>). Draw the pending row; don't draw a gap.</span></div>
+          <div><span class="n warn">4</span><span><strong>No busy state exists.</strong> All four export functions are async — dynamic imports plus a worker round-trip for STEP — and the menu closes instantly on click with nothing disabled or spinning (<code>App.tsx:3254-3263</code>).</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">H2</span><span class="nm">Failures, with the fix inline</span><span class="st">every row does something</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:6px;max-width:330px">
+            <div class="wf-bar" style="border-color:var(--live);flex-direction:column;align-items:flex-start;gap:3px">
+              <b style="font-size:12px;color:var(--live)">2 things to fix first</b>
+              <span class="wf-fine">Both are one tap. Neither needs the AI.</span>
+            </div>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px;border-color:var(--live)">
+              <span style="color:var(--live)">▲</span> 412 open edges
+              <span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Fix model</span>
+            </div>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px;border-color:var(--live)">
+              <span style="color:var(--live)">▲</span> 1.4M triangles — heavy
+              <span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Simplify</span>
+            </div>
+            <div class="wf-bar" style="padding:4px 8px;font-size:10.5px"><span style="color:var(--ok)">✓</span> Fits your bed</div>
+            <div class="wf-bar" style="padding:4px 8px;font-size:10.5px"><span style="color:var(--ok)">✓</span> Scale looks right</div>
+            <div class="wf-row" style="gap:5px;margin-top:4px">
+              <span class="wf-btn pri" style="flex:1;text-align:center">Fix both, then export</span>
+            </div>
+            <span class="wf-fine">Fixing changes the model on the stage — you'll see it happen. Undo works.</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span>Both buttons <strong>already exist</strong> inside <code>ExportReadiness</code> (<code>Workspace.tsx:2855</code>, <code>:2863</code>) — this frame promotes them from a one-line squeeze to real rows.</span></div>
+          <div><span class="n warn">!</span><span><strong>Export already mutates the model as a side effect</strong> and doesn't say so: when preflight auto-repairs, <code>applyResultNoCommit</code> replaces the live geometry, wiping split pieces and measurements. Clicking “Export STL” can clear your pieces list (<code>App.tsx:3260-3261</code>). Say it out loud, as above.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">H3</span><span class="nm">Blocked — and the override</span><span class="st">the only real gate</span><span class="spacer"></span><span class="tag new">new</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:6px;max-width:330px">
+            <div class="wf-bar" style="border-color:var(--live);background:var(--live-w);flex-direction:column;align-items:flex-start;gap:3px">
+              <b style="font-size:12px;color:var(--live)">Larger than your bed</b>
+              <span class="wf-fine">183 × 92 × 42 mm won't fit 256 × 256 mm in any tested orientation.</span>
+            </div>
+            <div class="wf-row" style="gap:5px">
+              <span class="wf-btn pri" style="flex:1;text-align:center">Scale to fit</span>
+              <span class="wf-btn" style="flex:1;text-align:center">Split into pieces</span>
+            </div>
+            <div class="wf-row" style="justify-content:center;padding-top:6px;border-top:1px solid var(--rule)">
+              <span class="wf-fine"><u>Export anyway — I'll deal with it in the slicer</u></span>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Nothing gates export today.</strong> <code>preflightExport</code> returns a <code>ready</code> flag that <em>no caller reads</em>, and the only <code>disabled</code> on a format row is the STEP-engine test — so a red “Larger than the bed” leaves all four formats fully clickable (<code>preflight.ts:65</code>, <code>Workspace.tsx:2878</code>).</span></div>
+          <div><span class="n acc">✓</span><span>The override is <strong>a link, not a button</strong>, and it is never hidden. Blocking an expert from their own file is how you teach them to distrust the checker.</span></div>
+          <div><span class="n">↓</span><span>Bed-fit only tests <strong>two orientations</strong> — as-placed and a 90° X/Y swap. Z is never swapped, so a tall part that would fit lying down reports “no” (<code>printability.ts:72-75</code>). The override is doing real work here.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">Defects this section is quietly load-bearing on</span>
+    <p><strong>The main export menu opts out of the app's own solo-menu invariant.</strong> <code>ExportMenu</code>
+    uses a bare <code>useState</code> and never registers with <code>useSoloMenu</code>, so it stacks with other
+    popups; it also has <strong>no Escape and no outside-click dismissal</strong> — it closes only on re-click,
+    <code>onMouseLeave</code>, or picking an item (<code>Workspace.tsx:2871-2875</code>). Mouse-leave dismissal is
+    unreachable on touch, on a product that ships for iPad.</p>
+    <p><strong>“One .3mf per plate” fires N separate <code>downloadBlob()</code> calls in a loop</strong> with no
+    zip and no progress, even though <code>zipModelFiles()</code> already exists and is used by the split path.
+    Browsers throttle multi-file downloads, so a user can silently receive fewer files than plates
+    (<code>App.tsx:465-467</code>). It also <strong>drops per-face MMU paint</strong> that the sibling
+    “One project .3mf” preserves (<code>exportClient.ts:96-126</code>).</p>
+    <p><strong>The plate bar's Export button is hard-coded <code>disabled={false}</code></strong> — clickable with
+    no geometry, where <code>collectPlateParts()</code> returns null and the click is a silent no-op
+    (<code>Workspace.tsx:523</code>). The compact copy of the same menu in the Objects panel gates correctly.</p>
+    <p><strong>The slicer rows promise a deep link that only exists in dev.</strong> <code>openInSlicer</code>
+    skips the <code>bambustudio://</code> / <code>orcaslicer://</code> hand-off entirely unless
+    <code>import.meta.env.DEV</code>, then silently downloads — while the menu still reads “sends the 3MF to the
+    desktop app” (<code>slicer.ts:25-38</code>). It also ignores plates: a 3-plate layout hands off as one object.</p>
+  </div>
+</section>
+
+<!-- ============ SECTION I — THE LADDER, COMPLETED ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">I</span><h2>The disclosure ladder, completed</h2></div>
+  <p class="sec-note">E2 drew the face. These are the five resolutions the ladder still owes —
+  and one of them, <strong>the mesh object, has no rung at all today</strong>.</p>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">I1</span><span class="nm">Edge selected</span><span class="st">single only — there is no multi-edge</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="model" style="min-height:150px;background:var(--panel)">
+            [ model — one edge lit ]
+            <div style="position:absolute;bottom:9%;left:9%">
+              <div class="ctxbar">
+                <span class="wf-chip" style="font-size:10px">2 mm</span>
+                <span class="wf-btn pri">Round</span><span class="wf-btn">Chamfer</span>
+              </div>
+            </div>
+          </div>
+          <div class="wf-bar" style="margin-top:8px;font-size:10.5px">
+            <span class="wf-eyebrow">EDGE · 24.5 MM LONG</span>
+            <span class="spacer" style="flex:1"></span>
+            <span class="wf-fine">Quick edit — free, no AI</span>
+          </div>
+          <div class="wf-fine" style="margin-top:5px">Or drag the blue arrow to round this edge live.</div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span>Two verbs, one number. The panel already exists and is already free of AI — <code>Round</code> / <code>Chamfer</code> at a default 2 mm, tooltipped “no tokens”.</span></div>
+          <div><span class="n warn">!</span><span><strong>There is no multi-edge selection anywhere.</strong> <code>selectedFaces</code> is the only set state and it holds faces; edges and corners are strictly single via <code>selectedFeature</code>. A “3 edges selected” state cannot be drawn because it cannot exist.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">I2</span><span class="nm">Multi-face selected</span><span class="st">shift-click / shift-drag</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="model" style="min-height:150px;background:var(--panel)">
+            [ three faces tinted teal ]
+            <div style="position:absolute;bottom:9%;left:9%">
+              <div class="ctxbar">
+                <span class="wf-chip" style="font-size:10px">2 mm</span>
+                <span class="wf-btn pri">Extrude all 3</span>
+                <span class="wf-btn ghost">Round all 3</span><span class="wf-btn ghost">Chamfer all 3</span>
+              </div>
+            </div>
+          </div>
+          <div class="wf-bar" style="margin-top:8px;font-size:10.5px">
+            <span class="wf-eyebrow">3 FACES SELECTED · SHIFT-CLICK ADDS MORE</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Multi-face loses three of the four single-face verbs.</strong> One face offers Round · Chamfer · Extrude · Hole…; a <em>set</em> offers only “Extrude all N”. The two ghosted buttons above are <strong>the ask</strong> — the CAD calls are identical, the UI simply never offers them.</span></div>
+          <div><span class="n warn">2</span><span><strong>The shift-click hint lies in two modes.</strong> It renders for every non-point kind, but shift-click is face-only and box-select always returns face payloads — so shift-dragging in Edge mode silently produces a <em>face</em> selection.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frames two" style="margin-top:26px">
+    <div class="frame">
+      <div class="fb"><span class="no">I3</span><span class="nm">Whole body</span><span class="st">the only rung not in the corner</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-row" style="align-items:stretch;gap:8px">
+            <div class="model" style="min-height:130px;background:var(--panel);flex:1.4">[ bounding box + corner anchors ]</div>
+            <div class="wf-col" style="flex:0 0 150px;gap:5px">
+              <div class="wf-row" style="justify-content:space-between"><span class="wf-eyebrow">SELECTION</span><span class="wf-fine">✕</span></div>
+              <div class="wf-row" style="gap:4px"><span class="wf-fine" style="width:14px">W</span><span class="wf-input" style="padding:4px 7px;font-size:11px">60</span></div>
+              <div class="wf-row" style="gap:4px"><span class="wf-fine" style="width:14px">D</span><span class="wf-input" style="padding:4px 7px;font-size:11px">40</span></div>
+              <div class="wf-row" style="gap:4px"><span class="wf-fine" style="width:14px">H</span><span class="wf-input" style="padding:4px 7px;font-size:11px">30</span></div>
+              <div class="wf-row" style="gap:4px"><span class="wf-chip on" style="font-size:10px">mm</span><span class="wf-chip" style="font-size:10px">in</span></div>
+              <span class="wf-fine">Edit any size — the whole part rescales (uniform).</span>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span><strong>Uniform-vs-per-axis is resolved by engine, honestly.</strong> CAD is uniform-locked and says so — “CAD parts scale uniformly — ask in chat or edit Params for exact per-axis dimensions”. A generative mesh gets a real <code>uniform</code> checkbox you can uncheck.</span></div>
+          <div><span class="n">↓</span><span>A primitive-spec model disables all three fields with “Resizing needs the CAD engine.” Three engines, three truthful states, one panel.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">I4</span><span class="nm">Attachment selected</span><span class="st">today: no panel at all</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="model" style="min-height:130px;background:var(--panel)">
+            [ second part lit, move gizmo forced on ]
+            <div style="position:absolute;bottom:8%;left:10%">
+              <div class="ctxbar">
+                <span class="wf-btn pri">Check fit</span><span class="wf-btn">Make it fit</span>
+                <span class="wf-btn">Drop to plate</span><span class="wf-btn ghost">Merge</span>
+              </div>
+            </div>
+          </div>
+          <div class="wf-fine" style="margin-top:6px">Does it fit here? Computes the real overlap — zero overlap means no collision at this position.</div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Selecting an attachment produces no contextual panel whatsoever.</strong> <code>selectAttach</code> sets ids and forces the gizmo to “move”; the Selection inspector is gated on <code>modelSelected</code>, which App explicitly zeroes while an attachment is live (<code>App.tsx:2315</code>). Every action lives in the Objects panel — <strong>which defaults to closed</strong>.</span></div>
+          <div><span class="n warn">2</span><span>Attachments and the model resolve through <em>separate</em> state (<code>selAttachIds</code> array vs a <code>modelSelected</code> boolean), so there is no mixed selection and no unified “N selected”.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frames" style="margin-top:26px">
+    <div class="frame">
+      <div class="fb"><span class="no">I5</span><span class="nm">Mesh object — the missing rung</span><span class="st">the ladder has no state for this at all</span><span class="spacer"></span><span class="tag new">new</span><span class="tag del">bug</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-row" style="align-items:stretch;gap:8px">
+            <div class="wf-col" style="flex:0 0 auto;gap:4px">
+              <span class="wf-eyebrow">RAIL — MESH</span>
+              <span class="wf-btn ghost" style="text-align:left;opacity:.45;text-decoration:line-through">Select</span>
+              <span class="wf-btn" style="text-align:left">Transform</span>
+              <span class="wf-btn" style="text-align:left">Measure</span>
+              <span class="wf-btn" style="text-align:left">Mark</span>
+              <span class="wf-btn" style="text-align:left">Paint</span>
+            </div>
+            <div class="model" style="min-height:150px;background:var(--panel);flex:1">
+              [ AI mesh — no face, edge or corner is pickable ]
+              <div style="position:absolute;bottom:8%;left:8%">
+                <div class="ctxbar" style="border-color:var(--rule)">
+                  <span class="wf-btn ghost">Paint region</span><span class="wf-btn ghost">Measure</span>
+                  <span class="wf-btn ghost">Remesh to CAD…</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="wf-bar" style="margin-top:8px;border-color:var(--live);font-size:10.5px">
+            <span style="color:var(--live)">▲</span>
+            <span>Pressing <b>V</b> still toggles Select — the tool activates on a mesh with no panel, no rung, and no way back.</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Confirmed missing.</strong> The whole Select block is wrapped in <code>(activeKind === "replicad" || separatedKind === "replicad")</code>, so on a generative mesh the rail <strong>loses its first slot entirely</strong> — no face, edge or corner can be picked, and nothing explains why.</span></div>
+          <div><span class="n warn">2</span><span><strong>But the keyboard doesn't know that.</strong> <code>toggleSelectTool</code> has no <code>activeKind</code> guard and the key handler calls it unconditionally, so <code>featureCtl.mode</code> goes true and the Viewer starts picking features — with the rail button that would turn it off <em>not rendered</em>.</span></div>
+          <div><span class="n acc">3</span><span>The rung this section proposes: mesh objects get <strong>their own verbs</strong> — paint a region, measure, or convert — instead of an absence. An empty rung teaches nothing; a missing one teaches that the app is broken.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">The z-index defect, confirmed — and already fixed once</span>
+    <p><code>.canvas-rail</code> is <code>left:10px; top:12px; z-index:30</code>. <code>.pin-panel</code> — which is
+    the single-feature inspector, the multi-face panel <em>and</em> the hole panel — is
+    <code>top:12px; left:12px; z-index:6</code>. <strong>Same corner, 24 levels apart</strong>: the rail draws over
+    every panel it opens. The Select flyout compounds it at <code>z-index:31</code>, directly over the panel header.</p>
+    <p>The team <strong>already hit this exact bug for the Objects list and fixed it</strong> by moving that panel to
+    the right dock — the comment reads “a left-docked panel sat underneath them (rail z 30 vs panel z 9) — tools drew
+    on top of it”. The same fix has not been applied to the three <code>.pin-panel</code> surfaces.</p>
+  </div>
+</section>
+
+<!-- ============ SECTION J — NARROW & THE COMPOSER ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">J</span><h2>Narrow widths &amp; the composer's own states</h2></div>
+  <p class="sec-note">Every label and hit-area rule in this document is justified by touch, and no layout so far is
+  drawn for it. There are <strong>ten viewport breakpoints and five container queries</strong> in
+  <code>styles.css</code> — two of them dead, two of them splitting the same width across different parts of the file.</p>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">J1</span><span class="nm">≤900 px — stacked</span><span class="st">viewer over chat</span></div>
+      <div class="fbody">
+        <div class="wf" style="max-width:400px">
+          <div class="wf-bar" style="padding:5px 8px;font-size:10px"><span class="wf-eyebrow">⬡</span><span style="font-size:10px">Wall bracket</span><span class="spacer" style="flex:1"></span><span class="wf-btn ghost" style="padding:2px 6px">New</span><span class="wf-btn ghost" style="padding:2px 6px">◍</span></div>
+          <div class="wf-col" style="gap:0;border:1px solid var(--rule);border-top:0">
+            <div class="stage" style="min-height:120px;padding:8px">
+              <div class="printbar" style="font-size:9.5px;padding:4px 7px"><span>78×70×78</span><span class="ok">bed ✓</span><span style="color:var(--accent-d)">Snug ⌄</span></div>
+              <div class="model" style="min-height:70px">[ 3D — takes the top ]</div>
+            </div>
+            <div style="border-top:1px solid var(--rule);padding:8px;background:var(--panel)">
+              <div class="wf-fine" style="margin-bottom:5px">Chat ‹ &nbsp;·&nbsp; 46vh, min 300px</div>
+              <div class="bubble a" style="font-size:10px">Built it — 78 × 70 × 78 mm.</div>
+              <div class="wf-row" style="margin-top:6px;gap:5px">
+                <span class="wf-btn ghost" style="padding:4px 7px">📎</span>
+                <span class="wf-input" style="padding:6px 8px;font-size:10.5px">Describe a change…</span>
+                <span class="wf-btn pri" style="padding:4px 9px">↑</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong><code>.modehint</code> is <code>display:none</code> at ≤900 px.</strong> That line is the only running explanation of what Auto/Precise/Generative will do <em>and the only place the Auto engine pick and its price are surfaced</em>. Every phone and every iPad in portrait loses it.</span></div>
+          <div><span class="n warn">2</span><span>The <strong>step labels</strong> of the path-to-print vanish at ≤640 px, leaving three unlabelled dots. They read <code>Design · Check · Print Ready</code> (or <code>Needs fix</code>) — not “Model”, which appears only in a code comment.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">J2</span><span class="nm">≤430 px — touch</span><span class="st">the composer stops fitting</span></div>
+      <div class="fbody">
+        <div class="wf" style="max-width:250px">
+          <div class="wf-bar" style="padding:4px 7px;font-size:9.5px"><span class="wf-eyebrow">⬡</span><span class="spacer" style="flex:1"></span><span class="wf-btn ghost" style="padding:2px 5px">Templates</span></div>
+          <div class="model" style="min-height:90px;margin-top:6px">[ 3D ]</div>
+          <div class="wf-row" style="margin-top:6px;gap:4px">
+            <span class="wf-btn ghost" style="padding:4px 6px">📎</span>
+            <span class="wf-btn ghost" style="padding:4px 6px">🎙</span>
+            <span class="wf-input" style="padding:5px 6px;font-size:10px;min-width:0">Descri…</span>
+            <span class="wf-btn pri" style="padding:4px 7px">↑</span>
+          </div>
+          <div class="wf-bar" style="margin-top:6px;border-color:var(--live);font-size:9.5px;padding:4px 7px">
+            <span style="color:var(--live)">▲</span> 172 px of chrome is non-negotiable
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>The composer chrome never shrinks.</strong> Paperclip 40 + mic 40 + send 44 + three 8 px gaps + 24 px padding = <strong>172 px fixed</strong> (<code>.composer &gt; button { flex: 0 0 auto }</code>). On a 320 px phone the text field gets ~148 px — about twelve characters.</span></div>
+          <div><span class="n acc">2</span><span>Two composers must be drawn, not one: <strong>the mic renders nothing when <code>SpeechRecognition</code> is absent</strong> (Firefox), so the row is a 3-button and a 2-button layout depending on browser.</span></div>
+          <div><span class="n warn">3</span><span>iOS forces <code>.composer textarea</code> to 16 px under <code>@media (pointer: coarse)</code> while the JS growth clamp stays hardcoded at 132 px — so a touch device fits <strong>~4 lines where desktop fits ~5</strong>, and the two numbers live in different files.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frames" style="margin-top:26px">
+    <div class="frame">
+      <div class="fb"><span class="no">J3</span><span class="nm">The composer, all states</span><span class="st">idle · typed · multi-line · attached · warming</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:9px;max-width:520px">
+            <div>
+              <div class="wf-eyebrow">IDLE — 40 PX</div>
+              <div class="wf-row" style="gap:5px;margin-top:3px"><span class="wf-btn ghost">📎</span><span class="wf-input" style="padding:8px 10px">Describe a part, or a change…</span><span class="wf-btn ghost">🎙</span><span class="wf-btn pri">↑</span></div>
+            </div>
+            <div>
+              <div class="wf-eyebrow">MULTI-LINE — GROWS TO 132 PX, THEN SCROLLS</div>
+              <div class="wf-row" style="gap:5px;margin-top:3px;align-items:flex-end"><span class="wf-btn ghost">📎</span><span class="wf-input" style="padding:8px 10px;color:var(--ink);min-height:56px">A wall bracket for a 32 mm pipe, 4 mm wall,<br>two M4 holes 40 mm apart, rounded corners…</span><span class="wf-btn ghost">🎙</span><span class="wf-btn pri">↑</span></div>
+            </div>
+            <div>
+              <div class="wf-eyebrow">REFERENCE IMAGE ATTACHED</div>
+              <div class="wf-bar" style="margin-top:3px;padding:5px 8px"><span class="wf-ph" style="width:32px;height:32px;padding:0">img</span><span style="font-size:11px">reference image</span><span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Measure</span><span class="wf-fine">✕</span></div>
+              <div class="wf-row" style="gap:4px;margin-top:4px"><span class="wf-chip on" style="font-size:10px">Front</span><span class="wf-chip" style="font-size:10px">Left</span><span class="wf-chip" style="font-size:10px">Back</span><span class="wf-chip" style="font-size:10px">Right</span><span class="wf-fine">More angles → truer proportions.</span></div>
+            </div>
+            <div>
+              <div class="wf-eyebrow" style="color:var(--accent-d)">KERNEL WARMING — INLINE, NOT AN OVERLAY</div>
+              <div class="wf-bar" style="margin-top:3px;padding:5px 8px;border-color:var(--accent)"><span style="color:var(--accent-d)">◍</span><span style="font-size:11px">Starting the CAD engine…</span><span class="spacer" style="flex:1"></span><span class="wf-fine">you can keep typing</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Warm-up status exists in exactly one place</strong> — an overlay <em>inside the viewer body</em>, which only renders on the 3D and Params tabs. On Source, Printability or History the kernel loads with no indication at all. Worse, it is unguarded by <code>!geometry</code>, so “Starting the CAD engine…” can appear over a model that is already on screen.</span></div>
+          <div><span class="n warn">2</span><span><code>api.init()</code> is a bare <code>await ensureOC()</code> under a 60 s watchdog and <strong>reports no progress</strong> — no bytes, no percentage, no phase. An indeterminate spinner is the honest maximum. The overlay also carries <strong>no <code>role="status"</code></strong>, so screen readers are told nothing.</span></div>
+          <div><span class="n warn">3</span><span><strong>The ✕ on the image chip silently destroys up to three more photos.</strong> <code>clearImage</code> calls <code>clearAllViews()</code>, wiping every Left/Back/Right angle with no warning. The chip label is also the hardcoded string “reference image” — two consecutive uploads are visually identical.</span></div>
+          <div><span class="n">4</span><span>Send is <strong>not disabled on empty input</strong>: pressing ⏎ on an empty box submits, hits <code>if (!p &amp;&amp; !image) return;</code> and does nothing at all — no error, no shake, no focus.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">Two breakpoints that don't do what they look like</span>
+    <p><strong><code>@container (max-width: 720px)</code> is dead code.</strong> It hides <code>.tabs .btn-label</code>,
+    but <code>.viewer-head .btn-label</code> at the 900 px tier already matches those exact elements at equal
+    specificity — and 720 &lt; 900, so the earlier tier is always active first. Nothing observable happens at 720 px.</p>
+    <p><strong>The 900 px container query is broader than its own comment claims.</strong> The comment says
+    “View/Objects give up words first”, but <code>.viewer-head .btn-label</code> is a descendant selector and
+    <code>.tabs</code> is a direct child of <code>.viewer-head</code> — so at a ≤900 px <em>viewer column</em> it hides
+    <strong>every</strong> button label in the head, tabs included. There is no rule anywhere restoring them.</p>
+    <p>Two separate <code>@media (max-width: 900px)</code> blocks also live at different points in the file — the
+    layout stack and the plate-bar reposition — so scanning for “the 900 px rules” finds half of them.</p>
+  </div>
+</section>
+
+<!-- ============ SECTION K — ERRORS ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">K</span><h2>Errors &amp; recovery</h2></div>
+  <p class="sec-note">The app has <strong>excellent error copy</strong> — long, specific, non-blaming, and often
+  naming the exact free escape hatch. What it lacks is somewhere to <em>act</em>. Almost every failure is a red chat
+  bubble with no button on it.</p>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">K1</span><span class="nm">Crash boundary — both themes</span><span class="st">today: light-only, hardcoded</span><span class="spacer"></span><span class="tag del">bug</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-row" style="gap:8px;align-items:stretch">
+            <div class="wf-col" style="flex:1;gap:5px;background:#fbfcfc;border:1px solid #e3e6ea;padding:9px">
+              <b style="font-size:12px;color:#15181e">Something went wrong loading Moldable</b>
+              <span style="font-size:10px;color:#6b7280">Copy this if you need help; then click Reload.</span>
+              <div style="background:#f6f7f9;border:1px solid #e3e6ea;padding:5px;font-family:var(--mono);font-size:8.5px;color:#6b7280">TypeError: undefined is not…</div>
+              <div class="wf-row" style="gap:4px"><span style="background:#2f7a70;color:#fff;font-size:10px;padding:3px 9px">Reload</span><span class="wf-btn" style="padding:3px 8px;font-size:10px">Copy</span></div>
+            </div>
+            <div class="wf-col" style="flex:1;gap:5px;background:#1b1c1d;border:1px solid #333536;padding:9px">
+              <b style="font-size:12px;color:#ececed">Something went wrong loading Moldable</b>
+              <span style="font-size:10px;color:#8d8e90">Copy this if you need help; then click Reload.</span>
+              <div style="background:#141516;border:1px solid #333536;padding:5px;font-family:var(--mono);font-size:8.5px;color:#8d8e90">TypeError: undefined is not…</div>
+              <div class="wf-row" style="gap:4px"><span style="background:#19c8b5;color:#05231f;font-size:10px;padding:3px 9px">Reload</span><span style="border:1px solid #333536;color:#c6c7c9;padding:3px 8px;font-size:10px">Copy</span></div>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>Confirmed.</strong> <code>main.tsx</code> paints the boundary with literal hex inline styles — <code>#15181e</code> on <code>#fff</code>, box <code>#f6f7f9</code> — and no <code>prefers-color-scheme</code> or <code>data-theme</code> handling, <em>while <code>index.html</code> has already painted the root <code>#121213</code> for dark users</em>. A dark-mode crash flashes a white full-screen panel.</span></div>
+          <div><span class="n acc">2</span><span>The copy says “<strong>Copy this</strong>” and there is <strong>no copy button</strong>. <code>componentDidCatch</code> only <code>console.error</code>s — nothing is persisted or reportable.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">K2</span><span class="nm">Kernel failed — with a Retry that works</span><span class="st">today: no Retry, and it would be inert</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-bar" style="border-color:var(--live);background:var(--live-w);flex-direction:column;align-items:stretch;gap:6px">
+            <div class="wf-row">
+              <span style="color:var(--live)">▲</span>
+              <span style="font-size:11.5px"><b>3D CAD kernel unavailable</b> — Precise mode is using the simple primitive engine (STEP export off).</span>
+            </div>
+            <div class="wf-row" style="gap:5px">
+              <span class="wf-btn">Try again</span><span class="wf-btn ghost">What this means</span>
+              <span class="spacer" style="flex:1"></span><span class="wf-fine">Templates · measuring · export still work</span>
+            </div>
+          </div>
+          <div class="wf-fine" style="margin-top:6px">(<code>Aborted(). Build with -sASSERTIONS…</code>)</div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>The banner has no control of any kind today</strong> — and a Retry bolted on would do nothing: <code>getEngineSelection()</code> memoizes the <em>rejected</em> promise at module scope, so every later call replays the same failure. <strong>Retry must clear the memo</strong>, or don't draw the button.</span></div>
+          <div><span class="n warn">2</span><span><strong>If the fallback engine also fails, the app says nothing at all.</strong> The boot effect chains only <code>.then().finally()</code> with no <code>.catch()</code>, so the rejection is unhandled, <code>sel</code> stays null — and because <code>booting</code> is <code>booting || (!sel &amp;&amp; mode === "precise")</code>, the user is left staring at “Starting the CAD engine…” <strong>forever</strong>.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="frames two" style="margin-top:26px">
+    <div class="frame">
+      <div class="fb"><span class="no">K3</span><span class="nm">Self-heal exhausted — three ranked recoveries</span><span class="st">geometry retained</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:6px">
+            <div class="bubble a" style="border-color:var(--live);background:var(--live-w)">
+              <b style="font-size:11px">Couldn't build that change.</b><br>
+              <span style="font-size:10.5px">The CAD kernel rejected the geometry — usually a fillet radius larger than its edge can take, or a boolean between shapes that only touch.</span>
+            </div>
+            <div class="wf-row" style="gap:5px;flex-wrap:wrap">
+              <span class="wf-btn pri">Try smaller radii</span>
+              <span class="wf-btn">Build it a different way</span>
+              <span class="wf-btn">Keep what I had</span>
+            </div>
+            <div class="wf-bar" style="padding:4px 8px;font-size:10px"><span class="wf-fine">▸ Thought process — 3 attempts, error fed back each time</span></div>
+            <div class="model" style="min-height:60px;background:var(--panel)">[ the PREVIOUS model is still here — untouched ]</div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span><strong>Geometry retention is already true</strong> and worth drawing: <code>setResult(null)</code> lives in exactly one place, <code>startNew()</code>. A failed build never clears the stage.</span></div>
+          <div><span class="n warn">!</span><span><strong>One exception, and it's silent.</strong> <code>openProjectById()</code> calls <code>setGeometry(null)</code> <em>before</em> awaiting <code>rebuildHead(p)</code> — if that throws, the catch posts an error and the viewer is left <strong>empty</strong>. Opening a project is the one path that can lose your model on failure.</span></div>
+          <div><span class="n warn">2</span><span>“3 attempts” is <strong>not what the user necessarily sees</strong>: the loop exits early when a new error string is byte-identical to the last, so a run can end after attempt 2. Don't draw a fixed “1 of 3”.</span></div>
+          <div><span class="n warn">3</span><span><strong>There is no retry affordance on the failed message.</strong> The only Retry hangs off the preceding <em>user</em> message and is replaced by a dead 0.4-opacity span whenever anything else is running.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">K4</span><span class="nm">Offline</span><span class="st">no indicator exists anywhere</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-bar" style="flex-direction:column;align-items:stretch;gap:5px">
+            <div class="wf-row"><span class="wf-chip" style="border-color:var(--live);color:var(--live)">● Offline</span><span class="spacer" style="flex:1"></span><span class="wf-fine">reconnecting…</span></div>
+            <span class="wf-fine">Templates, direct edits, measuring and export all work without a connection.</span>
+          </div>
+          <div class="wf-row" style="margin-top:8px;gap:5px">
+            <span class="wf-chip on">Templates</span><span class="wf-chip on">Measure</span><span class="wf-chip on">Export</span>
+            <span class="wf-chip" style="opacity:.45">Ask AI</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong><code>navigator.onLine</code> is read exactly once</strong> — inside an error formatter, <em>after</em> a request has already failed. There is no offline banner, no queued retry, and no connection indicator in the chrome.</span></div>
+          <div><span class="n acc">✓</span><span>The sentence the app already writes is the right one, and it names what still works. It just arrives <strong>after</strong> the failure instead of preventing it. Move it into the chrome and grey the one control that can't work.</span></div>
+          <div><span class="n warn">2</span><span><strong>Error bubbles bypass the Markdown renderer</strong> (assistant messages render <code>&lt;Markdown&gt;</code> only when <code>!m.error</code>), so every URL in that excellent copy — <code>huggingface.co/settings/tokens</code>, <code>aistudio.google.com/apikey</code> — renders as <strong>unclickable raw text</strong>.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SECTION L — INSPECTOR ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">L</span><h2>The Inspector panels</h2></div>
+  <p class="sec-note">Four panels, drawn against what the code actually stores. Two of them present
+  <strong>heuristics as if they were constraints</strong>, and the History tab mislabels which version is live.</p>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">L1</span><span class="nm">Parameters — bounds labelled honestly</span><span class="st">min/max are 25% and 3× of the default</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:6px;max-width:330px">
+            <div class="wf-row" style="justify-content:space-between"><span class="wf-eyebrow">PARAMETERS</span><span class="wf-fine">✕</span></div>
+            <span class="wf-fine">Drag a slider — the model re-builds instantly, no AI call.</span>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><span style="width:74px">wallThickness</span><span class="wf-ph" style="flex:1;padding:2px">▬▬●▬▬▬</span><span class="wf-input" style="padding:2px 5px;max-width:44px">4</span><span>mm</span></div>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><span style="width:74px">holeSpacing</span><span class="wf-ph" style="flex:1;padding:2px">▬▬▬●▬▬</span><span class="wf-input" style="padding:2px 5px;max-width:44px">40</span><span>mm</span></div>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><span style="width:74px">holes</span><span class="wf-ph" style="flex:1;padding:2px">▬●▬▬▬▬</span><span class="wf-input" style="padding:2px 5px;max-width:44px">2</span><span style="color:var(--live)">count</span></div>
+            <div class="wf-bar" style="border-color:var(--live);padding:5px 8px;font-size:10px">
+              <span style="color:var(--live)">▲</span> Ranges are suggestions, not limits — type any value.
+            </div>
+            <div class="wf-row" style="gap:5px"><span class="wf-btn">Reset to AI values</span><span class="wf-btn pri">Save as version</span></div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n warn">!</span><span><strong>The bounds have no relation to geometry.</strong> <code>paramRange</code> is min = 25% of the AI's default and max = 3× it, anchored on the default rather than the live value. Presenting that as a constraint is a lie the panel currently tells by omission.</span></div>
+          <div><span class="n warn">2</span><span><strong>Negative defaults produce a dead slider:</strong> for <code>v = -5</code> it returns <code>min 0, max -15</code> — max below min — and <code>extractParams</code> explicitly accepts negatives.</span></div>
+          <div><span class="n warn">3</span><span><strong>Every row is suffixed “mm” unconditionally</strong>, so a count reads “holes … mm” and an angle reads “angle … mm”. The Selection inspector honours the mm/in toggle; this panel ignores it entirely.</span></div>
+          <div><span class="n warn">4</span><span><strong>Slider edits are applied but never committed</strong> — <code>applyParams → applyResultNoCommit</code> appends no version and never persists, so Undo silently discards them. Hence “Save as version” has to be a real, visible button.</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">L2</span><span class="nm">History — fork on restore</span><span class="st">“current” currently means “newest”</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:5px;max-width:330px">
+            <span class="wf-eyebrow">VERSION HISTORY</span>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px;border-color:var(--accent)"><div class="wf-col" style="gap:1px"><b>Rounded the top edges</b><span class="wf-fine">14:22 · 78 × 70 × 78 mm · <span style="color:var(--accent-d)">live</span></span></div></div>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><div class="wf-col" style="gap:1px"><b>Adjusted parameters — wallThickness 4</b><span class="wf-fine">14:19 · 78 × 70 × 78 mm</span></div><span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Restore</span></div>
+            <div class="wf-bar" style="padding:5px 8px;font-size:10.5px"><div class="wf-col" style="gap:1px"><b>Two M4 holes at 40 mm centres</b><span class="wf-fine">14:11 · 78 × 70 × 78 mm</span></div><span class="spacer" style="flex:1"></span><span class="wf-btn" style="padding:2px 7px">Restore</span></div>
+            <span class="wf-fine">Restoring records a new version, so nothing is lost.</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span><strong>Fork-on-restore already works</strong> — <code>restoreVersion</code> appends rather than truncating, and the panel already says so. Keep the sentence; it's doing real reassurance work.</span></div>
+          <div><span class="n warn">!</span><span><strong>But “current” is wrong after an Undo.</strong> The panel marks row <code>i === 0</code> — the <em>newest</em> version — as “· current” and hides its Restore, while “current” really means <code>headId</code>. Undo, and the label points at a version that is not on screen. This frame renames it <strong>live</strong> and binds it to <code>headId</code>.</span></div>
+          <div><span class="n warn">2</span><span><code>appendVersion</code> truncates the redo branch but <code>restoreVersion</code> does not — so Undo-then-Restore and Undo-then-edit have <strong>opposite effects</strong> on the same stored array.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">Printability and History still replace the viewport</span>
+    <p>E3 docks Printability beside the stage. The same argument applies to History: both tabs currently
+    <strong>unmount the 3D view</strong>, so you cannot read a version summary while looking at the model —
+    and the Undo/Redo buttons vanish with it, because <code>.viewer-tools</code> renders only on the
+    <code>3d</code> and <code>params</code> tabs.</p>
+    <p><strong>No collapsed rail exists for any inspector surface.</strong> The chat column has one
+    (<code>.chat-rail</code>, “Chat ›”); the Parameters dock, Selection inspector and Objects panel are binary
+    open/closed. Narrow-width handling is a width cap on the right dock, not a rail —
+    so the “collapsed selector strip” in the brief is <strong>new work, not a restyle</strong>.</p>
+    <p>Escape doesn't reach them either: <code>dismissOverlays</code> clears tools and selection but never touches
+    <code>tab</code>, so the Parameters dock cannot be dismissed with Escape — only by its ✕, which switches the tab
+    back to 3D. That breaks the one-Escape-contract this document opens with.</p>
+  </div>
+</section>
+
+<!-- ============ SECTION M — WRONG BUT BUILT ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">M</span><h2>The wrong-but-built path</h2></div>
+  <p class="sec-note">The most common real failure is not an error — it's a model that <em>built fine</em> and isn't
+  what you meant. The brief called this unspecified. It is half-built already, and the half that's missing is the
+  half the user can see.</p>
+
+  <div class="frames">
+    <div class="frame">
+      <div class="fb"><span class="no">M1</span><span class="nm">“Not that” — both candidates kept</span><span class="st">History already stores both; nothing shows them</span><span class="spacer"></span><span class="tag new">new</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-row" style="align-items:stretch;gap:8px">
+            <div class="wf-col" style="flex:1;gap:5px">
+              <div class="wf-row" style="justify-content:space-between"><span class="wf-eyebrow">BEFORE — v5</span><span class="wf-fine">14:19</span></div>
+              <div class="model" style="min-height:96px;background:var(--panel)">[ the shape you had ]</div>
+              <span class="wf-btn" style="text-align:center">Keep this one</span>
+            </div>
+            <div class="wf-col" style="flex:1;gap:5px">
+              <div class="wf-row" style="justify-content:space-between"><span class="wf-eyebrow" style="color:var(--accent-d)">AFTER — v6 · preview</span><span class="wf-fine">now</span></div>
+              <div class="model" style="min-height:96px;background:var(--panel);border-color:var(--accent)">[ green = added · red = removed ]</div>
+              <span class="wf-btn pri" style="text-align:center">Keep this one</span>
+            </div>
+          </div>
+          <div class="wf-bar" style="margin-top:8px">
+            <span class="wf-btn">Try again, differently</span>
+            <span class="wf-btn ghost">Keep both as versions</span>
+            <span class="spacer" style="flex:1"></span>
+            <span class="wf-fine">Nothing is thrown away either way.</span>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span><strong>The claim that “regeneration overwrites” is largely refuted.</strong> <code>applyResult</code> appends a version and advances <code>headId</code>, so the prior result survives in History and Undo. The AI preview bar already offers <strong>Apply / Discard</strong> with an added/removed colour legend. The data model is fine.</span></div>
+          <div><span class="n warn">!</span><span><strong>The genuinely destructive path is the Parameters slider</strong> — <code>applyResultNoCommit</code> writes no version and never persists, so parametric state is silently discarded by Undo/Redo. That, not regeneration, is where work actually disappears.</span></div>
+          <div><span class="n acc">2</span><span>What's missing is purely presentational: <strong>you never see the two candidates at once.</strong> The preview bar shows the new one over the canvas; the old one exists only as a row in a tab that unmounts the viewport. This frame is a view onto state that already exists.</span></div>
+          <div><span class="n">3</span><span>“Try again, differently” is the cross-cutting rule from §5 made visible — and it is <strong>cheap</strong> here precisely because forking is already the storage model.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SECTION N — CALIBRATION ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">N</span><h2>Calibration &amp; fit</h2></div>
+  <p class="sec-note">Print the coupon → push the peg into each hole → type the tightest one that fits. This is the
+  differentiator with the shortest path to shipping, and <strong>every piece of it already exists</strong> — they are
+  simply not connected to each other.</p>
+
+  <div class="frames two">
+    <div class="frame">
+      <div class="fb"><span class="no">N1</span><span class="nm">The calibration loop</span><span class="st">coupon → tightest fit → written back</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:7px">
+            <div class="wf-row" style="gap:6px;align-items:stretch">
+              <div class="wf-card" style="flex:1"><div class="wf-ph thumb">coupon</div><div class="t">Tolerance test coupon</div><div class="m">6 holes · ⌀10 mm</div></div>
+              <div class="wf-col" style="flex:2;gap:5px">
+                <span class="wf-eyebrow">2 · PRINT IT, THEN PUSH THE PEG IN</span>
+                <div class="wf-row" style="gap:4px;flex-wrap:wrap">
+                  <span class="wf-chip">0.05</span><span class="wf-chip">0.15</span><span class="wf-chip on">0.25</span>
+                  <span class="wf-chip">0.35</span><span class="wf-chip">0.45</span><span class="wf-chip">0.55</span>
+                </div>
+                <span class="wf-fine">Tap the tightest hole the peg still enters with a firm push.</span>
+                <div class="wf-bar" style="border-color:var(--accent);padding:5px 8px">
+                  <span style="font-size:11px">Your snug clearance is <b>0.25 mm</b></span>
+                  <span class="spacer" style="flex:1"></span><span class="wf-btn pri" style="padding:3px 8px">Save</span>
+                </div>
+                <span class="wf-fine">Loose becomes 0.45 · Press becomes 0.15. Every future fit uses your printer, not an average.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span>The coupon is real: six ⌀10 mm holes stepped 0.05 → 0.55 mm with notches counting the step, plus a ⌀10 test peg. It already builds with <strong>no key and no AI call</strong>.</span></div>
+          <div><span class="n warn">!</span><span><strong>Tapping a hole replaces typing a number.</strong> Today the only path is: find the coupon as the <em>last of 11 cards</em> in the Templates modal (it's excluded from the 4-card strip), read a chat paragraph, then navigate to Settings → Printer and type a decimal into an empty field.</span></div>
+          <div><span class="n warn">2</span><span><strong>The instructions and the geometry disagree by exactly 0.1 mm.</strong> Code: hole <code>i</code> has clearance <code>0.05 + 0.1i</code> with <code>i+1</code> notches → for <em>n</em> notches, <code>0.05 + 0.1(n-1)</code>. Settings says “notch count × 0.1 (+0.05)” → <code>0.1n + 0.05</code>. <strong>Every calibrating user is told the wrong number.</strong></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="frame">
+      <div class="fb"><span class="no">N2</span><span class="nm">The uncalibrated middle state</span><span class="st">“typical FDM clearances”, never “guesses”</span></div>
+      <div class="fbody">
+        <div class="wf">
+          <div class="wf-col" style="gap:7px">
+            <div class="wf-bar" style="flex-direction:column;align-items:flex-start;gap:3px">
+              <div class="wf-row" style="gap:6px"><span class="wf-eyebrow">FIT</span><span class="wf-chip">Loose</span><span class="wf-chip on">Snug</span><span class="wf-chip">Press</span></div>
+              <span class="wf-fine">Using typical FDM clearances — <u>calibrate for your printer</u> (5 min, one print)</span>
+            </div>
+            <div class="wf-bar" style="border-color:var(--accent);flex-direction:column;align-items:flex-start;gap:2px">
+              <span class="wf-fine">After calibrating:</span>
+              <span style="font-size:11px">Snug · <b>0.25 mm</b> — measured on your printer</span>
+            </div>
+          </div>
+        </div>
+        <div class="co">
+          <div><span class="n acc">✓</span><span><strong>Never “fits are guesses”.</strong> 0.2 mm is a defensible default; the honest framing is that it's <em>typical</em>, not that it's unreliable. The invitation to calibrate carries the confidence, not a disclaimer.</span></div>
+          <div><span class="n warn">!</span><span><strong>The Fit tooltips never reflect calibration.</strong> They are hardcoded “~0.4 / ~0.2 / ~0.1 mm” while <code>fitClearance()</code> actually sends 0.55 / 0.35 / 0.25 after a 0.35 calibration. <strong>The user is shown one number and given another.</strong></span></div>
+          <div><span class="n warn">2</span><span><strong>The Fit control only appears in the guided “Fix a broken part” flow</strong> — an ordinary Precise request never carries the calibrated clearance at all. Templates ignore it outright, and “Make it fit” hardcodes 0.2 mm per side in both the geometry and its own tooltip.</span></div>
+          <div><span class="n warn">3</span><span>Fit level is <code>useState("snug")</code> with <strong>no persistence</strong> — unlike the calibration number, the chosen fit resets every session.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note warn">
+    <span class="lbl">The unit mismatch worth catching before this ships</span>
+    <p>The coupon adds its clearance to the hole <strong>diameter</strong> (<code>makeCylinder((d + c) / 2, …)</code>),
+    but the number the user types is consumed as a <strong>per-side</strong> “snug” clearance. A user who measures a
+    0.30 mm diameter clearance and types it gets 0.30 mm <em>per side</em> — <strong>double what they measured</strong>.
+    Either halve it on the way in or change what the coupon reports. Entering <code>0</code> is also accepted and
+    silently collapses the whole ladder to 0.05 / 0.05 / 0.2 mm.</p>
+  </div>
+</section>
+
+
+<!-- ============ SECTION O — BUILD ORDER ============ -->
+<section class="sec">
+  <div class="sec-head"><span class="code">O</span><h2>Build order</h2></div>
 
   <h3>Ship first — these are defects today, independent of the redesign</h3>
   <div class="tw"><table>
@@ -926,21 +1650,14 @@ INSPECTOR → Printability  (docked beside the LIVE stage — the model never le
   is worse than no chip.</p>
 </section>
 
-<!-- ============ SECTION I — REMAINING ============ -->
+<!-- ============ SECTION P — REMAINING ============ -->
 <section class="sec">
-  <div class="sec-head"><span class="code">I</span><h2>Still to wireframe</h2></div>
-  <p class="sec-note">Drawn above: A1, D1–D3, E1–E3, G1. These remain, ordered by how much they'd change the build.</p>
+  <div class="sec-head"><span class="code">P</span><h2>Still to wireframe</h2></div>
+  <p class="sec-note">Drawn above: A1, D1–D3, E1–E3, F1, F6, G1, H1–H3, I1–I5, J1–J3, K1–K4, L1–L2, M1, N1–N2. <strong>All P0 and P1 rows are now drawn</strong> — what follows is what remains.</p>
 
   <div class="tw"><table>
     <thead><tr><th>Priority</th><th>Screen / state</th></tr></thead>
     <tbody>
-      <tr><td><strong>P0</strong></td><td>Launchpad — narrow/stacked ≤900 px and ≤430 px touch · composer focused/typed/multi-line · attachment chip present · kernel-warming inline status</td></tr>
-      <tr><td><strong>P0</strong></td><td>Contextual toolbar — the remaining five resolutions (edge · multi-face · whole body · attachment · <strong>mesh object</strong>, which is currently missing from the ladder entirely)</td></tr>
-      <tr><td><strong>P0</strong></td><td>Export — readiness checklist opening state (all-pass, and with failures + inline fixes) · format list · blocked &amp; export-anyway override</td></tr>
-      <tr><td><strong>P1</strong></td><td>Errors — build failed with previous geometry retained · self-heal exhausted with three ranked recoveries · kernel-failed banner with working Retry · offline · <strong>themed crash boundary, both themes</strong></td></tr>
-      <tr><td><strong>P1</strong></td><td>Inspector — Selection (how uniform-vs-per-axis scaling is resolved) · Parameters (bounds labelled honestly as heuristic) · History (fork-on-restore) · collapsed selector strip</td></tr>
-      <tr><td><strong>P1</strong></td><td><strong>The wrong-but-built path</strong> — how you say "not that" and keep both candidates side by side. Currently unspecified and it's the most common real failure.</td></tr>
-      <tr><td><strong>P1</strong></td><td>Calibration — print the coupon → tap the tightest fit → value written back. Plus the <em>uncalibrated middle state</em>: "using typical FDM clearances", never "fits are guesses"</td></tr>
       <tr><td><strong>P2</strong></td><td>Import card — file-type detected · SVG four-mode · photo blocked on scale</td></tr>
       <tr><td><strong>P2</strong></td><td>Measure-from-photo — place reference → drag dimensions → named editable chips</td></tr>
       <tr><td><strong>P2</strong></td><td>Library — grid with inline rename · Templates tab with search · bulk select · empty state</td></tr>
@@ -962,7 +1679,7 @@ INSPECTOR → Printability  (docked beside the LIVE stage — the model never le
 </section>
 
 <div class="footer">
-  Moldable · UX workflow &amp; wireframe sheet v2 · 2026-07-26 · companion to <code>docs/UX_WORKFLOW.md</code>
+  Moldable · UX workflow &amp; wireframe sheet v2.1 · 2026-07-27 · companion to <code>docs/UX_WORKFLOW.md</code>
 </div>
 
 </div>

@@ -472,7 +472,7 @@ INSPECTOR → Printability  (docked beside the live stage — the model never le
    └── all clear
         ▼
    EXPORT (one surface, opens on the readiness checklist)
-   ├── ✓ watertight   ✓ fits bed   ✓ walls ≥ 2 perimeters   ✓ no floating islands
+   ├── ✓ watertight   ✓ fits bed   ✓ scale sane   ✓ slicer-friendly   (the four that are computed)
    ├── Files ....... 3MF (default) · STL · STEP · OBJ
    ├── Plates ...... one .3mf per plate
    ├── Pieces ...... per piece · all as .zip

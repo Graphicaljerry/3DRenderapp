@@ -15,6 +15,7 @@
      and any fixed value is invisible on one of them — a flat --surf chip on the --surf
      statusbar disappeared completely. A wash darkens in light and lightens in dark
      (--ink inverts), so one token separates a control from whatever is behind it. */
+  --launch-bg-page: oklch(93.2% 0.005 160);
   --ctl: color-mix(in srgb, var(--ink) 6%, transparent);
   --ctl-h: color-mix(in srgb, var(--ink) 11%, transparent);
   --bg: oklch(99.4% 0.002 160);     /* panels & cards — never pure white */
@@ -43,8 +44,13 @@
      popover appearing behind the tool rail was luck, not layout. Bands, not one-offs:
      canvas furniture stays under 40, every transient surface starts at 60. */
   --z-canvas: 10;    /* bars and panels that live on the canvas */
-  --z-rail: 30;      /* the tool rail and its flyouts */
   --z-transient: 36; /* preview bars, capture overlays — above furniture, below menus */
+  /* ABOVE --z-transient deliberately. The rail is not passive furniture, it is how you
+     switch and cancel tools, so it has to stay clickable while a transient overlay is
+     up. With the rail at 30 the Mark tool's full-bleed draw surface (36) covered its
+     own button: clicking Mark again started a stroke instead of turning it off, and
+     the only way out was to draw something. */
+  --z-rail: 40;      /* the tool rail and its flyouts */
   --z-popover: 60;   /* EVERY menu, dropdown and flyout */
   --z-modal: 100;    /* full-screen gates */
   --z-portal: 110;   /* portaled menus, which can open from inside a modal */
@@ -100,6 +106,7 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
   --bord-subtle: #212123;
   --bord-strong: #3b3c3e;
   --surf: oklch(15.5% 0.004 160);   /* app background — near-black, not pure black */
+  --launch-bg-page: oklch(13.5% 0.004 160);
   --bg: #1c1c1e;          /* panels — lighter than surf: elevation by lightness */
   --accent: #5aa082;      /* brand green, lifted for a dark background */
   --accent-d: #74b89a;    /* hover — brighter in dark, not darker */
@@ -949,7 +956,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* ---------- Launchpad (the entry surface) ----------
    A route, not a modal: the composer is the only filled, high-contrast object on
    the screen, and every other path below it reaches geometry without a key. */
-.launchpad { position: relative; min-height: 100vh; display: flex; flex-direction: column; background: var(--surf); color: var(--ink); }
+/* A shade greyer than --surf in light mode. The plate is drawn in low-alpha accent
+   over this, and against a near-white page there was nothing for it to sit against —
+   the whole animation washed out. Dark mode already had the contrast. */
+.launchpad { position: relative; min-height: 100vh; display: flex; flex-direction: column; background: var(--launch-bg-page); color: var(--ink); }
 .launch-bg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
 .launchpad > *:not(.launch-bg) { position: relative; z-index: 1; }
 .launch-account { font-size: 12px; color: var(--mut); padding: 5px 10px; border: 1px solid var(--bord); border-radius: 999px; }
@@ -1010,6 +1020,21 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .launch-guided .gc-go { color: var(--accent-d); }
 .launch-resume { align-self: flex-start; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--accent); background: var(--bg); color: var(--accent-d); font-size: 12.5px; }
 .launch-resume:hover { background: var(--accent-w); }
+/* Recent projects: the same chip language as the templates below, with a real
+   thumbnail so you recognise the part rather than reading its name. */
+.launch-recents { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; }
+.launch-recent {
+  display: inline-flex; align-items: center; gap: 9px; padding: 6px 13px 6px 6px;
+  border: 1px solid transparent; border-radius: var(--r-sm); background: var(--ctl);
+  color: var(--ink2); font: inherit; font-size: 13px; text-align: left;
+  transition: background-color .15s ease, color .15s ease;
+}
+.launch-recent:hover { background: var(--ctl-h); color: var(--ink); }
+.lr-thumb { width: 30px; height: 30px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 5px; overflow: hidden; background: var(--bg); color: var(--subt); }
+.lr-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.lr-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lr-meta b { font-weight: 500; font-size: 13px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 15ch; }
+.lr-meta em { font-style: normal; font-size: 10.5px; color: var(--subt); line-height: 1.2; }
 .launch-signin { margin-top: 10px; padding: 14px; border: 1px solid var(--bord); border-radius: 12px; background: var(--bg); }
 .launch-foot { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--bord); display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--mut); }
 .launch-foot .launch-actions { display: flex; align-items: baseline; gap: 14px; margin-left: auto; }
@@ -1063,15 +1088,20 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 }
 /* Collapse rail — mirrors the chat's, on the opposite edge. */
 .dock-rail {
-  /* Vertically centred so it never collides with the stats card or the zoom stack. */
-  position: absolute; top: 50%; transform: translateY(-50%); right: 12px; z-index: 7;
-  width: 30px; height: 128px; padding: 0;
-  border: 1px solid var(--bord); border-radius: 10px; background: var(--bg);
+  /* Full height, mirroring the collapsed chat rail on the opposite edge. As a short
+     centred pill it read as a stray floating control; matched to the chat rail the two
+     become one idea — a canvas with a collapsible panel on each side — and the target
+     is far easier to hit. The zoom cluster is shifted clear of it below. */
+  position: absolute; top: 12px; bottom: 12px; right: 12px; z-index: 7;
+  width: 34px; padding: 0;
+  border: 1px solid var(--bord); border-radius: 12px; background: var(--bg);
   box-shadow: var(--shadow-md); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
 }
+/* Same handling the open dock already gets: canvas furniture steps aside for it. */
+.viewer-body:has(.dock-rail) .right-dock { right: 56px; }
 .dock-rail:hover { background: var(--surf); }
-.dock-rail-label { writing-mode: vertical-rl; font-size: 11.5px; font-weight: 600; color: var(--mut); letter-spacing: .04em; }
+.dock-rail-label { writing-mode: vertical-rl; font-size: 12px; font-weight: 600; color: var(--mut); letter-spacing: .04em; }
 /* Opening the Inspector reads as the rail expanding into the panel: same right edge,
    same vertical centre, growing out to full size. transform-origin does the work, so
    it is one composited animation with no layout thrash. */
@@ -1464,3 +1494,69 @@ details.guide { margin-top: 10px; }
 /* Rail icons a touch bigger (user request) */
 .canvas-rail .ghost.sm.iconbtn { padding: 8px 9px; }
 .canvas-rail .iconbtn svg { width: 19px; height: 19px; }
+
+/* ---------- top bar: navigation reads as text ----------
+   Templates / Library are navigation, so they are text with an underline that grows
+   on hover — no box. The underline is a transform on a pseudo-element (compositor
+   only) rather than border-bottom, which would shift the label by a pixel. Pointer
+   queries keep the effect off touch, where there is no hover to reveal it. */
+.navlink {
+  position: relative; background: none; border: none; padding: 6px 2px; margin: 0 6px;
+  font: inherit; font-size: 13px; font-weight: 500; color: var(--ink2);
+  transition: color .15s ease;
+}
+.navlink::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: 2px; height: 1.5px;
+  background: currentColor; border-radius: 2px;
+  transform: scaleX(0); transform-origin: left center;
+  transition: transform .2s cubic-bezier(.22,1,.36,1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .navlink:hover { color: var(--ink); }
+  .navlink:hover::after { transform: scaleX(1); }
+}
+.navlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+.navlink:active { color: var(--accent-d); }
+
+/* Theme toggle: sun and moon stacked in one box, cross-faded and counter-rotated so
+   switching is a single continuous motion. */
+.theme-toggle {
+  position: relative; width: 32px; height: 32px; flex: 0 0 auto;
+  display: inline-grid; place-items: center;
+  background: none; border: none; border-radius: 999px; color: var(--ink2);
+  transition: background-color .15s ease, color .15s ease;
+}
+.theme-toggle:hover { background: var(--ctl); color: var(--ink); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.theme-toggle .tt-ico {
+  grid-area: 1 / 1; display: inline-flex;
+  transition: opacity .26s ease, transform .34s cubic-bezier(.22,1,.36,1);
+}
+.theme-toggle .tt-sun  { opacity: 0; transform: rotate(-70deg) scale(.6); }
+.theme-toggle .tt-moon { opacity: 1; transform: rotate(0deg) scale(1); }
+.theme-toggle.is-dark .tt-sun  { opacity: 1; transform: rotate(0deg) scale(1); }
+.theme-toggle.is-dark .tt-moon { opacity: 0; transform: rotate(70deg) scale(.6); }
+@media (prefers-reduced-motion: reduce) {
+  .navlink::after, .theme-toggle .tt-ico { transition: none; }
+}
+
+/* ---------- tool rail: names on hover ----------
+   Icon-only at rest; hovering the RAIL (not each button) slides every tool's name in
+   at once, so you learn the whole toolbar in one pass instead of hunting tooltips one
+   button at a time. Only the seven top-level tools get names — the Face/Edge/Corner
+   flyout is a sub-mode of Select and already carries its own labels, and naming those
+   here would teach the wrong vocabulary. Width is the only animated property and the
+   rail is absolutely positioned over the canvas, so nothing else reflows. */
+.canvas-rail .rail-name {
+  display: block; max-width: 0; overflow: hidden; white-space: nowrap;
+  font-size: 12px; font-weight: 500; line-height: 1;
+  opacity: 0; transition: max-width .22s cubic-bezier(.22,1,.36,1), opacity .16s ease, margin-left .22s cubic-bezier(.22,1,.36,1);
+  margin-left: 0;
+}
+@media (hover: hover) and (pointer: fine) {
+  .canvas-rail:hover .rail-name { max-width: 110px; opacity: 1; margin-left: 8px; }
+  /* Buttons go from square icons to a labelled row; keep the icon column aligned. */
+  .canvas-rail:hover .ghost.sm.iconbtn { justify-content: flex-start; }
+}
+.canvas-rail .ghost.sm.iconbtn { justify-content: center; }
+@media (prefers-reduced-motion: reduce) { .canvas-rail .rail-name { transition: none; } }

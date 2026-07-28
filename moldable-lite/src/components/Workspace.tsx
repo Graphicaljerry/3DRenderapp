@@ -638,7 +638,7 @@ function MaterialMenu({ appearance, setAppearance }: { appearance: { color: stri
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button className="ghost sm iconbtn has-modes" aria-label="Material" aria-expanded={open} title="Display material — filament colour & finish (visual only)" onClick={() => setOpen((v) => !v)}>
         <span className="mat-dot" style={{ background: appearance.color }} />
-      </button>
+      <span className="rail-name">Material</span></button>
       {open && (
         <div className="snap-menu" role="menu">
           <div className="mat-swatches">
@@ -673,7 +673,7 @@ function SurfaceMenu({ disabled, isCad, onApply }: { disabled: boolean; isCad: b
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button className="ghost sm iconbtn has-modes" aria-label="Surface texture" aria-expanded={open} title="Surface texture — knurl, hex, noise, wave, voronoi, diamond or fuzzy skin as real printable geometry" onClick={() => setOpen((v) => !v)}>
         <IconTexturize />
-      </button>
+      <span className="rail-name">Texture</span></button>
       {open && (
         <div className="snap-menu" role="menu">
           <div className="snap-row"><span>Pattern</span>
@@ -1570,6 +1570,12 @@ export function Workspace(p: Props) {
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
   const [markMode, setMarkMode] = useState(false); // "circle it and ask" draw overlay
+  // Mark's state lives HERE while Select/Transform/Measure/Paint live in App, so nothing
+  // kept them mutually exclusive — Mark and Measure could both render as armed at once.
+  // One direction is this effect (another tool wins → Mark stands down); the other is in
+  // Mark's own onClick, which disarms the rest before arming itself.
+  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode;
+  useEffect(() => { if (otherToolOn) setMarkMode(false); }, [otherToolOn]);
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -1728,11 +1734,23 @@ export function Workspace(p: Props) {
         </div>
         <div className="topbar-right">
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
-          <button className="ghost" onClick={p.onOpenTemplates}>Templates</button>
-          <button className="ghost" onClick={p.onOpenLibrary}>Library</button>
+          {/* Navigation, not actions: these read as text with an underline on hover.
+              Only "+ New chat" keeps a filled button, because it is the one thing here
+              that CHANGES something. Boxing all four made none of them primary. */}
+          <button className="navlink" onClick={p.onOpenTemplates}>Templates</button>
+          <button className="navlink" onClick={p.onOpenLibrary}>Library</button>
           <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
-          <button className="ghost profile" onClick={p.onToggleTheme} title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} aria-label="Toggle dark mode">
-            {p.theme === "dark" ? <IconSun /> : <IconMoon />}
+          {/* The two icons are stacked and cross-faded rather than swapped, so the
+              switch is one continuous motion instead of a pop. */}
+          <button
+            className={`theme-toggle${p.theme === "dark" ? " is-dark" : ""}`}
+            onClick={p.onToggleTheme}
+            title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label="Toggle dark mode"
+            aria-pressed={p.theme === "dark"}
+          >
+            <span className="tt-ico tt-sun"><IconSun /></span>
+            <span className="tt-ico tt-moon"><IconMoon /></span>
           </button>
           <div className="profile-wrap">
             <button
@@ -2214,7 +2232,8 @@ export function Workspace(p: Props) {
                         onClick={p.featureCtl.toggleMode}
                       >
                         <IconPointer />
-                      </button>
+                      <span className="rail-name">Select</span>
+                    </button>
                       {p.featureCtl.mode && p.activeKind === "replicad" && (
                         <div className="rail-fly">
                           <div className="seg sm mode-seg">
@@ -2238,6 +2257,7 @@ export function Workspace(p: Props) {
                       onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
                     >
                       <IconTransform />
+                    <span className="rail-name">Move</span>
                     </button>
                     {p.transformCtl.mode !== "off" && (
                       <div className="rail-fly">
@@ -2258,6 +2278,7 @@ export function Workspace(p: Props) {
                       onClick={p.measureCtl.toggle}
                     >
                       <IconRuler />
+                    <span className="rail-name">Measure</span>
                     </button>
                     {p.measureCtl.mode && p.measureCtl.items.length > 0 && (
                       <div className="rail-fly">
@@ -2272,9 +2293,18 @@ export function Workspace(p: Props) {
                       aria-label="Mark"
                       disabled={!p.geometry || p.tab !== "3d"}
                       title="Mark tool: draw around a part of the model — a marked screenshot attaches to the chat so the AI knows exactly where your change goes"
-                      onClick={() => setMarkMode((v) => !v)}
+                      onClick={() => setMarkMode((v) => {
+                        if (!v) {
+                          if (p.featureCtl.mode) p.featureCtl.toggleMode();
+                          if (p.measureCtl.mode) p.measureCtl.toggle();
+                          if (p.transformCtl.mode !== "off") p.transformCtl.setMode("off");
+                          if (p.paintCtl.mode) p.paintCtl.setMode(false);
+                        }
+                        return !v;
+                      })}
                     >
                       <IconMarker />
+                    <span className="rail-name">Mark</span>
                     </button>
                     {p.pins.length > 0 && (
                       <div className="rail-fly">
@@ -2294,6 +2324,7 @@ export function Workspace(p: Props) {
                       onClick={() => p.paintCtl.setMode(!p.paintCtl.mode)}
                     >
                       <IconPaint />
+                    <span className="rail-name">Paint</span>
                     </button>
                     {p.paintCtl.mode && (
                       <div className="rail-fly">

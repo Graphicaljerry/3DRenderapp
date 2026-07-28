@@ -32,7 +32,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip } from "./components/icons";
+import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
@@ -1280,12 +1280,22 @@ export default function App() {
   // Land on a FRESH start screen; offer the last session as a one-tap resume
   // chip instead of auto-opening it (auto-open replayed stale errors on load).
   const [resume, setResume] = useState<{ id: string; name: string } | null>(null);
+  // The four most recently touched projects, shown on the Launchpad as thumbnails.
+  // Deliberately NOT a second library page: the Library modal already does thumbnails,
+  // search, rename and delete, so the entry screen shows the few you actually want and
+  // hands off to it for everything else.
+  const [recent, setRecent] = useState<{ id: string; name: string; engine: string; thumb?: string }[]>([]);
   useEffect(() => {
     const id = localStorage.getItem("moldable_last_project");
-    if (!id) return;
-    void getProject(id).then((p) => {
-      if (p) setResume({ id: p.id, name: p.name });
-    });
+    if (id) void getProject(id).then((p) => { if (p) setResume({ id: p.id, name: p.name }); });
+    void listProjects().then((all) => {
+      setRecent(
+        [...all]
+          .sort((a, b) => b.updatedAt - a.updatedAt)
+          .slice(0, 4)
+          .map((p) => ({ id: p.id, name: p.name, engine: p.engine, thumb: p.thumb })),
+      );
+    }).catch(() => { /* no store yet — the row just doesn't render */ });
   }, []);
   async function resumeLast() {
     if (!resume) return;
@@ -3546,6 +3556,9 @@ export default function App() {
         onSkip={() => setEntered(true)}
         resume={resume}
         onResume={() => { setEntered(true); void resumeLast(); }}
+        recent={recent}
+        onOpenRecent={(id) => { void getProject(id).then((pr) => { if (pr) { setEntered(true); void openProjectById(pr); } }); }}
+        onAllProjects={() => { setEntered(true); setShowLibrary(true); }}
         accountEmail={accountEmail}
         onFree={enterFree}
         onSubmit={(text) => { setEntered(true); void send(text); }}
@@ -3982,23 +3995,137 @@ function CubeMark({ size = 22 }: { size?: number }) {
    It is also the wrong world — the workspace already renders a real perspective plate,
    so the entry screen should point at that, not invent a second fake one.
 
-   The plate is static; the machine is not. A gantry sweeps the bed on a slow loop and
-   the part it passes over is revealed behind it, one footprint per pass, forever. This
-   replaced a one-shot entrance that played for 1.4 s and then froze — which needed a
-   sessionStorage flag to stop it re-performing on every visit, and left a still image
-   the rest of the time. A loop needs no such gate: there is no "again" to suppress. */
+   The plate is static; the machine is not. A nozzle prints the first layer of a part —
+   outer wall, inner wall, then diagonal infill — leaving a bead behind it, then the bed
+   clears and the next part starts. That is the machine this app drives, so it is the
+   right thing to show. (It replaced a gantry sweep, which read as radar: a bar tracking
+   across a grid is a scanner no matter what it reveals.)
 
-/** Four template silhouettes in plate-normalised coords — closed outlines only. */
+   Cost is O(1) per frame regardless of path length: the bead is drawn ONCE onto an
+   offscreen layer as the nozzle advances and composited thereafter, so a frame is two
+   drawImage calls plus the nozzle dot — not a re-stroke of a few hundred segments. The
+   plate is cached the same way. Capped at 30 fps. Nothing here is on the critical path
+   for first paint; the canvas simply starts drawing once React mounts it. */
+
+/** Recognisable part PROFILES in plate-normalised coords — closed outlines.
+ *  Profiles, not top-down footprints: viewed from above a hook and a bracket are both
+ *  rectangles, and the whole point is that you can tell what is being printed. */
 const FOOTPRINTS: [number, number][][] = [
-  // wall hook
-  [[.30,.72],[.30,.30],[.44,.30],[.44,.58],[.66,.58],[.66,.44],[.74,.44],[.74,.72]],
-  // cable clip
-  [[.26,.66],[.26,.46],[.34,.38],[.50,.34],[.66,.38],[.74,.46],[.74,.66],[.64,.66],[.64,.50],[.50,.44],[.36,.50],[.36,.66]],
-  // phone stand
-  [[.24,.74],[.24,.62],[.62,.26],[.72,.34],[.44,.62],[.70,.62],[.70,.74]],
-  // spacer
-  [[.34,.68],[.34,.36],[.66,.36],[.66,.68]],
+  // wall hook — a J: back plate down the left, throat, and the upturned tip
+  [[.30,.16],[.44,.16],[.44,.62],[.56,.70],[.68,.62],[.68,.40],[.80,.40],[.80,.66],
+   [.58,.84],[.30,.72]],
+  // phone stand — wedge with a lip at the foot and a cable slot behind it
+  [[.20,.80],[.20,.66],[.30,.66],[.30,.60],[.22,.60],[.60,.20],[.72,.28],[.44,.66],
+   [.74,.66],[.74,.80]],
+  // L-bracket with a corner gusset and two bolt pads
+  [[.26,.20],[.40,.20],[.40,.58],[.56,.58],[.56,.46],[.68,.46],[.68,.70],[.26,.70]],
+  // spur gear — twelve teeth around a hub (generated below, kept here for ordering)
+  [],
+  // cable clip — a C that opens to the right
+  [[.32,.24],[.68,.24],[.68,.38],[.46,.38],[.46,.62],[.68,.62],[.68,.76],[.32,.76]],
 ];
+// Tooth-by-tooth gear: recognisable at a glance and the one curved profile in the set.
+FOOTPRINTS[3] = (() => {
+  const pts: [number, number][] = [];
+  const TEETH = 12, RO = 0.30, RI = 0.24;
+  for (let i = 0; i < TEETH; i++) {
+    const a0 = (i / TEETH) * Math.PI * 2;
+    const step = (Math.PI * 2) / TEETH / 4;
+    for (const [k, r] of [[0, RI], [1, RO], [2, RO], [3, RI]] as [number, number][]) {
+      const a = a0 + k * step;
+      pts.push([0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r]);
+    }
+  }
+  return pts;
+})();
+
+type Pt = { x: number; y: number };
+/** One continuous nozzle move. `travel` moves are non-extruding (no bead drawn). */
+type Move = { a: Pt; b: Pt; travel: boolean };
+
+/** Offset a closed polygon inward by `d` — used for the inner wall. Each edge is
+ *  pushed along its inward normal and consecutive edges re-intersected. Good enough
+ *  for convex-ish profiles at the small offsets a perimeter uses; a degenerate
+ *  intersection (near-parallel edges) falls back to the shifted endpoint. */
+function insetPolygon(poly: Pt[], d: number): Pt[] {
+  const n = poly.length;
+  if (n < 3) return poly;
+  // Signed area decides which side is "in", so winding order doesn't matter.
+  let area2 = 0;
+  for (let i = 0; i < n; i++) {
+    const p = poly[i], q = poly[(i + 1) % n];
+    area2 += p.x * q.y - q.x * p.y;
+  }
+  const s = area2 > 0 ? 1 : -1;
+  const lines: { px: number; py: number; dx: number; dy: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = poly[i], q = poly[(i + 1) % n];
+    const ex = q.x - p.x, ey = q.y - p.y;
+    const L = Math.hypot(ex, ey) || 1;
+    const nx = (ey / L) * s, ny = (-ex / L) * s; // inward normal
+    lines.push({ px: p.x + nx * d, py: p.y + ny * d, dx: ex / L, dy: ey / L });
+  }
+  const out: Pt[] = [];
+  for (let i = 0; i < n; i++) {
+    const A = lines[(i - 1 + n) % n], B = lines[i];
+    const den = A.dx * B.dy - A.dy * B.dx;
+    if (Math.abs(den) < 1e-9) { out.push({ x: B.px, y: B.py }); continue; }
+    const t = ((B.px - A.px) * B.dy - (B.py - A.py) * B.dx) / den;
+    out.push({ x: A.px + A.dx * t, y: A.py + A.dy * t });
+  }
+  return out;
+}
+
+/** Diagonal zig-zag infill: scanlines at 45°, paired into spans inside the polygon,
+ *  alternating direction so the nozzle snakes instead of teleporting between rows. */
+function infillLines(poly: Pt[], spacing: number): [Pt, Pt][] {
+  const C = Math.cos(-Math.PI / 4), S = Math.sin(-Math.PI / 4);
+  const rot = (p: Pt): Pt => ({ x: p.x * C - p.y * S, y: p.x * S + p.y * C });
+  const unrot = (p: Pt): Pt => ({ x: p.x * C + p.y * S, y: -p.x * S + p.y * C });
+  const r = poly.map(rot);
+  let lo = Infinity, hi = -Infinity;
+  for (const p of r) { lo = Math.min(lo, p.y); hi = Math.max(hi, p.y); }
+  const rows: [Pt, Pt][] = [];
+  let flip = false;
+  for (let y = lo + spacing; y < hi; y += spacing) {
+    const xs: number[] = [];
+    for (let i = 0; i < r.length; i++) {
+      const a = r[i], b = r[(i + 1) % r.length];
+      if ((a.y <= y && b.y > y) || (b.y <= y && a.y > y)) xs.push(a.x + ((y - a.y) / (b.y - a.y)) * (b.x - a.x));
+    }
+    xs.sort((m, n) => m - n);
+    for (let i = 0; i + 1 < xs.length; i += 2) {
+      const span: [Pt, Pt] = [unrot({ x: xs[i], y }), unrot({ x: xs[i + 1], y })];
+      rows.push(flip ? [span[1], span[0]] : span);
+    }
+    flip = !flip;
+  }
+  return rows;
+}
+
+/** The full toolpath for one part: outer wall, inner wall, then infill — the order a
+ *  slicer actually emits, with non-extruding travel moves between disconnected runs. */
+function buildToolpath(poly: Pt[], wall: number, spacing: number): Move[] {
+  const moves: Move[] = [];
+  const loop = (pts: Pt[]) => {
+    for (let i = 0; i < pts.length; i++) moves.push({ a: pts[i], b: pts[(i + 1) % pts.length], travel: false });
+  };
+  loop(poly);
+  const inner = insetPolygon(poly, wall);
+  moves.push({ a: poly[0], b: inner[0], travel: true });
+  loop(inner);
+  // Scanline containment is exact for ANY polygon (even-odd rule), but insetPolygon is
+  // not: on a sharply concave profile like the gear its edges self-intersect and the
+  // "inside" it reports leaks past the teeth. Hatch the true outline instead — infill
+  // meeting the perimeter is what a slicer does anyway.
+  let cursor = inner[0];
+  for (const [a, b] of infillLines(poly, spacing)) {
+    moves.push({ a: cursor, b: a, travel: true });
+    moves.push({ a, b, travel: false });
+    cursor = b;
+  }
+  return moves;
+}
 
 function LaunchBackdrop() {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -4009,25 +4136,30 @@ function LaunchBackdrop() {
     if (!ctx) return;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    let raf = 0, w = 0, h = 0, plate: { x: number; y: number; side: number } | null = null;
-    // The plate costs ~70 strokes plus text to draw, which is far too much to repeat at
-    // 30 fps for something that never changes. It is rendered once per resize/theme into
-    // an offscreen bitmap; a frame is then one drawImage plus the two moving parts.
-    let plateBmp: HTMLCanvasElement | null = null;
-    let dpr = 1;
+    let raf = 0, w = 0, h = 0, dpr = 1;
+    let plate: { x: number; y: number; side: number } | null = null;
+    let plateBmp: HTMLCanvasElement | null = null;   // static bed, redrawn on resize/theme
+    let beadBmp: HTMLCanvasElement | null = null;    // extruded plastic, drawn incrementally
+    let beadCtx: CanvasRenderingContext2D | null = null;
+
     const tokens = () => {
       const cs = getComputedStyle(document.documentElement);
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
       return {
         accent: cs.getPropertyValue("--accent").trim() || "#498a6f",
         subtle: cs.getPropertyValue("--subt").trim() || "#8b968f",
-        dark: document.documentElement.getAttribute("data-theme") === "dark",
+        dark,
+        // Light mode sat on the same alphas as dark and washed out completely against
+        // an off-white page — the plate was barely there. Light needs MORE ink, not
+        // the same, because it is dark-on-light instead of light-on-dark.
+        grid: dark ? 0.05 : 0.10,
+        gridMajor: dark ? 0.10 : 0.19,
+        bezel: dark ? 0.16 : 0.30,
+        bead: dark ? 0.42 : 0.52,
+        fill: dark ? 0.07 : 0.10,
       };
     };
 
-    /** The plate, its graduations and its light — everything here is fixed, so this
-        renders once into `plateBmp` and every frame just blits it. The text-column
-        mask is NOT applied here: the gantry and the part have to be masked by the
-        same gradient, so it is applied once at the end of each composed frame. */
     const drawPlate = () => {
       const t = tokens();
       const side = Math.min(h * 0.78, 900);
@@ -4040,57 +4172,49 @@ function LaunchBackdrop() {
       const bmp = document.createElement("canvas");
       bmp.width = Math.max(1, Math.round(w * dpr));
       bmp.height = Math.max(1, Math.round(h * dpr));
-      const ctx2 = bmp.getContext("2d");
-      if (!ctx2) return;
-      ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const ctx = ctx2;                     // shadow the outer ctx for the body below
+      const g = bmp.getContext("2d");
+      if (!g) return;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
       plateBmp = bmp;
 
-      // One directional light, above and right. The only ambient event on the screen.
-      const glow = ctx.createRadialGradient(x + side * 0.8, y + side * 0.15, 0, x + side * 0.8, y + side * 0.15, side * 0.9);
+      const glow = g.createRadialGradient(x + side * 0.8, y + side * 0.15, 0, x + side * 0.8, y + side * 0.15, side * 0.9);
       glow.addColorStop(0, t.accent); glow.addColorStop(1, "transparent");
-      ctx.globalAlpha = t.dark ? 0.05 : 0.04;
-      ctx.fillStyle = glow;
-      ctx.fillRect(0, 0, w, h);
+      g.globalAlpha = t.dark ? 0.05 : 0.05;
+      g.fillStyle = glow;
+      g.fillRect(0, 0, w, h);
 
-      ctx.strokeStyle = t.accent;
-      ctx.lineWidth = 1;
+      g.strokeStyle = t.accent;
+      g.lineWidth = 1;
       for (let i = 0; i <= DIV; i++) {
-        const major = i % 4 === 0;
-        ctx.globalAlpha = major ? (t.dark ? 0.10 : 0.07) : (t.dark ? 0.05 : 0.035);
+        g.globalAlpha = i % 4 === 0 ? t.gridMajor : t.grid;
         const gx = Math.round(x + i * step) + 0.5;
         const gy = Math.round(y + i * step) + 0.5;
-        ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx, y + side); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x + side, gy); ctx.stroke();
+        g.beginPath(); g.moveTo(gx, y); g.lineTo(gx, y + side); g.stroke();
+        g.beginPath(); g.moveTo(x, gy); g.lineTo(x + side, gy); g.stroke();
       }
+      g.globalAlpha = t.bezel; g.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, side, side);
+      g.globalAlpha = t.bezel * 0.5; g.strokeRect(Math.round(x + 6) + 0.5, Math.round(y + 6) + 0.5, side - 12, side - 12);
 
-      // Double bezel — real plates have a raised lip.
-      ctx.globalAlpha = 0.16; ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, side, side);
-      ctx.globalAlpha = 0.08; ctx.strokeRect(Math.round(x + 6) + 0.5, Math.round(y + 6) + 0.5, side - 12, side - 12);
-
-      // Graduations along the bottom and left, numbered in millimetres.
-      ctx.fillStyle = t.subtle;
-      ctx.globalAlpha = 0.5;
-      ctx.font = '500 10px "JetBrains Mono", ui-monospace, monospace';
-      ctx.strokeStyle = t.subtle;
+      g.fillStyle = t.subtle;
+      g.font = '500 10px "JetBrains Mono", ui-monospace, monospace';
+      g.strokeStyle = t.subtle;
       const b = y + side, quarter = side / 4;
       for (let i = 0; i <= 4; i++) {
         const gx = x + i * quarter, gy = b - i * quarter;
-        ctx.globalAlpha = 0.28;
-        ctx.beginPath(); ctx.moveTo(gx, b); ctx.lineTo(gx, b + 5); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x - 5, gy); ctx.stroke();
-        ctx.globalAlpha = 0.5;
+        g.globalAlpha = t.dark ? 0.28 : 0.42;
+        g.beginPath(); g.moveTo(gx, b); g.lineTo(gx, b + 5); g.stroke();
+        g.beginPath(); g.moveTo(x, gy); g.lineTo(x - 5, gy); g.stroke();
+        g.globalAlpha = t.dark ? 0.5 : 0.68;
         const mm = i * 64;
-        ctx.textAlign = "center"; ctx.textBaseline = "top";
-        // i === 0 is the origin, already labelled "0,0" — a second "0" collides with it.
-        if (i > 0) ctx.fillText(i === 4 ? `${mm} mm` : String(mm), gx, b + 10);
-        ctx.textAlign = "right"; ctx.textBaseline = "middle";
-        if (i > 0) ctx.fillText(String(mm), x - 10, gy);
+        g.textAlign = "center"; g.textBaseline = "top";
+        if (i > 0) g.fillText(i === 4 ? `${mm} mm` : String(mm), gx, b + 10);
+        g.textAlign = "right"; g.textBaseline = "middle";
+        if (i > 0) g.fillText(String(mm), x - 10, gy);
       }
-      ctx.globalAlpha = 0.45;
-      ctx.textAlign = "left"; ctx.textBaseline = "top";
-      ctx.fillText("0,0", x + 4, b + 10);
-      ctx.globalAlpha = 1;
+      g.globalAlpha = t.dark ? 0.45 : 0.6;
+      g.textAlign = "left"; g.textBaseline = "top";
+      g.fillText("0,0", x + 4, b + 10);
+      g.globalAlpha = 1;
     };
 
     /** Fade everything out under the text column so type sits in clean air. */
@@ -4104,107 +4228,132 @@ function LaunchBackdrop() {
       ctx.globalAlpha = 1;
     };
 
-    // Which part is on the bed. Starts on the day's part so two people opening the app
-    // on different days don't see the same one first, then cycles.
     let part = new Date().getDate() % FOOTPRINTS.length;
-    const pathOf = (p: { x: number; y: number; side: number }, i: number) => {
-      const path = new Path2D();
-      FOOTPRINTS[i].forEach(([nx, ny], j) => {
-        const px = p.x + nx * p.side, py = p.y + ny * p.side;
-        j === 0 ? path.moveTo(px, py) : path.lineTo(px, py);
-      });
-      path.closePath();
-      return path;
+    let moves: Move[] = [];
+    let lengths: number[] = [];
+    let total = 0;
+    let drawnUpTo = 0;   // index of the last move already committed to the bead layer
+    let drawnFrac = 0;   // how much of moves[drawnUpTo] is committed
+
+    const newBeadLayer = () => {
+      const bmp = document.createElement("canvas");
+      bmp.width = Math.max(1, Math.round(w * dpr));
+      bmp.height = Math.max(1, Math.round(h * dpr));
+      const g = bmp.getContext("2d");
+      if (!g) return;
+      g.setTransform(dpr, 0, 0, dpr, 0, 0);
+      beadBmp = bmp; beadCtx = g;
+      drawnUpTo = 0; drawnFrac = 0;
     };
 
-    /** The gantry: a soft band of light with a bright leading edge, crossing the bed. */
-    const drawGantry = (gx: number, fade: number) => {
+    const planPart = () => {
       if (!plate) return;
-      const t = tokens();
       const { x, y, side } = plate;
-      ctx.save();
-      ctx.beginPath(); ctx.rect(x, y, side, side); ctx.clip();
-
-      // The band trails BEHIND the leading edge — light falls off the way a real
-      // gantry's does, brightest at the head.
-      const trail = side * 0.22;
-      const band = ctx.createLinearGradient(gx - trail, 0, gx, 0);
-      band.addColorStop(0, "transparent");
-      band.addColorStop(1, t.accent);
-      ctx.globalAlpha = (t.dark ? 0.085 : 0.06) * fade;
-      ctx.fillStyle = band;
-      ctx.fillRect(gx - trail, y, trail, side);
-
-      ctx.globalAlpha = (t.dark ? 0.4 : 0.28) * fade;
-      ctx.strokeStyle = t.accent;
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(Math.round(gx) + 0.5, y);
-      ctx.lineTo(Math.round(gx) + 0.5, y + side);
-      ctx.stroke();
-      ctx.restore();
+      const poly: Pt[] = FOOTPRINTS[part].map(([nx, ny]) => ({ x: x + nx * side, y: y + ny * side }));
+      moves = buildToolpath(poly, side * 0.018, side * 0.030);
+      lengths = moves.map((m) => Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y));
+      total = lengths.reduce((s, v) => s + v, 0) || 1;
+      newBeadLayer();
     };
 
-    /** The part, revealed only where the gantry has already passed. */
-    const drawPart = (gx: number, alpha: number) => {
-      if (!plate || alpha <= 0) return;
+    /** Commit bead up to `dist` along the path. Only the NEW span is stroked. */
+    const extrudeTo = (dist: number): Pt | null => {
+      const g = beadCtx;
+      if (!g) return null;
       const t = tokens();
-      ctx.save();
-      // Clipping to the swept region is what ties the two together: the outline is not
-      // a second animation running alongside the gantry, it is the gantry's output.
-      ctx.beginPath();
-      ctx.rect(plate.x, plate.y, Math.max(0, gx - plate.x), plate.side);
-      ctx.clip();
-      const path = pathOf(plate, part);
-      ctx.fillStyle = t.accent;
-      ctx.globalAlpha = (t.dark ? 0.07 : 0.05) * alpha;
-      ctx.fill(path);
-      ctx.strokeStyle = t.accent;
-      ctx.globalAlpha = (t.dark ? 0.34 : 0.24) * alpha;
-      ctx.lineWidth = 1.5;
-      ctx.stroke(path);
-      ctx.restore();
+      // Opaque here, faded at COMPOSITE time. Stroking translucently made every
+      // round line-cap overlap its neighbour and double the alpha, leaving a row of
+      // dots along the bead where the segments met.
+      g.strokeStyle = t.accent;
+      g.globalAlpha = 1;
+      g.lineCap = "round";
+      g.lineJoin = "round";
+      g.lineWidth = Math.max(1.6, (plate?.side ?? 400) * 0.008);
+      let acc = 0, head: Pt | null = null;
+      for (let i = 0; i < moves.length; i++) {
+        const L = lengths[i];
+        if (acc + L <= dist) {
+          if (i > drawnUpTo || (i === drawnUpTo && drawnFrac < 1)) {
+            const from = i === drawnUpTo ? drawnFrac : 0;
+            if (!moves[i].travel) {
+              g.beginPath();
+              g.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * from, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * from);
+              g.lineTo(moves[i].b.x, moves[i].b.y);
+              g.stroke();
+            }
+            drawnUpTo = i; drawnFrac = 1;
+          }
+          acc += L;
+          head = moves[i].b;
+          continue;
+        }
+        const f = L > 0 ? (dist - acc) / L : 1;
+        // `from` must be resolved BEFORE drawnUpTo moves on. Updating the cursor first
+        // made `i === drawnUpTo` false for a newly-entered move, so its leading fraction
+        // was never stroked and the bead came out dashed.
+        const from = i === drawnUpTo ? drawnFrac : 0;
+        if (f > from && !moves[i].travel) {
+          g.beginPath();
+          g.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * from, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * from);
+          g.lineTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f);
+          g.stroke();
+        }
+        drawnUpTo = i; drawnFrac = Math.max(from, f);
+        head = { x: moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f, y: moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f };
+        break;
+      }
+      return head;
     };
 
-    // One pass of the bed. Slow enough to read as ambient rather than as a progress bar.
-    const CYCLE = 11000;
-    const SWEEP_END = 0.72;   // gantry clears the bed
-    const HOLD_END = 0.88;    // finished part holds
-    let t0 = 0, lastPaint = 0, lastCycle = 0;
+    const PRINT = 9000;   // laying the first layer
+    const HOLD = 2200;    // finished part sits on the bed
+    const CLEAR = 900;    // bed clears
+    const CYCLE = PRINT + HOLD + CLEAR;
+    let t0 = 0, lastPaint = 0, cycleIx = 0;
+
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       if (!t0) t0 = now;
-      // 30 fps is ample for an 11-second sweep and halves the cost on the entry screen,
-      // which is competing with the OCCT kernel warming up in the background.
-      if (now - lastPaint < 33) return;
+      if (now - lastPaint < 33) return;   // 30 fps is ample and halves the cost
       lastPaint = now;
-
-      const p = ((now - t0) % CYCLE) / CYCLE;
-      const cycles = Math.floor((now - t0) / CYCLE);
-      if (cycles !== lastCycle) { lastCycle = cycles; part = (part + 1) % FOOTPRINTS.length; }
-
       if (!plate || !plateBmp) return;
-      const { x, side } = plate;
-      const travel = side * 1.12;                       // overshoot both edges
-      const s = Math.min(1, p / SWEEP_END);
-      const gx = x - side * 0.06 + travel * s;
-      const partAlpha = p < HOLD_END ? 1 : 1 - (p - HOLD_END) / (1 - HOLD_END);
-      // The gantry itself fades as it leaves, so it doesn't pop off the right edge.
-      const gantryFade = p < SWEEP_END ? Math.min(1, (1 - s) / 0.12) : 0;
+
+      const elapsed = now - t0;
+      const ix = Math.floor(elapsed / CYCLE);
+      if (ix !== cycleIx) { cycleIx = ix; part = (part + 1) % FOOTPRINTS.length; planPart(); }
+      if (!moves.length) planPart();
+
+      const p = (elapsed % CYCLE);
+      const printing = p < PRINT;
+      const head = printing ? extrudeTo((p / PRINT) * total) : extrudeTo(total);
+      const fade = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
 
       ctx.clearRect(0, 0, w, h);
       ctx.drawImage(plateBmp, 0, 0, w, h);
-      drawPart(p < SWEEP_END ? gx : x + side + 1, partAlpha);
-      drawGantry(gx, gantryFade);
+      if (beadBmp) { ctx.globalAlpha = fade * tokens().bead; ctx.drawImage(beadBmp, 0, 0, w, h); ctx.globalAlpha = 1; }
+      if (printing && head) {
+        // The nozzle: a small solid dot at the head of the bead. The only moving
+        // object on the screen once the bead is laid.
+        const t = tokens();
+        const r = Math.max(2.2, plate.side * 0.011);
+        ctx.globalAlpha = 0.9;
+        ctx.fillStyle = t.accent;
+        ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.18;
+        ctx.beginPath(); ctx.arc(head.x, head.y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 1;
+      }
       applyMask();
     };
 
-    /** Reduced motion gets the finished bed, no gantry — the composed end state. */
+    /** Reduced motion: the finished part, no nozzle, no loop. */
     const drawStill = () => {
       if (!plate || !plateBmp) return;
+      planPart();
+      extrudeTo(total);
       ctx.clearRect(0, 0, w, h);
       ctx.drawImage(plateBmp, 0, 0, w, h);
-      drawPart(plate.x + plate.side + 1, 1);
+      if (beadBmp) { ctx.globalAlpha = tokens().bead; ctx.drawImage(beadBmp, 0, 0, w, h); ctx.globalAlpha = 1; }
       applyMask();
     };
 
@@ -4212,7 +4361,8 @@ function LaunchBackdrop() {
       cancelAnimationFrame(raf);
       drawPlate();
       if (still) { drawStill(); return; }
-      t0 = 0; lastPaint = 0; lastCycle = 0;
+      planPart();
+      t0 = 0; lastPaint = 0; cycleIx = 0;
       raf = requestAnimationFrame(frame);
     };
 
@@ -4227,8 +4377,6 @@ function LaunchBackdrop() {
     const onResize = () => { clearTimeout(rt); rt = setTimeout(resize, 150); };
     resize();
     window.addEventListener("resize", onResize);
-    // Theme flips change every colour the plate is drawn from, so the cached bitmap
-    // has to be rebuilt — render() does that and picks the loop back up.
     const obs = new MutationObserver(() => render());
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => { cancelAnimationFrame(raf); clearTimeout(rt); window.removeEventListener("resize", onResize); obs.disconnect(); };
@@ -4239,7 +4387,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, accountEmail }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -4253,6 +4401,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onSubmit: (text: string) => void;
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
+  recent?: { id: string; name: string; engine: string; thumb?: string }[];
+  onOpenRecent?: (id: string) => void;
+  onAllProjects?: () => void;
   accountEmail?: string | null;
 }) {
   const [draft, setDraft] = useState("");
@@ -4360,7 +4511,30 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           </button>
         )}
 
-        <p className="launch-label">Or start from a template</p>
+        {/* Your own work outranks the samples, so it sits above them. Shown whenever
+            projects EXIST rather than only when signed in — they are stored locally
+            either way, and hiding a signed-out user's own parts would be a lie. */}
+        {!!recent?.length && (
+          <>
+            <p className="launch-label">Pick up a recent project</p>
+            <div className="launch-recents">
+              {recent.map((r) => (
+                <button key={r.id} className="launch-recent" onClick={() => onOpenRecent?.(r.id)} title={`Open ${r.name}`}>
+                  <span className="lr-thumb">
+                    {r.thumb ? <img src={r.thumb} alt="" aria-hidden="true" /> : <IconCube />}
+                  </span>
+                  <span className="lr-meta">
+                    <b>{r.name}</b>
+                    <em>{r.engine === "replicad" ? "Precise CAD" : r.engine === "generative" ? "AI mesh" : "Part"}</em>
+                  </span>
+                </button>
+              ))}
+              <button className="launch-chip subtle" onClick={onAllProjects}>All projects →</button>
+            </div>
+          </>
+        )}
+
+        <p className="launch-label">{recent?.length ? "Or start from a template" : "Start from a template"}</p>
         <div className="launch-chips">
           {TEMPLATES.slice(0, 4).map((t) => (
             <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>
@@ -4419,8 +4593,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 
         <footer className="launch-foot">
           <span>
+            {/* Signed in, the old copy here restated the account chip in the header and
+                talked about key storage — nothing you can act on. Signed out it is a
+                real offer, so that half stays. */}
             {accountEmail
-              ? <>Your designs and keys sync to <b>{accountEmail}</b>.</>
+              ? null
               : <>Runs in your browser. Your designs and keys stay on this device.{" "}
                   <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button></>}
           </span>

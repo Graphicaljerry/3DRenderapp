@@ -1308,6 +1308,8 @@ interface Props {
     setMode: (m: "ask" | "auto") => void;
   };
   aiDiff: { added: Float32Array | null; removed: Float32Array | null } | null;
+  /** Faces of the CURRENT model a hovered parameter moves — drawn on the object itself. */
+  paramPeek: Float32Array | null;
   /** Grabbing/hovering a parameter slider previews WHERE it acts on the model. */
   onPeekParam: (key: string) => void;
   onPeekParamEnd: () => void;
@@ -2120,6 +2122,7 @@ export function Workspace(p: Props) {
                 onMeasurePoint={p.measureCtl.point}
                 onMeasureSegment={p.measureCtl.segment}
                 diff={p.aiDiff}
+                paramPeek={p.paramPeek}
                 holeGhost={p.holeCtl.draft ? { at: p.holeCtl.draft.at, normal: p.holeCtl.draft.normal, diameter: p.holeCtl.draft.diameter, depth: p.holeCtl.draft.depth, ref: p.holeCtl.draft.ref?.center ?? null } : null}
                 holePlace={p.holeCtl.draft && !p.holeCtl.draft.picking
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }

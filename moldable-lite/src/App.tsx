@@ -1679,9 +1679,16 @@ export default function App() {
   // overlay the AI change preview uses. You see the region before you touch it.
   //
   // Never touches the live model: it builds into a throwaway result and only diffs.
-  const [paramPeek, setParamPeek] = useState<{ added: Float32Array | null; removed: Float32Array | null } | null>(null);
+  const [paramPeek, setParamPeek] = useState<Float32Array | null>(null);
   const peekSeq = useRef(0);
   const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cache keyed by (code, every current value, param) — so re-hovering a slider you already
+  // looked at is instant, while ANY change to the model or another value invalidates the
+  // whole set. A probe is a full OCCT rebuild plus a BVH pass; paying that twice for the
+  // same question is the difference between the panel feeling live and feeling laggy.
+  const peekCache = useRef(new Map<string, Float32Array | null>());
+  const peekKeyBase = (code: string, vals: CadParams) =>
+    `${code.length}:${Object.keys(vals).sort().map((k) => `${k}=${vals[k]}`).join(",")}`;
 
   function endParamPeek() {
     peekSeq.current++;                       // invalidates any build still in flight
@@ -1703,14 +1710,19 @@ export default function App() {
     const base = { ...(src.params ?? {}), ...paramValues };
     const v = base[key];
     if (typeof v !== "number") return;
+    const ck = `${peekKeyBase(src.code, base)}|${key}`;
+    if (peekCache.current.has(ck)) { setParamPeek(peekCache.current.get(ck) ?? null); return; }
     // Big enough to be visible at a glance, small enough that the shape stays itself.
     const bump = Math.max(Math.abs(v) * 0.18, 1.5);
     try {
       const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, preview: true });
       if (seq !== peekSeq.current) return;   // pointer moved on — drop the stale result
-      const d = await computeChangeDiff(result.geometry, probe.geometry);
+      const { affectedFaces } = await import("./print/affected");
+      const faces = affectedFaces(result.geometry, probe.geometry);
+      if (peekCache.current.size > 40) peekCache.current.clear();   // bounded; keys are per-model anyway
+      peekCache.current.set(ck, faces);
       if (seq !== peekSeq.current) return;
-      setParamPeek(d);
+      setParamPeek(faces);
     } catch { /* a value that doesn't build just shows no peek */ }
   }
 
@@ -3671,7 +3683,8 @@ export default function App() {
           mode: aiApply,
           setMode: setAiApply,
         }}
-        aiDiff={pending?.diff ?? paramPeek}
+        aiDiff={pending?.diff ?? null}
+        paramPeek={paramPeek}
         onPeekParam={peekParam}
         onPeekParamEnd={endParamPeek}
         holeCtl={{
@@ -4102,7 +4115,10 @@ FOOTPRINTS[2] = (() => {
 const NAME_TEXT = "JERRY";
 // Per letter: bars on a 0..3 x 0..5 grid, [x0,y0,x1,y1].
 const GLYPHS: Record<string, [number, number, number, number][]> = {
-  J: [[2, 0, 3, 5], [0, 4, 2, 5], [0, 3, 1, 4]],
+  // Grid Y is UP (by=0 is the baseline, by=5 the cap height) because the renderer maps
+  // y1 - by*sy. The hook was written at by 3..5, which put it at the CAP — an upside-down
+  // J. It belongs on the baseline.
+  J: [[2, 1, 3, 5], [0, 0, 3, 1], [0, 1, 1, 2]],
   E: [[0, 0, 1, 5], [1, 0, 3, 1], [1, 2, 2.6, 3], [1, 4, 3, 5]],
   R: [[0, 0, 1, 5], [1, 4, 2.6, 5], [2, 3, 3, 4], [1, 2, 2.6, 3], [2, 0, 3, 2]],
   Y: [[0, 4, 1, 5], [0.6, 3, 1.6, 4], [1.4, 3, 2.4, 4], [2, 4, 3, 5], [1.2, 0, 2, 3]],

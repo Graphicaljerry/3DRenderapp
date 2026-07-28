@@ -147,6 +147,8 @@ interface Props {
   onEmptyTap?: () => void; // tap on empty space — the app closes open tools/panels
   /** AI change preview: ghost overlays for what the proposal adds (green) / removes (red). */
   diff: { added: Float32Array | null; removed: Float32Array | null } | null;
+  /** Triangles of the current model a hovered parameter would move. */
+  paramPeek: Float32Array | null;
   /** Hole tool ghost: the drill shown in place before committing, plus an alignment
    *  guide line to the reference hole's centre when one is picked. */
   holeGhost: { at: [number, number, number]; normal: [number, number, number]; diameter: number; depth: number; ref: [number, number, number] | null } | null;
@@ -267,7 +269,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
@@ -2111,6 +2113,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (diff.added) mk(diff.added, 0x22c55e);
     if (diff.removed) mk(diff.removed, 0xef4444);
   }, [diff]);
+
+  // Parameter peek: the faces of THIS model that the hovered slider moves, lit on the
+  // object. depthTest stays ON (unlike the diff volumes) — these ARE surfaces of the
+  // model, so they must be occluded by the parts of it in front of them, or the
+  // highlight reads as floating rather than painted on.
+  const peekMesh = useRef<THREE.Mesh | null>(null);
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (peekMesh.current) {
+      peekMesh.current.removeFromParent();
+      peekMesh.current.geometry.dispose();
+      (peekMesh.current.material as THREE.Material).dispose();
+      peekMesh.current = null;
+    }
+    if (!paramPeek || !paramPeek.length) return;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(paramPeek, 3));
+    g.computeVertexNormals();
+    const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({
+      color: 0x2563eb, transparent: true, opacity: 0.55, side: THREE.DoubleSide,
+      polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
+    }));
+    m.renderOrder = 2;
+    s.scene.add(m);
+    peekMesh.current = m;
+  }, [paramPeek]);
 
   // Hole tool ghost: a red drill cylinder + entry ring, a dashed line to the reference,
   // and SOLID alignment guides whenever an in-plane coordinate matches the reference —

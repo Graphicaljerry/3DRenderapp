@@ -3546,6 +3546,7 @@ export default function App() {
         onSkip={() => setEntered(true)}
         resume={resume}
         onResume={() => { setEntered(true); void resumeLast(); }}
+        accountEmail={accountEmail}
         onFree={enterFree}
         onSubmit={(text) => { setEntered(true); void send(text); }}
       />
@@ -3974,10 +3975,82 @@ function CubeMark({ size = 22 }: { size?: number }) {
   );
 }
 
+/* Ambient backdrop: a build plate receding into the distance, drifting slowly toward
+   the viewer. Canvas rather than DOM so it costs one compositor layer and no layout,
+   and it holds a single static frame under prefers-reduced-motion. */
+function LaunchBackdrop() {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+    const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    let w = 0, h = 0, dpr = 1;
+    const resize = () => {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = cv.clientWidth; h = cv.clientHeight;
+      cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    };
+    resize();
+    window.addEventListener("resize", resize);
+
+    const accent = () => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#498a6f";
+    const SPACING = 46;      // world units between grid lines
+    const HORIZON = 0.42;    // where the plate meets the vanishing point, as a fraction of height
+    const draw = (t: number) => {
+      ctx.clearRect(0, 0, w, h);
+      const hz = h * HORIZON;
+      const col = accent();
+      // Depth lines: evenly spaced in world space, projected so they bunch at the horizon.
+      const drift = still ? 0 : (t / 90) % SPACING;
+      for (let i = 0; i < 34; i++) {
+        const world = i * SPACING + drift;
+        const y = hz + (h - hz) * (1 - 1 / (1 + world / 190));
+        if (y > h + 2) break;
+        const fade = Math.min(1, (y - hz) / (h - hz) * 2.1);
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = 0.055 * fade;
+        ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+      }
+      // Rails converging on the vanishing point.
+      const cx = w / 2;
+      for (let i = -11; i <= 11; i++) {
+        const x = cx + i * (w / 13);
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = 0.05 * (1 - Math.abs(i) / 13);
+        ctx.beginPath(); ctx.moveTo(cx, hz); ctx.lineTo(x, h); ctx.stroke();
+      }
+      // A slow band of light travelling along the plate.
+      if (!still) {
+        const sweep = hz + (h - hz) * ((t / 5200) % 1);
+        const g = ctx.createLinearGradient(0, sweep - 90, 0, sweep + 90);
+        g.addColorStop(0, "transparent");
+        g.addColorStop(0.5, col);
+        g.addColorStop(1, "transparent");
+        ctx.globalAlpha = 0.05;
+        ctx.fillStyle = g;
+        ctx.fillRect(0, sweep - 90, w, 180);
+      }
+      ctx.globalAlpha = 1;
+    };
+    if (still) draw(0);
+    else {
+      const loop = (t: number) => { draw(t); raf = requestAnimationFrame(loop); };
+      raf = requestAnimationFrame(loop);
+    }
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
+  }, []);
+  return <canvas className="launch-bg" ref={ref} aria-hidden="true" />;
+}
+
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, accountEmail }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -3991,6 +4064,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onSubmit: (text: string) => void;
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
+  accountEmail?: string | null;
 }) {
   const [draft, setDraft] = useState("");
   const [showSignIn, setShowSignIn] = useState(false);
@@ -4042,6 +4116,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 
   return (
     <div className="launchpad">
+      <LaunchBackdrop />
       <header className="launch-top">
         <div className="brand">
           <CubeMark />
@@ -4049,7 +4124,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         </div>
         <div className="launch-top-right">
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? "☀" : "☾"}</button>
-          <button className="ghost sm" aria-expanded={showSignIn} onClick={() => setShowSignIn((v) => !v)}>Sign in</button>
+          {accountEmail
+            ? <span className="launch-account" title={`Signed in as ${accountEmail}`}>Signed in · {accountEmail}</span>
+            : <button className="ghost sm" aria-expanded={showSignIn} onClick={() => setShowSignIn((v) => !v)}>Sign in</button>}
         </div>
       </header>
 
@@ -4089,7 +4166,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <span className="gc-sub">Photo in → a replacement that actually fits</span>
         </button>
 
-        {showSignIn && (
+        {showSignIn && !accountEmail && (
         <div className="launch-signin">
         <div className="sect-label">Sign in — sync your projects &amp; keys across devices</div>
         {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
@@ -4133,8 +4210,10 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 
         <footer className="launch-foot">
           <span>
-            Runs in your browser. Your designs and keys stay on this device.{" "}
-            <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button>
+            {accountEmail
+              ? <>Your designs and keys sync to <b>{accountEmail}</b>.</>
+              : <>Runs in your browser. Your designs and keys stay on this device.{" "}
+                  <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button></>}
           </span>
           <span className="launch-actions">
             <button className="launch-free" onClick={onFree}>Start free in generative mode</button>

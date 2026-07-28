@@ -922,6 +922,13 @@ function ContextBar({ anchor, viewerRef, children }: {
    Objects panel, and the split-pieces panel (STL/3MF/zip) — three different format
    vocabularies for one concept. It opens on readiness, because the question before
    "which file?" is always "is this going to print?". */
+const FORMATS_WHAT =
+  "3MF keeps real millimetres and per-part colour and is what modern slicers want. " +
+  "STL is the universal fallback and forgets both. STEP is editable CAD for Fusion or Shapr3D, not a print file. " +
+  "OBJ is for reference only.";
+const READINESS_WHAT =
+  "Four checks that run before every export: the model is closed, it fits your bed, its size looks sane, " +
+  "and it is not so dense your slicer will struggle.";
 function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
   const [override, setOverride] = useState(false);
   const [pieceFmt, setPieceFmt] = useState<"stl" | "3mf">("stl");
@@ -952,7 +959,7 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
 
   return (
     <div className="dock-panel export-panel">
-      <p className="dock-sub">Print readiness</p>
+      <p className="dock-sub">Print readiness <Hint text={READINESS_WHAT} /></p>
       {!r ? (
         // The report is computed on an idle callback after the geometry lands. Say so,
         // rather than rendering nothing and looking like a clean bill of health.
@@ -984,7 +991,7 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
         </button>
       )}
 
-      <p className="dock-sub">File</p>
+      <p className="dock-sub">File <Hint text={FORMATS_WHAT} /></p>
       <input
         className="xname"
         value={p.exportName ?? ""}
@@ -1029,6 +1036,12 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
       {busy && <p className="dock-note">Preparing the file…</p>}
     </div>
   );
+}
+
+/* Hover help. `title` alone is invisible until you already suspect there is something
+   to learn — this marks the spot. Focusable so it is reachable without a pointer. */
+function Hint({ text }: { text: string }) {
+  return <span className="hint" tabIndex={0} role="note" aria-label={text} title={text}>?</span>;
 }
 
 function DockRow({ k, v }: { k: string; v: string }) {
@@ -1806,6 +1819,7 @@ export function Workspace(p: Props) {
         <div className="composer-wrap">
             <div className="modebar">
               <div className="modebar-row">
+                <Hint text="How the shape gets made. Precise builds exact, editable millimetre parts you can export as STEP — brackets, cases, adapters. Generative builds an organic AI mesh — figurines, sculpted shapes — which cannot be dimensioned. Auto reads your description and picks for you." />
                 <div className="seg">
                   <button className={p.modePref === "auto" ? "on" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
                   <button className={p.modePref === "precise" ? "on" : ""} title="Precise (CAD) — exact, editable, dimensioned parts · STEP export" onClick={() => p.pickMode("precise")}>Precise (CAD)</button>
@@ -2460,7 +2474,7 @@ export function Workspace(p: Props) {
             )}
             <aside className="inspector-dock" role="region" aria-label="Inspector" style={dockOpen ? undefined : { display: "none" }}>
               <div className="dock-head">
-                <p className="dock-eyebrow">Inspector</p>
+                <p className="dock-eyebrow">Inspector <Hint text="One panel at a time, beside the model. Pick a face or an edge and Selection describes it; the others inspect the whole part." /></p>
                 <button className="x" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}>›</button>
               </div>
               <div className="dock-list">
@@ -2667,25 +2681,30 @@ function ModelMenu({ value, groups, title, onPick, label }: { value: string; gro
 
 /** First-class FDM fit control — how loose the fitted features should be.
  *  Snug is the sensible default; re-fitting is one click, not a reprint. */
-const FIT_OPTS: { id: FitId; label: string; hint: string }[] = [
+const FIT_WHAT =
+  "How much room to leave between parts that go together — a lid on a box, a peg in a hole. " +
+  "Loose slides freely, Snug goes together by hand, Press needs a push and holds without glue. " +
+  "Calibrate once in Settings › Printer and these become your printer's real numbers.";
+const FIT_OPTS: { id: FitId; label: string; plain: string }[] = [
   // No millimetres in the hint: the real number comes from fitClearance(), which moves
   // with calibration. Baking one in here is how the tooltips came to disagree with it.
-  { id: "loose", label: "Loose", hint: "sliding fit" },
-  { id: "snug", label: "Snug", hint: "everyday fit" },
-  { id: "press", label: "Press", hint: "tight / press fit" },
+  { id: "loose", label: "Loose", plain: "Slides in and out freely" },
+  { id: "snug", label: "Snug", plain: "Goes together by hand and stays put" },
+  { id: "press", label: "Press", plain: "Needs a firm push, holds without glue" },
 ];
 function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
   const calibrated = fitCalibration() != null;
   return (
     <div className="fitbar" role="group" aria-label="Fit tolerance">
       <span className="fit-label">Fit</span>
+      <Hint text={FIT_WHAT} />
       <div className="fit-seg">
         {FIT_OPTS.map((o) => (
           <button
             key={o.id}
             type="button"
             className={fit === o.id ? "on" : ""}
-            title={`${o.hint} — ${fitClearance(o.id)} mm${calibrated ? ", measured on your printer" : " (typical FDM)"}`}
+            title={`${o.plain} — ${fitClearance(o.id)} mm gap${calibrated ? ", measured on your printer" : " (typical FDM estimate)"}`}
             onClick={() => onFit(o.id)}
           >
             {o.label}

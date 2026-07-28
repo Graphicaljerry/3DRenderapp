@@ -16,6 +16,9 @@
      statusbar disappeared completely. A wash darkens in light and lightens in dark
      (--ink inverts), so one token separates a control from whatever is behind it. */
   --launch-bg-page: oklch(93.2% 0.005 160);
+  /* One duration and one curve for every side panel, so both edges feel like one app. */
+  --panel-ms: .30s;
+  --panel-ease: cubic-bezier(.22, 1, .36, 1);
   --ctl: color-mix(in srgb, var(--ink) 6%, transparent);
   --ctl-h: color-mix(in srgb, var(--ink) 11%, transparent);
   --bg: oklch(99.4% 0.002 160);     /* panels & cards — never pure white */
@@ -916,9 +919,26 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .chat-bar .ghost.sm { background: var(--bubble-a); border-color: transparent; border-radius: 4px; color: var(--bubble-a-ink); padding: 5px 10px; }
 .chat-bar .ghost.sm:hover { background: var(--bord-strong); border-color: transparent; color: var(--ink); }
 .split.chat-collapsed { grid-template-columns: 40px 1fr; }
-.chat-rail { border: 1px solid var(--bord); border-radius: 12px; background: var(--bg); cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0; }
-.chat-rail:hover { background: var(--surf); }
-.chat-rail-label { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; font-weight: 600; color: var(--mut); letter-spacing: .04em; }
+/* A COLLAPSED rail is tinted with the accent wash and keeps an accent label, so a
+   closed panel reads as closed rather than as a blank strip of chrome. Deliberately a
+   wash and not a filled accent bar: this is persistent furniture, and a permanently
+   loud strip down the edge of the app becomes noise within a minute. Both rails share
+   the treatment so the two edges are obviously the same control. */
+.chat-rail, .dock-rail {
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--bord));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 9%, var(--chrome));
+  cursor: pointer; display: flex; align-items: center; justify-content: center; padding: 0;
+}
+.chat-rail:hover, .dock-rail:hover {
+  background: color-mix(in srgb, var(--accent) 17%, var(--chrome));
+  border-color: var(--accent);
+}
+.chat-rail-label, .dock-rail-label {
+  font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--accent-d); transition: color .15s ease;
+}
+.chat-rail-label { writing-mode: vertical-rl; transform: rotate(180deg); }
 
 /* ---------- docked side panel (Parameters over the 3D view) ---------- */
 /* Provider interception. Sits where the prompt was typed, never a modal — the
@@ -1094,40 +1114,36 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      is far easier to hit. The zoom cluster is shifted clear of it below. */
   position: absolute; top: 12px; bottom: 12px; right: 12px; z-index: 7;
   width: 34px; padding: 0;
-  /* --chrome, not --bg: over a dark 3D canvas a --bg panel is within a couple of
-     percent lightness of the scene behind it and the tab disappeared. This is the one
-     surface with nothing but canvas behind it, so it needs its own value plus a
-     stronger edge. */
-  border: 1px solid var(--bord-strong); border-radius: 12px; background: var(--chrome);
-  box-shadow: var(--shadow-md); cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  /* Colour and border come from the shared collapsed-rail rule below, which both this
+     and the chat rail use — over a dark 3D canvas a plain --bg panel sat within a couple
+     of percent lightness of the scene and the tab disappeared entirely. */
+  box-shadow: var(--shadow-md);
 }
 /* Same handling the open dock already gets: canvas furniture steps aside for it. */
 .viewer-body:has(.dock-rail) .right-dock { right: 56px; }
-.dock-rail:hover { background: var(--ctl-h); border-color: var(--accent); }
-.dock-rail:hover .dock-rail-label { color: var(--ink); }
-.dock-rail-label { writing-mode: vertical-rl; font-size: 12px; font-weight: 600; color: var(--ink2); letter-spacing: .06em; text-transform: uppercase; transition: color .15s ease; }
-/* Opening the Inspector reads as the rail expanding into the panel: same right edge,
-   same vertical centre, growing out to full size. transform-origin does the work, so
-   it is one composited animation with no layout thrash. */
-@keyframes dock-expand {
-  from { opacity: 0; transform: translateX(8px) scale(0.12, 0.16); border-radius: 10px; }
-  60%  { opacity: 1; }
-  to   { opacity: 1; transform: none; border-radius: 10px; }
+.dock-rail-label { writing-mode: vertical-rl; }
+/* Both side panels PAN. They slide in from their own edge and out the same way — no
+   scaling, because a panel that grows out of a sliver reads as a popup rather than a
+   drawer, and the two sides looked like different mechanisms. One duration and one
+   curve for the chat on the left and the Inspector on the right, so the app has a
+   single idea of what opening a panel means. Transform + opacity only: compositor
+   work, no layout during the slide (which matters here — the WebGL canvas resizes off
+   the layout, and animating the grid track would re-size it every frame). */
+@keyframes panel-slide-right {   /* Inspector, right edge */
+  from { opacity: 0; transform: translateX(100%); }
+  to   { opacity: 1; transform: translateX(0); }
 }
-/* NO translateY here. It dated from when the rail was a vertically-centred pill; once
-   the rail became full-height (top/bottom insets, no centring transform) the keyframe
-   was applying a -50% offset that the resting style does not have, so the rail leapt
-   half its own height ABOVE the canvas for the duration and snapped back — the glitch.
-   Scale from the right edge is all this needs. */
-@keyframes rail-shrink {
-  from { opacity: 1; transform: scaleX(1); }
-  to   { opacity: 0; transform: scaleX(0.4); }
+@keyframes panel-slide-left {    /* Chat, left edge */
+  from { opacity: 0; transform: translateX(-100%); }
+  to   { opacity: 1; transform: translateX(0); }
 }
-.inspector-dock { transform-origin: right center; animation: dock-expand .34s cubic-bezier(.22,1,.28,1); }
-.dock-rail { transform-origin: right center; animation: rail-shrink .2s cubic-bezier(.4,0,1,1) reverse; }
+/* The rails arrive the same way their panels leave — sliding in from the outer edge. */
+.inspector-dock { animation: panel-slide-right var(--panel-ms) var(--panel-ease); }
+.dock-rail { animation: panel-slide-right var(--panel-ms) var(--panel-ease); }
+.chat { animation: panel-slide-left var(--panel-ms) var(--panel-ease); }
+.chat-rail { animation: panel-slide-left var(--panel-ms) var(--panel-ease); }
 @media (prefers-reduced-motion: reduce) {
-  .inspector-dock, .dock-rail { animation: none; }
+  .inspector-dock, .dock-rail, .chat, .chat-rail { animation: none; }
 }
 
 /* Hover help */

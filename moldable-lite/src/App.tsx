@@ -32,7 +32,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconX, IconArrowUp } from "./components/icons";
+import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
@@ -4177,6 +4177,8 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 }) {
   const [draft, setDraft] = useState("");
   const [showSignIn, setShowSignIn] = useState(false);
+  // Same gate as the plate trace: the entrance plays once per tab, not on every return.
+  const [replayEntrance] = useState(() => sessionStorage.getItem("moldable_lp_traced") !== "1");
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
   const [email, setEmail] = useState("");
@@ -4240,7 +4242,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
       </header>
 
       <main className="launch-main">
-       <div className="launch-col">
+       <div className={`launch-col${replayEntrance ? " play" : ""}`}>
         <h1 className="launch-h1">What do you want to make?</h1>
         <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
 
@@ -4253,6 +4255,12 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
             placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
           />
+          <div className="launch-composer-foot">
+            {/* Real path, not decoration: this is the guided photo flow the app already has. */}
+            <button type="button" className="launch-attach" onClick={onGuided}>
+              <IconPaperclip /> Start from a photo
+            </button>
+          </div>
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim()}><IconArrowUp /></button>
         </form>
         <p className="launch-fine">Sizes are AI-generated. Check the fit before a long print.</p>

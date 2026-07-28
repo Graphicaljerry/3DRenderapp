@@ -297,7 +297,25 @@ button { font-family: inherit; cursor: pointer; }
 .send:disabled { opacity: 0.5; cursor: default; }
 
 /* ---------- viewer ---------- */
-.viewer-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; gap: 8px; }
+.viewer-head {
+  position: absolute; top: 0; left: 0; right: 0; z-index: var(--z-canvas);
+  display: flex; align-items: flex-start; justify-content: space-between;
+  padding: 10px 12px; gap: 8px;
+  pointer-events: none; /* the empty span of the bar must not block orbiting */
+}
+.viewer-head > * { pointer-events: auto; }
+/* The head FLOATS over the canvas rather than sitting in the column above it, so
+   the 3D view owns the full height of the viewer and the stats card / Inspector
+   ride at the very top corner. Only the tools pill is painted; the rest of the
+   bar is a pass-through span (pointer-events above) so orbiting still works where
+   it used to be a solid strip. */
+/* The pill lives top-LEFT and the docks top-RIGHT, so they coexist — until the
+   column is too narrow to hold both, where the docks drop below the pill instead
+   of sliding under it. */
+@container (max-width: 640px) {
+  .right-dock { top: 58px; }
+  .inspector-dock { top: 58px; }
+}
 /* The tab pill NEVER wraps internally (a lone icon on a second row inside the pill
    read as a broken overlay at iPad widths) — when the head runs out of room the
    whole tools cluster drops to its own row instead (see the 680px tier). */
@@ -318,7 +336,7 @@ button { font-family: inherit; cursor: pointer; }
 /* Toolbar buttons carry an icon + a text label; the label collapses when the viewer
    COLUMN (not the viewport — the chat width matters) gets narrow, so on iPad the row
    stays on one line instead of wrapping and squashing the 3D view. */
-.viewer { container-type: inline-size; }
+.viewer { container-type: inline-size; position: relative; }
 .iconbtn { display: inline-flex; align-items: center; gap: 6px; }
 .iconbtn svg { flex: 0 0 auto; }
 /* Tiered label collapse so the head stays ONE row at every width. Secondary labels
@@ -345,7 +363,10 @@ button { font-family: inherit; cursor: pointer; }
    cluster drops below as a whole instead of squeezing the tab pill apart. */
 @container (max-width: 680px) {
   .viewer-head { flex-wrap: wrap; gap: 6px; row-gap: 6px; }
-  .viewer-tools { gap: 3px; flex: 1 1 auto; }
+  /* The pill hugs its buttons — it used to stretch (flex: 1) to balance the tab
+     strip opposite it, and that strip is gone. A full-width pill would now run
+     under the right-hand dock. */
+  .viewer-tools { gap: 3px; flex: 0 0 auto; }
   .viewer-tools .ghost.sm { padding: 5px 6px; }
   .viewer-tools .seg button, .tabs button { padding: 5px 6px; }
   /* Give a cramped canvas its space back: a compact rail and a bounded dock, so the
@@ -1331,7 +1352,7 @@ details.guide { margin-top: 10px; }
 .canvas-rail {
   position: absolute;
   left: 10px;
-  top: 12px;
+  top: 62px;
   /* No overflow here: the tool flyouts are absolutely-positioned children that
      extend to the RIGHT of the rail, and any overflow value other than visible
      (even overflow-y alone — the other axis then computes to auto) would clip them.

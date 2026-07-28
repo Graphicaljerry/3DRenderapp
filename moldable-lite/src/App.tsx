@@ -463,10 +463,18 @@ export default function App() {
       if (!plates.has(part.plate)) plates.set(part.plate, []);
       plates.get(part.plate)!.push(part);
     }
-    for (const [n, parts] of [...plates.entries()].sort((x, y) => x[0] - y[0])) {
-      downloadBlob(geometriesTo3MF(parts), safeFileName(`${project?.name ?? "model"}-plate-${n}`, "3mf"));
+    const base = safeFileName(exportBase(), "3mf").replace(/\.[^.]+$/, "");
+    const entries = [...plates.entries()].sort((x, y) => x[0] - y[0]);
+    if (entries.length === 1) {
+      downloadBlob(geometriesTo3MF(entries[0][1]), `${base}-plate-${entries[0][0]}.3mf`);
+    } else {
+      // One zip, not N downloads: browsers throttle or block repeated downloadBlob()
+      // calls, so a user could silently receive fewer files than they had plates.
+      const files: Record<string, Blob> = {};
+      for (const [n, parts] of entries) files[`${base}-plate-${n}.3mf`] = geometriesTo3MF(parts);
+      downloadBlob(await (await import("./print/exportClient")).zipModelFiles(files), `${base}-plates.zip`);
     }
-    explainOnce("export-plates", `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.`);
+    explainOnce("export-plates", `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files${entries.length > 1 ? " in one zip" : ""} — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.`);
   }
   /** ONE project 3MF with every plate laid out — Bambu Studio / OrcaSlicer open it with
       the plates intact (each part named, grouped and positioned on its plate). */
@@ -474,7 +482,7 @@ export default function App() {
     const all = collectPlateParts();
     if (!all) return;
     const { platesToProject3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
-    downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }, plateNames), safeFileName(`${project?.name ?? "model"}-plates`, "3mf"));
+    downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }, plateNames), safeFileName(`${exportBase()}-plates`, "3mf"));
     const used = new Set(all.map((p) => p.plate)).size;
     explainOnce("export-project", `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.`);
   }
@@ -1242,6 +1250,11 @@ export default function App() {
   // user typed is preserved and offered two live exits (a free key, or build it as a
   // mesh right now). Every branch still ends in geometry.
   const [providerWall, setProviderWall] = useState<string | null>(null);
+  // Export used to have no filename control (every path derived it from project.name,
+  // silently falling back to "model") and no busy state at all, even though each path
+  // is async — a dynamic import plus a worker round-trip for STEP.
+  const [exportName, setExportName] = useState("");
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     if (!hasAuthReturn()) return;
     void completeAuthReturn().then((u) => {
@@ -1256,6 +1269,14 @@ export default function App() {
   useEffect(() => {
     if (project?.id) localStorage.setItem("moldable_last_project", project.id);
   }, [project?.id]);
+  useEffect(() => { setExportName(""); }, [project?.id]); // a new project re-derives the default
+  const exportBase = () => (exportName.trim() || project?.name || "model");
+  /** Every export is async (dynamic import, plus a worker round-trip for STEP). This is
+      the only thing that lets the UI say so — nothing disabled or spun before. */
+  const busyExport = <A extends unknown[]>(fn: (...a: A) => Promise<void>) => async (...a: A) => {
+    setExporting(true);
+    try { await fn(...a); } finally { setExporting(false); }
+  };
   // Land on a FRESH start screen; offer the last session as a one-tap resume
   // chip instead of auto-opening it (auto-open replayed stale errors on load).
   const [resume, setResume] = useState<{ id: string; name: string } | null>(null);
@@ -1740,12 +1761,12 @@ export default function App() {
   async function exportPiece(index: number, format: "stl" | "3mf") {
     const piece = splitPieces?.[index];
     if (!piece) return;
-    const base = safeFileName(project?.name ?? "model", format).replace(/\.[^.]+$/, "");
+    const base = safeFileName(exportBase(), format).replace(/\.[^.]+$/, "");
     downloadBlob(await pieceBlob(piece.geometry, format), `${base}-part${index + 1}.${format}`);
   }
   async function exportAllPieces(format: "stl" | "3mf") {
     if (!splitPieces?.length) return;
-    const base = safeFileName(project?.name ?? "model", format).replace(/\.[^.]+$/, "");
+    const base = safeFileName(exportBase(), format).replace(/\.[^.]+$/, "");
     try {
       const files: Record<string, Blob> = {};
       for (const [i, p] of splitPieces.entries()) files[`${base}-part${i + 1}.${format}`] = await pieceBlob(p.geometry, format);
@@ -1765,7 +1786,7 @@ export default function App() {
       const pf = preflightExport(result, printer);
       if (pf.repaired) applyResultNoCommit(pf.result);
       const blob = await engine.export(pf.result, "3mf");
-      const how = await openInSlicer(target, blob, safeFileName(project?.name ?? "model", "3mf"));
+      const how = await openInSlicer(target, blob, safeFileName(exportBase(), "3mf"));
       setMessages((m) => [
         ...m,
         {
@@ -3265,7 +3286,7 @@ export default function App() {
       const pf = preflightExport(result, printer);
       if (pf.repaired) applyResultNoCommit(pf.result); // viewer + report show exactly what was exported
       const blob = await engine.export(pf.result, format);
-      downloadBlob(blob, safeFileName(project?.name ?? "model", format));
+      downloadBlob(blob, safeFileName(exportBase(), format));
       // STEP is a CAD hand-off, not a print file — skip the print-readiness line.
       if (format !== "step") {
         explainOnce("export", `Exported ${format.toUpperCase()}. ${preflightSummary(pf)}`);
@@ -3664,8 +3685,8 @@ export default function App() {
           assign: assignPlate,
           add: addPlate,
           remove: removePlate,
-          exportEach: exportPlates,
-          exportProject: exportPlatesProject,
+          exportEach: busyExport(exportPlates),
+          exportProject: busyExport(exportPlatesProject),
         }}
         activePlate={activePlate}
         setActivePlate={setActivePlate}
@@ -3722,18 +3743,22 @@ export default function App() {
         paramValues={paramValues}
         onApplyParams={applyParams}
         onSaveParams={saveParamsVersion}
-        onOpenSlicer={openSlicer}
+        onOpenSlicer={busyExport(openSlicer)}
         onRepair={repairMesh}
         onSimplify={simplifyMesh}
         onSplit={splitMesh}
         onFitToPlate={() => void fitModelToPlate()}
-        splitCtl={{ pieces: splitPieces, exportPiece, exportAll: exportAllPieces, clear: () => setSplitPieces(null) }}
+        splitCtl={{ pieces: splitPieces, exportPiece: busyExport(exportPiece), exportAll: busyExport(exportAllPieces), clear: () => setSplitPieces(null) }}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy }}
         supportsStep={result?.supportsStep ?? false}
         canExport={(f) => (result?.kind === "generative" ? f === "stl" || f === "obj" || f === "3mf" /* = GenerativeEngine.canExport, inlined so the render path never loads the lazy engine */ : sel?.engine.canExport(f) ?? false)}
-        onExport={exportAs}
+        onExport={busyExport(exportAs)}
+        exportName={exportName}
+        onExportName={setExportName}
+        exportDefaultName={project?.name ?? "model"}
+        exporting={exporting}
         onOpenSettings={() => { setSettingsPane("ai"); setShowSettings(true); }}
         onOpenLibrary={() => setShowLibrary(true)}
         onNew={startNew}

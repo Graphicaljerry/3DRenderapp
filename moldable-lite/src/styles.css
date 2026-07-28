@@ -832,6 +832,29 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .wall-actions .x { margin-left: auto; }
 .wall-card .fine { margin: 0; }
 
+/* ---------- Export panel (the one surface) ---------- */
+.export-panel .dock-sub { margin-top: 4px; }
+.xrow { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 6px; background: var(--bg); border: 1px solid var(--bord); font-size: 12.5px; }
+.xrow.ok { border-color: color-mix(in srgb, var(--accent) 45%, var(--bord)); }
+.xrow.bad { border-color: var(--warn); }
+.xmark { width: 12px; text-align: center; color: var(--subt); }
+.xrow.ok .xmark { color: var(--accent-d); }
+.xrow.bad .xmark { color: var(--warn); }
+.xlabel { color: var(--ink); }
+.xdetail { margin-left: auto; font-size: 11px; color: var(--subt); }
+.xfix { display: flex; gap: 6px; flex-wrap: wrap; }
+.xoverride { align-self: flex-start; font-size: 11.5px; }
+.xname { width: 100%; padding: 7px 10px; border: 1px solid var(--bord); border-radius: 6px; font: inherit; font-size: 12.5px; background: var(--bg); color: var(--ink); }
+.xformats { display: flex; gap: 6px; flex-wrap: wrap; }
+.xfmt { padding: 6px 13px; border-radius: 999px; border: 1px solid var(--accent); background: var(--accent-w); color: var(--accent-d); font-size: 12.5px; font-weight: 500; }
+.xfmt:hover:not(:disabled) { background: var(--accent); color: var(--on-accent); }
+.xfmt:disabled { border-color: var(--bord); background: var(--bg); color: var(--subt); opacity: .6; }
+.xpiece { align-self: flex-start; }
+.export-panel .ghost.sm { text-align: left; }
+.export-panel .fine { margin: 0; }
+/* The status-bar trigger reads as pressed while its panel is the open one. */
+.statusbar .primary.on { background: var(--accent-d); }
+
 /* ---------- Launchpad (the entry surface) ----------
    A route, not a modal: the composer is the only filled, high-contrast object on
    the screen, and every other path below it reaches geometry without a key. */

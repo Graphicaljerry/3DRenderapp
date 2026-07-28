@@ -427,34 +427,6 @@ function PlateMenu({ value, count, names, onPick, onNewPlate }: { value: number;
     </span>
   );
 }
-
-/** The two ways plates leave the app: one project file with plates, or one file per plate. */
-function PlateExportMenu({ exportEach, exportProject, disabled, compact }: { exportEach: () => void; exportProject: () => void; disabled: boolean; compact?: boolean }) {
-  const btn = useRef<HTMLButtonElement>(null);
-  const [anchor, setAnchor] = useState<DOMRect | null>(null);
-  const close = () => setAnchor(null);
-  return (
-    <span className={compact ? "lp-export-wrap" : undefined} onClick={(e) => e.stopPropagation()}>
-      <button ref={btn} className={compact ? "lp-export" : "pb-export"} disabled={disabled} aria-haspopup="menu" aria-expanded={!!anchor}
-        title="Export your plate layout for the slicer" onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
-        Export ▾
-      </button>
-      {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={close} width={230}>
-          <button role="menuitem" className="pmenu-item" onClick={() => { close(); exportProject(); }}>
-            <b>One project .3mf</b>
-            <span>All plates in one file — Bambu Studio / OrcaSlicer</span>
-          </button>
-          <button role="menuitem" className="pmenu-item" onClick={() => { close(); exportEach(); }}>
-            <b>One .3mf per plate</b>
-            <span>Separate file for each plate — any slicer</span>
-          </button>
-        </AnchoredMenu>
-      )}
-    </span>
-  );
-}
-
 /** Bambu-style plate tabs over the 3D view: see what prints where, focus one plate,
     add/remove/rename plates (double-click a tab), and export the layout. */
 function PlateBar({ count, names, active, setActive, counts, onAdd, onRemove, onRename, exportEach, exportProject }: {
@@ -520,7 +492,6 @@ function PlateBar({ count, names, active, setActive, counts, onAdd, onRemove, on
         )}
       </div>
       <button className="pb-add" title="Add a build plate" onClick={onAdd}>+</button>
-      <PlateExportMenu exportEach={exportEach} exportProject={exportProject} disabled={false} />
     </div>
   );
 }
@@ -946,6 +917,120 @@ function ContextBar({ anchor, viewerRef, children }: {
   return <div className="ctxbar" ref={ref} role="toolbar" aria-label="Selection actions">{children}</div>;
 }
 
+/* ONE export surface. Replaces four that did not know about each other: the status-bar
+   dropdown (3MF/STL/STEP/OBJ), the plate bar menu (3MF only), the same menu again in the
+   Objects panel, and the split-pieces panel (STL/3MF/zip) — three different format
+   vocabularies for one concept. It opens on readiness, because the question before
+   "which file?" is always "is this going to print?". */
+function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
+  const [override, setOverride] = useState(false);
+  const [pieceFmt, setPieceFmt] = useState<"stl" | "3mf">("stl");
+  const r = p.report;
+  const pieces = p.splitCtl.pieces ?? [];
+  const hasPlates = p.plateCtl.count > 1 || p.attachments.length > 0;
+  const isMesh = p.activeKind !== "replicad";
+
+  // The four checks preflight actually runs. Nothing here is claimed that the code
+  // does not compute — wall thickness and floating islands are deliberately absent.
+  const tight = r?.manifold.isWatertight ?? null;
+  const fits = r?.bedFit.fitsRotated ?? null;
+  const heavy = r ? r.triangleCount > HEAVY_TRIANGLES : null;
+  const maxDim = p.dims ? Math.max(p.dims.x, p.dims.y, p.dims.z) : null;
+  const sane = maxDim == null ? null : maxDim >= 3;
+  const blocked = r != null && (fits === false || tight === false);
+  const gated = blocked && !override;
+
+  const Check = ({ ok, label, detail }: { ok: boolean | null; label: string; detail?: string }) => (
+    <div className={`xrow${ok === false ? " bad" : ok ? " ok" : ""}`}>
+      <span className="xmark">{ok == null ? "·" : ok ? "✓" : "▲"}</span>
+      <span className="xlabel">{label}</span>
+      {detail && <span className="xdetail">{detail}</span>}
+    </div>
+  );
+
+  if (!p.geometry) return <p className="dock-empty">Nothing to export yet — build or import a model first.</p>;
+
+  return (
+    <div className="dock-panel export-panel">
+      <p className="dock-sub">Print readiness</p>
+      {!r ? (
+        // The report is computed on an idle callback after the geometry lands. Say so,
+        // rather than rendering nothing and looking like a clean bill of health.
+        <p className="dock-note">Checking this model…</p>
+      ) : (
+        <>
+          <Check ok={tight} label="Watertight" detail={tight ? undefined : `${r.manifold.boundaryEdges} open edges`} />
+          <Check ok={fits} label="Fits your bed" detail={`${p.printer.bed.x}×${p.printer.bed.y} mm`} />
+          <Check ok={sane} label="Scale looks right" detail={maxDim ? `${Math.round(maxDim)} mm` : undefined} />
+          <Check ok={heavy === null ? null : !heavy} label="Slicer-friendly" detail={r.triangleCount >= 1000 ? `${Math.round(r.triangleCount / 1000)}k tris` : `${r.triangleCount} tris`} />
+        </>
+      )}
+
+      {r && !tight && isMesh && (
+        <button className="ghost sm" disabled={busy} onClick={p.onRepair}>Fix model — make it watertight</button>
+      )}
+      {r && heavy && isMesh && (
+        <button className="ghost sm" disabled={busy} onClick={p.onSimplify}>Simplify — halve triangles</button>
+      )}
+      {r && fits === false && (
+        <div className="xfix">
+          <button className="primary sm" disabled={busy} onClick={p.onFitToPlate}>Scale to fit</button>
+          <button className="ghost sm" disabled={busy} onClick={p.onSplit}>Split into pieces</button>
+        </div>
+      )}
+      {gated && (
+        <button className="link xoverride" onClick={() => setOverride(true)}>
+          Export anyway — I'll deal with it in the slicer
+        </button>
+      )}
+
+      <p className="dock-sub">File</p>
+      <input
+        className="xname"
+        value={p.exportName ?? ""}
+        placeholder={p.exportDefaultName ?? "model"}
+        aria-label="File name"
+        onChange={(e) => p.onExportName?.(e.target.value)}
+      />
+      <div className="xformats">
+        {EXPORT_FORMATS.map(({ f, label, desc }) => {
+          const ok = p.canExport(f) && !(f === "step" && !p.supportsStep);
+          return (
+            <button key={f} className="xfmt" disabled={!ok || gated || busy} title={f === "step" && !p.supportsStep ? "needs the Precise engine" : desc} onClick={() => p.onExport(f)}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+
+      {hasPlates && (
+        <>
+          <p className="dock-sub">Plates</p>
+          <button className="ghost sm" disabled={gated || busy} onClick={p.plateCtl.exportProject}>One project .3mf — all plates in one file</button>
+          <button className="ghost sm" disabled={gated || busy} onClick={p.plateCtl.exportEach}>One .3mf per plate{p.plateCtl.count > 1 ? " — as a zip" : ""}</button>
+        </>
+      )}
+
+      {pieces.length > 0 && (
+        <>
+          <p className="dock-sub">Pieces · {pieces.length}</p>
+          <div className="seg sm xpiece">
+            <button className={pieceFmt === "stl" ? "on" : ""} onClick={() => setPieceFmt("stl")}>STL</button>
+            <button className={pieceFmt === "3mf" ? "on" : ""} onClick={() => setPieceFmt("3mf")}>3MF</button>
+          </div>
+          <button className="ghost sm" disabled={gated || busy} onClick={() => p.splitCtl.exportAll(pieceFmt)}>Download all as .zip</button>
+        </>
+      )}
+
+      <p className="dock-sub">Hand off</p>
+      <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("bambu")}>Open in Bambu Studio</button>
+      <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("orca")}>Open in OrcaSlicer</button>
+      <p className="fine">Sends the 3MF of the model. The one-click hand-off needs the desktop build; on the web this downloads the file instead.</p>
+      {busy && <p className="dock-note">Preparing the file…</p>}
+    </div>
+  );
+}
+
 function DockRow({ k, v }: { k: string; v: string }) {
   return (
     <div className="dock-row">
@@ -1032,10 +1117,10 @@ function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]
   );
 }
 
-type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history";
+type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
 const DOCK_ITEMS: ReadonlyArray<readonly [DockPanel, string]> = [
   ["selection", "Selection"], ["objects", "Objects"], ["params", "Parameters"],
-  ["print", "Printability"], ["code", "Source"], ["history", "History"],
+  ["print", "Printability"], ["code", "Source"], ["history", "History"], ["export", "Export"],
 ];
 const TAB_PANEL = { "3d": "selection", code: "code", params: "params", print: "print", history: "history" } as const;
 
@@ -1166,6 +1251,10 @@ interface Props {
   bootError?: string;
   authNotice?: string | null;
   onDismissAuthNotice?: () => void;
+  exportName?: string;
+  onExportName?: (v: string) => void;
+  exportDefaultName?: string;
+  exporting?: boolean;
   providerWall?: string | null;
   onWallDismiss?: () => void;
   onWallAddKey?: () => void;
@@ -1515,7 +1604,6 @@ export function Workspace(p: Props) {
                       <button key={n} className={p.activePlate === n ? "on" : ""} title={n === 0 ? "Show every plate" : `Show only plate ${n}`} onClick={() => p.setActivePlate(n)}>{n === 0 ? "All" : `P${n}`}</button>
                     ))}
                     <button className="lp-add" title="Add a build plate" onClick={() => p.plateCtl.add()}>+</button>
-                    <PlateExportMenu compact exportEach={p.plateCtl.exportEach} exportProject={p.plateCtl.exportProject} disabled={!p.geometry} />
                   </div>
                   <div className={`lp-row${p.modelSelected ? " on" : ""}${p.geometry ? "" : " static"}`} style={{ cursor: p.geometry ? "pointer" : "default" }} title="Select the whole part (shows its bounding box) — double-click the name to rename" onClick={() => p.geometry && p.onModelSelect(!p.modelSelected)}>
                     <IconCube />
@@ -2414,6 +2502,7 @@ export function Workspace(p: Props) {
                   <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
                 )}
                 {dockPanel === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
+                {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
               </div>
             </aside>
           </div>
@@ -2433,7 +2522,13 @@ export function Workspace(p: Props) {
             <BuildTag />
             <DesktopUpdateChip />
             <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => setDockPanel("print")} />
-            <ExportMenu supportsStep={p.supportsStep} canExport={p.canExport} onExport={p.onExport} onOpenSlicer={p.onOpenSlicer} disabled={!p.geometry} report={p.report} activeKind={p.activeKind} busy={p.status === "generating"} onFix={p.onRepair} onSimplify={p.onSimplify} />
+            {/* Opens the Export panel in the dock rather than a dropdown of its own. The
+                old .export-menu opted out of the app's solo-menu invariant and had no
+                Escape or outside-click dismissal — it closed on re-click, onMouseLeave,
+                or picking an item, and mouse-leave is unreachable on touch. */}
+            <div className="export-wrap">
+              <button className={`primary${dockPanel === "export" ? " on" : ""}`} disabled={!p.geometry} onClick={() => setDockPanel("export")}>Export…</button>
+            </div>
           </div>
         </section>
       </main>
@@ -3013,75 +3108,6 @@ function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestor
     </div>
   );
 }
-
-/** Compact print-readiness line at the top of the export menu, with one-click
- *  fixes for the two classic slicer blockers: open meshes and heavy meshes. */
-function ExportReadiness({ report, activeKind, busy, onFix, onSimplify }: { report: PrintabilityReport | null; activeKind: EngineKind; busy: boolean; onFix: () => void; onSimplify: () => void }) {
-  if (!report) return null;
-  const fits = report.bedFit.fitsRotated;
-  const tight = report.manifold.isWatertight;
-  const heavy = report.triangleCount > HEAVY_TRIANGLES;
-  const isMesh = activeKind !== "replicad";
-  if (tight && fits && !heavy) {
-    return (
-      <div className="export-ready ok">
-        <IconCheck /> Print-ready — watertight · {report.bedFit.fitsAsIs ? "fits the bed" : "fits rotated"}
-      </div>
-    );
-  }
-  // Meshes can be closed & thinned right here; replicad output is
-  // kernel-exact, so a leak there is worth a look in Printability instead.
-  if (!tight && isMesh) {
-    return (
-      <div className="export-ready fix">
-        <span>{report.manifold.boundaryEdges} open edge(s)</span>
-        <button className="ghost sm mini" disabled={busy} onClick={onFix}>Fix model</button>
-      </div>
-    );
-  }
-  if (heavy && isMesh) {
-    return (
-      <div className="export-ready fix">
-        <span>{Math.round(report.triangleCount / 1e5) / 10}M triangles — heavy for slicers</span>
-        <button className="ghost sm mini" disabled={busy} onClick={onSimplify}>Simplify</button>
-      </div>
-    );
-  }
-  return <div className="export-ready no">{!fits ? "Larger than the bed — see Printability" : "Not watertight — see Printability"}</div>;
-}
-
-function ExportMenu({ supportsStep, canExport, onExport, onOpenSlicer, disabled, report, activeKind, busy, onFix, onSimplify }: { supportsStep: boolean; canExport: (f: ExportFormat) => boolean; onExport: (f: ExportFormat) => void; onOpenSlicer: (t: SlicerTarget) => void; disabled: boolean; report: PrintabilityReport | null; activeKind: EngineKind; busy: boolean; onFix: () => void; onSimplify: () => void }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div className="export-wrap">
-      {open && (
-        <div className="export-menu" onMouseLeave={() => setOpen(false)}>
-          <ExportReadiness report={report} activeKind={activeKind} busy={busy} onFix={onFix} onSimplify={onSimplify} />
-          {EXPORT_FORMATS.map(({ f, label, desc }) => {
-            const enabled = canExport(f) && !(f === "step" && !supportsStep);
-            return (
-              <button key={f} className="export-item" disabled={!enabled} onClick={() => { setOpen(false); onExport(f); }}>
-                <span className="ef">{label}</span>
-                <span className="ed">{f === "step" && !supportsStep ? "needs the Precise engine" : desc}</span>
-              </button>
-            );
-          })}
-          <div className="export-sep" />
-          <button className="export-item" onClick={() => { setOpen(false); onOpenSlicer("bambu"); }}>
-            <span className="ef">Open in Bambu Studio</span>
-            <span className="ed">sends the 3MF to the desktop app</span>
-          </button>
-          <button className="export-item" onClick={() => { setOpen(false); onOpenSlicer("orca"); }}>
-            <span className="ef">Open in OrcaSlicer</span>
-            <span className="ed">sends the 3MF to the desktop app</span>
-          </button>
-        </div>
-      )}
-      <button className="primary" disabled={disabled} onClick={() => setOpen((o) => !o)}>Export ▾</button>
-    </div>
-  );
-}
-
 /** Hole tool: exact placement (typed offsets + magnet snap) and alignment against an
     existing hole — pick its rim/wall, then zero a delta or type the exact spacing. */
 function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
@@ -3250,13 +3276,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
         <span>{pieces.length} pieces</span>
         <button className="x" aria-label="Hide pieces list" onClick={splitCtl.clear}><IconX /></button>
       </div>
-      <div className="split-actions">
-        <div className="seg sm">
-          <button className={format === "stl" ? "on" : ""} onClick={() => setFormat("stl")}>STL</button>
-          <button className={format === "3mf" ? "on" : ""} onClick={() => setFormat("3mf")}>3MF</button>
-        </div>
-        <button className="primary sm" onClick={() => splitCtl.exportAll(format)}>Download all ({format.toUpperCase()} zip)</button>
-      </div>
+      <p className="fine">Export them from the <b>Export</b> panel — one zip, or per piece.</p>
       <div className="split-list">
         {pieces.map((pc, i) => (
           <div className="split-row" key={i}>

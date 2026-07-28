@@ -1308,6 +1308,9 @@ interface Props {
     setMode: (m: "ask" | "auto") => void;
   };
   aiDiff: { added: Float32Array | null; removed: Float32Array | null } | null;
+  /** Grabbing/hovering a parameter slider previews WHERE it acts on the model. */
+  onPeekParam: (key: string) => void;
+  onPeekParamEnd: () => void;
   holeCtl: {
     draft: {
       at: [number, number, number];
@@ -1860,25 +1863,33 @@ export function Workspace(p: Props) {
                     <span className="web-state">{p.webMode === "auto" ? "Auto" : p.webMode === "on" ? "On" : "Off"}</span>
                   </button>
                 )}
+                {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
               </div>
-              <span className="modehint">
-                {p.autoPick
+              {/* This line renders ONLY when it says something you could not already
+                  read off the controls. It used to restate the mode on every idle
+                  frame ("Describe what you want to print — Auto picks…"), which is
+                  what the ? beside Auto is for, and cost a whole row above the input
+                  for nothing. Now it appears for what Auto actually chose, for the
+                  photo/markup states, and for generative pricing. */}
+              {(() => {
+                const line = p.autoPick
                   ? p.autoPick
-                  : p.modePref === "auto"
-                  ? "Describe what you want to print — Auto picks exact CAD or AI mesh for you (tap Precise or Generative to choose yourself)"
                   : p.modePref === "precise"
-                  ? p.guided
-                    ? "Replacement part — clearance is added to fitted features"
-                    : p.imageUrl
-                      ? p.imageMarkup
-                        ? "Marked screenshot → the change goes where you circled"
-                        : "Photo → exact CAD replacement (vision)"
-                      : "Exact parts from text or a photo · STEP export"
-                  : p.genProvider === "auto"
-                    ? "Whole/organic objects from a photo or text · Auto shows the engine & price when you send"
-                    : `Whole/organic objects from a photo or text · ${costLabel(p.genProvider, p.genModel) || "see Settings for pricing"}`}
-              </span>
-              {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
+                    ? p.guided
+                      ? "Replacement part — clearance is added to fitted features"
+                      : p.imageUrl
+                        ? p.imageMarkup
+                          ? "Marked screenshot → the change goes where you circled"
+                          : "Photo → exact CAD replacement (vision)"
+                        : null
+                    : p.modePref === "generative"
+                      ? p.genProvider === "auto"
+                        ? "Auto shows the engine & price when you send"
+                        : costLabel(p.genProvider, p.genModel) || null
+                      : null;
+                return line ? <span className="modehint">{line}</span> : null;
+              })()}
+              <div className="modebar-row modebar-gen">
               {p.mode === "generative" && (
                 <button
                   className={`texchip${p.genTexCtl.on ? " on" : ""}`}
@@ -1891,6 +1902,7 @@ export function Workspace(p: Props) {
                   {p.genTexCtl.on ? "🎨 Color: on" : "⬜ Color: off — print-first"}
                 </button>
               )}
+              </div>
             </div>
 
             {p.imageUrl && (
@@ -2533,7 +2545,7 @@ export function Workspace(p: Props) {
                 )}
                 {dockPanel === "objects" && objectsPanel}
                 {dockPanel === "params" && (
-                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} />
+                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
                 )}
                 {dockPanel === "print" && (
                   <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
@@ -3353,7 +3365,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
   );
 }
 
-function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onSave: () => void }) {
+function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
   const [local, setLocal] = useState<CadParams>(values);
   useEffect(() => setLocal(values), [values]);
   if (!isCad || !defaults) {
@@ -3375,8 +3387,18 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave }: { defau
         const { min, max, step } = paramRange(def);
         const v = local[k] ?? def;
         return (
-          <div className="param-row" key={k}>
-            <span className="pname">{k}</span>
+          <div
+            className="param-row"
+            key={k}
+            /* Both pointer and keyboard reach the peek: hovering the row starts it
+               (debounced in the handler), and focusing either control does too, so a
+               keyboard user gets the same visual tell. */
+            onPointerEnter={() => onPeek(k)}
+            onPointerLeave={onPeekEnd}
+            onFocus={() => onPeek(k)}
+            onBlur={onPeekEnd}
+          >
+            <span className="pname" title={k}>{k}</span>
             <input
               type="range"
               min={min}

@@ -1671,6 +1671,49 @@ export default function App() {
     }
   }
 
+  // ---- Parameter peek -----------------------------------------------------------
+  // Sliders are named after variables in generated code (plateWidth, hookReach, tipHeight)
+  // and the names change with every model, so reading them tells you nothing about WHICH
+  // part of the object they move. Grabbing a slider now builds the model once with that
+  // value nudged up and shows the geometric difference on the canvas — the same green/red
+  // overlay the AI change preview uses. You see the region before you touch it.
+  //
+  // Never touches the live model: it builds into a throwaway result and only diffs.
+  const [paramPeek, setParamPeek] = useState<{ added: Float32Array | null; removed: Float32Array | null } | null>(null);
+  const peekSeq = useRef(0);
+  const peekTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function endParamPeek() {
+    peekSeq.current++;                       // invalidates any build still in flight
+    if (peekTimer.current) { clearTimeout(peekTimer.current); peekTimer.current = null; }
+    setParamPeek(null);
+  }
+
+  function peekParam(key: string) {
+    if (peekTimer.current) clearTimeout(peekTimer.current);
+    // Hover intent: sweeping the cursor across a stack of sliders must not fire a build
+    // per row. Only a deliberate rest on one triggers the probe.
+    peekTimer.current = setTimeout(() => void runParamPeek(key), 260);
+  }
+
+  async function runParamPeek(key: string) {
+    const src = result?.source;
+    if (!sel || !result || src?.kind !== "code" || status === "generating") return;
+    const seq = ++peekSeq.current;
+    const base = { ...(src.params ?? {}), ...paramValues };
+    const v = base[key];
+    if (typeof v !== "number") return;
+    // Big enough to be visible at a glance, small enough that the shape stays itself.
+    const bump = Math.max(Math.abs(v) * 0.18, 1.5);
+    try {
+      const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, preview: true });
+      if (seq !== peekSeq.current) return;   // pointer moved on — drop the stale result
+      const d = await computeChangeDiff(result.geometry, probe.geometry);
+      if (seq !== peekSeq.current) return;
+      setParamPeek(d);
+    } catch { /* a value that doesn't build just shows no peek */ }
+  }
+
   /** Persist the current slider-adjusted state as a version. */
   function saveParamsVersion() {
     if (!project || !result || result.source.kind !== "code") return;
@@ -3628,7 +3671,9 @@ export default function App() {
           mode: aiApply,
           setMode: setAiApply,
         }}
-        aiDiff={pending?.diff ?? null}
+        aiDiff={pending?.diff ?? paramPeek}
+        onPeekParam={peekParam}
+        onPeekParamEnd={endParamPeek}
         holeCtl={{
           draft: holeDraft,
           canStart: !!selectedFeature && selectedFeature.kind === "face" && !selectedFeature.curved && activeKind === "replicad",
@@ -4017,15 +4062,25 @@ const FOOTPRINTS: [number, number][][] = [
   // phone stand — wedge with a lip at the foot and a cable slot behind it
   [[.20,.80],[.20,.66],[.30,.66],[.30,.60],[.22,.60],[.60,.20],[.72,.28],[.44,.66],
    [.74,.66],[.74,.80]],
-  // L-bracket with a corner gusset and two bolt pads
-  [[.26,.20],[.40,.20],[.40,.58],[.56,.58],[.56,.46],[.68,.46],[.68,.70],[.26,.70]],
-  // spur gear — twelve teeth around a hub (generated below, kept here for ordering)
+  // spur gear (generated below)
   [],
+  // hex key / allen wrench — an L with a hex head
+  [[.22,.34],[.70,.34],[.70,.20],[.82,.20],[.82,.46],[.34,.46],[.34,.78],[.22,.78]],
   // cable clip — a C that opens to the right
   [[.32,.24],[.68,.24],[.68,.38],[.46,.38],[.46,.62],[.68,.62],[.68,.76],[.32,.76]],
+  // "JERRY" nameplate (generated below) — the thing half of 3D printing actually is:
+  // a name on a keychain, a desk sign, a label for someone.
+  [],
+  // rocket — the small silly one in the set
+  [[.50,.12],[.60,.30],[.60,.56],[.72,.70],[.72,.82],[.58,.74],[.56,.86],[.44,.86],
+   [.42,.74],[.28,.82],[.28,.70],[.40,.56],[.40,.30]],
+  // open-end spanner
+  [[.30,.18],[.42,.18],[.42,.26],[.50,.26],[.50,.18],[.62,.18],[.62,.40],[.54,.46],
+   [.54,.78],[.38,.78],[.38,.46],[.30,.40]],
 ];
+
 // Tooth-by-tooth gear: recognisable at a glance and the one curved profile in the set.
-FOOTPRINTS[3] = (() => {
+FOOTPRINTS[2] = (() => {
   const pts: [number, number][] = [];
   const TEETH = 12, RO = 0.30, RI = 0.24;
   for (let i = 0; i < TEETH; i++) {
@@ -4038,6 +4093,50 @@ FOOTPRINTS[3] = (() => {
   }
   return pts;
 })();
+
+/* A nameplate. Letters are stroked as 7-segment-ish bars on a 3x5 grid and then
+   OUTLINED as a single closed loop around the plate — the toolpath is a plate with
+   the letters cut through it, which is exactly how you would print a keychain tag.
+   Kept as one outline (not per-letter islands) so it plays through the same
+   perimeter → infill machinery as everything else. */
+const NAME_TEXT = "JERRY";
+// Per letter: bars on a 0..3 x 0..5 grid, [x0,y0,x1,y1].
+const GLYPHS: Record<string, [number, number, number, number][]> = {
+  J: [[2, 0, 3, 5], [0, 4, 2, 5], [0, 3, 1, 4]],
+  E: [[0, 0, 1, 5], [1, 0, 3, 1], [1, 2, 2.6, 3], [1, 4, 3, 5]],
+  R: [[0, 0, 1, 5], [1, 4, 2.6, 5], [2, 3, 3, 4], [1, 2, 2.6, 3], [2, 0, 3, 2]],
+  Y: [[0, 4, 1, 5], [0.6, 3, 1.6, 4], [1.4, 3, 2.4, 4], [2, 4, 3, 5], [1.2, 0, 2, 3]],
+};
+FOOTPRINTS[5] = (() => {
+  // The plate outline only — the letter bars ride on top as extra closed loops that
+  // buildToolpath() walks after it (see NAME_BARS).
+  // Shifted right of 0.40: the backdrop fades out under the text column, and a plate
+  // starting at 0.14 put the J in the faded band where it was barely legible.
+  return [[.40, .38], [.97, .38], [.97, .62], [.40, .62]] as [number, number][];
+})();
+/** Letter bars for the nameplate, in plate-normalised coords. */
+const NAME_BARS: [number, number][][] = (() => {
+  const letters = NAME_TEXT.split("");
+  const CW = 3, GAP = 1;                       // glyph width + spacing, in grid units
+  const totalW = letters.length * CW + (letters.length - 1) * GAP;
+  const x0 = 0.435, x1 = 0.935, y0 = 0.415, y1 = 0.585;
+  const sx = (x1 - x0) / totalW, sy = (y1 - y0) / 5;
+  const out: [number, number][][] = [];
+  letters.forEach((ch, i) => {
+    const ox = i * (CW + GAP);
+    for (const [bx0, by0, bx1, by1] of GLYPHS[ch] ?? []) {
+      out.push([
+        [x0 + (ox + bx0) * sx, y1 - by0 * sy],
+        [x0 + (ox + bx1) * sx, y1 - by0 * sy],
+        [x0 + (ox + bx1) * sx, y1 - by1 * sy],
+        [x0 + (ox + bx0) * sx, y1 - by1 * sy],
+      ]);
+    }
+  });
+  return out;
+})();
+/** Extra closed loops printed after a part's own outline (nameplate lettering). */
+const EXTRA_LOOPS: Record<number, [number, number][][]> = { 5: NAME_BARS };
 
 type Pt = { x: number; y: number };
 /** One continuous nozzle move. `travel` moves are non-extruding (no bead drawn). */
@@ -4105,7 +4204,7 @@ function infillLines(poly: Pt[], spacing: number): [Pt, Pt][] {
 
 /** The full toolpath for one part: outer wall, inner wall, then infill — the order a
  *  slicer actually emits, with non-extruding travel moves between disconnected runs. */
-function buildToolpath(poly: Pt[], wall: number, spacing: number): Move[] {
+function buildToolpath(poly: Pt[], wall: number, spacing: number, extra: Pt[][] = []): Move[] {
   const moves: Move[] = [];
   const loop = (pts: Pt[]) => {
     for (let i = 0; i < pts.length; i++) moves.push({ a: pts[i], b: pts[(i + 1) % pts.length], travel: false });
@@ -4119,10 +4218,19 @@ function buildToolpath(poly: Pt[], wall: number, spacing: number): Move[] {
   // "inside" it reports leaks past the teeth. Hatch the true outline instead — infill
   // meeting the perimeter is what a slicer does anyway.
   let cursor = inner[0];
-  for (const [a, b] of infillLines(poly, spacing)) {
+  // A part with lettering gets NO infill: diagonal hatch over the glyphs made "JERRY"
+  // unreadable, and on a real nameplate the lettering is the feature you look at.
+  for (const [a, b] of (extra.length ? [] : infillLines(poly, spacing))) {
     moves.push({ a: cursor, b: a, travel: true });
     moves.push({ a, b, travel: false });
     cursor = b;
+  }
+  // Lettering on a nameplate: separate closed loops walked last, each reached by a
+  // travel move, exactly as a slicer orders disconnected islands on one layer.
+  for (const isle of extra) {
+    moves.push({ a: cursor, b: isle[0], travel: true });
+    loop(isle);
+    cursor = isle[0];
   }
   return moves;
 }
@@ -4250,7 +4358,9 @@ function LaunchBackdrop() {
       if (!plate) return;
       const { x, y, side } = plate;
       const poly: Pt[] = FOOTPRINTS[part].map(([nx, ny]) => ({ x: x + nx * side, y: y + ny * side }));
-      moves = buildToolpath(poly, side * 0.018, side * 0.030);
+      const extra = (EXTRA_LOOPS[part] ?? []).map((loopPts) =>
+        loopPts.map(([nx, ny]) => ({ x: x + nx * side, y: y + ny * side })));
+      moves = buildToolpath(poly, side * 0.018, side * 0.030, extra);
       lengths = moves.map((m) => Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y));
       total = lengths.reduce((s, v) => s + v, 0) || 1;
       newBeadLayer();

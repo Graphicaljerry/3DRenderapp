@@ -463,6 +463,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!s) return;
       controls.enabled = !e.value;
       s.transforming = e.value;
+      renderer.domElement.style.cursor = e.value ? "grabbing" : "";
       if (dynamicRes) { if (e.value) qualityDown(); else qualityUp(); } // low-res while the handle drags
       // The dims box can't follow a mid-drag pivot — hide it for the drag only. A model
       // drag commits an op whose rebuild recreates the dims; a no-op release or an
@@ -527,6 +528,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s.tcR.enabled = !translateWins;
       if (translateWins) (s.tcR as any).axis = null; // drop the loser's hover highlight
       else (s.tc as any).axis = null;
+      applyGizmoCursor(s);
+    };
+    /** Tell the pointer what it is about to grab.
+     *  The arbitration above already knows which handle is under the cursor and on which
+     *  axis, but that only ever tinted the gizmo — the cursor stayed a plain arrow, so
+     *  "am I on the handle or about to orbit the camera instead?" was a guess you
+     *  resolved by dragging and undoing. Axis-shaped cursors make the answer visible
+     *  before the press: a translate arrow reads as a move, a ring as a rotate-grab. */
+    const applyGizmoCursor = (s: Internals) => {
+      if (s.transforming) return;                 // 'grabbing' is owned by the drag
+      const winner = s.tc.enabled ? s.tc : s.tcR;
+      const axis: string | null = (winner as any).axis ?? null;
+      if (!axis || !(winner as any).object) {
+        if (renderer.domElement.style.cursor === "grab" || renderer.domElement.style.cursor === "move")
+          renderer.domElement.style.cursor = "";
+        return;
+      }
+      renderer.domElement.style.cursor = winner.getMode() === "rotate" ? "grab" : "move";
     };
     renderer.domElement.addEventListener("pointermove", arbitrate, true);
     renderer.domElement.addEventListener("pointerdown", arbitrate, true);

@@ -21,7 +21,7 @@ export interface PrintPrepCtl {
 }
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
-import { paramRange, type CadParams } from "../cad/params";
+import { paramSoftRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
 import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type UpdateState } from "../lib/desktopUpdate";
@@ -3370,6 +3370,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
 
 function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
   const [local, setLocal] = useState<CadParams>(values);
+  const [editing, setEditing] = useState<Record<string, string>>({});
   useEffect(() => setLocal(values), [values]);
   if (!isCad || !defaults) {
     return (
@@ -3380,62 +3381,148 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
       </div>
     );
   }
-  const commit = (next: CadParams) => {
-    if (!busy) onApply(next);
-  };
+  const commit = (next: CadParams) => { if (!busy) onApply(next); };
+  const keys = Object.keys(defaults);
+  const changed = keys.filter((k) => (local[k] ?? defaults[k]) !== defaults[k]).length;
+
   return (
-    <div className="panel">
-      <p className="fine" style={{ margin: "0 0 10px" }}>Drag a slider — the model re-builds instantly, no AI call.</p>
-      {Object.entries(defaults).map(([k, def]) => {
-        const { min, max, step } = paramRange(def);
+    <div className="panel params">
+      <p className="fine params-lede">
+        Hover a row to see the part it moves. Drag the name to scrub, or type a value —
+        <b> +5</b>, <b>*2</b> and <b>(30/2)+4</b> all work.
+      </p>
+      {groupParams(defaults, local).map((grp) => (
+      <section className="pgroup" key={grp.title || "all"}>
+        {grp.title && <h4 className="pgroup-title">{grp.title}</h4>}
+      {grp.rows.map(({ key: k }) => {
+        const def = defaults[k];
         const v = local[k] ?? def;
+        const isInt = isCountParam(k);
+        const { min, max, step: soft } = paramSoftRange(def);
+        const step = isInt ? 1 : soft;
+        const dirty = v !== def;
+        // Position within the SOFT range, drawn as a fill behind the number — the range
+        // is a guess, so it informs without occupying a row of its own.
+        const pct = max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0;
+
+        const setVal = (raw: number) => {
+          const q = isInt ? Math.round(raw) : Math.round(raw / step) * step;
+          setLocal({ ...local, [k]: +q.toFixed(4) });
+        };
+
         return (
           <div
-            className="param-row"
+            className={`prow${dirty ? " dirty" : ""}`}
             key={k}
-            /* Both pointer and keyboard reach the peek: hovering the row starts it
-               (debounced in the handler), and focusing either control does too, so a
-               keyboard user gets the same visual tell. */
             onPointerEnter={() => onPeek(k)}
             onPointerLeave={onPeekEnd}
             onFocus={() => onPeek(k)}
             onBlur={onPeekEnd}
           >
-            <span className="pname" title={k}>{k}</span>
-            <input
-              type="range"
-              min={min}
-              max={max}
-              step={step}
-              value={v}
+            {/* Drag the LABEL to scrub, the way Figma and Blender do. The label was
+                already the hover target for the geometry peek, so rest = show me where
+                this acts, drag = change it. Pointer capture means the drag survives
+                leaving the row. */}
+            <button
+              type="button"
+              className="prow-name"
+              title={`${k} — drag to scrub`}
               disabled={busy}
-              onChange={(e) => setLocal({ ...local, [k]: +e.target.value })}
-              onPointerUp={() => commit(local)}
-              onKeyUp={(e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") commit(local); }}
-            />
-            <input
-              className="pnum"
-              type="number"
-              step={step}
-              value={v}
-              disabled={busy}
-              onChange={(e) => setLocal({ ...local, [k]: +e.target.value })}
-              onBlur={() => commit(local)}
-              onKeyDown={(e) => { if (e.key === "Enter") commit(local); }}
-            />
-            <span className="punit">mm</span>
+              onPointerDown={(e) => {
+                if (busy) return;
+                const el = e.currentTarget;
+                el.setPointerCapture(e.pointerId);
+                const x0 = e.clientX;
+                const v0 = v;
+                let moved = false;
+                const move = (ev: PointerEvent) => {
+                  const dx = ev.clientX - x0;
+                  if (Math.abs(dx) < 3 && !moved) return;
+                  moved = true;
+                  // Fine scrub while Shift is held, as every 3D tool does.
+                  const scale = (ev.shiftKey ? 0.25 : 1) * step;
+                  setVal(Math.min(max, Math.max(min, v0 + dx * scale * 0.5)));
+                };
+                const up = () => {
+                  el.releasePointerCapture(e.pointerId);
+                  el.removeEventListener("pointermove", move);
+                  el.removeEventListener("pointerup", up);
+                  if (moved) commit({ ...local, [k]: local[k] ?? v });
+                };
+                el.addEventListener("pointermove", move);
+                el.addEventListener("pointerup", up);
+              }}
+            >
+              <span className="pn-human">{humanizeParam(k)}</span>
+              <span className="pn-code">{k}</span>
+            </button>
+
+            <span className="prow-field">
+              <i className="pf-fill" style={{ width: `${pct}%` }} aria-hidden="true" />
+              <input
+                className="pf-input"
+                type="text"
+                inputMode="decimal"
+                value={editing[k] ?? String(v)}
+                disabled={busy}
+                aria-label={`${humanizeParam(k)} in millimetres`}
+                onChange={(e) => setEditing({ ...editing, [k]: e.target.value })}
+                onFocus={() => setEditing({ ...editing, [k]: String(v) })}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { const n = { ...editing }; delete n[k]; setEditing(n); (e.target as HTMLInputElement).blur(); return; }
+                  if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); return; }
+                  // Arrows nudge by one step, x10 with Shift — keyboard parity with the scrub.
+                  if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                    e.preventDefault();
+                    const d = (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1);
+                    const nv = +( (parseFloat(editing[k] ?? String(v)) || v) + d ).toFixed(4);
+                    setEditing({ ...editing, [k]: String(nv) });
+                    const next = { ...local, [k]: isInt ? Math.round(nv) : nv };
+                    setLocal(next); commit(next);
+                  }
+                }}
+                onBlur={() => {
+                  const raw = editing[k];
+                  const n = { ...editing }; delete n[k]; setEditing(n);
+                  if (raw === undefined) return;
+                  const parsed = evalParamInput(raw, v);
+                  if (parsed === null) return;              // unparseable → keep the old value
+                  const q = isInt ? Math.round(parsed) : +parsed.toFixed(4);
+                  if (q === v) return;
+                  const next = { ...local, [k]: q };
+                  setLocal(next); commit(next);
+                }}
+              />
+              <span className="pf-unit">{isInt ? "" : "mm"}</span>
+            </span>
+
+            {/* Per-row revert. A global "Reset to AI values" throws away every edit to
+                undo one, which is why nobody uses it mid-session. */}
+            <button
+              type="button"
+              className="prow-revert"
+              title={dirty ? `Revert to the AI's ${def}` : "Unchanged"}
+              aria-label={`Revert ${humanizeParam(k)}`}
+              disabled={busy || !dirty}
+              onClick={() => { const next = { ...local, [k]: def }; setLocal(next); commit(next); }}
+            >
+              <IconReset />
+            </button>
           </div>
         );
       })}
+      </section>
+      ))}
       <div className="param-actions">
-        <button className="ghost sm" disabled={busy} onClick={() => { setLocal(defaults); onApply(defaults); }}><IconReset /> Reset to AI values</button>
+        <button className="ghost sm" disabled={busy || !changed} onClick={() => { setLocal(defaults); onApply(defaults); }}>
+          <IconReset /> Reset all{changed ? ` (${changed})` : ""}
+        </button>
         <button className="primary sm" disabled={busy} onClick={onSave}>Save as version</button>
       </div>
       <p className="fine">Adjustments apply to exports immediately; “Save as version” keeps them in History.</p>
     </div>
   );
 }
-
 function Spinner() {
   return <span className="spinner" aria-hidden />;
 }

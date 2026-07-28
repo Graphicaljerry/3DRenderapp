@@ -217,7 +217,7 @@ export default function App() {
   const [key, setKey] = useState(() => localStorage.getItem(KEY_LS) ?? "");
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_LS) ?? MODELS[0].id);
   // "entered" survives reloads for free-mode users too (not only key holders).
-  const [entered, setEnteredState] = useState(() => !!localStorage.getItem(KEY_LS) || localStorage.getItem("moldable_entered") === "1");
+  const [entered, setEnteredState] = useState(false);
   const setEntered = (v: boolean) => {
     if (v) localStorage.setItem("moldable_entered", "1");
     setEnteredState(v);
@@ -3544,6 +3544,8 @@ export default function App() {
         onTemplate={(t) => void loadTemplate(t)}
         onGuided={() => { setEntered(true); startGuided(); }}
         onSkip={() => setEntered(true)}
+        resume={resume}
+        onResume={() => { setEntered(true); void resumeLast(); }}
         onFree={enterFree}
         onSubmit={(text) => { setEntered(true); void send(text); }}
       />
@@ -3975,7 +3977,7 @@ function CubeMark({ size = 22 }: { size?: number }) {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -3987,6 +3989,8 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onSkip: () => void;
   onFree: () => void;
   onSubmit: (text: string) => void;
+  resume?: { id: string; name: string } | null;
+  onResume?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const [showSignIn, setShowSignIn] = useState(false);
@@ -4065,6 +4069,12 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim()}>↑</button>
         </form>
         <p className="launch-fine">Sizes are AI-generated — check the fit before a long print.</p>
+
+        {resume && (
+          <button className="launch-resume" onClick={onResume}>
+            Continue where you left off — <b>{resume.name}</b>
+          </button>
+        )}
 
         <p className="launch-label">Or start from a template — one tap, no key needed</p>
         <div className="launch-chips">

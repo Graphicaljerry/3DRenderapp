@@ -1548,10 +1548,11 @@ export function Workspace(p: Props) {
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
   const [showLayers, setShowLayers] = useState(false); // legacy gate: context-menu Rename still opens Objects
   const [dockPanel, setDockPanel] = useState<DockPanel>("selection");
+  const [dockOpen, setDockOpen] = useState(true);
   // A pick is a request to inspect it: bring Selection forward rather than leaving the
   // description behind whichever panel happened to be open.
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
-  useEffect(() => { if (picked) setDockPanel("selection"); }, [picked]);
+  useEffect(() => { if (picked) { setDockPanel("selection"); setDockOpen(true); } }, [picked]);
   void showLayers; void setShowLayers; // retained: context-menu Rename still drives this
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
@@ -1970,17 +1971,6 @@ export function Workspace(p: Props) {
           onDrop={onDrop}
         >
           <div className="viewer-head">
-            <div className="tabs">
-              {(["3d", "code", "params", "print", "history"] as const).map((t) => {
-                const label = t === "3d" ? "3D View" : t === "code" ? "Source" : t === "params" ? "Params" : t === "print" ? "Printability" : "History";
-                const Ic = t === "3d" ? IconCube : t === "code" ? IconCode : t === "params" ? IconSliders : t === "print" ? IconPrinter : IconHistory;
-                return (
-                  <button key={t} className={`iconbtn${TAB_PANEL[t] === dockPanel ? " on" : ""}`} aria-label={label} title={label} onClick={() => { setDockPanel(TAB_PANEL[t]); p.setTab("3d"); }}>
-                    <Ic /><span className="btn-label">{label}</span>
-                  </button>
-                );
-              })}
-            </div>
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="viewer-tools">
                   <div className="seg sm">
@@ -2015,9 +2005,6 @@ export function Workspace(p: Props) {
                     toggleOverhang={p.printPrep.toggleOverhang}
                     onResetView={() => p.viewerRef.current?.resetView()}
                   />
-                  <button className={`ghost sm iconbtn${dockPanel === "objects" ? " on" : ""}`} aria-pressed={dockPanel === "objects"} aria-label="Objects" title="Objects on the canvas — select, rename, group and assign plates" onClick={() => setDockPanel((v) => (v === "objects" ? "selection" : "objects"))}>
-                    <IconLayers /><span className="btn-label">Objects</span>
-                  </button>
                   <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
                     <IconHelp />
                   </button>
@@ -2466,8 +2453,16 @@ export function Workspace(p: Props) {
             {/* Sibling of .right-dock, never a child: `.right-dock:empty { display: none }`
                 is the only thing that hides that stack, so an always-rendered child there
                 would leave an invisible box capturing clicks over the canvas. */}
-            <aside className="inspector-dock" role="region" aria-label="Inspector">
-              <p className="dock-eyebrow">Inspector — one panel at a time</p>
+            {!dockOpen && (
+              <button className="dock-rail" title="Show inspector" aria-label="Show inspector" onClick={() => setDockOpen(true)}>
+                <span className="dock-rail-label">‹ Inspector</span>
+              </button>
+            )}
+            <aside className="inspector-dock" role="region" aria-label="Inspector" style={dockOpen ? undefined : { display: "none" }}>
+              <div className="dock-head">
+                <p className="dock-eyebrow">Inspector</p>
+                <button className="x" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}>›</button>
+              </div>
               <div className="dock-list">
                 {DOCK_ITEMS.map(([key, label]) => (
                   <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key} onClick={() => setDockPanel(key)}>
@@ -2521,13 +2516,13 @@ export function Workspace(p: Props) {
             {p.status === "generating" && <GenTimer />}
             <BuildTag />
             <DesktopUpdateChip />
-            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => setDockPanel("print")} />
+            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => { setDockPanel("print"); setDockOpen(true); }} />
             {/* Opens the Export panel in the dock rather than a dropdown of its own. The
                 old .export-menu opted out of the app's solo-menu invariant and had no
                 Escape or outside-click dismissal — it closed on re-click, onMouseLeave,
                 or picking an item, and mouse-leave is unreachable on touch. */}
             <div className="export-wrap">
-              <button className={`primary${dockPanel === "export" ? " on" : ""}`} disabled={!p.geometry} onClick={() => setDockPanel("export")}>Export…</button>
+              <button className={`primary${dockPanel === "export" && dockOpen ? " on" : ""}`} disabled={!p.geometry} onClick={() => { setDockPanel("export"); setDockOpen(true); }}>Export…</button>
             </div>
           </div>
         </section>

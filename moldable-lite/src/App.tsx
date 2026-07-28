@@ -4331,7 +4331,16 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             autoFocus
             rows={1}
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              // Grow with the text up to the CSS max-height; the scrollbar exists only
+              // beyond that. Without this the box was fixed-height with overflow:auto,
+              // so a gutter appeared while the box still looked mostly empty.
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+              el.style.overflowY = el.scrollHeight > 260 ? "auto" : "hidden";
+            }}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
             placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
           />

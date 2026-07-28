@@ -1821,7 +1821,7 @@ export function Workspace(p: Props) {
               <div className="modebar-row">
                 <Hint text="How the shape gets made. Precise builds exact, editable millimetre parts you can export as STEP — brackets, cases, adapters. Generative builds an organic AI mesh — figurines, sculpted shapes — which cannot be dimensioned. Auto reads your description and picks for you." />
                 <div className="seg">
-                  <button className={p.modePref === "auto" ? "on" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
+                  <button className={p.modePref === "auto" ? "on auto-live" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
                   <button className={p.modePref === "precise" ? "on" : ""} title="Precise (CAD) — exact, editable, dimensioned parts · STEP export" onClick={() => p.pickMode("precise")}>Precise (CAD)</button>
                   <button className={p.modePref === "generative" ? "on" : ""} title="Generative (AI mesh) — organic / sculptural shapes from text or a photo" onClick={() => p.pickMode("generative")}>Generative (AI mesh)</button>
                 </div>
@@ -2682,9 +2682,11 @@ function ModelMenu({ value, groups, title, onPick, label }: { value: string; gro
 /** First-class FDM fit control — how loose the fitted features should be.
  *  Snug is the sensible default; re-fitting is one click, not a reprint. */
 const FIT_WHAT =
-  "How much room to leave between parts that go together — a lid on a box, a peg in a hole. " +
-  "Loose slides freely, Snug goes together by hand, Press needs a push and holds without glue. " +
-  "Calibrate once in Settings › Printer and these become your printer's real numbers.";
+  "Only matters when a part has to mate with something — a lid on a box, a peg in a hole, a slot over a tab. " +
+  "FDM printers lay down plastic slightly wider than the model, so two parts printed at exactly the same size seize up. " +
+  "This is the gap left on each side to compensate: Loose slides freely, Snug goes together by hand, Press needs a firm push and holds without glue. " +
+  "It has nothing to do with whether the part fits your print bed — that is the 'Fits bed' check on the model. " +
+  "Print the Tolerance test coupon (Templates) and enter what actually fit, and these become your printer's measured numbers instead of estimates.";
 const FIT_OPTS: { id: FitId; label: string; plain: string }[] = [
   // No millimetres in the hint: the real number comes from fitClearance(), which moves
   // with calibration. Baking one in here is how the tooltips came to disagree with it.
@@ -2696,7 +2698,10 @@ function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
   const calibrated = fitCalibration() != null;
   return (
     <div className="fitbar" role="group" aria-label="Fit tolerance">
-      <span className="fit-label">Fit</span>
+      {/* "Fit" alone read as "does it fit the bed?" — which is a DIFFERENT check, shown
+          on the model as "Fits bed". Naming what it fits removes the collision without
+          needing the hover. */}
+      <span className="fit-label">Part fit</span>
       <Hint text={FIT_WHAT} />
       <div className="fit-seg">
         {FIT_OPTS.map((o) => (

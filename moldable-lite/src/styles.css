@@ -330,7 +330,13 @@ button { font-family: inherit; cursor: pointer; }
 
 /* ---------- viewer ---------- */
 .viewer-head {
-  position: absolute; top: 0; left: 0; right: 0; z-index: var(--z-canvas);
+  /* --z-popover, NOT --z-canvas. A positioned element with a z-index creates a
+     stacking context, which CAPS every descendant at that value: with the head at
+     the canvas band (10), the Set size / View / Snap menus inside it declared 60 and
+     still rendered under the tool rail at 30. A container that hosts popovers has to
+     live in the popover band itself. Safe to sit this high because the bar is
+     pointer-events: none apart from the pill, so it blocks nothing. */
+  position: absolute; top: 0; left: 0; right: 0; z-index: var(--z-popover);
   display: flex; align-items: flex-start; justify-content: space-between;
   padding: 10px 12px; gap: 8px;
   pointer-events: none; /* the empty span of the bar must not block orbiting */
@@ -791,6 +797,27 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .modebar .seg { background: transparent; border-color: var(--bord-strong); border-radius: 999px; padding: 3px; }
 .modebar .seg button { border-radius: 999px; padding: 5px 12px; color: var(--ink2); }
 .modebar .seg button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; font-weight: 600; }
+/* Auto engaged: the pill is ALIVE — a specular sheen sweeps it every few seconds, and a
+   faint accent halo breathes underneath. Auto is the one mode where the app is making a
+   decision for you, so it gets the one animated surface in the composer. Pure transform/
+   opacity (compositor-only), and the sheen pauses under prefers-reduced-motion. */
+.modebar .seg button.auto-live { position: relative; overflow: hidden; box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent), 0 0 12px color-mix(in srgb, var(--accent) 28%, transparent); }
+.modebar .seg button.auto-live::after {
+  content: ""; position: absolute; top: 0; bottom: 0; left: -60%; width: 45%;
+  background: linear-gradient(105deg, transparent, color-mix(in srgb, var(--on-invert) 30%, transparent) 50%, transparent);
+  transform: skewX(-18deg) translateX(0);
+  animation: auto-sheen 3.2s cubic-bezier(.4,0,.2,1) infinite;
+  pointer-events: none;
+}
+@keyframes auto-sheen {
+  0%   { transform: skewX(-18deg) translateX(0); opacity: 0; }
+  8%   { opacity: 1; }
+  34%  { transform: skewX(-18deg) translateX(360%); opacity: 1; }
+  42%, 100% { transform: skewX(-18deg) translateX(360%); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .modebar .seg button.auto-live::after { animation: none; opacity: 0; }
+}
 .seg button { border: none; background: none; border-radius: 7px; padding: 5px 10px; font-size: 12px; font-weight: 500; color: var(--mut); white-space: nowrap; }
 .seg button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
 .seg.sm button { padding: 3px 9px; font-size: 11px; }
@@ -957,7 +984,9 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      --bord-strong — that token is for hover/focus, and using it at rest drew a
      hard grey box around the hero. */
   border: 1px solid var(--bord); border-radius: var(--r-md); background: var(--bg); color: var(--ink);
-  font: inherit; font-size: 1rem; line-height: 1.5; resize: none; overflow-y: auto;
+  /* hidden, not auto: the box GROWS with the text (see the onChange handler) and only
+     turns its scrollbar on at max-height — no gutter while the box is mostly empty. */
+  font: inherit; font-size: 1rem; line-height: 1.5; resize: none; overflow-y: hidden;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
 .launch-composer:focus-within textarea { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }

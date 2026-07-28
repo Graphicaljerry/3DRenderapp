@@ -126,7 +126,27 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       return attempt(op.size);
     }
     if (op.type === "fillet" || op.type === "chamfer") {
-      const filter = (e: any) => e.withinDistance(PICK_TOL, op.at);
+      // NEAREST edge, not "everything within tolerance". withinDistance(0.25) alone
+      // catches every edge running past the anchor — so an anchor near a corner (or on
+      // a part with sub-tolerance features) beveled faces the user never picked. Rank
+      // all edges by sampled distance to the anchor and keep only the winner — plus
+      // genuine ties, which is what makes a CORNER pick work: the vertex sits at
+      // distance ~0 from all three of its edges, and rounding them together is the op.
+      const distTo = (edge: any): number => {
+        let d = Infinity;
+        try {
+          for (let i = 0; i <= 8; i++) {
+            const q = edge.pointAt(i / 8);
+            d = Math.min(d, Math.hypot(q.x - op.at[0], q.y - op.at[1], q.z - op.at[2]));
+          }
+        } catch { /* unmeasurable edge — stays Infinity */ }
+        return d;
+      };
+      let best = Infinity;
+      for (const ed of shape.edges) best = Math.min(best, distTo(ed));
+      if (best > PICK_TOL) throw new Error("couldn't find an edge at that point — try picking it again");
+      const CO_TOL = 0.02; // ties this close to the winner are the same pick (a corner)
+      const filter = (e: any) => e.when(({ element }: any) => distTo(element) <= best + CO_TOL);
       attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
       return attempt(op.size);
     }

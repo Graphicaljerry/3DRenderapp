@@ -2670,11 +2670,29 @@ function buildTriData(geo: THREE.BufferGeometry): TriData {
     const pv = (v: number) => new THREE.Vector3(vpos[v * 3], vpos[v * 3 + 1], vpos[v * 3 + 2]);
     const A = closed ? cen : pv(ends[0]);
     const B = closed ? cen : pv(ends[1]);
-    // Representative point: the start of the chain's median segment. OCCT samples edge
-    // vertices ON the true curve, so this point lies exactly on the physical edge (unlike
-    // a chord midpoint or centroid) — which makes it a reliable target for fillet/chamfer.
+    // Representative point — the fillet/chamfer anchor, so it must be ON the physical
+    // edge and AWAY from its ends. The old choice ("start of the median segment") was
+    // an endpoint whenever the chain had one segment — which is every straight CAD
+    // edge — i.e. a model CORNER. The worker's finder then matched all three edges
+    // through that corner, and a picked bottom edge beveled the top too.
+    //  • ≥2 segments: an interior junction vertex — OCCT samples these exactly on the
+    //    true curve, and a junction of two chain segments cannot be a chain end.
+    //  • 1 segment: the chord midpoint — a single-segment edge is straight to within
+    //    the tessellation tolerance, so its midpoint lies on it.
     const midSeg = segs[Math.floor(segs.length / 2)];
-    const C = new THREE.Vector3(edges[midSeg * 6], edges[midSeg * 6 + 1], edges[midSeg * 6 + 2]);
+    let C: THREE.Vector3;
+    if (segs.length > 1) {
+      const interior = midSeg >= 0 && (vcount.get(segVa[midSeg]) ?? 0) >= 2 ? segVa[midSeg] : segVb[midSeg];
+      C = (vcount.get(interior) ?? 0) >= 2
+        ? pv(interior)
+        : pv([...vcount.entries()].find(([, c]) => c >= 2)![0]); // any interior vertex
+    } else {
+      C = new THREE.Vector3(
+        (edges[midSeg * 6] + edges[midSeg * 6 + 3]) / 2,
+        (edges[midSeg * 6 + 1] + edges[midSeg * 6 + 4]) / 2,
+        (edges[midSeg * 6 + 2] + edges[midSeg * 6 + 5]) / 2,
+      );
+    }
     chains.push({ segs, ax: A.x, ay: A.y, az: A.z, bx: B.x, by: B.y, bz: B.z, cx: C.x, cy: C.y, cz: C.z, len, closed });
   }
 
@@ -2997,8 +3015,9 @@ function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: 
     if (s.selCache?.key === `edge:${chainId}` && s.selCache.info.kind === "edge") { showOnly(s.edgeHi); return s.selCache.info; }
     const ch = tri.chains[chainId];
     // Highlight the WHOLE physical edge (a thin tube along every segment, not one chord).
-    // A real edge has no width, so keep the tube slim — just enough to read as a line.
-    const er = Math.max(0.1, s.markR * 0.32);
+    // A real edge has no width, so keep the tube slim — but thick enough that the
+    // selection is unmistakable at a glance from normal viewing distance.
+    const er = Math.max(0.14, s.markR * 0.45);
     const parts: THREE.BufferGeometry[] = [];
     const yA = new THREE.Vector3(0, 1, 0);
     const A = new THREE.Vector3(), B = new THREE.Vector3(), dir = new THREE.Vector3(), mid = new THREE.Vector3(), q = new THREE.Quaternion(), mtx = new THREE.Matrix4(), scl = new THREE.Vector3();

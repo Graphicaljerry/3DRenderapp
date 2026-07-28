@@ -30,9 +30,9 @@ import { parseSpec } from "./cad/spec";
 import { extractParams, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
 import { TemplatesModal } from "./components/TemplatesModal";
-import { TEMPLATES, type Template } from "./cad/templates";
+import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconX } from "./components/icons";
+import { IconGitHub, IconGoogle, IconX, IconArrowUp } from "./components/icons";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
@@ -3975,9 +3975,26 @@ function CubeMark({ size = 22 }: { size?: number }) {
   );
 }
 
-/* Ambient backdrop: a build plate receding into the distance, drifting slowly toward
-   the viewer. Canvas rather than DOM so it costs one compositor layer and no layout,
-   and it holds a single static frame under prefers-reduced-motion. */
+/* Ambient backdrop: the build plate, drawn the way a slicer draws it — orthographic,
+   top-down, axis-aligned, graduated in real millimetres against the configured bed.
+   No perspective: a horizon with rails converging on a centred vanishing point reads as
+   radar or a coordinate axis, not as a plate, and no amount of tuning removes that.
+   It is also the wrong world — the workspace already renders a real perspective plate,
+   so the entry screen should point at that, not invent a second fake one.
+   The plate is static. One part footprint strokes itself on at load and then holds. */
+
+/** Four template silhouettes in plate-normalised coords — closed outlines only. */
+const FOOTPRINTS: [number, number][][] = [
+  // wall hook
+  [[.30,.72],[.30,.30],[.44,.30],[.44,.58],[.66,.58],[.66,.44],[.74,.44],[.74,.72]],
+  // cable clip
+  [[.26,.66],[.26,.46],[.34,.38],[.50,.34],[.66,.38],[.74,.46],[.74,.66],[.64,.66],[.64,.50],[.50,.44],[.36,.50],[.36,.66]],
+  // phone stand
+  [[.24,.74],[.24,.62],[.62,.26],[.72,.34],[.44,.62],[.70,.62],[.70,.74]],
+  // spacer
+  [[.34,.68],[.34,.36],[.66,.36],[.66,.68]],
+];
+
 function LaunchBackdrop() {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
@@ -3986,63 +4003,155 @@ function LaunchBackdrop() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    let raf = 0;
-    let w = 0, h = 0, dpr = 1;
+    // A surface seen every session should not re-perform: trace once per tab.
+    const replay = sessionStorage.getItem("moldable_lp_traced") !== "1";
+
+    let raf = 0, w = 0, h = 0, plate: { x: number; y: number; side: number } | null = null;
+    const tokens = () => {
+      const cs = getComputedStyle(document.documentElement);
+      return {
+        accent: cs.getPropertyValue("--accent").trim() || "#498a6f",
+        subtle: cs.getPropertyValue("--subt").trim() || "#8b968f",
+        dark: document.documentElement.getAttribute("data-theme") === "dark",
+      };
+    };
+
+    /** The plate, its graduations and its light. Everything here is fixed. */
+    const drawPlate = () => {
+      const t = tokens();
+      const side = Math.min(h * 0.78, 900);
+      const x = w * 0.63 - side / 2;
+      const y = h * 0.55 - side / 2;
+      plate = { x, y, side };
+      const DIV = 32;                       // 8 mm per division on a 256 mm bed
+      const step = side / DIV;
+      ctx.clearRect(0, 0, w, h);
+
+      // One directional light, above and right. The only ambient event on the screen.
+      const glow = ctx.createRadialGradient(x + side * 0.8, y + side * 0.15, 0, x + side * 0.8, y + side * 0.15, side * 0.9);
+      glow.addColorStop(0, t.accent); glow.addColorStop(1, "transparent");
+      ctx.globalAlpha = t.dark ? 0.05 : 0.04;
+      ctx.fillStyle = glow;
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = t.accent;
+      ctx.lineWidth = 1;
+      for (let i = 0; i <= DIV; i++) {
+        const major = i % 4 === 0;
+        ctx.globalAlpha = major ? (t.dark ? 0.10 : 0.07) : (t.dark ? 0.05 : 0.035);
+        const gx = Math.round(x + i * step) + 0.5;
+        const gy = Math.round(y + i * step) + 0.5;
+        ctx.beginPath(); ctx.moveTo(gx, y); ctx.lineTo(gx, y + side); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x + side, gy); ctx.stroke();
+      }
+
+      // Double bezel — real plates have a raised lip.
+      ctx.globalAlpha = 0.16; ctx.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, side, side);
+      ctx.globalAlpha = 0.08; ctx.strokeRect(Math.round(x + 6) + 0.5, Math.round(y + 6) + 0.5, side - 12, side - 12);
+
+      // Graduations along the bottom and left, numbered in millimetres.
+      ctx.fillStyle = t.subtle;
+      ctx.globalAlpha = 0.5;
+      ctx.font = '500 10px "JetBrains Mono", ui-monospace, monospace';
+      ctx.strokeStyle = t.subtle;
+      const b = y + side, quarter = side / 4;
+      for (let i = 0; i <= 4; i++) {
+        const gx = x + i * quarter, gy = b - i * quarter;
+        ctx.globalAlpha = 0.28;
+        ctx.beginPath(); ctx.moveTo(gx, b); ctx.lineTo(gx, b + 5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, gy); ctx.lineTo(x - 5, gy); ctx.stroke();
+        ctx.globalAlpha = 0.5;
+        const mm = i * 64;
+        ctx.textAlign = "center"; ctx.textBaseline = "top";
+        // i === 0 is the origin, already labelled "0,0" — a second "0" collides with it.
+        if (i > 0) ctx.fillText(i === 4 ? `${mm} mm` : String(mm), gx, b + 10);
+        ctx.textAlign = "right"; ctx.textBaseline = "middle";
+        if (i > 0) ctx.fillText(String(mm), x - 10, gy);
+      }
+      ctx.globalAlpha = 0.45;
+      ctx.textAlign = "left"; ctx.textBaseline = "top";
+      ctx.fillText("0,0", x + 4, b + 10);
+
+      // Fade the plate out under the text column so type sits in clean air.
+      const mask = ctx.createLinearGradient(0, 0, w * 0.58, 0);
+      mask.addColorStop(0, "rgba(0,0,0,1)"); mask.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.globalCompositeOperation = "destination-out";
+      ctx.fillStyle = mask; ctx.fillRect(0, 0, w * 0.58, h);
+      ctx.globalCompositeOperation = "source-over";
+      ctx.globalAlpha = 1;
+    };
+
+    const fp = FOOTPRINTS[new Date().getDate() % FOOTPRINTS.length];
+    const pathOf = (p: { x: number; y: number; side: number }) => {
+      const path = new Path2D();
+      fp.forEach(([nx, ny], i) => {
+        const px = p.x + nx * p.side, py = p.y + ny * p.side;
+        i === 0 ? path.moveTo(px, py) : path.lineTo(px, py);
+      });
+      path.closePath();
+      return path;
+    };
+    const perimeter = (p: { side: number }) => {
+      let len = 0;
+      for (let i = 0; i < fp.length; i++) {
+        const a = fp[i], b = fp[(i + 1) % fp.length];
+        len += Math.hypot((b[0] - a[0]) * p.side, (b[1] - a[1]) * p.side);
+      }
+      return len;
+    };
+
+    /** The traced footprint, drawn over the plate. progress 0..1. */
+    const drawTrace = (progress: number) => {
+      if (!plate) return;
+      const t = tokens();
+      const len = perimeter(plate);
+      ctx.save();
+      // Match the plate's own fade so the outline disappears under the text too.
+      const clip = ctx.createLinearGradient(0, 0, w * 0.58, 0);
+      ctx.strokeStyle = t.accent;
+      ctx.globalAlpha = 0.2;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([len, len]);
+      ctx.lineDashOffset = len * (1 - progress);
+      ctx.stroke(pathOf(plate));
+      ctx.setLineDash([]);
+      void clip;
+      ctx.restore();
+    };
+
+    const easeOutQuint = (x: number) => 1 - Math.pow(1 - x, 5);
+    let start = 0;
+    const run = (now: number) => {
+      if (!start) start = now;
+      const p = Math.min(1, (now - start) / 1400);
+      drawPlate();
+      drawTrace(easeOutQuint(p));
+      if (p < 1) raf = requestAnimationFrame(run);
+      else sessionStorage.setItem("moldable_lp_traced", "1");
+    };
+
+    const render = () => {
+      cancelAnimationFrame(raf);
+      if (still || !replay) { drawPlate(); drawTrace(1); return; }
+      start = 0;
+      raf = requestAnimationFrame(run);
+    };
+
+    let rt: ReturnType<typeof setTimeout>;
     const resize = () => {
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
       w = cv.clientWidth; h = cv.clientHeight;
       cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      render();
     };
+    const onResize = () => { clearTimeout(rt); rt = setTimeout(resize, 150); };
     resize();
-    window.addEventListener("resize", resize);
-
-    const accent = () => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#498a6f";
-    const SPACING = 46;      // world units between grid lines
-    const HORIZON = 0.42;    // where the plate meets the vanishing point, as a fraction of height
-    const draw = (t: number) => {
-      ctx.clearRect(0, 0, w, h);
-      const hz = h * HORIZON;
-      const col = accent();
-      // Depth lines: evenly spaced in world space, projected so they bunch at the horizon.
-      const drift = still ? 0 : (t / 90) % SPACING;
-      for (let i = 0; i < 34; i++) {
-        const world = i * SPACING + drift;
-        const y = hz + (h - hz) * (1 - 1 / (1 + world / 190));
-        if (y > h + 2) break;
-        const fade = Math.min(1, (y - hz) / (h - hz) * 2.1);
-        ctx.strokeStyle = col;
-        ctx.globalAlpha = 0.055 * fade;
-        ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
-      }
-      // Rails converging on the vanishing point.
-      const cx = w / 2;
-      for (let i = -11; i <= 11; i++) {
-        const x = cx + i * (w / 13);
-        ctx.strokeStyle = col;
-        ctx.globalAlpha = 0.05 * (1 - Math.abs(i) / 13);
-        ctx.beginPath(); ctx.moveTo(cx, hz); ctx.lineTo(x, h); ctx.stroke();
-      }
-      // A slow band of light travelling along the plate.
-      if (!still) {
-        const sweep = hz + (h - hz) * ((t / 5200) % 1);
-        const g = ctx.createLinearGradient(0, sweep - 90, 0, sweep + 90);
-        g.addColorStop(0, "transparent");
-        g.addColorStop(0.5, col);
-        g.addColorStop(1, "transparent");
-        ctx.globalAlpha = 0.05;
-        ctx.fillStyle = g;
-        ctx.fillRect(0, sweep - 90, w, 180);
-      }
-      ctx.globalAlpha = 1;
-    };
-    if (still) draw(0);
-    else {
-      const loop = (t: number) => { draw(t); raf = requestAnimationFrame(loop); };
-      raf = requestAnimationFrame(loop);
-    }
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
+    window.addEventListener("resize", onResize);
+    // Theme flips change every colour the plate is drawn from.
+    const obs = new MutationObserver(() => { drawPlate(); drawTrace(1); });
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return () => { cancelAnimationFrame(raf); clearTimeout(rt); window.removeEventListener("resize", onResize); obs.disconnect(); };
   }, []);
   return <canvas className="launch-bg" ref={ref} aria-hidden="true" />;
 }
@@ -4131,8 +4240,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
       </header>
 
       <main className="launch-main">
+       <div className="launch-col">
         <h1 className="launch-h1">What do you want to make?</h1>
-        <p className="launch-sub">Describe a part in plain language — real millimetres, checked against your printer, exported as the files your slicer wants.</p>
+        <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
 
         <form className="launch-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
           <textarea
@@ -4143,27 +4253,29 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
             placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
           />
-          <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim()}>↑</button>
+          <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim()}><IconArrowUp /></button>
         </form>
-        <p className="launch-fine">Sizes are AI-generated — check the fit before a long print.</p>
+        <p className="launch-fine">Sizes are AI-generated. Check the fit before a long print.</p>
 
         {resume && (
           <button className="launch-resume" onClick={onResume}>
-            Continue where you left off — <b>{resume.name}</b>
+            Continue where you left off: <b>{resume.name}</b>
           </button>
         )}
 
-        <p className="launch-label">Or start from a template — one tap, no key needed</p>
+        <p className="launch-label">Or start from a template</p>
         <div className="launch-chips">
           {TEMPLATES.slice(0, 4).map((t) => (
-            <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>{t.name}</button>
+            <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>
+              {templateThumb(t.id) && <img src={templateThumb(t.id)} alt="" aria-hidden="true" />}
+              {t.name}
+            </button>
           ))}
           <button className="launch-chip subtle" onClick={onAllTemplates}>All {TEMPLATES.length} templates →</button>
         </div>
 
-        <button className="guided-cta launch-guided" onClick={onGuided}>
-          <span className="gc-title">Fix a broken part</span>
-          <span className="gc-sub">Photo in → a replacement that actually fits</span>
+        <button className="launch-guided" onClick={onGuided}>
+          Fix a broken part: photo in, replacement out <span className="gc-go">→</span>
         </button>
 
         {showSignIn && !accountEmail && (
@@ -4221,6 +4333,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             <button className="link" onClick={onSkip}>Skip</button>
           </span>
         </footer>
+       </div>
       </main>
     </div>
   );

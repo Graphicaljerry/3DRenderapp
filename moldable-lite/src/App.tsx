@@ -3981,7 +3981,12 @@ function CubeMark({ size = 22 }: { size?: number }) {
    radar or a coordinate axis, not as a plate, and no amount of tuning removes that.
    It is also the wrong world — the workspace already renders a real perspective plate,
    so the entry screen should point at that, not invent a second fake one.
-   The plate is static. One part footprint strokes itself on at load and then holds. */
+
+   The plate is static; the machine is not. A gantry sweeps the bed on a slow loop and
+   the part it passes over is revealed behind it, one footprint per pass, forever. This
+   replaced a one-shot entrance that played for 1.4 s and then froze — which needed a
+   sessionStorage flag to stop it re-performing on every visit, and left a still image
+   the rest of the time. A loop needs no such gate: there is no "again" to suppress. */
 
 /** Four template silhouettes in plate-normalised coords — closed outlines only. */
 const FOOTPRINTS: [number, number][][] = [
@@ -4003,10 +4008,13 @@ function LaunchBackdrop() {
     const ctx = cv.getContext("2d");
     if (!ctx) return;
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    // A surface seen every session should not re-perform: trace once per tab.
-    const replay = sessionStorage.getItem("moldable_lp_traced") !== "1";
 
     let raf = 0, w = 0, h = 0, plate: { x: number; y: number; side: number } | null = null;
+    // The plate costs ~70 strokes plus text to draw, which is far too much to repeat at
+    // 30 fps for something that never changes. It is rendered once per resize/theme into
+    // an offscreen bitmap; a frame is then one drawImage plus the two moving parts.
+    let plateBmp: HTMLCanvasElement | null = null;
+    let dpr = 1;
     const tokens = () => {
       const cs = getComputedStyle(document.documentElement);
       return {
@@ -4016,7 +4024,10 @@ function LaunchBackdrop() {
       };
     };
 
-    /** The plate, its graduations and its light. Everything here is fixed. */
+    /** The plate, its graduations and its light — everything here is fixed, so this
+        renders once into `plateBmp` and every frame just blits it. The text-column
+        mask is NOT applied here: the gantry and the part have to be masked by the
+        same gradient, so it is applied once at the end of each composed frame. */
     const drawPlate = () => {
       const t = tokens();
       const side = Math.min(h * 0.78, 900);
@@ -4025,7 +4036,15 @@ function LaunchBackdrop() {
       plate = { x, y, side };
       const DIV = 32;                       // 8 mm per division on a 256 mm bed
       const step = side / DIV;
-      ctx.clearRect(0, 0, w, h);
+
+      const bmp = document.createElement("canvas");
+      bmp.width = Math.max(1, Math.round(w * dpr));
+      bmp.height = Math.max(1, Math.round(h * dpr));
+      const ctx2 = bmp.getContext("2d");
+      if (!ctx2) return;
+      ctx2.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const ctx = ctx2;                     // shadow the outer ctx for the body below
+      plateBmp = bmp;
 
       // One directional light, above and right. The only ambient event on the screen.
       const glow = ctx.createRadialGradient(x + side * 0.8, y + side * 0.15, 0, x + side * 0.8, y + side * 0.15, side * 0.9);
@@ -4071,75 +4090,135 @@ function LaunchBackdrop() {
       ctx.globalAlpha = 0.45;
       ctx.textAlign = "left"; ctx.textBaseline = "top";
       ctx.fillText("0,0", x + 4, b + 10);
+      ctx.globalAlpha = 1;
+    };
 
-      // Fade the plate out under the text column so type sits in clean air.
-      const mask = ctx.createLinearGradient(0, 0, w * 0.58, 0);
-      mask.addColorStop(0, "rgba(0,0,0,1)"); mask.addColorStop(1, "rgba(0,0,0,0)");
+    /** Fade everything out under the text column so type sits in clean air. */
+    const applyMask = () => {
+      const g = ctx.createLinearGradient(0, 0, w * 0.58, 0);
+      g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.globalCompositeOperation = "destination-out";
-      ctx.fillStyle = mask; ctx.fillRect(0, 0, w * 0.58, h);
+      ctx.fillStyle = g;
+      ctx.fillRect(0, 0, w * 0.58, h);
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
     };
 
-    const fp = FOOTPRINTS[new Date().getDate() % FOOTPRINTS.length];
-    const pathOf = (p: { x: number; y: number; side: number }) => {
+    // Which part is on the bed. Starts on the day's part so two people opening the app
+    // on different days don't see the same one first, then cycles.
+    let part = new Date().getDate() % FOOTPRINTS.length;
+    const pathOf = (p: { x: number; y: number; side: number }, i: number) => {
       const path = new Path2D();
-      fp.forEach(([nx, ny], i) => {
+      FOOTPRINTS[i].forEach(([nx, ny], j) => {
         const px = p.x + nx * p.side, py = p.y + ny * p.side;
-        i === 0 ? path.moveTo(px, py) : path.lineTo(px, py);
+        j === 0 ? path.moveTo(px, py) : path.lineTo(px, py);
       });
       path.closePath();
       return path;
     };
-    const perimeter = (p: { side: number }) => {
-      let len = 0;
-      for (let i = 0; i < fp.length; i++) {
-        const a = fp[i], b = fp[(i + 1) % fp.length];
-        len += Math.hypot((b[0] - a[0]) * p.side, (b[1] - a[1]) * p.side);
-      }
-      return len;
-    };
 
-    /** The traced footprint, drawn over the plate. progress 0..1. */
-    const drawTrace = (progress: number) => {
+    /** The gantry: a soft band of light with a bright leading edge, crossing the bed. */
+    const drawGantry = (gx: number, fade: number) => {
       if (!plate) return;
       const t = tokens();
-      const len = perimeter(plate);
+      const { x, y, side } = plate;
       ctx.save();
-      // Match the plate's own fade so the outline disappears under the text too.
-      const clip = ctx.createLinearGradient(0, 0, w * 0.58, 0);
+      ctx.beginPath(); ctx.rect(x, y, side, side); ctx.clip();
+
+      // The band trails BEHIND the leading edge — light falls off the way a real
+      // gantry's does, brightest at the head.
+      const trail = side * 0.22;
+      const band = ctx.createLinearGradient(gx - trail, 0, gx, 0);
+      band.addColorStop(0, "transparent");
+      band.addColorStop(1, t.accent);
+      ctx.globalAlpha = (t.dark ? 0.085 : 0.06) * fade;
+      ctx.fillStyle = band;
+      ctx.fillRect(gx - trail, y, trail, side);
+
+      ctx.globalAlpha = (t.dark ? 0.4 : 0.28) * fade;
       ctx.strokeStyle = t.accent;
-      ctx.globalAlpha = 0.2;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([len, len]);
-      ctx.lineDashOffset = len * (1 - progress);
-      ctx.stroke(pathOf(plate));
-      ctx.setLineDash([]);
-      void clip;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(Math.round(gx) + 0.5, y);
+      ctx.lineTo(Math.round(gx) + 0.5, y + side);
+      ctx.stroke();
       ctx.restore();
     };
 
-    const easeOutQuint = (x: number) => 1 - Math.pow(1 - x, 5);
-    let start = 0;
-    const run = (now: number) => {
-      if (!start) start = now;
-      const p = Math.min(1, (now - start) / 1400);
-      drawPlate();
-      drawTrace(easeOutQuint(p));
-      if (p < 1) raf = requestAnimationFrame(run);
-      else sessionStorage.setItem("moldable_lp_traced", "1");
+    /** The part, revealed only where the gantry has already passed. */
+    const drawPart = (gx: number, alpha: number) => {
+      if (!plate || alpha <= 0) return;
+      const t = tokens();
+      ctx.save();
+      // Clipping to the swept region is what ties the two together: the outline is not
+      // a second animation running alongside the gantry, it is the gantry's output.
+      ctx.beginPath();
+      ctx.rect(plate.x, plate.y, Math.max(0, gx - plate.x), plate.side);
+      ctx.clip();
+      const path = pathOf(plate, part);
+      ctx.fillStyle = t.accent;
+      ctx.globalAlpha = (t.dark ? 0.07 : 0.05) * alpha;
+      ctx.fill(path);
+      ctx.strokeStyle = t.accent;
+      ctx.globalAlpha = (t.dark ? 0.34 : 0.24) * alpha;
+      ctx.lineWidth = 1.5;
+      ctx.stroke(path);
+      ctx.restore();
+    };
+
+    // One pass of the bed. Slow enough to read as ambient rather than as a progress bar.
+    const CYCLE = 11000;
+    const SWEEP_END = 0.72;   // gantry clears the bed
+    const HOLD_END = 0.88;    // finished part holds
+    let t0 = 0, lastPaint = 0, lastCycle = 0;
+    const frame = (now: number) => {
+      raf = requestAnimationFrame(frame);
+      if (!t0) t0 = now;
+      // 30 fps is ample for an 11-second sweep and halves the cost on the entry screen,
+      // which is competing with the OCCT kernel warming up in the background.
+      if (now - lastPaint < 33) return;
+      lastPaint = now;
+
+      const p = ((now - t0) % CYCLE) / CYCLE;
+      const cycles = Math.floor((now - t0) / CYCLE);
+      if (cycles !== lastCycle) { lastCycle = cycles; part = (part + 1) % FOOTPRINTS.length; }
+
+      if (!plate || !plateBmp) return;
+      const { x, side } = plate;
+      const travel = side * 1.12;                       // overshoot both edges
+      const s = Math.min(1, p / SWEEP_END);
+      const gx = x - side * 0.06 + travel * s;
+      const partAlpha = p < HOLD_END ? 1 : 1 - (p - HOLD_END) / (1 - HOLD_END);
+      // The gantry itself fades as it leaves, so it doesn't pop off the right edge.
+      const gantryFade = p < SWEEP_END ? Math.min(1, (1 - s) / 0.12) : 0;
+
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(plateBmp, 0, 0, w, h);
+      drawPart(p < SWEEP_END ? gx : x + side + 1, partAlpha);
+      drawGantry(gx, gantryFade);
+      applyMask();
+    };
+
+    /** Reduced motion gets the finished bed, no gantry — the composed end state. */
+    const drawStill = () => {
+      if (!plate || !plateBmp) return;
+      ctx.clearRect(0, 0, w, h);
+      ctx.drawImage(plateBmp, 0, 0, w, h);
+      drawPart(plate.x + plate.side + 1, 1);
+      applyMask();
     };
 
     const render = () => {
       cancelAnimationFrame(raf);
-      if (still || !replay) { drawPlate(); drawTrace(1); return; }
-      start = 0;
-      raf = requestAnimationFrame(run);
+      drawPlate();
+      if (still) { drawStill(); return; }
+      t0 = 0; lastPaint = 0; lastCycle = 0;
+      raf = requestAnimationFrame(frame);
     };
 
     let rt: ReturnType<typeof setTimeout>;
     const resize = () => {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
       w = cv.clientWidth; h = cv.clientHeight;
       cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -4148,8 +4227,9 @@ function LaunchBackdrop() {
     const onResize = () => { clearTimeout(rt); rt = setTimeout(resize, 150); };
     resize();
     window.addEventListener("resize", onResize);
-    // Theme flips change every colour the plate is drawn from.
-    const obs = new MutationObserver(() => { drawPlate(); drawTrace(1); });
+    // Theme flips change every colour the plate is drawn from, so the cached bitmap
+    // has to be rebuilt — render() does that and picks the loop back up.
+    const obs = new MutationObserver(() => render());
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => { cancelAnimationFrame(raf); clearTimeout(rt); window.removeEventListener("resize", onResize); obs.disconnect(); };
   }, []);
@@ -4177,8 +4257,6 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 }) {
   const [draft, setDraft] = useState("");
   const [showSignIn, setShowSignIn] = useState(false);
-  // Same gate as the plate trace: the entrance plays once per tab, not on every return.
-  const [replayEntrance] = useState(() => sessionStorage.getItem("moldable_lp_traced") !== "1");
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
   const [email, setEmail] = useState("");
@@ -4242,7 +4320,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
       </header>
 
       <main className="launch-main">
-       <div className={`launch-col${replayEntrance ? " play" : ""}`}>
+       {/* 420 ms staggered fade-up, every load. It used to be gated to once per tab,
+           which meant a reload dropped you onto a dead screen with no sense of entry. */}
+       <div className="launch-col play">
         <h1 className="launch-h1">What do you want to make?</h1>
         <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
 

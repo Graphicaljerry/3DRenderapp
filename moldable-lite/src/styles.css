@@ -32,6 +32,15 @@
   --shadow-lg: 0 6px 14px rgba(18,40,36,.07), 0 18px 40px rgba(18,40,36,.10);
   /* Sharp, exact radius scale. */
   --r-xs: 6px; --r-sm: 6px; --r-md: 10px; --r-lg: 10px; --r-full: 999px;
+  /* Stacking scale. Menus used to sit at 8-10 while canvas furniture reached 32, so a
+     popover appearing behind the tool rail was luck, not layout. Bands, not one-offs:
+     canvas furniture stays under 40, every transient surface starts at 60. */
+  --z-canvas: 10;    /* bars and panels that live on the canvas */
+  --z-rail: 30;      /* the tool rail and its flyouts */
+  --z-transient: 36; /* preview bars, capture overlays — above furniture, below menus */
+  --z-popover: 60;   /* EVERY menu, dropdown and flyout */
+  --z-modal: 100;    /* full-screen gates */
+  --z-portal: 110;   /* portaled menus, which can open from inside a modal */
   --font-display: "Schibsted Grotesk", -apple-system, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-family: "Schibsted Grotesk", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -143,7 +152,7 @@ button { font-family: inherit; cursor: pointer; }
 .statusbar, .pnum, .prow, .measure-mm { font-variant-numeric: tabular-nums; }
 
 /* ---------- gate / cards ---------- */
-.gate, .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(21,24,30,0.45); padding: 24px; z-index: 50; }
+.gate, .overlay { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(21,24,30,0.45); padding: 24px; z-index: var(--z-modal); }
 .gate { background: var(--surf); }
 /* max-width in viewport units: inside a place-items:center grid, max-width:100%
    resolves against the content-sized track and fails to constrain the card. */
@@ -457,7 +466,7 @@ button { font-family: inherit; cursor: pointer; }
 .viewer.drop { outline: 2px dashed var(--accent); outline-offset: -3px; border-radius: 12px; }
 
 /* Snapping popover (magnet button). */
-.snap-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 10; width: 284px; max-width: calc(100vw - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 10px 12px; animation: panel-in .18s cubic-bezier(.23,1,.32,1); }
+.snap-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-popover); width: 284px; max-width: calc(100vw - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 10px 12px; animation: panel-in .18s cubic-bezier(.23,1,.32,1); }
 /* Rows wrap when a segment is wider than the popover (iPad: Matte/Satin/Glossy/Metal),
    and the segment itself can wrap its buttons rather than overflow the panel. */
 .snap-row { display: flex; align-items: center; justify-content: space-between; gap: 6px 8px; margin: 6px 0; font-size: 12px; color: var(--ink2); flex-wrap: wrap; }
@@ -518,7 +527,7 @@ button { font-family: inherit; cursor: pointer; }
 .hole-panel .ghost.on { border-color: var(--accent); color: var(--accent-d); }
 
 /* AI change preview: proposal held on canvas, Apply/Discard bar */
-.ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 11; display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow-md); }
+.ai-preview-bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: var(--z-transient); display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow-md); }
 .apb-text { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
 .apb-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mut); }
 .apb-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
@@ -529,7 +538,7 @@ button { font-family: inherit; cursor: pointer; }
 @media (max-width: 700px) { .apb-legend { display: none; } }
 
 /* "circle it and ask" draw overlay */
-.mark-overlay { position: absolute; inset: 0; z-index: 12; cursor: crosshair; }
+.mark-overlay { position: absolute; inset: 0; z-index: var(--z-transient); cursor: crosshair; }
 .mark-overlay canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 .mark-hint { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; padding: 7px 12px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); font-size: 12px; color: var(--ink2); pointer-events: none; }
 .mark-hint button { pointer-events: auto; flex: 0 0 auto; }
@@ -560,7 +569,7 @@ button { font-family: inherit; cursor: pointer; }
 .pb-export:hover { background: var(--surf); }
 /* small anchored menu shared by plate pickers + plate export — portaled to <body> and
    fixed-positioned by AnchoredMenu, so scroll containers can never clip or bury it */
-.pmenu { position: fixed; z-index: 80; max-height: min(46vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; flex-direction: column; }
+.pmenu { position: fixed; z-index: var(--z-portal); max-height: min(46vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 10px; box-shadow: var(--shadow-md); padding: 4px; display: flex; flex-direction: column; }
 .pmenu-item { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; text-align: left; border: none; background: none; border-radius: 7px; padding: 6px 9px; font-size: 12px; color: var(--ink); }
 .pmenu-item b { font-size: 12px; font-weight: 600; }
 .pmenu-item span { font-size: 10.5px; color: var(--subt); }
@@ -639,7 +648,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 @media (max-width: 640px) { .p2p-lab { display: none; } }
 .export-wrap { margin-left: auto; position: relative; }
 /* z-index above the docked side panel (6): the transient menu always wins. */
-.export-menu { position: absolute; right: 0; bottom: 46px; z-index: 8; width: 280px; max-width: calc(100vw - 20px); background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; }
+.export-menu { position: absolute; right: 0; bottom: 46px; z-index: var(--z-popover); width: 280px; max-width: calc(100vw - 20px); background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; }
 .export-item { display: flex; flex-direction: column; align-items: flex-start; width: 100%; background: none; border: none; border-radius: 8px; padding: 8px 10px; text-align: left; }
 .export-item:hover:not(:disabled) { background: var(--surf); }
 .export-item:disabled { opacity: 0.4; cursor: default; }
@@ -764,7 +773,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .mp-trigger svg { flex: none; color: var(--subt); }
 /* Anchored to the trigger's LEFT edge (the trigger is left-aligned), opening
    rightward; capped to the viewport so it never runs off either edge. */
-.mp-menu { position: absolute; left: 0; right: auto; bottom: calc(100% + 6px); z-index: 9; width: 264px; max-width: calc(100vw - 20px); max-height: min(54vh, 380px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; transform-origin: bottom left; animation: mp-pop .18s cubic-bezier(0.23,1,0.32,1); }
+.mp-menu { position: absolute; left: 0; right: auto; bottom: calc(100% + 6px); z-index: var(--z-popover); width: 264px; max-width: calc(100vw - 20px); max-height: min(54vh, 380px); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; transform-origin: bottom left; animation: mp-pop .18s cubic-bezier(0.23,1,0.32,1); }
 @keyframes mp-pop { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .mp-menu { animation: none; } }
 .mp-group + .mp-group { margin-top: 4px; border-top: 1px solid var(--bord); padding-top: 4px; }
@@ -929,7 +938,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    rail can never draw over it. translate() is written from a rAF loop; the -50%/-140%
    in the transform origin is folded into `left`/`top` so the JS only writes translate. */
 .ctxbar {
-  position: absolute; left: 0; top: 0; z-index: 32;
+  position: absolute; left: 0; top: 0; z-index: calc(var(--z-rail) + 2);
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 6px; border-radius: 10px;
   background: var(--bg); border: 1.5px solid var(--accent); box-shadow: var(--shadow-md);
@@ -1080,7 +1089,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 
 /* ---------- profile dropdown menu ---------- */
 .profile-wrap { position: relative; }
-.profile-menu { position: absolute; right: 0; top: calc(100% + 6px); width: 232px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; z-index: 40; display: flex; flex-direction: column; }
+.profile-menu { position: absolute; right: 0; top: calc(100% + 6px); width: 232px; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); padding: 6px; z-index: var(--z-popover); display: flex; flex-direction: column; }
 .pm-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 12px; border-bottom: 1px solid var(--bord); margin-bottom: 4px; }
 .pm-avatar { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .pm-who { display: flex; flex-direction: column; min-width: 0; }
@@ -1329,7 +1338,7 @@ details.guide { margin-top: 10px; }
      A short canvas (iPad portrait with the chat open) is therefore left alone
      rather than clipped: wrapping to two columns pushed the flyouts off-screen,
      which is worse than the rail reaching the status bar. */
-  z-index: 30;
+  z-index: var(--z-rail);
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -1348,7 +1357,7 @@ details.guide { margin-top: 10px; }
   display: flex;
   gap: 6px;
   align-items: center;
-  z-index: 31;
+  z-index: calc(var(--z-rail) + 1);
 }
 .canvas-rail .rail-fly .btn-label { display: inline; } /* flyouts keep their words */
 .canvas-rail .rail-sep { height: 1px; background: var(--bord-subtle); margin: 3px 4px; }
@@ -1364,7 +1373,6 @@ details.guide { margin-top: 10px; }
   left: calc(100% + 10px);
   right: auto;
   top: 0;
-  z-index: 40;
 }
 
 /* Rail icons a touch bigger (user request) */

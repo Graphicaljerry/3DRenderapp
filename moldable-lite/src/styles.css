@@ -752,6 +752,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .fit-seg { display: inline-flex; background: var(--surf); border: 1px solid var(--bord); border-radius: 9px; padding: 2px; }
 .fit-seg button { border: none; background: none; border-radius: 7px; padding: 4px 12px; font-size: 12px; font-weight: 500; color: var(--mut); }
 .fit-seg button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
+.fit-mm { font-size: 11px; color: var(--mut); font-variant-numeric: tabular-nums; }
 /* ---------- model picker (compact custom dropdown; replaces native select) ---------- */
 .modelpick2 { position: relative; }
 .mp-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 200px; padding: 0 8px 0 11px; border: 1px solid var(--bord); border-radius: 8px; background: var(--bg); color: var(--ink2); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease, transform .16s ease-out; }

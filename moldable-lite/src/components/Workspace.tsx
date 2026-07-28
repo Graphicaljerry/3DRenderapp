@@ -34,7 +34,7 @@ import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
 import { localSupported } from "../llm/local";
 import { shortModelName } from "../llm/openrouterModels";
-import type { FitId } from "../llm/prompts";
+import { fitClearance, fitCalibration, type FitId } from "../llm/prompts";
 import { PROVIDERS, costLabel } from "../gen/registry";
 
 // The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
@@ -741,7 +741,7 @@ function SnapMenu({ snap, setSnap }: { snap: { move: number; rotate: number }; s
 }
 
 /** Typed resize, Bambu-style: exact W/D/H in mm (linked by default) or a uniform %,
- *  plus one-tap "Fit to plate". Mesh models may stretch per-axis; CAD scales uniformly. */
+ *  plus one-tap "Scale to fit bed". Mesh models may stretch per-axis; CAD scales uniformly. */
 function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
@@ -792,7 +792,7 @@ function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
         aria-label="Set size"
         aria-expanded={open}
         disabled={!d || ctl.busy}
-        title="Set size — type the exact size in mm (or a %) instead of dragging the Scale gizmo; includes one-tap Fit to plate"
+        title="Set size — type the exact size in mm (or a %) instead of dragging the Scale gizmo; includes one-tap Scale to fit bed"
         onClick={() => { if (!open) seed(); setOpen((v) => !v); }}
       >
         <IconScale /><span className="btn-label">Set size…</span>
@@ -815,7 +815,7 @@ function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
           </div>
           <div className="snap-row rz-actions">
             <button className="ghost sm" disabled={ctl.fits || ctl.busy} title={ctl.fits ? "Already fits the plate" : `Shrink to fit your ${ctl.bed.x} × ${ctl.bed.y} mm plate`} onClick={() => { ctl.fitToPlate(); setOpen(false); }}>
-              Fit to plate
+              Scale to fit bed
             </button>
             <button className="primary sm" disabled={ctl.busy} onClick={apply}>Apply</button>
           </div>
@@ -1067,10 +1067,10 @@ function DockSelection({ feature, dims, units, modelSelected, ask }: {
         <DockRow k="Position" v={`X ${n(feature.cx)}   Y ${n(feature.cy)}   Z ${n(feature.cz)}`} />
         <p className="dock-note">
           {feature.kind === "face"
-            ? "Round, Chamfer and Extrude are on the toolbar at the selection — free, no AI. Extrude takes a negative value to pull the face in, or drag the blue arrow."
+            ? "Round, Bevel and Push / Pull are on the toolbar at the selection — free, no AI. A negative value pulls the face in, or drag the blue arrow."
             : feature.kind === "edge"
-              ? "Round and Chamfer are on the toolbar at the selection — free, no AI. Or drag the blue arrow to round this edge live."
-              : "Round and Chamfer are on the toolbar at the selection — free, no AI."}
+              ? "Round and Bevel are on the toolbar at the selection — free, no AI. Or drag the blue arrow to round this edge live."
+              : "Round and Bevel are on the toolbar at the selection — free, no AI."}
         </p>
         {ask && <DockAsk ask={ask} />}
       </div>
@@ -1127,7 +1127,7 @@ const TAB_PANEL = { "3d": "selection", code: "code", params: "params", print: "p
 function HelpSheet({ onClose }: { onClose: () => void }) {
   const rows: { icon: JSX.Element; text: string }[] = [
     { icon: <IconCube />, text: "Orbit: drag rotates, pinch or scroll zooms, middle- or right-drag (two fingers) pans." },
-    { icon: <IconPointer />, text: "Right-click the model, a part, or empty space for quick actions — rename, duplicate, fit tools, plates." },
+    { icon: <IconPointer />, text: "Right-click the model, a part, or empty space for quick actions — rename, duplicate, clearance tools, plates." },
     { icon: <IconLayers />, text: "Objects panel: double-click any name (or a plate tab) to rename it." },
     { icon: <IconPointer />, text: "Select: pick Face, Edge, Corner or Point (keys 1–4), then tap the model to choose a spot to edit." },
     { icon: <IconEdgeSel />, text: "Drag the blue arrow to extrude a face or round an edge — the model updates live; type an exact mm in the quick-edit box instead if you prefer." },
@@ -1662,7 +1662,7 @@ export function Workspace(p: Props) {
                     <button
                       className="ghost sm"
                       style={{ width: "100%", marginTop: 6 }}
-                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — test the fit, then Merge to keep it or Undo to regroup"
+                      title="Ungroup the model's disconnected solids (like a box printed beside its lid) so each moves on its own — check the clearance, then Merge to keep it or Undo to regroup"
                       onClick={p.onSeparateParts}
                     >
                       Separate {p.partCount} parts
@@ -1671,10 +1671,10 @@ export function Workspace(p: Props) {
                   {p.selAttachIds.length > 0 && (
                     <div className="lp-fitrow">
                       <button className="ghost sm" title="Does it fit here? Computes the real overlap between the selected part(s) and the model — zero overlap means no collision at this position" onClick={() => p.onCheckFit(p.selAttachIds)}>
-                        Check fit
+                        Check clearance
                       </button>
                       <button className="ghost sm" title="For parts that nest into each other: carve the selected part's shape (+0.2 mm clearance) out of the model at its current position, so it can slot in" onClick={() => p.onMakeFit(p.selAttachIds)}>
-                        Make it fit
+                        Cut to fit
                       </button>
                       <button className="ghost sm" title="Settle the selected part(s) back down onto the build plate (keeps position and rotation)" onClick={() => p.onDropToPlate(p.selAttachIds)}>
                         Drop to plate
@@ -1846,7 +1846,7 @@ export function Workspace(p: Props) {
                     ? "Whole/organic objects from a photo or text · Auto shows the engine & price when you send"
                     : `Whole/organic objects from a photo or text · ${costLabel(p.genProvider, p.genModel) || "see Settings for pricing"}`}
               </span>
-              {p.mode === "precise" && p.guided && <FitControl fit={p.fit} onFit={p.onFit} />}
+              {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
               {p.mode === "generative" && (
                 <button
                   className={`texchip${p.genTexCtl.on ? " on" : ""}`}
@@ -2154,7 +2154,7 @@ export function Workspace(p: Props) {
                         ) : null}
                         {plateItems("model")}
                         <div className="pmenu-sep" />
-                        <Item label="Zoom to fit" onClick={() => p.viewerRef.current?.resetView()} />
+                        <Item label="Frame model" onClick={() => p.viewerRef.current?.resetView()} />
                       </>
                     )}
                     {t.kind === "attachment" && (
@@ -2164,8 +2164,8 @@ export function Workspace(p: Props) {
                         <Item label="Copy" onClick={() => p.clipboardCtl.copy({ kind: "attachment", id: t.id })} />
                         <Item label="Delete" onClick={() => p.onRemoveAttachment(t.id)} />
                         <div className="pmenu-sep" />
-                        <Item label="Check fit" hint="Real overlap vs the model" onClick={() => p.onCheckFit([t.id])} />
-                        <Item label="Make it fit" hint="Carve its shape + clearance" onClick={() => p.onMakeFit([t.id])} />
+                        <Item label="Check clearance" hint="Real overlap vs the model" onClick={() => p.onCheckFit([t.id])} />
+                        <Item label="Cut to fit" hint="Carve its shape + clearance" onClick={() => p.onMakeFit([t.id])} />
                         <Item label="Drop to plate" onClick={() => p.onDropToPlate([t.id])} />
                         <Item label="Merge into model" hint="Fuse into one solid" onClick={() => p.onMergeAttachments([t.id])} />
                         {plateItems(t.id)}
@@ -2371,7 +2371,7 @@ export function Workspace(p: Props) {
                 {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
                   <div className="zoom-ctl" role="group" aria-label="Zoom">
                     <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>
-                    <button title="Zoom to fit — re-frame the model" aria-label="Zoom to fit" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
+                    <button title="Frame the model in view" aria-label="Frame model" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
                     <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
                   </div>
                 )}
@@ -2668,19 +2668,31 @@ function ModelMenu({ value, groups, title, onPick, label }: { value: string; gro
 /** First-class FDM fit control — how loose the fitted features should be.
  *  Snug is the sensible default; re-fitting is one click, not a reprint. */
 const FIT_OPTS: { id: FitId; label: string; hint: string }[] = [
-  { id: "loose", label: "Loose", hint: "sliding fit · ~0.4 mm" },
-  { id: "snug", label: "Snug", hint: "everyday fit · ~0.2 mm" },
-  { id: "press", label: "Press", hint: "tight / press fit · ~0.1 mm" },
+  // No millimetres in the hint: the real number comes from fitClearance(), which moves
+  // with calibration. Baking one in here is how the tooltips came to disagree with it.
+  { id: "loose", label: "Loose", hint: "sliding fit" },
+  { id: "snug", label: "Snug", hint: "everyday fit" },
+  { id: "press", label: "Press", hint: "tight / press fit" },
 ];
 function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
+  const calibrated = fitCalibration() != null;
   return (
     <div className="fitbar" role="group" aria-label="Fit tolerance">
       <span className="fit-label">Fit</span>
       <div className="fit-seg">
         {FIT_OPTS.map((o) => (
-          <button key={o.id} type="button" className={fit === o.id ? "on" : ""} title={o.hint} onClick={() => onFit(o.id)}>{o.label}</button>
+          <button
+            key={o.id}
+            type="button"
+            className={fit === o.id ? "on" : ""}
+            title={`${o.hint} — ${fitClearance(o.id)} mm${calibrated ? ", measured on your printer" : " (typical FDM)"}`}
+            onClick={() => onFit(o.id)}
+          >
+            {o.label}
+          </button>
         ))}
       </div>
+      <span className="fit-mm">{fitClearance(fit)} mm{calibrated ? "" : " · typical"}</span>
     </div>
   );
 }
@@ -3021,7 +3033,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
       {!report.bedFit.fitsRotated && (
         <div className="param-actions" style={{ flexWrap: "wrap" }}>
           <button className="primary sm" disabled={busy} onClick={onFitToPlate} title="Uniformly shrink the model until it fits the plate — one tap, undoable">
-            Fit to plate — scale down
+            Scale to fit bed
           </button>
           <button className="ghost sm" disabled={busy} onClick={onSplit}>
             Split to fit bed — print in pieces
@@ -3041,8 +3053,8 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
           {prep.thin.busy ? "Checking walls…" : "Check wall thickness"}
         </button>
         {prep.chamfer.can && (
-          <button className="ghost sm" disabled={busy} onClick={() => prep.chamfer.apply(0.3)} title="Chamfer every bottom edge by 0.3 mm so the squished first layer (elephant foot) doesn't bulge past the true footprint">
-            Elephant-foot chamfer
+          <button className="ghost sm" disabled={busy} onClick={() => prep.chamfer.apply(0.3)} title="Bevel every bottom edge by 0.3 mm so the squished first layer (elephant foot) doesn't bulge past the true footprint">
+            Elephant-foot bevel
           </button>
         )}
       </div>
@@ -3223,7 +3235,7 @@ function MultiFaceOpRow({ count, busy, isCad, onApply }: { count: number; busy: 
         <input type="number" min={-50} max={50} step={0.2} value={size} onChange={(e) => setSize(Number(e.target.value) || 0)} aria-label="size in mm" />
         <span className="fine">mm</span>
         <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(size)} title={`Push all ${count} faces out (+) or in (−) by ${size} mm — no tokens`}>
-          Extrude all {count}
+          Push / Pull all {count}
         </button>
       </div>
     </div>
@@ -3231,7 +3243,7 @@ function MultiFaceOpRow({ count, busy, isCad, onApply }: { count: number; busy: 
 }
 
 // Free, instant geometry ops on the picked edge/corner/face — computed locally by
-// replicad, no AI call. Faces also get Extrude (push out / pull in).
+// replicad, no AI call. Faces also get Push / Pull.
 function DirectOpBar({ kind, busy, onApply, liveSize, onHole }: { kind: SelectKind; busy: boolean; onApply: (type: PointOp["type"], size: number) => void; liveSize?: number | null; onHole?: () => void }) {
   const [size, setSize] = useState(2);
   // Dragging the on-model arrow mirrors its live value into the box, so the number
@@ -3252,11 +3264,11 @@ function DirectOpBar({ kind, busy, onApply, liveSize, onHole }: { kind: SelectKi
         />
         <span className="fine">mm</span>
         <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(round, Math.abs(size))} title={`Round the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Round</button>
-        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(chamfer, Math.abs(size))} title={`Chamfer the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Chamfer</button>
-        {face && <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("extrude", size)} title={`Push this face out (+) or in (−) by ${size} mm — no tokens`}>Extrude</button>}
+        <button className="ghost sm" disabled={busy || !size} onClick={() => onApply(chamfer, Math.abs(size))} title={`Bevel the ${what}'s edges by ${Math.abs(size)} mm — no tokens`}>Bevel</button>
+        {face && <button className="ghost sm" disabled={busy || !size} onClick={() => onApply("extrude", size)} title={`Push this face out (+) or in (−) by ${size} mm — no tokens`}>Push / Pull</button>}
         {face && onHole && <button className="ghost sm" disabled={busy} onClick={onHole} title="Drill a hole at this spot — with exact offsets, magnet snapping, and alignment to another hole">Hole…</button>}
       </div>
-      {face && <p className="fine">Extrude: positive pushes the face out, negative pulls it in — or drag the blue arrow on the face.</p>}
+      {face && <p className="fine">Positive pushes the face out, negative pulls it in — or drag the blue arrow on the face.</p>}
       {kind === "edge" && <p className="fine">Or drag the blue arrow to round this edge live.</p>}
     </div>
   );

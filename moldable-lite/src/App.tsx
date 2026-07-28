@@ -552,7 +552,7 @@ export default function App() {
     setSeparated(true);
     explainOnce(
       "separate",
-      `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check fit** — it computes the real overlap between the solids. If parts are meant to nest and they collide, **Make it fit** carves the needed room out of the model. **Undo** or **Regroup parts** puts everything back exactly as it was; **Merge all into model** makes the new arrangement permanent.`,
+      `Separated the model into **${pieces.length} parts** — the largest stays as the model, the other${rest.length > 1 ? "s are" : " is"} now free object${rest.length > 1 ? "s" : ""} you can move and rotate on their own (in any direction, mid-air included). Try the fit: drag Part 2 over the model, then tap **Check clearance** — it computes the real overlap between the solids. If parts are meant to nest and they collide, **Cut to fit** carves the needed room out of the model. **Undo** or **Regroup parts** puts everything back exactly as it was; **Merge all into model** makes the new arrangement permanent.`,
     );
   }
 
@@ -562,7 +562,7 @@ export default function App() {
       standalone it commits a version like any other edit. */
   async function makeItFit(ids: string[]) {
     if (!geometry || !result || status === "generating" || !ids.length) return;
-    const CLEARANCE = 0.2; // mm per side — the usual FDM slip-fit allowance
+    const CLEARANCE = fitClearance(fit); // per side — the chosen fit, shifted by this printer's calibration
     setStatus("generating");
     try {
       let baseGeom = geometry;
@@ -586,7 +586,7 @@ export default function App() {
         carvedNames.push(a.name);
       }
       if (!g) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Nothing to carve — the selected part isn't overlapping the model. Move it to where it should nest (so they collide), then tap Make it fit." }]);
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Nothing to carve — the selected part isn't overlapping the model. Move it to where it should nest (so they collide), then tap Cut to fit." }]);
         return;
       }
       g.computeVertexNormals();
@@ -606,10 +606,10 @@ export default function App() {
       else applyResult(res, project?.name ?? "Model", `Carved clearance for ${names}`, "make it fit");
       setMessages((m) => [...m, {
         id: mid(), role: "assistant",
-        text: `Carved **${names}**'s shape out of the model with **${CLEARANCE} mm clearance** per side — it can nest there now. Tap **Check fit** to confirm (it should pass), and slide the part in and out to eyeball it. ${separatedRef.current ? "**Merge all into model** makes this permanent; **Undo** / **Regroup parts** restores the original." : "Undo restores the un-carved model."}`,
+        text: `Carved **${names}**'s shape out of the model with **${CLEARANCE} mm clearance** per side — it can nest there now. Tap **Check clearance** to confirm (it should pass), and slide the part in and out to eyeball it. ${separatedRef.current ? "**Merge all into model** makes this permanent; **Undo** / **Regroup parts** restores the original." : "Undo restores the un-carved model."}`,
       }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Make it fit failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Cut to fit failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -638,7 +638,7 @@ export default function App() {
         } else {
           const pct = Math.round((overlap / partVol) * 100);
           const shown = overlap >= 1000 ? `${(overlap / 1000).toFixed(1)} cm³` : `${overlap.toFixed(1)} mm³`;
-          lines.push(`✗ **${a.name}** overlaps the model by **${shown}**${pct > 0 ? ` (~${pct}% of the part)` : ""} — they collide at this position. If it's just misplaced, move it and re-check. If these parts are MEANT to nest (a lid into a box, a peg into a hole), tap **Make it fit** — it carves ${a.name}'s shape plus clearance out of the model right here.`);
+          lines.push(`✗ **${a.name}** overlaps the model by **${shown}**${pct > 0 ? ` (~${pct}% of the part)` : ""} — they collide at this position. If it's just misplaced, move it and re-check. If these parts are MEANT to nest (a lid into a box, a peg into a hole), tap **Cut to fit** — it carves ${a.name}'s shape plus clearance out of the model right here.`);
         }
       }
       if (lines.length) {
@@ -4759,7 +4759,7 @@ function SettingsModal({
               <p className="fine">45° is the standard FDM rule of thumb; raise it for PLA, lower for ABS.</p>
             </SGroup>
             <SGroup title="Fit calibration">
-              <label>Measured snug clearance (mm)</label>
+              <label>Measured snug clearance (mm, per side)</label>
               <input
                 type="number"
                 min={0}
@@ -4774,7 +4774,7 @@ function SettingsModal({
                 }}
               />
               <p className="fine">
-                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: the clearance is 0.05 mm for one notch, then +0.1 mm per extra notch. Snug/loose/press fits in every future part then use YOUR printer's reality instead of the 0.2 mm default.
+                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: 0.05 mm for one notch, then +0.1 mm per extra notch. That is the gap per side — the same number every fit uses. Snug/loose/press fits in every future part then use YOUR printer's reality instead of the 0.2 mm default.
               </p>
             </SGroup>
           </>

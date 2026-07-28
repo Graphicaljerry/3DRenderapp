@@ -304,7 +304,7 @@ function main(replicad, params) {
     name: "Tolerance test coupon",
     blurb: "Measure YOUR printer's real fit",
     summary:
-      "A fit-calibration coupon: six ⌀10 mm holes stepped from 0.05 to 0.55 mm extra clearance (notches above each hole count the step: 1 notch ≈ 0.05, then +0.1 per notch) plus a ⌀10 test peg. Print it, push the peg into each hole, and note the TIGHTEST one it firmly fits — enter that clearance in Settings → Printer → Fit calibration, and every future snug/press/loose fit uses your printer's reality.",
+      "A fit-calibration coupon: six ⌀10 mm holes, each cut with a per-side gap from 0.05 to 0.55 mm (notches above a hole count its step: 1 notch = 0.05 mm, then +0.1 mm per extra notch) plus a ⌀10 test peg. Print it, push the peg into each hole, and note the TIGHTEST one it firmly fits — enter that number in Settings → Printer → Fit calibration, and every future snug/press/loose fit uses your printer's reality.",
     code: `const defaultParams = { pegDiameter: 10, startClearance: 0.05, step: 0.1, holes: 6, thickness: 6 };
 function main(replicad, params) {
   const p = { ...defaultParams, ...params };
@@ -319,7 +319,9 @@ function main(replicad, params) {
   for (let i = 0; i < n; i++) {
     const cx = (i - (n - 1) / 2) * pitch;
     const c = p.startClearance + p.step * i;
-    plate = plate.cut(makeCylinder((d + c) / 2, t + 2, [cx, 0, -1], [0, 0, 1]));
+    // c is the PER-SIDE gap, so the hole grows by 2c across the diameter — this is the
+    // same number Settings and every future fit use.
+    plate = plate.cut(makeCylinder(d / 2 + c, t + 2, [cx, 0, -1], [0, 0, 1]));
     // Notch code above each hole: 1 notch = the start clearance, +1 per step.
     for (let k = 0; k <= i; k++) {
       const nx = cx + (k - i / 2) * 1.8;

@@ -901,6 +901,51 @@ function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }
    replacing the tab strip's habit of hiding the canvas to show a full-width panel.
    The top tab strip and this list are two views of the SAME state (TAB_PANEL maps
    between them), so "3D View" reads as active exactly when "Selection" does. */
+/* The contextual toolbar. Anchored AT the selection instead of parked in the canvas
+   corner underneath the tool rail — pointer travel is ~0, and the rail can no longer
+   draw over the panel it just opened (rail z-index 30 vs .pin-panel 6, same corner).
+   Position is written straight to the node from a rAF loop so orbiting the model does
+   not re-render React; the loop only runs while something is actually selected. */
+function ContextBar({ anchor, viewerRef, children }: {
+  anchor: [number, number, number] | null;
+  viewerRef: React.RefObject<ViewerHandle | null>;
+  children: React.ReactNode;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!anchor) return;
+    let raf = 0;
+    let lx = -1, ly = -1;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const el = ref.current;
+      if (!el) return;
+      const pt = viewerRef.current?.projectPoint(anchor[0], anchor[1], anchor[2]);
+      if (!pt) return;
+      el.style.visibility = pt.behind ? "hidden" : "visible";
+      // Keep the bar inside the canvas and clear of the Inspector dock — a selection
+      // near the right edge would otherwise project underneath it and be unreachable.
+      const host = el.parentElement;
+      let x = pt.x, y = pt.y;
+      if (host) {
+        const half = el.offsetWidth / 2;
+        const dock = host.querySelector(".inspector-dock") as HTMLElement | null;
+        const rightLimit = host.clientWidth - (dock ? dock.offsetWidth + 24 : 12) - half;
+        x = Math.min(Math.max(x, half + 12), Math.max(half + 12, rightLimit));
+        y = Math.max(y, el.offsetHeight + 20); // never above the viewer head
+      }
+      if (Math.abs(x - lx) < 0.5 && Math.abs(y - ly) < 0.5) return; // no sub-pixel churn
+      lx = x; ly = y;
+      // centred on the pick and lifted clear of it, so the bar never covers what was clicked
+      el.style.transform = `translate(calc(${Math.round(x)}px - 50%), calc(${Math.round(y)}px - 100% - 14px))`;
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [anchor, viewerRef]);
+  if (!anchor) return null;
+  return <div className="ctxbar" ref={ref} role="toolbar" aria-label="Selection actions">{children}</div>;
+}
+
 function DockRow({ k, v }: { k: string; v: string }) {
   return (
     <div className="dock-row">
@@ -913,11 +958,12 @@ function DockRow({ k, v }: { k: string; v: string }) {
 /* Reads whatever is currently selected. Three truthful states rather than one
    invented one: a picked feature, the whole body, or nothing picked yet — the
    empty state is where the selection-driven model gets taught. */
-function DockSelection({ feature, dims, units, modelSelected }: {
+function DockSelection({ feature, dims, units, modelSelected, ask }: {
   feature: PickedFeature | null;
   dims: { x: number; y: number; z: number } | null;
   units: "mm" | "in";
   modelSelected: boolean;
+  ask?: { text: string; setText: (v: string) => void; onAsk: () => void; onClear: () => void; canAsk: boolean; busy: boolean; placeholder: string; count?: number };
 }) {
   const n = (v: number) => (units === "in" ? (v / 25.4).toFixed(2) : String(Math.round(v * 10) / 10));
   const u = units === "in" ? "in" : "mm";
@@ -934,6 +980,14 @@ function DockSelection({ feature, dims, units, modelSelected }: {
         <DockRow k={kind} v={detail} />
         {size && <DockRow k="Size" v={size} />}
         <DockRow k="Position" v={`X ${n(feature.cx)}   Y ${n(feature.cy)}   Z ${n(feature.cz)}`} />
+        <p className="dock-note">
+          {feature.kind === "face"
+            ? "Round, Chamfer and Extrude are on the toolbar at the selection — free, no AI. Extrude takes a negative value to pull the face in, or drag the blue arrow."
+            : feature.kind === "edge"
+              ? "Round and Chamfer are on the toolbar at the selection — free, no AI. Or drag the blue arrow to round this edge live."
+              : "Round and Chamfer are on the toolbar at the selection — free, no AI."}
+        </p>
+        {ask && <DockAsk ask={ask} />}
       </div>
     );
   }
@@ -947,7 +1001,35 @@ function DockSelection({ feature, dims, units, modelSelected }: {
       </div>
     );
   }
+  if (ask && ask.count) {
+    return (
+      <div className="dock-panel">
+        <p className="dock-sub">Selection</p>
+        <DockRow k="Faces" v={`${ask.count} selected`} />
+        <p className="dock-note">Shift-click to add more, or shift-drag to box-select.</p>
+        <DockAsk ask={ask} />
+      </div>
+    );
+  }
   return <p className="dock-empty">Click a face, an edge or a corner to see what you can do with it.</p>;
+}
+
+/* The "ask the AI about this selection" path. It used to sit in the floating panel
+   the tool rail drew over; the verbs moved to the contextual bar and the words moved
+   here, so there is one place for each rather than one card holding both. */
+function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]["ask"]> }) {
+  return (
+    <div className="dock-ask">
+      <textarea rows={2} value={ask.text} onChange={(e) => ask.setText(e.target.value)} placeholder={ask.placeholder} />
+      <div className="param-actions">
+        <button className="primary sm" disabled={!ask.text.trim() || !ask.canAsk || ask.busy} onClick={ask.onAsk}>
+          Ask AI to change {ask.count ? "these" : "this"}
+        </button>
+        <button className="ghost sm" onClick={ask.onClear}>Clear</button>
+      </div>
+      {!ask.canAsk && <p className="fine">Precise (CAD) models only.</p>}
+    </div>
+  );
 }
 
 type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history";
@@ -1377,6 +1459,10 @@ export function Workspace(p: Props) {
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
   const [showLayers, setShowLayers] = useState(false); // legacy gate: context-menu Rename still opens Objects
   const [dockPanel, setDockPanel] = useState<DockPanel>("selection");
+  // A pick is a request to inspect it: bring Selection forward rather than leaving the
+  // description behind whichever panel happened to be open.
+  const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
+  useEffect(() => { if (picked) setDockPanel("selection"); }, [picked]);
   void showLayers; void setShowLayers; // retained: context-menu Rename still drives this
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
@@ -2243,74 +2329,31 @@ export function Workspace(p: Props) {
                   {p.activeKind !== "replicad" && <p className="fine">AI edits need a Precise (CAD) model — notes work everywhere.</p>}
                 </div>
               )}
-              {p.featureCtl.selected && (
-                <div className="pin-panel">
-                  <div className="pin-head">
-                    <span>
-                      {(() => {
-                        const f = p.featureCtl.selected!;
-                        const cap = f.label.charAt(0).toUpperCase() + f.label.slice(1);
-                        if (f.kind === "face") return `${cap} · ${f.w} × ${f.h} mm`;
-                        if (f.kind === "edge") return `${cap} · ${f.len} mm long`;
-                        return `Corner · ${f.cx}, ${f.cy}, ${f.cz} mm`;
-                      })()}
-                    </span>
-                    <button className="x" aria-label="Clear selection" onClick={p.featureCtl.clear}><IconX /></button>
-                  </div>
-                  {p.activeKind === "replicad" && (
-                    <DirectOpBar
-                      kind={p.featureCtl.selected.kind}
-                      busy={p.status === "generating"}
-                      onApply={p.featureCtl.directOp}
-                      liveSize={p.featureCtl.liveMm}
-                      onHole={p.holeCtl.canStart ? p.holeCtl.start : undefined}
-                    />
-                  )}
-                  <textarea
-                    rows={2}
-                    value={p.featureCtl.text}
-                    onChange={(e) => p.featureCtl.setText(e.target.value)}
-                    placeholder={p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep"}
+              {p.featureCtl.selected && p.activeKind === "replicad" && (
+                <ContextBar anchor={[p.featureCtl.selected.cx, p.featureCtl.selected.cy, p.featureCtl.selected.cz]} viewerRef={p.viewerRef}>
+                  <DirectOpBar
+                    kind={p.featureCtl.selected.kind}
+                    busy={p.status === "generating"}
+                    onApply={p.featureCtl.directOp}
+                    liveSize={p.featureCtl.liveMm}
+                    onHole={p.holeCtl.canStart ? p.holeCtl.start : undefined}
                   />
-                  <div className="param-actions">
-                    <button
-                      className="primary sm"
-                      disabled={!p.featureCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
-                      onClick={p.featureCtl.askAi}
-                    >
-                      Ask AI to change this
-                    </button>
-                    <button className="ghost sm" onClick={p.featureCtl.clear}>Cancel</button>
-                  </div>
-                  {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
-                </div>
+                  <button className="x" aria-label="Clear selection" onClick={p.featureCtl.clear}><IconX /></button>
+                </ContextBar>
               )}
               {p.holeCtl.draft && <HolePanel ctl={p.holeCtl} busy={p.status === "generating"} />}
-              {p.facesCtl.faces.length > 0 && (
-                <div className="pin-panel">
-                  <div className="pin-head">
-                    <span>{p.facesCtl.faces.length} {p.facesCtl.faces.length === 1 ? "face" : "faces"} selected · shift-click adds more</span>
-                    <button className="x" aria-label="Clear selection" onClick={p.facesCtl.clear}><IconX /></button>
-                  </div>
+              {p.facesCtl.faces.length > 0 && p.activeKind === "replicad" && (
+                <ContextBar
+                  anchor={[
+                    p.facesCtl.faces.reduce((a, f) => a + f.cx, 0) / p.facesCtl.faces.length,
+                    p.facesCtl.faces.reduce((a, f) => a + f.cy, 0) / p.facesCtl.faces.length,
+                    p.facesCtl.faces.reduce((a, f) => a + f.cz, 0) / p.facesCtl.faces.length,
+                  ]}
+                  viewerRef={p.viewerRef}
+                >
                   <MultiFaceOpRow count={p.facesCtl.faces.length} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.facesCtl.directOp} />
-                  <textarea
-                    rows={2}
-                    value={p.facesCtl.text}
-                    onChange={(e) => p.facesCtl.setText(e.target.value)}
-                    placeholder="e.g. add a 3 mm fillet to these faces · shell these 2 mm"
-                  />
-                  <div className="param-actions">
-                    <button
-                      className="primary sm"
-                      disabled={!p.facesCtl.text.trim() || p.activeKind !== "replicad" || p.status === "generating"}
-                      onClick={p.facesCtl.askAi}
-                    >
-                      Ask AI to change these
-                    </button>
-                    <button className="ghost sm" onClick={p.facesCtl.clear}>Cancel</button>
-                  </div>
-                  {p.activeKind !== "replicad" && <p className="fine">Precise (CAD) models only.</p>}
-                </div>
+                  <button className="x" aria-label="Clear selection" onClick={p.facesCtl.clear}><IconX /></button>
+                </ContextBar>
               )}
               {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
                 <div className="box-hint">Shift-click faces to build a selection · shift-drag to box-select</div>
@@ -2346,7 +2389,19 @@ export function Workspace(p: Props) {
               </div>
               <div className="dock-body">
                 {dockPanel === "selection" && (
-                  <DockSelection feature={p.featureCtl.selected} dims={p.dims} units={p.units} modelSelected={p.modelSelected} />
+                  <DockSelection
+                    feature={p.featureCtl.selected}
+                    dims={p.dims}
+                    units={p.units}
+                    modelSelected={p.modelSelected}
+                    ask={
+                      p.facesCtl.faces.length > 0
+                        ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
+                        : p.featureCtl.selected
+                          ? { text: p.featureCtl.text, setText: p.featureCtl.setText, onAsk: p.featureCtl.askAi, onClear: p.featureCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep" }
+                          : undefined
+                    }
+                  />
                 )}
                 {dockPanel === "objects" && objectsPanel}
                 {dockPanel === "params" && (

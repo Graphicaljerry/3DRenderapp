@@ -3349,7 +3349,11 @@ export default function App() {
   }
   // One tool at a time. The rail buttons and the keyboard shortcuts both call these,
   // so a key can never leave two tools armed the way a raw setter would.
-  const toggleSelectTool = () => setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; });
+  // Guarded on the engine: the rail hides the Select button entirely for a generative
+  // mesh (features can't be picked on one), but the keyboard had no such guard — V armed
+  // the tool anyway, the Viewer started picking, and the button that would turn it back
+  // off was not rendered. Silently doing nothing is the honest behaviour here.
+  const toggleSelectTool = () => { if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return; setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }); };
   const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } else setMeasurePending(null); return next; });
   const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } };
 

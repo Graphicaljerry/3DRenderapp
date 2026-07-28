@@ -868,6 +868,37 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   .launch-foot { flex-direction: column; align-items: flex-start; gap: 6px; }
 }
 
+/* Contextual toolbar — anchored at the selection, above the tool rail (z 30) so the
+   rail can never draw over it. translate() is written from a rAF loop; the -50%/-140%
+   in the transform origin is folded into `left`/`top` so the JS only writes translate. */
+.ctxbar {
+  position: absolute; left: 0; top: 0; z-index: 32;
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 6px; border-radius: 10px;
+  background: var(--bg); border: 1.5px solid var(--accent); box-shadow: var(--shadow-md);
+  pointer-events: auto; white-space: nowrap;
+  animation: panel-in .16s cubic-bezier(.23,1,.32,1);
+}
+/* Sit just above-left of the anchor point so the bar never covers what was picked. */
+.ctxbar::after { content: ""; position: absolute; left: 50%; bottom: -5px; margin-left: -4px; width: 8px; height: 8px; background: var(--bg); border-right: 1.5px solid var(--accent); border-bottom: 1.5px solid var(--accent); transform: rotate(45deg); }
+.ctxbar .x { margin-left: 2px; }
+/* Inside the bar, DirectOpBar drops its heading and hint: a toolbar anchored on the
+   model has to stay narrow enough not to cover it. The same guidance still reaches
+   the user — it lives in the dock's Selection panel, which has room for prose. */
+.ctxbar .directop { display: contents; }
+.ctxbar .directop-label, .ctxbar .directop > .fine { display: none; }
+.ctxbar .directop-row { display: inline-flex; align-items: center; gap: 5px; }
+.ctxbar .directop-row input { width: 56px; padding: 4px 6px; border: 1px solid var(--bord); border-radius: 6px; font: inherit; font-size: 12px; background: var(--bg); color: var(--ink); }
+.ctxbar .ghost.sm { padding: 4px 9px; font-size: 12px; }
+.ctxbar .multiface { display: inline-flex; align-items: center; gap: 5px; }
+@media (prefers-reduced-motion: reduce) { .ctxbar { animation: none; } }
+
+/* The ask-the-AI half of a selection, now in the dock instead of a floating card. */
+.dock-ask { display: flex; flex-direction: column; gap: 7px; margin-top: 2px; }
+.dock-ask textarea { width: 100%; border: 1px solid var(--bord); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 12.5px; resize: vertical; background: var(--bg); color: var(--ink); }
+.dock-ask .param-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.dock-ask .fine { margin: 0; }
+
 /* ---------- Inspector dock ----------
    A real column beside the stage, not an overlay that replaces it. Sibling of
    .right-dock (never a child — that stack relies on :empty to disappear). */

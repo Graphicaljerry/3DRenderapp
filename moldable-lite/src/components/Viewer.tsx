@@ -54,6 +54,11 @@ export interface ViewerHandle {
   /** A large, clean render of the model alone (no grid/dims/pins) — the reference
    *  image for "refine this as a mesh": it feeds an image→3D generator. */
   captureModelShot: () => string | null;
+  /** Project a display-space point to canvas-relative pixels, so UI can be anchored
+   *  AT a selection instead of parked in a corner. `behind` is true when the point is
+   *  on the far side of the camera (the caller should hide rather than mis-place).
+   *  Null before the scene exists. */
+  projectPoint: (x: number, y: number, z: number) => { x: number; y: number; behind: boolean } | null;
 }
 
 export interface PickedPoint {
@@ -2194,6 +2199,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useImperativeHandle(ref, () => wakeOnCall({
     resetView() {
       if (st.current) frameToObject(st.current);
+    },
+    projectPoint(x, y, z) {
+      const s = st.current;
+      if (!s) return null;
+      const r = s.renderer.domElement.getBoundingClientRect();
+      const v = new THREE.Vector3(x, y, z).project(s.camera);
+      return {
+        x: (v.x * 0.5 + 0.5) * r.width,
+        y: (-v.y * 0.5 + 0.5) * r.height,
+        behind: v.z > 1, // past the far plane / behind the camera
+      };
     },
     /** Clear all per-face paint from the model (the "Erase all painting" button). */
     eraseFacePaint() {

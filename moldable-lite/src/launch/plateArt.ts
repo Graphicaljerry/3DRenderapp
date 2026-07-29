@@ -60,6 +60,12 @@ const NAME_BARS: [number, number][][] = (() => {
 /** Recognisable part PROFILES in plate-normalised coords — closed outlines.
  *  Profiles, not top-down footprints: viewed from above a hook and a bracket are both
  *  rectangles, and the whole point is that you can tell what is being printed. */
+/** Display names aligned with FOOTPRINTS — the printer HUD names what it is making. */
+export const FOOTPRINT_NAMES = [
+  "wall hook", "phone stand", "gear", "cable clip", "name tag",
+  "katana", "shark", "t-rex", "duck", "tree", "cat",
+] as const;
+
 export const FOOTPRINTS: [number, number][][] = [
   // wall hook — a J: back plate down the left, throat, and the upturned tip
   [[.30,.16],[.44,.16],[.44,.62],[.56,.70],[.68,.62],[.68,.40],[.80,.40],[.80,.66],

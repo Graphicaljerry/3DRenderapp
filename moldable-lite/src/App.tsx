@@ -33,7 +33,7 @@ import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube } from "./components/icons";
-import { FOOTPRINTS, extraLoopsFor, buildToolpath, type Pt, type Move } from "./launch/plateArt";
+import { FOOTPRINTS, FOOTPRINT_NAMES, extraLoopsFor, buildToolpath, type Pt, type Move } from "./launch/plateArt";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
@@ -4206,6 +4206,13 @@ function LaunchBackdrop() {
     let moves: Move[] = [];
     let lengths: number[] = [];
     let total = 0;
+    // The machine's rhythm: perimeters deliberate, infill brisk, travels darting. One
+    // constant speed for everything was the biggest "screensaver, not printer" tell —
+    // the eye reads the change of pace as the machine changing what it is doing.
+    const speedOf = (m: Move) => (m.travel ? 2.7 : m.wall ? 1.0 : 1.75);
+    let durs: number[] = [];
+    let totalTime = 1;
+    let wallPath: Path2D | null = null;
     let drawnUpTo = 0;   // index of the last move already committed to the bead layer
     let drawnFrac = 0;   // how much of moves[drawnUpTo] is committed
 
@@ -4229,7 +4236,32 @@ function LaunchBackdrop() {
       moves = buildToolpath(poly, side * 0.018, side * 0.030, extra);
       lengths = moves.map((m) => Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y));
       total = lengths.reduce((s, v) => s + v, 0) || 1;
+      durs = moves.map((m, i) => lengths[i] / speedOf(m));
+      totalTime = durs.reduce((s, v) => s + v, 0) || 1;
+      wallPath = new Path2D();
+      for (const m of moves) if (m.wall && !m.travel) { wallPath.moveTo(m.a.x, m.a.y); wallPath.lineTo(m.b.x, m.b.y); }
       newBeadLayer();
+    };
+
+    /** Map print progress (0..1 of print TIME) to distance along the path, walking the
+     *  per-move durations — this is where the speed profile becomes visible motion. */
+    const distAtProgress = (frac: number): number => {
+      let tLeft = frac * totalTime, d = 0;
+      for (let i = 0; i < moves.length; i++) {
+        if (tLeft <= durs[i]) return d + (durs[i] > 0 ? (tLeft / durs[i]) * lengths[i] : 0);
+        tLeft -= durs[i];
+        d += lengths[i];
+      }
+      return total;
+    };
+    /** Is the nozzle extruding at this distance (false while it travels)? */
+    const extrudingAt = (dist: number): boolean => {
+      let acc = 0;
+      for (let i = 0; i < moves.length; i++) {
+        acc += lengths[i];
+        if (dist <= acc) return !moves[i].travel;
+      }
+      return false;
     };
 
     /** Commit bead up to `dist` along the path. Only the NEW span is stroked. */
@@ -4306,7 +4338,9 @@ function LaunchBackdrop() {
 
       const p = (elapsed % CYCLE);
       const printing = p < PRINT;
-      const head = printing ? extrudeTo((p / PRINT) * total) : extrudeTo(total);
+      const dist = printing ? distAtProgress(p / PRINT) : total;
+      const head = extrudeTo(dist);
+      const extruding = printing && extrudingAt(dist);
       const fadeA = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
 
       // Composite only the PLATE'S BOX, not the whole viewport. Everything that changes
@@ -4323,16 +4357,69 @@ function LaunchBackdrop() {
       ctx.clearRect(bx, by, bw, bh);
       blit(plateBmp);
       if (beadBmp) { ctx.globalAlpha = fadeA * tokens().bead; blit(beadBmp); ctx.globalAlpha = 1; }
+      const t = tokens();
       if (printing && head) {
-        // The nozzle: a small solid dot at the head of the bead. The only moving
-        // object on the screen once the bead is laid.
-        const t = tokens();
-        const r = Math.max(2.2, plate.side * 0.011);
-        ctx.globalAlpha = 0.9;
+        // Hot tail: the last stretch of bead behind the nozzle glows brighter and
+        // "cools" with distance — fresh extrusion, not ink. Drawn on the live canvas
+        // only, so the settled bead layer keeps its uniform tone.
+        if (extruding) {
+          const TAIL = plate.side * 0.055;
+          let remain = Math.min(TAIL, dist), acc = 0, i = 0;
+          for (; i < moves.length && acc + lengths[i] < dist - remain; i++) acc += lengths[i];
+          ctx.lineCap = "round";
+          ctx.strokeStyle = t.accent;
+          let dAt = dist - remain;
+          for (; i < moves.length && dAt < dist; i++) {
+            const segStart = acc, segEnd = acc + lengths[i];
+            acc = segEnd;
+            if (moves[i].travel || lengths[i] === 0) { dAt = Math.max(dAt, segEnd); continue; }
+            const f0 = Math.max(0, (dAt - segStart) / lengths[i]);
+            const f1 = Math.min(1, (dist - segStart) / lengths[i]);
+            if (f1 <= f0) { dAt = segEnd; continue; }
+            const heat = 1 - (dist - (segStart + f1 * lengths[i])) / TAIL;   // 0 cold .. 1 at nozzle
+            ctx.globalAlpha = (t.dark ? 0.5 : 0.4) + 0.4 * Math.max(0, heat);
+            ctx.lineWidth = (moves[i].wall ? Math.max(1.8, plate.side * 0.009) : Math.max(1.3, plate.side * 0.0062)) * 1.05;
+            ctx.beginPath();
+            ctx.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f0, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f0);
+            ctx.lineTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f1, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f1);
+            ctx.stroke();
+            dAt = segEnd;
+          }
+        }
+        // The nozzle: full and haloed while extruding, small and quiet while
+        // travelling — a nozzle that glows identically while laying nothing reads
+        // as a cursor.
+        const r = Math.max(2.2, plate.side * 0.011) * (extruding ? 1 : 0.62);
+        ctx.globalAlpha = extruding ? 0.95 : 0.55;
         ctx.fillStyle = t.accent;
         ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 0.18;
-        ctx.beginPath(); ctx.arc(head.x, head.y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+        if (extruding) {
+          ctx.globalAlpha = 0.16;
+          ctx.beginPath(); ctx.arc(head.x, head.y, r * 2.6, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+      // Completion beat: one soft contour pulse the moment the layer finishes — the
+      // machine announcing "layer done", not just stopping.
+      if (!printing && wallPath && p < PRINT + 450) {
+        const u = (p - PRINT) / 450;
+        ctx.globalAlpha = 0.30 * (1 - u) * fadeA;
+        ctx.strokeStyle = t.accent;
+        ctx.lineWidth = Math.max(1.8, plate.side * 0.009) + 3 * (1 - u);
+        ctx.lineCap = "round";
+        ctx.stroke(wallPath);
+        ctx.globalAlpha = 1;
+      }
+      // Printer HUD: what it is making and how far along — quiet, mono, inside the
+      // plate's top-left. Gives the loop a story; you catch the name and watch for
+      // that part. Fades out with the bed.
+      {
+        const pct = Math.round((printing ? p / PRINT : 1) * 100);
+        ctx.globalAlpha = (t.dark ? 0.6 : 0.75) * fadeA;
+        ctx.fillStyle = t.subtle;
+        ctx.font = '500 11px "JetBrains Mono", ui-monospace, monospace';
+        ctx.textAlign = "left"; ctx.textBaseline = "top";
+        ctx.fillText(printing ? `${FOOTPRINT_NAMES[part]} · first layer ${pct}%` : `${FOOTPRINT_NAMES[part]} · done`, plate.x + 10, plate.y + 10);
         ctx.globalAlpha = 1;
       }
       applyMask();

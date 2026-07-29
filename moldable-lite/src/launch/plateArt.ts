@@ -63,13 +63,19 @@ const NAME_BARS: [number, number][][] = (() => {
 /** Display names aligned with FOOTPRINTS — the printer HUD names what it is making. */
 export const FOOTPRINT_NAMES = [
   "wall hook", "phone stand", "gear", "cable clip", "name tag",
-  "katana", "shark", "t-rex", "duck", "tree", "cat",
+  "articulated dragon", "rocket", "benchy", "hex key", "L-bracket", "vase",
 ] as const;
 
+/** Recognisable part PROFILES in plate-normalised coords — closed outlines, y DOWN.
+ *  Profiles, not top-down footprints: viewed from above a hook and a bracket are both
+ *  rectangles, and the whole point is that you can tell what is being printed.
+ *  Weighted towards things people print to USE, plus the two toys the hobby is famous
+ *  for (the articulated dragon and a Benchy). */
 export const FOOTPRINTS: [number, number][][] = [
-  // wall hook — a J: back plate down the left, throat, and the upturned tip
-  [[.30,.16],[.44,.16],[.44,.62],[.56,.70],[.68,.62],[.68,.40],[.80,.40],[.80,.66],
-   [.58,.84],[.30,.72]],
+  // wall hook — wall plate down the left, arm forward along the bottom, tip turned up.
+  // (The previous outline had the arm meeting the plate mid-height and read as a U.)
+  // Plate deliberately much taller than the upturned tip — equal legs read as a U.
+  [[.26,.10],[.40,.10],[.40,.70],[.66,.70],[.66,.44],[.80,.44],[.80,.86],[.26,.86]],
   // phone stand — wedge with a lip at the foot and a cable slot behind it
   [[.20,.80],[.20,.66],[.30,.66],[.30,.60],[.22,.60],[.60,.20],[.72,.28],[.44,.66],
    [.74,.66],[.74,.80]],
@@ -79,27 +85,28 @@ export const FOOTPRINTS: [number, number][][] = [
   // "JERRY" nameplate — the thing half of 3D printing actually is: a name on a
   // keychain, a desk sign, a label for someone.
   NAMEPLATE,
-  // ---- The models people actually print. Chosen from download counts on MakerWorld /
-  // Printables / Thingiverse and then filtered on ONE question: can you name it from a
-  // flat outline? Anything that only reads in 3D (a Benchy from above is a blob) or
-  // needs interior islands to be legible was dropped, as were an articulated dragon,
-  // snowflake, elephant, snake and axolotl whose silhouettes did not survive the test.
-  // katana — the most-downloaded print-in-place model class on MakerWorld
-  [[0.156,0.848],[0.376,0.658],[0.409,0.697],[0.432,0.677],[0.403,0.640],[0.683,0.412],[0.830,0.254],[0.900,0.115],[0.813,0.186],[0.643,0.372],[0.451,0.535],[0.364,0.600],[0.334,0.563],[0.311,0.583],[0.344,0.622],[0.124,0.812]],
-  // flexi shark
-  [[0.130,0.500],[0.240,0.380],[0.400,0.365],[0.470,0.180],[0.510,0.375],[0.680,0.425],[0.720,0.360],[0.748,0.435],[0.800,0.455],[0.900,0.140],[0.855,0.480],[0.905,0.700],[0.800,0.545],[0.740,0.585],[0.630,0.605],[0.400,0.605],[0.430,0.800],[0.300,0.600],[0.220,0.580],[0.160,0.555]],
-  // flexi T-rex — forelimbs omitted, they vanish at this scale
-  [[0.130,0.300],[0.185,0.185],[0.290,0.155],[0.345,0.265],[0.450,0.205],[0.575,0.235],[0.680,0.300],[0.795,0.385],[0.900,0.500],[0.775,0.480],[0.695,0.555],[0.640,0.710],[0.620,0.820],[0.495,0.855],[0.550,0.755],[0.580,0.600],[0.465,0.560],[0.375,0.495],[0.320,0.400],[0.265,0.340],[0.140,0.385]],
-  // rubber duck
-  [[0.130,0.365],[0.230,0.305],[0.270,0.210],[0.345,0.145],[0.425,0.225],[0.435,0.335],[0.520,0.400],[0.645,0.455],[0.775,0.525],[0.875,0.400],[0.815,0.585],[0.735,0.705],[0.565,0.775],[0.385,0.745],[0.285,0.640],[0.255,0.500],[0.245,0.400],[0.155,0.415]],
-  // christmas tree — the tier step-in is what stops it being a triangle
-  [[0.520,0.100],[0.665,0.385],[0.605,0.385],[0.755,0.585],[0.685,0.585],[0.855,0.765],[0.585,0.765],[0.585,0.865],[0.455,0.865],[0.455,0.765],[0.185,0.765],[0.355,0.585],[0.285,0.585],[0.435,0.385],[0.375,0.385]],
-  // sitting cat. The tail is a straight raised sweep, not the researched curl: a
-  // curled tip needs the inner edge to double back across the outer edge's line, and
-  // no placement of those four points makes that loop simple — an automated search
-  // over the plausible range found zero non-self-intersecting configurations. The
-  // straight tail is provably simple and still reads as a cat.
-  [[0.235,0.145],[0.290,0.250],[0.355,0.130],[0.400,0.270],[0.400,0.360],[0.480,0.450],[0.585,0.545],[0.665,0.650],[0.720,0.560],[0.860,0.280],[0.800,0.500],[0.775,0.655],[0.775,0.755],[0.715,0.835],[0.545,0.850],[0.300,0.845],[0.285,0.690],[0.290,0.530],[0.265,0.400],[0.210,0.335],[0.195,0.260]],
+  // articulated dragon — the print-in-place model the hobby is known for. Side
+  // profile: horned head, arched neck, raised wing, four legs, tapering tail.
+  // The neck is the whole trick: without a genuinely THIN neck the head merges into
+  // the body and the outline reads as a fish with a dorsal fin.
+  [[.06,.42],[.16,.34],[.21,.22],[.29,.34],[.40,.42],[.47,.32],[.56,.08],[.74,.20],
+   [.66,.36],[.80,.42],[.90,.52],[.97,.66],[.86,.60],[.70,.55],[.68,.74],[.57,.74],
+   [.55,.60],[.44,.62],[.42,.76],[.31,.76],[.33,.58],[.43,.50],[.13,.49]],
+  // rocket — nose cone, body, two swept fins, nozzle
+  [[.50,.10],[.58,.32],[.58,.64],[.74,.82],[.74,.88],[.61,.80],[.61,.90],[.39,.90],
+   [.39,.80],[.26,.88],[.26,.82],[.42,.64],[.42,.32]],
+  // 3DBenchy — the calibration boat everyone has printed. Pointed bow, deck, cabin
+  // box and funnel.
+  [[.14,.56],[.30,.44],[.44,.44],[.44,.30],[.52,.30],[.52,.20],[.60,.20],[.60,.30],
+   [.70,.30],[.70,.44],[.84,.44],[.86,.62],[.72,.76],[.30,.76]],
+  // hex key — a plain L, the shape of the tool in every printer's toolkit
+  [[.22,.26],[.80,.26],[.80,.40],[.36,.40],[.36,.84],[.22,.84]],
+  // L-bracket with a diagonal gusset
+  [[.24,.18],[.38,.18],[.38,.40],[.62,.62],[.80,.62],[.80,.78],[.24,.78]],
+  // vase — flared rim, PINCHED neck, wide belly, tapered foot. Without the pinch at
+  // the neck the silhouette is just a hexagon.
+  [[.40,.14],[.60,.14],[.55,.26],[.72,.46],[.68,.68],[.56,.86],[.44,.86],[.32,.68],
+   [.28,.46],[.45,.26]],
 ];
 
 // Tooth-by-tooth gear: recognisable at a glance and the one curved profile in the set.

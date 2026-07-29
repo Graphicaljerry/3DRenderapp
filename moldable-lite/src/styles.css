@@ -1699,3 +1699,38 @@ details.guide { margin-top: 10px; }
 .dock-resize { position: absolute; left: -7px; top: 0; bottom: 0; width: 14px; cursor: col-resize; touch-action: none; z-index: 2; }
 .dock-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: transparent; transition: background-color .15s ease; }
 .dock-resize:hover::after, .dock-resize:active::after { background: var(--accent); }
+
+/* ---------- motion: nothing changes state instantly ----------
+   Audited in the browser rather than by eye: every rule that styles :hover, :active or
+   :focus-visible was collected from the live stylesheets, and its BASE selector checked
+   for a transition. Eight came back at 0s and snapped — the tool rail's zoom and view
+   buttons, the bed chip, the mic and attach buttons, the Objects rows, the Inspector's
+   own panel list, the transform-format pills and the help dots.
+
+   Enumerated properties, never `transition: all`: `all` animates layout properties too,
+   so a hover that also changes padding or width janks, and it is the single most common
+   tell of generated CSS. One shared token pair so every control in the app agrees on
+   how fast "responding to you" feels. */
+:root { --ease-ui: cubic-bezier(.22, 1, .36, 1); --ms-ui: .16s; }
+.attach, .mic, .bedchip, .hint, .xfmt, .pm-item, .lp-row,
+.view-snaps button, .zoom-ctl button, .dock-item {
+  transition:
+    background-color var(--ms-ui) var(--ease-ui),
+    border-color var(--ms-ui) var(--ease-ui),
+    color var(--ms-ui) var(--ease-ui),
+    box-shadow var(--ms-ui) var(--ease-ui),
+    opacity var(--ms-ui) var(--ease-ui),
+    transform .14s var(--ease-ui);
+}
+/* Press feedback on the small canvas controls: they are the ones you tap repeatedly
+   (zoom, view snaps), so they benefit most from feeling physical. */
+.zoom-ctl button:active, .view-snaps button:active, .bedchip:active,
+.attach:active, .mic:active, .xfmt:active { transform: scale(.94); }
+.lp-row:not(.static):active { transform: scale(.99); }
+/* Honour the OS setting — this whole block is decoration. */
+@media (prefers-reduced-motion: reduce) {
+  .attach, .mic, .bedchip, .hint, .xfmt, .pm-item, .lp-row,
+  .view-snaps button, .zoom-ctl button, .dock-item { transition: none; }
+  .zoom-ctl button:active, .view-snaps button:active, .bedchip:active,
+  .attach:active, .mic:active, .xfmt:active, .lp-row:not(.static):active { transform: none; }
+}

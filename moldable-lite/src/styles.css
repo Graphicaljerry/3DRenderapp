@@ -1128,15 +1128,21 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      centred pill it read as a stray floating control; matched to the chat rail the two
      become one idea — a canvas with a collapsible panel on each side — and the target
      is far easier to hit. The zoom cluster is shifted clear of it below. */
-  position: absolute; top: 12px; bottom: 12px; right: 12px; z-index: 7;
-  width: 34px; padding: 0;
+  /* Flush to the frame and the same 40px width as the collapsed chat rail on the
+     opposite edge. It sat 12px in and 6px narrower, so the two collapsed tabs did not
+     read as the same control — measured chat gapOuter 0 / w 40 against dock 12 / 34.
+     Top and bottom are flush to the viewer too; it cannot run the full window height
+     the way the chat rail does, because the status bar (and its Export button) live
+     below the viewer body. */
+  position: absolute; top: 0; bottom: 0; right: 0; z-index: 7;
+  width: 40px; padding: 0;
   /* Colour and border come from the shared collapsed-rail rule below, which both this
      and the chat rail use — over a dark 3D canvas a plain --bg panel sat within a couple
      of percent lightness of the scene and the tab disappeared entirely. */
   box-shadow: var(--shadow-md);
 }
 /* Same handling the open dock already gets: canvas furniture steps aside for it. */
-.viewer-body:has(.dock-rail) .right-dock { right: 56px; }
+.viewer-body:has(.dock-rail) .right-dock { right: 52px; }   /* clear the 40px rail + 12 */
 .dock-rail-label { writing-mode: vertical-rl; }
 /* Both side panels PAN. They slide in from their own edge and out the same way — no
    scaling, because a panel that grows out of a sliver reads as a popup rather than a

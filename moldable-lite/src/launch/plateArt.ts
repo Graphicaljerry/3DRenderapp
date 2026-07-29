@@ -150,60 +150,152 @@ export function infillLines(poly: Pt[], spacing: number): [Pt, Pt][] {
   return rows;
 }
 
-/** The full toolpath for one part: ONE perimeter, then infill at a uniform margin,
- *  then any lettering islands — in slicer order, with travel moves between runs.
- *
- *  Deliberately no second perimeter. These profiles are small and full of features a
- *  wall or two wide (the katana's blade, the cat's tail, the T-rex's legs), so an inner
- *  wall can never be valid everywhere — and every partial strategy tried (mitre limits,
- *  clearance thresholds, dropping unfit segments) left FRAGMENTS: stubs that start and
- *  stop arbitrarily and read as broken linework rather than a printed wall. One clean
- *  perimeter with a consistent infill margin looks like a deliberate first layer; the
- *  wall-versus-infill hierarchy comes from stroke weight instead (see Move.wall).
- */
+/** Offset a closed polygon OUTWARD by `d`, with a mitre limit at sharp corners.
+ *  Outward on purpose: this is the look the launchpad had at v259 — a double contour
+ *  with the hatch meeting it — which the original code produced by accident (its
+ *  "inset" ran outward in canvas space) and which read better than every corrected
+ *  inward scheme tried since. Outward is also structurally kinder: it cannot collapse
+ *  in thin FEATURES (blades, tails), only pinch at narrow exterior NOTCHES, which the
+ *  crossing harness checks per shape. */
+function offsetOut(poly: Pt[], d: number): Pt[] {
+  const n = poly.length;
+  if (n < 3) return poly;
+  let area2 = 0;
+  for (let i = 0; i < n; i++) {
+    const p = poly[i], q = poly[(i + 1) % n];
+    area2 += p.x * q.y - q.x * p.y;
+  }
+  const s = area2 > 0 ? 1 : -1;   // outward normal in canvas (y-down) space
+  const lines: { px: number; py: number; dx: number; dy: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const p = poly[i], q = poly[(i + 1) % n];
+    const ex = q.x - p.x, ey = q.y - p.y;
+    const L = Math.hypot(ex, ey) || 1;
+    const nx = (ey / L) * s, ny = (-ex / L) * s;
+    lines.push({ px: p.x + nx * d, py: p.y + ny * d, dx: ex / L, dy: ey / L });
+  }
+  const out: Pt[] = [];
+  const LIMIT = Math.abs(d) * 2.5;
+  for (let i = 0; i < n; i++) {
+    const A = lines[(i - 1 + n) % n], B = lines[i];
+    const den = A.dx * B.dy - A.dy * B.dx;
+    let mitred: Pt | null = null;
+    if (Math.abs(den) > 1e-9) {
+      const t = ((B.px - A.px) * B.dy - (B.py - A.py) * B.dx) / den;
+      const q = { x: A.px + A.dx * t, y: A.py + A.dy * t };
+      if (Math.hypot(q.x - poly[i].x, q.y - poly[i].y) <= LIMIT) mitred = q;
+    }
+    if (mitred) { out.push(mitred); continue; }
+    // ROUND JOIN. The old fallback emitted one point, and the chord it created CUT THE
+    // CORNER — at a needle tip (the katana's point, a shark fin) that chord passes
+    // through the source polygon, so the ring crossed the profile it was wrapping.
+    // Arc points all sit at exactly |d| from the vertex; chords of that circle at
+    // <=40 degree steps stay at >=0.94|d| from it, which cannot reach the source.
+    const vx = poly[i].x, vy = poly[i].y;
+    // End of the previous edge's offset segment = this vertex pushed along the PREVIOUS
+    // edge's normal; start of this edge's = the vertex along THIS edge's normal.
+    const prevLen = Math.hypot(vx - poly[(i - 1 + n) % n].x, vy - poly[(i - 1 + n) % n].y);
+    const pPrev = { x: A.px + A.dx * prevLen, y: A.py + A.dy * prevLen };
+    const a0 = Math.atan2(pPrev.y - vy, pPrev.x - vx);
+    const a1 = Math.atan2(B.py - vy, B.px - vx);
+    let diff = a1 - a0;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    const steps = Math.max(1, Math.ceil(Math.abs(diff) / 0.7));
+    for (let k = 0; k <= steps; k++) {
+      const ang = a0 + (diff * k) / steps;
+      out.push({ x: vx + Math.cos(ang) * Math.abs(d), y: vy + Math.sin(ang) * Math.abs(d) });
+    }
+  }
+  return out;
+}
+
+/** Remove self-intersection loops from an offset ring. At a narrow exterior notch the
+ *  two offset edges cross and the offset curve carries a small twisted loop; cutting
+ *  the loop at the intersection point makes the ring BRIDGE the notch — which is what
+ *  the eye expects a printed outer wall to do. Classic offset-curve cleanup: find a
+ *  crossing pair, splice in the intersection, drop everything between, repeat. */
+function untwist(ringIn: Pt[]): Pt[] {
+  let ring = ringIn;
+  for (let guard = 0; guard < 12; guard++) {
+    const n = ring.length;
+    let cut: { i: number; j: number; p: Pt } | null = null;
+    outer: for (let i = 0; i < n && !cut; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (j === i || (j + 1) % n === i || (i + 1) % n === j) continue;
+        const a = ring[i], b = ring[(i + 1) % n], c = ring[j], d = ring[(j + 1) % n];
+        const den = (b.x - a.x) * (d.y - c.y) - (b.y - a.y) * (d.x - c.x);
+        if (Math.abs(den) < 1e-12) continue;
+        const t = ((c.x - a.x) * (d.y - c.y) - (c.y - a.y) * (d.x - c.x)) / den;
+        const u = ((c.x - a.x) * (b.y - a.y) - (c.y - a.y) * (b.x - a.x)) / den;
+        if (t <= 1e-6 || t >= 1 - 1e-6 || u <= 1e-6 || u >= 1 - 1e-6) continue;
+        cut = { i, j, p: { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t } };
+        break outer;
+      }
+    }
+    if (!cut) return ring;
+    // Keep the LARGER side of the cut (the ring), drop the twisted loop. Two candidate
+    // polygons share the intersection point; the loop is the short one.
+    const one: Pt[] = [...ring.slice(0, cut.i + 1), cut.p, ...ring.slice(cut.j + 1)];
+    const two: Pt[] = [cut.p, ...ring.slice(cut.i + 1, cut.j + 1)];
+    ring = one.length >= two.length ? one : two;
+  }
+  return ring;
+}
+
+/** The full toolpath for one part, in the v259 double-contour style: an outer RING one
+ *  wall outside the profile, the profile itself, then infill hatched across the ring's
+ *  whole interior — so the hatch runs up to the ring and visually CONNECTS to both
+ *  contours instead of floating in a moat. Lettering islands print last. */
 export function buildToolpath(poly: Pt[], wall: number, spacing: number, extra: Pt[][] = []): Move[] {
   const moves: Move[] = [];
   const loop = (pts: Pt[]) => {
     for (let i = 0; i < pts.length; i++) moves.push({ a: pts[i], b: pts[(i + 1) % pts.length], travel: false, wall: true });
   };
-  const inside = (q: Pt): boolean => {
+  const ring = untwist(offsetOut(poly, wall));
+  const insideOf = (shape: Pt[]) => (q: Pt): boolean => {
     let c = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const a = poly[i], b = poly[j];
+    for (let i = 0, j = shape.length - 1; i < shape.length; j = i++) {
+      const a = shape[i], b = shape[j];
       if ((a.y > q.y) !== (b.y > q.y) && q.x < ((b.x - a.x) * (q.y - a.y)) / (b.y - a.y) + a.x) c = !c;
     }
     return c;
   };
-  const distToOutline = (q: Pt): number => {
+  const distTo = (shape: Pt[]) => (q: Pt): number => {
     let m = Infinity;
-    for (let i = 0; i < poly.length; i++) {
-      const a = poly[i], b = poly[(i + 1) % poly.length];
+    for (let i = 0; i < shape.length; i++) {
+      const a = shape[i], b = shape[(i + 1) % shape.length];
       const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
       const t = L ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / L)) : 0;
       m = Math.min(m, Math.hypot(q.x - a.x - t * dx, q.y - a.y - t * dy));
     }
     return m;
   };
+  const inRing = insideOf(ring), distRing = distTo(ring);
 
+  loop(ring);
+  moves.push({ a: ring[0], b: poly[0], travel: true });
   loop(poly);
 
-  // Infill: exact scanline spans against the outline, each span clipped by sampling to
-  // a SINGLE uniform clearance. One number, measured from one thing — the ragged look
-  // came from margins measured partly to the outline and partly to wall fragments.
-  const CLEAR = wall * 1.35;
+  // Hatch the RING's interior: spans cross the inner contour by design — that is the
+  // "infill connecting to the walls" read — and stop half a bead short of the ring so
+  // the stroke widths just meet. Scanlines come from the profile but are extended and
+  // clipped against the ring by sampling, which is exact regardless of ring shape.
+  const CLEAR = wall * 0.45;
   let cursor = poly[0];
-  for (const [a, b] of (extra.length ? [] : infillLines(poly, spacing))) {
+  for (const [a0, b0] of (extra.length ? [] : infillLines(ring, spacing))) {
+    const a = a0, b = b0;
     const L = Math.hypot(b.x - a.x, b.y - a.y);
-    const steps = Math.max(2, Math.ceil(L / (wall * 0.75)));
+    const steps = Math.max(2, Math.ceil(L / (wall * 0.6)));
     let s0 = -1;
     for (let k = 0; k <= steps; k++) {
       const t = k / steps;
       const q = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-      const clear = inside(q) && distToOutline(q) >= CLEAR;
+      const clear = inRing(q) && distRing(q) >= CLEAR;
       if (clear && s0 < 0) s0 = t;
       if ((!clear || k === steps) && s0 >= 0) {
         const t1 = clear ? t : (k - 1) / steps;
-        if ((t1 - s0) * L >= spacing * 0.7) {
+        if ((t1 - s0) * L >= spacing * 0.6) {
           const p0 = { x: a.x + (b.x - a.x) * s0, y: a.y + (b.y - a.y) * s0 };
           const p1 = { x: a.x + (b.x - a.x) * t1, y: a.y + (b.y - a.y) * t1 };
           moves.push({ a: cursor, b: p0, travel: true });
@@ -214,8 +306,6 @@ export function buildToolpath(poly: Pt[], wall: number, spacing: number, extra: 
       }
     }
   }
-  // Lettering on a nameplate: separate closed loops walked last, each reached by a
-  // travel move, exactly as a slicer orders disconnected islands on one layer.
   for (const isle of extra) {
     moves.push({ a: cursor, b: isle[0], travel: true });
     loop(isle);

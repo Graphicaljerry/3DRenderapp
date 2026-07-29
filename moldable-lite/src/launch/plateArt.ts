@@ -271,27 +271,27 @@ export function buildToolpath(poly: Pt[], wall: number, spacing: number, extra: 
     }
     return m;
   };
-  const inRing = insideOf(ring), distRing = distTo(ring);
 
   loop(ring);
   moves.push({ a: ring[0], b: poly[0], travel: true });
   loop(poly);
 
-  // Hatch the RING's interior: spans cross the inner contour by design — that is the
-  // "infill connecting to the walls" read — and stop half a bead short of the ring so
-  // the stroke widths just meet. Scanlines come from the profile but are extended and
-  // clipped against the ring by sampling, which is exact regardless of ring shape.
-  const CLEAR = wall * 0.45;
+  // Hatch the PROFILE's interior, stopping AT the inner contour: the span tip lands
+  // ~0.35 wall from the outline, which with the stroke widths in the renderer means
+  // the infill bead just touches the wall bead — connected, never crossing into the
+  // moat between the two contours. (An earlier iteration hatched out to the ring and
+  // the hatch visibly sliced through the inner outline; not clean.)
+  const inPoly = insideOf(poly), distPoly = distTo(poly);
+  const CLEAR = wall * 0.35;
   let cursor = poly[0];
-  for (const [a0, b0] of (extra.length ? [] : infillLines(ring, spacing))) {
-    const a = a0, b = b0;
+  for (const [a, b] of (extra.length ? [] : infillLines(poly, spacing))) {
     const L = Math.hypot(b.x - a.x, b.y - a.y);
-    const steps = Math.max(2, Math.ceil(L / (wall * 0.6)));
+    const steps = Math.max(2, Math.ceil(L / (wall * 0.4)));
     let s0 = -1;
     for (let k = 0; k <= steps; k++) {
       const t = k / steps;
       const q = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-      const clear = inRing(q) && distRing(q) >= CLEAR;
+      const clear = inPoly(q) && distPoly(q) >= CLEAR;
       if (clear && s0 < 0) s0 = t;
       if ((!clear || k === steps) && s0 >= 0) {
         const t1 = clear ? t : (k - 1) / steps;

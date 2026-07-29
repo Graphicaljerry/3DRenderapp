@@ -19,7 +19,7 @@ import { MeshBVH } from "three-mesh-bvh";
 export function affectedFaces(
   base: THREE.BufferGeometry,
   probe: THREE.BufferGeometry,
-  opts: { tolMM?: number; maxTris?: number } = {},
+  opts: { tolMM?: number; maxTris?: number; probeOffset?: [number, number, number] } = {},
 ): Float32Array | null {
   const maxTris = opts.maxTris ?? 120_000;
 
@@ -34,6 +34,14 @@ export function affectedFaces(
   const pg = probe.index ? probe.toNonIndexed() : probe.clone();
   const ppos = pg.getAttribute("position")?.array as Float32Array | undefined;
   if (!ppos || ppos.length < 9) { pg.dispose(); if (b !== base) b.dispose(); return null; }
+  // Each engine build is recentred on ITS OWN bounding box, so base and probe live in
+  // different display frames: grow plateHeight and the probe's recentre shifts, which
+  // made every face read as "moved" (or the wrong region light up). The caller passes
+  // the recenter delta; applying it here puts both surfaces in the base's frame.
+  const off = opts.probeOffset;
+  if (off && (off[0] || off[1] || off[2])) {
+    for (let i = 0; i < ppos.length; i += 3) { ppos[i] += off[0]; ppos[i + 1] += off[1]; ppos[i + 2] += off[2]; }
+  }
   const bvh = new MeshBVH(pg);
 
   // Tolerance scales with the part: the two meshes are INDEPENDENT triangulations of

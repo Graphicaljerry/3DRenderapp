@@ -1571,6 +1571,18 @@ export function Workspace(p: Props) {
   // you had seen the model at all. Measured once at mount — resizing later is the user's
   // own doing and should not slam their panel shut.
   const [dockOpen, setDockOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 760);
+  // Resizable like the chat: same clamp-ref-persist pattern, opposite edge. The layers
+  // list and the parameter rows were designed into 262px; on a big screen there is no
+  // reason the Inspector cannot have the room the chat gets.
+  const DOCK_W_DEFAULT = 262;
+  const clampDockW = (w: number) => Math.min(520, Math.max(230, Math.round(w)));
+  const [dockW, setDockW] = useState(() => {
+    try { const v = Number(localStorage.getItem("moldable_dock_w")); return Number.isFinite(v) && v > 0 ? clampDockW(v) : DOCK_W_DEFAULT; } catch { return DOCK_W_DEFAULT; }
+  });
+  const dockWRef = useRef(dockW);
+  dockWRef.current = dockW;
+  const dockResize = useRef<{ startX: number; startW: number } | null>(null);
+  const saveDockW = (w: number) => { try { localStorage.setItem("moldable_dock_w", String(w)); } catch { /* private mode */ } };
   // A pick is a request to inspect it: bring Selection forward rather than leaving the
   // description behind whichever panel happened to be open.
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
@@ -1825,7 +1837,7 @@ export function Workspace(p: Props) {
         >
           <div className="chat-bar">
             <span className="chat-title">Chat</span>
-            <button className="ghost sm" title="Hide chat" onClick={() => setChatOpen(false)}>Hide ‹</button>
+            <button className="panel-collapse wide" title="Hide chat" onClick={() => setChatOpen(false)}>‹ Hide</button>
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
             brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} />
@@ -2062,7 +2074,7 @@ export function Workspace(p: Props) {
               )}
           </div>
 
-          <div className="viewer-body">
+          <div className="viewer-body" style={{ "--dock-w": `${dockOpen ? dockW : 0}px` } as CSSProperties}>
             {/* The stage is never hidden: every panel now docks beside it. */}
             <div style={{ display: "block", height: "100%" }}>
               <Viewer
@@ -2522,10 +2534,37 @@ export function Workspace(p: Props) {
                 <span className="dock-rail-label">‹ Inspector</span>
               </button>
             )}
-            <aside className="inspector-dock" role="region" aria-label="Inspector" style={dockOpen ? undefined : { display: "none" }}>
+            <aside className="inspector-dock" role="region" aria-label="Inspector" style={dockOpen ? ({ width: dockW } as CSSProperties) : { display: "none" }}>
+              {/* Same separator the chat has, on the Inspector's outer (left) edge.
+                  Dragging LEFT grows the panel, so the delta is negated. */}
+              <div
+                className="dock-resize"
+                role="separator"
+                aria-orientation="vertical"
+                aria-label="Resize inspector"
+                title="Drag to resize — double-click to reset"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  dockResize.current = { startX: e.clientX, startW: dockWRef.current };
+                  try { (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+                }}
+                onPointerMove={(e) => {
+                  const r = dockResize.current;
+                  if (!r) return;
+                  setDockW(clampDockW(r.startW - (e.clientX - r.startX)));
+                }}
+                onPointerUp={(e) => {
+                  if (!dockResize.current) return;
+                  dockResize.current = null;
+                  try { (e.currentTarget as HTMLElement).releasePointerCapture?.(e.pointerId); } catch { /* already lost */ }
+                  saveDockW(dockWRef.current);
+                }}
+                onPointerCancel={() => { dockResize.current = null; }}
+                onDoubleClick={() => { setDockW(DOCK_W_DEFAULT); saveDockW(DOCK_W_DEFAULT); }}
+              />
               <div className="dock-head">
                 <p className="dock-eyebrow">Inspector <Hint text="One panel at a time, beside the model. Pick a face or an edge and Selection describes it; the others inspect the whole part." /></p>
-                <button className="x" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}>›</button>
+                <button className="panel-collapse" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}>›</button>
               </div>
               <div className="dock-list">
                 {DOCK_ITEMS.map(([key, label]) => (
@@ -3375,6 +3414,11 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
 function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
   const [local, setLocal] = useState<CadParams>(values);
   const [editing, setEditing] = useState<Record<string, string>>({});
+  // The scrub's pointermove/pointerup handlers outlive the render that attached them,
+  // so they must read CURRENT state through a ref — closing over `local` committed the
+  // value from drag-start and the number snapped back on release.
+  const localRef = useRef(local);
+  localRef.current = local;
   useEffect(() => setLocal(values), [values]);
   if (!isCad || !defaults) {
     return (
@@ -3430,14 +3474,16 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
             <button
               type="button"
               className="prow-name"
-              title={`${k} — drag to scrub`}
+              title={`${k} — drag left/right to change, Shift for fine steps`}
               disabled={busy}
               onPointerDown={(e) => {
                 if (busy) return;
                 const el = e.currentTarget;
                 el.setPointerCapture(e.pointerId);
+                e.preventDefault();
                 const x0 = e.clientX;
                 const v0 = v;
+                let latest = v0;
                 let moved = false;
                 const move = (ev: PointerEvent) => {
                   const dx = ev.clientX - x0;
@@ -3445,20 +3491,24 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
                   moved = true;
                   // Fine scrub while Shift is held, as every 3D tool does.
                   const scale = (ev.shiftKey ? 0.25 : 1) * step;
-                  setVal(Math.min(max, Math.max(min, v0 + dx * scale * 0.5)));
+                  const raw = Math.min(max, Math.max(min, v0 + dx * scale * 0.5));
+                  latest = isInt ? Math.round(raw) : +(Math.round(raw / step) * step).toFixed(4);
+                  setLocal((prev) => ({ ...prev, [k]: latest }));
                 };
                 const up = () => {
                   el.releasePointerCapture(e.pointerId);
                   el.removeEventListener("pointermove", move);
                   el.removeEventListener("pointerup", up);
-                  if (moved) commit({ ...local, [k]: local[k] ?? v });
+                  if (moved) commit({ ...localRef.current, [k]: latest });
                 };
                 el.addEventListener("pointermove", move);
                 el.addEventListener("pointerup", up);
               }}
             >
+              {/* One name, the readable one. The raw identifier lives in the tooltip —
+                  showing both under each other doubled every row's height for a string
+                  most users never need. */}
               <span className="pn-human">{humanizeParam(k)}</span>
-              <span className="pn-code">{k}</span>
             </button>
 
             <span className="prow-field">

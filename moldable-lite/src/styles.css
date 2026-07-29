@@ -1111,7 +1111,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    .right-dock (never a child — that stack relies on :empty to disappear). */
 .inspector-dock {
   position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 7;
-  width: 262px; max-width: calc(100% - 24px);
+  width: 262px; max-width: calc(100% - 24px); /* width overridden inline by the resize state */
   display: flex; flex-direction: column; gap: 7px;
   padding: 12px; background: var(--bg); border: 1px solid var(--bord);
   border-radius: 10px; box-shadow: var(--shadow-md); overflow: hidden;
@@ -1196,8 +1196,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .dock-body .lp-head { padding-top: 0; }
 /* The docked stage keeps its own room: the dock is opaque, so shift canvas
    furniture that would otherwise sit underneath it. */
-.viewer-body:has(.inspector-dock:not([style*="none"])) .right-dock { right: 286px; }
-.viewer-body:has(.inspector-dock:not([style*="none"])) .export-menu { right: 286px; }
+/* Offset follows the RESIZABLE dock width (set inline as --dock-w), not a constant:
+   286px was right only for the default 262px panel. */
+.viewer-body:has(.inspector-dock:not([style*="none"])) .right-dock { right: calc(var(--dock-w, 262px) + 24px); }
+.viewer-body:has(.inspector-dock:not([style*="none"])) .export-menu { right: calc(var(--dock-w, 262px) + 24px); }
 
 .side-panel { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 6; width: 300px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); overflow: hidden; }
 .side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--bord); font-size: 13px; font-weight: 600; color: var(--ink); }
@@ -1636,9 +1638,7 @@ details.guide { margin-top: 10px; }
   cursor: ew-resize; touch-action: none;
 }
 .prow-name:disabled { cursor: default; }
-.pn-human { font-size: 13px; color: var(--ink2); line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
-/* The generated source and the AI both call it by its identifier — keep the link. */
-.pn-code { font-family: var(--font-mono); font-size: 9.5px; color: var(--subt); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.pn-human { font-size: 13px; color: var(--ink2); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .prow:hover .pn-human { color: var(--ink); }
 
 .prow-field { position: relative; display: flex; align-items: center; height: 30px; border-radius: 7px; background: var(--ctl); overflow: hidden; }
@@ -1667,3 +1667,23 @@ details.guide { margin-top: 10px; }
 .pgroup { margin: 0 0 4px; }
 .pgroup + .pgroup { margin-top: 12px; }
 .pgroup-title { margin: 0 0 4px; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--subt); }
+
+/* ---------- panel collapse buttons ----------
+   The Inspector's old close was a bare 16px "›" — a target you had to aim for. These
+   are the buttons that put a whole panel away, so they get a real footprint: 34px
+   square minimum (finger-sized), a visible resting fill, and a hover state. */
+.panel-collapse {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 34px; min-height: 34px; padding: 4px 10px;
+  border: none; border-radius: 8px; background: var(--ctl);
+  font-size: 17px; line-height: 1; color: var(--ink2); cursor: pointer;
+  transition: background-color .14s ease, color .14s ease;
+}
+.panel-collapse:hover { background: var(--ctl-h); color: var(--ink); }
+.panel-collapse.wide { font-size: 13px; font-weight: 500; gap: 4px; }
+.panel-collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The Inspector's resize handle: a grab strip down its left edge, exactly the chat's
+   affordance mirrored. Accent line on hover/drag, invisible at rest. */
+.dock-resize { position: absolute; left: -7px; top: 0; bottom: 0; width: 14px; cursor: col-resize; touch-action: none; z-index: 2; }
+.dock-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: transparent; transition: background-color .15s ease; }
+.dock-resize:hover::after, .dock-resize:active::after { background: var(--accent); }

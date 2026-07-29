@@ -4190,12 +4190,19 @@ function insetPolygon(poly: Pt[], d: number): Pt[] {
     lines.push({ px: p.x + nx * d, py: p.y + ny * d, dx: ex / L, dy: ey / L });
   }
   const out: Pt[] = [];
+  // MITER LIMIT. At a sharp corner the two offset lines meet far outside the shape — as
+  // the angle closes the intersection runs to infinity. The shark's tail and dorsal tip
+  // and the T-rex's snout all hit this: the inner wall shot past the plate and drew
+  // across the whole backdrop. Beyond 2.5x the offset distance, fall back to the plain
+  // offset point, which is what every real stroker does.
+  const LIMIT = Math.abs(d) * 2.5;
   for (let i = 0; i < n; i++) {
     const A = lines[(i - 1 + n) % n], B = lines[i];
     const den = A.dx * B.dy - A.dy * B.dx;
     if (Math.abs(den) < 1e-9) { out.push({ x: B.px, y: B.py }); continue; }
     const t = ((B.px - A.px) * B.dy - (B.py - A.py) * B.dx) / den;
-    out.push({ x: A.px + A.dx * t, y: A.py + A.dy * t });
+    const q = { x: A.px + A.dx * t, y: A.py + A.dy * t };
+    out.push(Math.hypot(q.x - poly[i].x, q.y - poly[i].y) > LIMIT ? { x: B.px, y: B.py } : q);
   }
   return out;
 }
@@ -4293,11 +4300,38 @@ function LaunchBackdrop() {
       };
     };
 
+    /** Where the bed can go: to the RIGHT of the real text column, measured from the DOM.
+     *  The old geometry was fractions of the canvas (centre at 0.63w, mask to 0.58w)
+     *  tuned against one 1440x900 window. On an iPad the text column is the same 620px
+     *  but the canvas is narrower, so the plate started at 461 while the text still ran
+     *  to 660 — the recent-project cards sat on top of live grid lines. On a phone the
+     *  plate started at -83, i.e. off the left edge entirely. Measuring the column makes
+     *  it correct at every width instead of at one. */
+    const layout = (): { x: number; y: number; side: number; fadeFrom: number; fadeTo: number } | null => {
+      const col = document.querySelector(".launch-col") as HTMLElement | null;
+      const rect = cv.getBoundingClientRect();
+      const colRight = col ? col.getBoundingClientRect().right - rect.left : w * 0.46;
+      const GAP = 28;
+      const left = colRight + GAP;
+      const avail = w - left - 16;
+      // Below this there is no room for a bed worth looking at. A plate crammed into
+      // 300px beside the text reads as a stamp, not a build plate — measured on iPad
+      // portrait, where the two-column grid left exactly that. The CSS drops to one
+      // column at the matching width, so below this the backdrop simply sits out.
+      if (avail < 420) return null;
+      const side = Math.min(avail, h * 0.84, 900);
+      const x = left + Math.max(0, (avail - side) / 2);
+      const y = Math.max(12, h * 0.5 - side / 2);
+      return { x, y, side, fadeFrom: Math.max(0, colRight - 40), fadeTo: colRight + GAP + side * 0.10 };
+    };
+
+    let fade = { from: 0, to: 0 };
     const drawPlate = () => {
       const t = tokens();
-      const side = Math.min(h * 0.78, 900);
-      const x = w * 0.63 - side / 2;
-      const y = h * 0.55 - side / 2;
+      const L = layout();
+      if (!L) { plate = null; plateBmp = null; ctx.clearRect(0, 0, w, h); return; }
+      const { x, y, side } = L;
+      fade = { from: L.fadeFrom, to: L.fadeTo };
       plate = { x, y, side };
       const DIV = 32;                       // 8 mm per division on a 256 mm bed
       const step = side / DIV;
@@ -4352,11 +4386,14 @@ function LaunchBackdrop() {
 
     /** Fade everything out under the text column so type sits in clean air. */
     const applyMask = () => {
-      const g = ctx.createLinearGradient(0, 0, w * 0.58, 0);
+      if (fade.to <= fade.from) return;
+      const g = ctx.createLinearGradient(fade.from, 0, fade.to, 0);
       g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.globalCompositeOperation = "destination-out";
       ctx.fillStyle = g;
-      ctx.fillRect(0, 0, w * 0.58, h);
+      // Only the gradient band: nothing is ever painted left of fade.from, so erasing
+      // from x=0 every frame was clearing empty pixels.
+      ctx.fillRect(fade.from, 0, fade.to - fade.from, h);
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
     };
@@ -4451,7 +4488,7 @@ function LaunchBackdrop() {
       if (!t0) t0 = now;
       if (now - lastPaint < 33) return;   // 30 fps is ample and halves the cost
       lastPaint = now;
-      if (!plate || !plateBmp) return;
+      if (!plate || !plateBmp) return;   // no room beside the text at this width
 
       const elapsed = now - t0;
       const ix = Math.floor(elapsed / CYCLE);
@@ -4461,11 +4498,22 @@ function LaunchBackdrop() {
       const p = (elapsed % CYCLE);
       const printing = p < PRINT;
       const head = printing ? extrudeTo((p / PRINT) * total) : extrudeTo(total);
-      const fade = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
+      const fadeA = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
 
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(plateBmp, 0, 0, w, h);
-      if (beadBmp) { ctx.globalAlpha = fade * tokens().bead; ctx.drawImage(beadBmp, 0, 0, w, h); ctx.globalAlpha = 1; }
+      // Composite only the PLATE'S BOX, not the whole viewport. Everything that changes
+      // lives inside the bed, but the frame was clearing and blitting two full-canvas
+      // bitmaps plus a full-height mask — at an iPad's 1366x1024 CSS px and dpr 2 that
+      // is ~5.6M pixels touched three times per frame, which is what made the animation
+      // feel heavy there while being fine on a laptop. The plate box is roughly a third
+      // of that, and the mask below is now a narrow band instead of half the screen.
+      const pad = 26;
+      const bx = Math.max(0, plate.x - pad), by = Math.max(0, plate.y - pad);
+      const bw = Math.min(w - bx, plate.side + pad * 2), bh = Math.min(h - by, plate.side + pad * 2);
+      const blit = (src: HTMLCanvasElement) =>
+        ctx.drawImage(src, bx * dpr, by * dpr, bw * dpr, bh * dpr, bx, by, bw, bh);
+      ctx.clearRect(bx, by, bw, bh);
+      blit(plateBmp);
+      if (beadBmp) { ctx.globalAlpha = fadeA * tokens().bead; blit(beadBmp); ctx.globalAlpha = 1; }
       if (printing && head) {
         // The nozzle: a small solid dot at the head of the bead. The only moving
         // object on the screen once the bead is laid.

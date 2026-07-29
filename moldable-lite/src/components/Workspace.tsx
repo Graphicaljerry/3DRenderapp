@@ -1566,7 +1566,11 @@ export function Workspace(p: Props) {
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
   const [showLayers, setShowLayers] = useState(false); // legacy gate: context-menu Rename still opens Objects
   const [dockPanel, setDockPanel] = useState<DockPanel>("selection");
-  const [dockOpen, setDockOpen] = useState(true);
+  // Open by default, EXCEPT where it would eat the canvas. The dock is a fixed 262px
+  // panel; on a phone the viewer is ~374px wide, so it covered 70% of the 3D view before
+  // you had seen the model at all. Measured once at mount — resizing later is the user's
+  // own doing and should not slam their panel shut.
+  const [dockOpen, setDockOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 760);
   // A pick is a request to inspect it: bring Selection forward rather than leaving the
   // description behind whichever panel happened to be open.
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;

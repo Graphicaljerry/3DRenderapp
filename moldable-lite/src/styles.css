@@ -989,6 +989,16 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   flex: 1; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 32px;
   display: grid; grid-template-columns: minmax(0, 620px) 1fr; align-content: center;
 }
+/* One column below ~1120px. Two columns need ~700px for the text plus ~420px for a bed
+   big enough to read; under that the second column is a sliver and the text is pinned
+   to 620px on a screen with room to spare. The backdrop measures the column and sits
+   out on its own once there is nothing beside it, so these two stay in step. */
+@media (max-width: 1120px) {
+  /* Centred, not stretched: with the bed gone the column would otherwise sit against
+     the left edge with the whole right half empty, which reads as a broken two-column
+     layout rather than a deliberate one-column one. */
+  .launch-main { grid-template-columns: minmax(0, 620px); justify-content: center; }
+}
 .launch-col { display: flex; flex-direction: column; gap: 14px; padding-bottom: 6vh; }
 /* One orchestrated entrance, replacing the perpetual sweep that was deleted. 70ms
    stagger — the tight end of the range, because this surface is seen every session. */

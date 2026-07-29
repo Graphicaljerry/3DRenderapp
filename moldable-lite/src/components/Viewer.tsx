@@ -2137,7 +2137,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4,
     }));
     m.renderOrder = 2;
-    s.scene.add(m);
+    // A CHILD of the model mesh, not of the scene. The faces are in the mesh's local
+    // space, and the mesh may be sitting inside a live transform pivot (the gizmo) or
+    // carry its own offset — added at scene level the highlight floated at the model's
+    // pre-transform position, visibly hanging off the part after a move.
+    if (s.mesh) s.mesh.add(m);
+    else s.scene.add(m);
     peekMesh.current = m;
   }, [paramPeek]);
 

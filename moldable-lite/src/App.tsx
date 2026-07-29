@@ -4244,7 +4244,10 @@ function LaunchBackdrop() {
       g.globalAlpha = 1;
       g.lineCap = "round";
       g.lineJoin = "round";
-      g.lineWidth = Math.max(1.6, (plate?.side ?? 400) * 0.008);
+      // Perimeter heavier than infill — the hierarchy a second wall used to fake.
+      const wWall = Math.max(1.8, (plate?.side ?? 400) * 0.009);
+      const wFill = Math.max(1.3, (plate?.side ?? 400) * 0.0062);
+      const widthOf = (m: Move) => (m.wall ? wWall : wFill);
       let acc = 0, head: Pt | null = null;
       for (let i = 0; i < moves.length; i++) {
         const L = lengths[i];
@@ -4252,6 +4255,7 @@ function LaunchBackdrop() {
           if (i > drawnUpTo || (i === drawnUpTo && drawnFrac < 1)) {
             const from = i === drawnUpTo ? drawnFrac : 0;
             if (!moves[i].travel) {
+              g.lineWidth = widthOf(moves[i]);
               g.beginPath();
               g.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * from, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * from);
               g.lineTo(moves[i].b.x, moves[i].b.y);
@@ -4269,6 +4273,7 @@ function LaunchBackdrop() {
         // was never stroked and the bead came out dashed.
         const from = i === drawnUpTo ? drawnFrac : 0;
         if (f > from && !moves[i].travel) {
+          g.lineWidth = widthOf(moves[i]);
           g.beginPath();
           g.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * from, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * from);
           g.lineTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f);

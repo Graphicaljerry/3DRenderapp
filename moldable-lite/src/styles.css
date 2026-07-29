@@ -548,14 +548,20 @@ button { font-family: inherit; cursor: pointer; }
    of the object rows. Height stops above the bottom-right zoom cluster. */
 .layers-panel { z-index: 9; width: min(264px, 100%); overflow: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 8px; font-size: 12.5px; animation: panel-in .2s cubic-bezier(.23,1,.32,1); }
 .lp-head { display: flex; align-items: center; justify-content: space-between; padding: 2px 4px 7px; color: var(--ink); }
-.lp-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border: none; border-radius: 7px; background: none; color: var(--ink2); text-align: left; font-size: 12.5px; }
+/* Rows WRAP when the panel is narrow instead of crushing every field: the name keeps
+   a readable minimum and the badges/dims drop to a second line, indented past the
+   icon. Squeezing everything onto one line turned "Phone stand" into "Phone s…" and
+   the CAD chip into "C…" the moment the panel lost 60px. */
+.lp-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; width: 100%; padding: 6px 8px; border: none; border-radius: 7px; background: none; color: var(--ink2); text-align: left; font-size: 12.5px; }
 .lp-row:not(.static):hover { background: var(--surf); color: var(--ink); }
 .lp-row.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); }
 .lp-row:disabled { opacity: .45; cursor: default; }
 .lp-row svg { flex: 0 0 auto; color: var(--accent-d); }
 /* The name keeps a readable minimum and ellipsizes; the dims sub yields first. Without
    this the row's fixed pills (badge/swatch/plate) squeezed the name to 0px wide. */
-.lp-name { flex: 1; min-width: 56px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-name { flex: 1 1 auto; min-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Dims come last and go quietly to their own line when the row wraps. */
+.lp-row .lp-sub { margin-left: auto; white-space: nowrap; }
 .lp-sub { font-size: 10.5px; color: var(--subt); white-space: nowrap; flex: 0 4 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .lp-plates { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 2px 4px 8px; border-bottom: 1px solid var(--bord-subtle); margin-bottom: 4px; }
 .lp-plates button { border: 1px solid transparent; background: var(--ctl); color: var(--mut); border-radius: 6px; padding: 3px 8px; font-size: 11px; font-weight: 600; }

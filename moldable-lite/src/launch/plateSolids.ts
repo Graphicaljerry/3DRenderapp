@@ -225,6 +225,66 @@ const disc = (r: number, sides = 20, cx = 0.5, cy = 0.5): Vec2[] => {
   return out;
 };
 
+/** The "Phone stand" template, built the way the template builds it and printed the way you
+ *  would actually print it: standing on its base.
+ *
+ *  Same numbers as cad/templates.ts, so what prints on the launchpad is the part behind the
+ *  template card rather than a doodle that resembles one. The old version was a ten-point
+ *  outline extruded flat, which read as a random polygon.
+ *
+ *  Cross-sections, bottom to top: the base and seat floor as one block growing backwards;
+ *  then the lip and the leaning support as separate islands, the lip split IN TWO by the
+ *  cable slot cut through it; then the support alone, drifting back as it rises. The 1-to-3
+ *  and 3-to-1 island changes are why this is `stepped` — there is no per-vertex path from
+ *  one to the next. */
+const PHONE_STAND: Solid = (() => {
+  const W = 70, SEAT = 22, ANG = 62, T = 9, LIP = 14, L = 78, SLOT = 14;   // template defaults
+  const a = (ANG * Math.PI) / 180;
+  const h = T / Math.sin(a);                       // horizontal cut of the leaning thickness
+  const D = SEAT + T;
+  const H = T + L * Math.sin(a);                   // overall height, standing
+  const back = D + h - T / Math.tan(a);            // where the outer face meets the bed
+  const slope = (D + L * Math.cos(a) - back) / H;  // both faces of the support are parallel
+  const maxX = back + slope * H;
+  const lipX = T * 0.66;
+  const slotX = T * 0.66 + 10;                     // how far the cable notch reaches back
+  const slotZ = T + LIP + 1;
+  const sy0 = (W - SLOT) / 2, sy1 = sy0 + SLOT;
+
+  const LAYERS = 30;
+  const S = Math.max(maxX, W) / 0.56;              // longest horizontal dim -> 0.56 of the bed
+  const px = (x: number): number => 0.5 + (x - maxX / 2) / S;
+  const py = (y: number): number => 0.5 + (y - W / 2) / S;
+  const box = (x0: number, x1: number, y0: number, y1: number): Vec2[] =>
+    [[px(x0), py(y0)], [px(x1), py(y0)], [px(x1), py(y1)], [px(x0), py(y1)]];
+
+  const sections: Section[] = [];
+  for (let i = 0; i < LAYERS; i++) {
+    const z = H * ((i + 0.5) / LAYERS);
+    const xOut = back + slope * z;
+    const loops: Vec2[][] = [];
+    if (z < T) {
+      // Base and seat floor, with the cable channel notched into the front edge.
+      loops.push(z < slotZ
+        ? [[px(0), py(0)], [px(xOut), py(0)], [px(xOut), py(W)], [px(0), py(W)],
+           [px(0), py(sy1)], [px(slotX), py(sy1)], [px(slotX), py(sy0)], [px(0), py(sy0)]]
+        : box(0, xOut, 0, W));
+    } else {
+      if (z < T + LIP) {                           // the slot cuts the lip clean in two
+        loops.push(box(0, lipX, 0, sy0));
+        loops.push(box(0, lipX, sy1, W));
+      }
+      loops.push(box(D + slope * (z - T), xOut, 0, W));
+    }
+    loops.sort((p, q) => {
+      const area = (l: Vec2[]) => Math.abs((l[2][0] - l[0][0]) * (l[2][1] - l[0][1]));
+      return area(q) - area(p);
+    });
+    sections.push({ z: i / (LAYERS - 1), loops });
+  }
+  return { sections, height: H / S, layers: LAYERS - 1, stepped: true };
+})();
+
 export const SOLIDS: { name: string; solid: Solid }[] = [
   // ---- tall, printed standing: these are why isometric matters ----
   {
@@ -299,18 +359,12 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
     },
   },
   {
-    name: "hex key",
-    solid: prism(centred([[.22,.26],[.80,.26],[.80,.40],[.36,.40],[.36,.84],[.22,.84]]), 0.055, 5),
-  },
-  {
     name: "cable clip",
     solid: prism(centred([[.32,.24],[.68,.24],[.68,.38],[.46,.38],[.46,.62],[.68,.62],[.68,.76],[.32,.76]]), 0.085, 7),
   },
   {
     name: "phone stand",
-    // Lying on its side — the orientation that needs no supports, and the one a slicer
-    // would suggest. Printed standing it would be a tower of overhang.
-    solid: prism(centred([[.20,.80],[.20,.66],[.30,.66],[.30,.60],[.22,.60],[.60,.20],[.72,.28],[.44,.66],[.74,.66],[.74,.80]]), 0.13, 10),
+    solid: PHONE_STAND,
   },
   {
     name: "bone dragon",

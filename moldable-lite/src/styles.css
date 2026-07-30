@@ -1734,3 +1734,7 @@ details.guide { margin-top: 10px; }
   .zoom-ctl button:active, .view-snaps button:active, .bedchip:active,
   .attach:active, .mic:active, .xfmt:active, .lp-row:not(.static):active { transform: none; }
 }
+
+/* Build number beside the wordmark on the launchpad. Aligned to the wordmark's baseline
+   rather than centred, so it reads as a version suffix and not as a second brand element. */
+.launch-top .brand .build-tag { align-self: flex-end; padding-bottom: 2px; margin-left: -2px; }

@@ -4528,6 +4528,16 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         <div className="brand">
           <CubeMark />
           <span className="wordmark">Moldable</span>
+          {/* Same build number the workspace shows. It lives up here rather than in the
+              footer because the footer's two halves fit its 620px by one pixel — adding a
+              tag there wrapped the actions onto a second line and pushed the page 41px
+              past a 768-tall laptop. Beside the wordmark it costs no layout at all. */}
+          <span
+            className="build-tag"
+            title="Deployed build number — it goes up with every update, so a bigger number after a refresh means the update landed."
+          >
+            v{__BUILD_STAMP__}
+          </span>
         </div>
         <div className="launch-top-right">
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? "☀" : "☾"}</button>
@@ -4672,15 +4682,6 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             <button className="launch-free" onClick={onFree}>Start free in generative mode</button>
             {/* A visible link only — deliberately not bound to Escape, so there is one Escape contract. */}
             <button className="link" onClick={onSkip}>Skip</button>
-            {/* Same build number as the workspace shows, here too: this is the screen you
-                land on after a refresh, and it is where you would look to tell whether the
-                deploy landed without having to open a project first. */}
-            <span
-              className="build-tag"
-              title="Deployed build number — it goes up with every update, so a bigger number after a refresh means the update landed."
-            >
-              v{__BUILD_STAMP__}
-            </span>
           </span>
         </footer>
        </div>

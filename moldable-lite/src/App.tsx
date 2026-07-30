@@ -4088,21 +4088,44 @@ function LaunchBackdrop() {
     let box = { x: 0, y: 0, w: 0, h: 0 };           // the region a frame touches
     let fade = { from: 0, to: 0 };
 
+    /* Resolve any CSS colour to sRGB by PAINTING it and reading the pixel back. Parsing the
+       string does not work here: the theme's page colour is an oklch(), which neither
+       getComputedStyle nor canvas fillStyle resolves — both hand it back verbatim, and a
+       naive number-scrape reads the 160 degree hue as a blue channel. It painted the whole
+       Benchy navy. Letting the browser rasterise it is the only reliable answer. */
+    const probe = document.createElement("canvas");
+    probe.width = probe.height = 1;
+    const pctx = probe.getContext("2d", { willReadFrequently: true });
+    const rgb = (c: string): [number, number, number] => {
+      if (!pctx) return [73, 138, 111];
+      pctx.fillStyle = "#000";
+      pctx.fillStyle = c;                       // an unparseable value leaves it black
+      pctx.fillRect(0, 0, 1, 1);
+      const d = pctx.getImageData(0, 0, 1, 1).data;
+      return [d[0], d[1], d[2]];
+    };
+
     const tokens = () => {
       const cs = getComputedStyle(document.documentElement);
       const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      const accent = cs.getPropertyValue("--accent").trim() || "#498a6f";
+      /* The body colour is the accent mixed toward the page, used at HIGH alpha — not the
+         accent itself at low alpha. Stacking a translucent accent thirty times builds a
+         muddy wash that reads as faded and flattens the form; one pre-mixed tint laid down
+         near-opaque reads as a surface, which is what a printed part is. */
+      const a = rgb(accent);
+      const p = rgb(cs.getPropertyValue("--launch-bg-page").trim() || (dark ? "#111" : "#eef1ef"));
+      const k = dark ? 0.44 : 0.30;
+      const body = `rgb(${a.map((v, i) => Math.round(p[i] + (v - p[i]) * k)).join(",")})`;
       return {
-        accent: cs.getPropertyValue("--accent").trim() || "#498a6f",
+        accent,
+        body,
         subtle: cs.getPropertyValue("--subt").trim() || "#8b968f",
         dark,
         grid: dark ? 0.07 : 0.13,
         gridMajor: dark ? 0.14 : 0.24,
         bezel: dark ? 0.22 : 0.36,
-        // The part is composited over the bed at this alpha. It used to be ~0.6, which held
-        // the whole stack at hologram strength; now that layers fill and stack into a body,
-        // the airiness comes from the per-layer fill ramp instead and this can sit near
-        // opaque without the bed grid showing through the part.
-        bead: dark ? 0.9 : 0.94,
+        bead: dark ? 0.94 : 0.97,
       };
     };
 
@@ -4213,11 +4236,7 @@ function LaunchBackdrop() {
       g.strokeStyle = t.accent;
       g.lineJoin = "round";
       g.lineCap = "round";
-      g.fillStyle = t.accent;
-      /* Per-layer fill alpha, scaled so a FULL stack lands near opaque whatever the layer
-         count: a 5-layer name tag and a 30-layer vase both have to end up solid, and one
-         fixed alpha washes out whichever of the two it was not tuned for. */
-      const base = 1 - Math.pow(0.02, 1 / Math.max(1, solid.layers));
+      g.fillStyle = t.body;
       for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) {
         const f = solid.layers ? L / solid.layers : 1;
         const z = f * solid.height;
@@ -4232,20 +4251,27 @@ function LaunchBackdrop() {
             g.closePath();
           }
         };
-        /* Fill the outer boundaries, faintly at the base and more solidly as the part rises.
+        /* Body: the tint, translucent at the base and firming up as the part rises, so the
+           layer lines below still read through the lower half and the top half is a surface.
            Layers land in ascending z onto the same bitmap, so a higher layer paints over the
-           one below and the stack resolves into a solid body whose only remaining lines are
-           the terraces where each layer oversteps the last — which is what a print looks
-           like. Keeping the base airy leaves the blueprint reading intact underneath. */
-        g.globalAlpha = base * (0.65 + 0.7 * f);
+           one below and the stack resolves into a solid form. */
+        g.globalAlpha = 0.42 + 0.48 * f;
         path(0, fill);
         g.fill();
-        // Every loop in ONE path: a mesh-sliced layer has thirty islands and stroking each
-        // separately costs thirty state changes for nothing.
-        g.globalAlpha = 0.5 + 0.45 * f;
-        g.lineWidth = Math.max(1, view.w * 0.0045);
-        path(0, loops.length);
+        /* Outer wall solid, inner loops as the blueprint. A single stroke weight for both
+           gave every line equal say, and on a busy part the interior detail then competed
+           with the silhouette and the shape went with it. The wall is the widest, most
+           opaque line on the part; everything inside it is thinner and quieter. */
+        g.globalAlpha = 0.75 + 0.25 * f;
+        g.lineWidth = Math.max(1.2, view.w * 0.0075);
+        path(0, fill);
         g.stroke();
+        if (loops.length > fill) {
+          g.globalAlpha = 0.3 + 0.25 * f;
+          g.lineWidth = Math.max(1, view.w * 0.0035);
+          path(fill, loops.length);
+          g.stroke();
+        }
       }
       drawnLayers = Math.max(drawnLayers, Math.min(upto + 1, solid.layers + 1));
     };
@@ -4273,7 +4299,7 @@ function LaunchBackdrop() {
       g.fill();
       g.globalCompositeOperation = "source-over";
       g.fillStyle = t.accent;
-      g.globalAlpha = 0.3;
+      g.globalAlpha = 0.1;
       g.fill();
       g.strokeStyle = t.accent;
       g.globalAlpha = 1;
@@ -4370,9 +4396,11 @@ function LaunchBackdrop() {
         const label = printing
           ? `${name} · layer ${Math.min(upto + 1, solid.layers)}/${solid.layers} · ${pct}%`
           : `${name} · done`;
-        // Clear of the TALLEST solid (0.62 of bed width) without floating in space:
-        // the back corner sits 0.5w above centre, so 0.18w above it just clears a rocket.
-        ctx.fillText(label, view.cx, anchor[1] - view.w * 0.18);
+        /* Clear of the TALLEST solid without floating in space. The back corner sits 0.5w
+           above centre; a vase stands 0.60w and its rim reaches another 0.165w behind that,
+           so 0.30w above the corner clears it. At 0.18w the label sat inside the rim, which
+           did not show until the layers became opaque enough to hide it. */
+        ctx.fillText(label, view.cx, anchor[1] - view.w * 0.30);
         ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
       }

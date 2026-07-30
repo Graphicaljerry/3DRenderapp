@@ -4218,61 +4218,142 @@ function LaunchBackdrop() {
     let part = new Date().getDate() % SOLIDS.length;
     let drawnLayers = 0;   // layers already committed to partBmp
 
+    /* Screen y of the current part's highest point. The HUD used to clear a constant
+       fraction of the bed width, which is a guess about the tallest solid — and every time a
+       part changed the guess went stale and the label ended up inside the model. Measuring
+       the part costs one pass over its sections when the part changes, and is right for
+       whatever gets added later. */
+    let partTopY = 0;
+    const measurePart = () => {
+      if (!view) return;
+      const { solid } = SOLIDS[part];
+      let top = Infinity;
+      for (const sec of solid.sections) {
+        const z = sec.z * solid.height;
+        for (const loop of sec.loops) {
+          for (const [x, y] of loop) {
+            const q = iso(view, x, y, z);
+            if (q[1] < top) top = q[1];
+          }
+        }
+      }
+      partTopY = Number.isFinite(top) ? top : view.cy;
+    };
+
     const resetPart = () => {
       const made = newLayer();
       if (!made) return;
       [partBmp, partCtx] = made;
       drawnLayers = 0;
+      measurePart();
     };
 
-    /** Commit every layer up to `upto` onto the cached bitmap. Only NEW layers are
-     *  stroked, so a frame is O(layers added this frame) — normally one, often zero —
-     *  rather than O(all layers so far). */
+    /* Paint layer `L` of the current solid onto `g`.
+       `frac` below 1 lays down only PART of it — whole loops in printing order, then a
+       partial trace of the one in progress — and returns the screen position of the head of
+       that trace, which is where the nozzle is. Painting a whole layer at once reads as
+       switching it on rather than printing it; on a part whose layer is thirty separate
+       islands, like the dragon, that is the whole difference between building and
+       accumulating. Returns null when the layer is empty. */
+    const paintLayer = (
+      g: CanvasRenderingContext2D,
+      solid: (typeof SOLIDS)[number]["solid"],
+      L: number,
+      frac: number,
+      t: ReturnType<typeof tokens>,
+    ): [number, number] | null => {
+      if (!view) return null;
+      const f = solid.layers ? L / solid.layers : 1;
+      const z = f * solid.height;
+      const { loops, fill } = sliceAt(solid, f);
+      if (!loops.length) return null;
+
+      // Vertex count stands in for path length: within one layer the loops are all drawn at
+      // the same scale, and this costs no square roots on every frame.
+      let whole = loops.length, partial = -1, partialPts = 0;
+      if (frac < 1) {
+        const total = loops.reduce((n, l) => n + l.length, 0);
+        const upto = Math.max(1, Math.floor(frac * total));
+        let done = 0;
+        whole = 0;
+        for (let i = 0; i < loops.length; i++) {
+          if (done + loops[i].length <= upto) { done += loops[i].length; whole = i + 1; }
+          else { partial = i; partialPts = upto - done; break; }
+        }
+      }
+
+      const path = (from: number, to: number) => {
+        g.beginPath();
+        for (let i = from; i < to; i++) {
+          loops[i].forEach(([x, y], k) => {
+            const q = iso(view!, x, y, z);
+            k ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+          });
+          g.closePath();
+        }
+      };
+      g.lineJoin = "round";
+      g.lineCap = "round";
+      const wallW = Math.max(1.2, view.w * 0.0075);
+      const innerW = Math.max(1, view.w * 0.0035);
+      /* Body: the tint, translucent at the base and firming up as the part rises, so the
+         layer lines below still read through the lower half and the top half is a surface.
+         Layers land in ascending z, so a higher one paints over the one below and the stack
+         resolves into a solid form. */
+      const solidTo = Math.min(whole, fill);
+      if (solidTo > 0) {
+        g.fillStyle = t.body;
+        g.globalAlpha = 0.42 + 0.48 * f;
+        path(0, solidTo);
+        g.fill();
+      }
+      /* Outer wall solid, inner loops as the blueprint. A single stroke weight for both gave
+         every line equal say, and on a busy part the interior detail then competed with the
+         silhouette and the shape went with it. */
+      g.strokeStyle = t.accent;
+      if (solidTo > 0) {
+        g.globalAlpha = 0.75 + 0.25 * f;
+        g.lineWidth = wallW;
+        path(0, solidTo);
+        g.stroke();
+      }
+      if (whole > fill) {
+        g.globalAlpha = 0.3 + 0.25 * f;
+        g.lineWidth = innerW;
+        path(fill, whole);
+        g.stroke();
+      }
+
+      let head: [number, number] | null = null;
+      if (partial >= 0 && partialPts > 0) {
+        const loop = loops[partial];
+        g.globalAlpha = partial < fill ? 0.75 + 0.25 * f : 0.3 + 0.25 * f;
+        g.lineWidth = partial < fill ? wallW : innerW;
+        g.beginPath();
+        for (let k = 0; k <= partialPts && k < loop.length; k++) {
+          const q = iso(view, loop[k][0], loop[k][1], z);
+          k ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+          head = q;
+        }
+        g.stroke();                       // open on purpose: this bead is still being laid
+      } else if (whole > 0) {
+        const loop = loops[whole - 1];
+        head = iso(view, loop[0][0], loop[0][1], z);
+      }
+      g.globalAlpha = 1;
+      return head;
+    };
+
+    /** Commit every COMPLETED layer up to `upto` onto the cached bitmap. Only new layers are
+     *  painted, so a frame is O(layers added this frame) — normally one, often zero —
+     *  rather than O(all layers so far). The layer in progress is not committed: it is
+     *  repainted live each frame until it finishes. */
     const commitTo = (upto: number) => {
       const g = partCtx;
       if (!g || !view) return;
       const t = tokens();
       const { solid } = SOLIDS[part];
-      g.strokeStyle = t.accent;
-      g.lineJoin = "round";
-      g.lineCap = "round";
-      g.fillStyle = t.body;
-      for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) {
-        const f = solid.layers ? L / solid.layers : 1;
-        const z = f * solid.height;
-        const { loops, fill } = sliceAt(solid, f);
-        const path = (from: number, to: number) => {
-          g.beginPath();
-          for (let i = from; i < to; i++) {
-            loops[i].forEach(([x, y], k) => {
-              const q = iso(view!, x, y, z);
-              k ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
-            });
-            g.closePath();
-          }
-        };
-        /* Body: the tint, translucent at the base and firming up as the part rises, so the
-           layer lines below still read through the lower half and the top half is a surface.
-           Layers land in ascending z onto the same bitmap, so a higher layer paints over the
-           one below and the stack resolves into a solid form. */
-        g.globalAlpha = 0.42 + 0.48 * f;
-        path(0, fill);
-        g.fill();
-        /* Outer wall solid, inner loops as the blueprint. A single stroke weight for both
-           gave every line equal say, and on a busy part the interior detail then competed
-           with the silhouette and the shape went with it. The wall is the widest, most
-           opaque line on the part; everything inside it is thinner and quieter. */
-        g.globalAlpha = 0.75 + 0.25 * f;
-        g.lineWidth = Math.max(1.2, view.w * 0.0075);
-        path(0, fill);
-        g.stroke();
-        if (loops.length > fill) {
-          g.globalAlpha = 0.3 + 0.25 * f;
-          g.lineWidth = Math.max(1, view.w * 0.0035);
-          path(fill, loops.length);
-          g.stroke();
-        }
-      }
+      for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) paintLayer(g, solid, L, 1, t);
       drawnLayers = Math.max(drawnLayers, Math.min(upto + 1, solid.layers + 1));
     };
 
@@ -4335,8 +4416,11 @@ function LaunchBackdrop() {
       // Ease-out so the first layers land briskly and the top settles — a linear stack
       // reads as a progress bar.
       const prog = printing ? 1 - Math.pow(1 - p / PRINT, 1.6) : 1;
-      const upto = Math.floor(prog * solid.layers);
-      commitTo(upto);
+      const exact = prog * solid.layers;
+      const upto = Math.floor(exact);
+      // Completed layers only. The one in progress is repainted live below, partially, so
+      // it looks laid down rather than switched on.
+      commitTo(printing ? upto - 1 : solid.layers);
       if (!printing && !toppedOut && partCtx) { drawTopLoops(partCtx); toppedOut = true; }
       const fadeA = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
 
@@ -4348,41 +4432,19 @@ function LaunchBackdrop() {
       if (partBmp) { ctx.globalAlpha = fadeA * tokens().bead; blit(partBmp); ctx.globalAlpha = 1; }
 
       if (printing) {
-        // The nozzle rides the layer being laid: a dot travelling the current contour,
-        // plus that contour drawn bright. This is the only thing moving once a layer
-        // is down, and it is what makes the stack read as PRINTING rather than fading in.
-        const f = solid.layers ? upto / solid.layers : 1;
-        const { loops } = sliceAt(solid, f);
-        const z = f * solid.height;
-        ctx.strokeStyle = t.accent;
-        ctx.globalAlpha = 0.95;
-        ctx.lineWidth = Math.max(1.4, view.w * 0.006);
-        ctx.lineJoin = "round";
-        ctx.beginPath();
-        for (const poly of loops) {
-          poly.forEach(([x, y], i) => {
-            const q = iso(view!, x, y, z);
-            i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]);
-          });
-          ctx.closePath();
+        // The layer in progress, laid down loop by loop, with the nozzle at the head of the
+        // bead. This is the only thing moving once a layer is down, and it is what makes the
+        // stack read as PRINTING rather than fading in.
+        const head = paintLayer(ctx, solid, upto, exact - upto, t);
+        if (head) {
+          const r = Math.max(2.2, view.w * 0.012);
+          ctx.fillStyle = t.accent;
+          ctx.globalAlpha = 0.95;
+          ctx.beginPath(); ctx.arc(head[0], head[1], r, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 0.16;
+          ctx.beginPath(); ctx.arc(head[0], head[1], r * 2.6, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
         }
-        ctx.stroke();
-        // Position around the contour, so the dot circles the layer as it is laid. Loop 0 is
-        // the largest by construction, so the nozzle rides the part's outline, not a window.
-        const poly = loops[0] ?? [[0.5, 0.5] as [number, number]];
-        const around = ((p / PRINT) * solid.layers * 1.7) % 1;
-        const fi = around * poly.length;
-        const i0 = Math.floor(fi) % poly.length, i1 = (i0 + 1) % poly.length;
-        const ft = fi - Math.floor(fi);
-        const a = poly[i0], b = poly[i1];
-        const q = iso(view, a[0] + (b[0] - a[0]) * ft, a[1] + (b[1] - a[1]) * ft, z);
-        const r = Math.max(2.2, view.w * 0.012);
-        ctx.fillStyle = t.accent;
-        ctx.globalAlpha = 0.95;
-        ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 0.16;
-        ctx.beginPath(); ctx.arc(q[0], q[1], r * 2.6, 0, Math.PI * 2); ctx.fill();
-        ctx.globalAlpha = 1;
       }
 
       // Printer HUD, in the bed's own top-left corner.
@@ -4396,11 +4458,8 @@ function LaunchBackdrop() {
         const label = printing
           ? `${name} · layer ${Math.min(upto + 1, solid.layers)}/${solid.layers} · ${pct}%`
           : `${name} · done`;
-        /* Clear of the TALLEST solid without floating in space. The back corner sits 0.5w
-           above centre; a vase stands 0.60w and its rim reaches another 0.165w behind that,
-           so 0.30w above the corner clears it. At 0.18w the label sat inside the rim, which
-           did not show until the layers became opaque enough to hide it. */
-        ctx.fillText(label, view.cx, anchor[1] - view.w * 0.30);
+        // Above the part itself, and never lower than just over the bed's back corner.
+        ctx.fillText(label, view.cx, Math.min(anchor[1] - view.w * 0.12, partTopY - 16));
         ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
       }

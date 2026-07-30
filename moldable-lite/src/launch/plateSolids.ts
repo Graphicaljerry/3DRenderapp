@@ -43,8 +43,9 @@ export type Solid = {
 /* ---------- builders ---------- */
 
 /** A constant cross-section extruded straight up — how flat parts actually print. */
-function prism(poly: Vec2[], height: number, layers: number, topLoops?: Vec2[][]): Solid {
-  return { sections: [{ z: 0, loops: [poly] }, { z: 1, loops: [poly] }], height, layers, topLoops };
+function prism(poly: Vec2[], height: number, layers: number, topLoops?: Vec2[][], holes: Vec2[][] = []): Solid {
+  const loops = [poly, ...holes];
+  return { sections: [{ z: 0, loops, fill: 1 }, { z: 1, loops, fill: 1 }], height, layers, topLoops };
 }
 
 /** A solid of revolution from a [z, radius] profile, centred on the bed. */
@@ -225,6 +226,149 @@ const disc = (r: number, sides = 20, cx = 0.5, cy = 0.5): Vec2[] => {
   return out;
 };
 
+/* ---------- helpers for the parts built from real millimetres ---------- */
+
+/** A rectangle with radiused corners, in whatever units the caller is working in. Every
+ *  functional part below uses this rather than a bare rect: a printed bracket or plate has
+ *  rounded corners, and drawn square they all read as the same anonymous slab. */
+const roundRect = (x0: number, y0: number, x1: number, y1: number, r: number, seg = 4): Vec2[] => {
+  const rr = Math.max(0, Math.min(r, Math.min(x1 - x0, y1 - y0) / 2));
+  const out: Vec2[] = [];
+  const arc = (cx: number, cy: number, a0: number) => {
+    for (let i = 0; i <= seg; i++) {
+      const a = a0 + (i / seg) * (Math.PI / 2);
+      out.push([cx + Math.cos(a) * rr, cy + Math.sin(a) * rr]);
+    }
+  };
+  arc(x1 - rr, y0 + rr, -Math.PI / 2);
+  arc(x1 - rr, y1 - rr, 0);
+  arc(x0 + rr, y1 - rr, Math.PI / 2);
+  arc(x0 + rr, y0 + rr, Math.PI);
+  return out;
+};
+
+/** Assemble a stepped solid from a per-layer loop builder working in millimetres.
+ *  `bounds` is the model's [x0,y0,x1,y1] footprint and `mmH` its height; the part is scaled
+ *  so its longest horizontal dimension is `target` of the bed and centred there. */
+function fromMM(
+  layers: number,
+  mmH: number,
+  bounds: [number, number, number, number],
+  target: number,
+  build: (z: number) => { outer: Vec2[][]; holes?: Vec2[][] },
+): Solid {
+  const [bx0, by0, bx1, by1] = bounds;
+  const S = Math.max(bx1 - bx0, by1 - by0) / target;
+  const mx = (bx0 + bx1) / 2, my = (by0 + by1) / 2;
+  const map = (poly: Vec2[]): Vec2[] => poly.map(([x, y]) => [0.5 + (x - mx) / S, 0.5 + (y - my) / S]);
+  const sections: Section[] = [];
+  for (let i = 0; i < layers; i++) {
+    // Sample the MIDDLE of each layer band: a plane exactly on a face of the model cuts a
+    // zero-thickness feature and yields a degenerate loop.
+    const { outer, holes = [] } = build(mmH * ((i + 0.5) / layers));
+    sections.push({
+      z: i / Math.max(1, layers - 1),
+      loops: [...outer.map(map), ...holes.map(map)],
+      fill: outer.length,
+    });
+  }
+  return { sections, height: mmH / S, layers: Math.max(1, layers - 1), stepped: true };
+}
+
+/** The "Wall hook" template: a 30 x 70 plate with two screw holes and a J-hook that reaches
+ *  34 mm out over a 10 mm inner radius. Printed flat on its back, which is what the template
+ *  says and what needs no supports.
+ *
+ *  The old version was three stacked rectangles that stepped sideways. It had no curve
+ *  anywhere, so it read as a stack of blocks — you could not tell it from the bracket.
+ *  Here the J is the template's own arc pair: both arcs are concentric, so the cross-section
+ *  is one interval whose ends sweep as the layers rise. That sweep IS the hook. */
+const WALL_HOOK: Solid = (() => {
+  const PW = 30, PH = 70, PT = 4, HW = 18, REACH = 34, RIN = 10, TIP = 16, T = 6, HOLE = 4.4;
+  const ROUT = RIN + T;
+  const holeY = PH / 2 - 8;
+  const aC = -T / 2 + ROUT, bC = REACH - ROUT;   // both arcs of the J share this centre
+  const shelf = REACH - T;                       // where the tip's underside begins
+  return fromMM(20, PT + REACH, [-PW / 2, -PH / 2, PW / 2, PH / 2], 0.62, (z) => {
+    if (z < PT) {
+      return {
+        outer: [roundRect(-PW / 2, -PH / 2, PW / 2, PH / 2, 3, 3)],
+        holes: [disc(HOLE / 2, 12, 0, holeY), disc(HOLE / 2, 12, 0, -holeY)],
+      };
+    }
+    const b = z - PT;
+    let lo: number, hi: number;
+    if (b <= bC) { lo = -T / 2; hi = T / 2; }                      // the stem, straight out
+    else {
+      lo = aC - Math.sqrt(Math.max(0, ROUT * ROUT - (b - bC) ** 2));
+      hi = b <= shelf ? aC - Math.sqrt(Math.max(0, RIN * RIN - (b - bC) ** 2)) : aC + TIP;
+    }
+    return { outer: [roundRect(-HW / 2, lo, HW / 2, hi, Math.min(2.5, (hi - lo) / 2), 2)] };
+  });
+})();
+
+/** An L-bracket with the things that make one legible: a radiused inside corner, rounded
+ *  outer corners, and screw holes in both legs. The old one was two bare rectangles meeting
+ *  at a hard right angle — structurally the least informative shape available. */
+const L_BRACKET: Solid = (() => {
+  const LEG = 58, W = 40, T = 5, FR = 15, HOLE = 5, R = 6, H = 52;
+  const hx = [24, 42];                    // screw centres along the flat leg
+  const hz = [24, 42];                    // and up the standing leg
+  const hy = W / 2;
+  return fromMM(22, H, [0, 0, LEG, W], 0.58, (z) => {
+    if (z < T) {
+      return {
+        outer: [roundRect(0, 0, LEG, W, R, 3)],
+        holes: hx.map((x) => disc(HOLE / 2, 12, x, hy)),
+      };
+    }
+    // The standing leg, thickened at its foot by a quarter-round fillet into the flat leg.
+    const fil = z < T + FR ? T + FR - Math.sqrt(Math.max(0, FR * FR - (T + FR - z) ** 2)) : T;
+    // Round the top corners off in the last R of height, the same way the flat leg is round.
+    const cap = z > H - R ? R - Math.sqrt(Math.max(0, R * R - (z - (H - R)) ** 2)) : 0;
+    const outer = [roundRect(0, cap, fil, W - cap, Math.min(2.5, fil / 2), 2)];
+    // Through-holes across the standing leg read as slots that open and close with height.
+    const holes: Vec2[][] = [];
+    for (const zc of hz) {
+      const half = Math.sqrt(Math.max(0, (HOLE / 2) ** 2 - (z - zc) ** 2));
+      if (half > 0.2) holes.push(roundRect(-1, hy - half, T + 1, hy + half, 0, 1));
+    }
+    return { outer, holes };
+  });
+})();
+
+/** The "Cable clip" template: a 2.5 mm base with two screw tabs and a C-ring for a 6 mm
+ *  cable, snap opening at the top. Printed base down, as the template builds it.
+ *
+ *  The old one was a rectilinear C traced by hand. A real clip is a ring, and a ring sliced
+ *  horizontally gives two bands whose width changes every layer — that variation is the
+ *  whole reason it reads as round rather than as a bent rectangle. */
+const CABLE_CLIP: Solid = (() => {
+  const CABLE = 6, WALL = 2.4, LEN = 12, BASE = 2.5, TAB = 9, SCREW = 3.4;
+  const rIn = CABLE / 2 + 0.15, rOut = rIn + WALL, cz = BASE + rIn;
+  const half = rOut + TAB, gap = (CABLE * 0.72) / 2;
+  const H = cz + rOut;
+  /* 26 layers over 11 mm, not the dozen the part's size suggests. The ring's cross-section
+     is a thin band, and at a coarse pitch the bands sit far enough apart in the isometric
+     that they read as loose slats instead of a curved wall. */
+  return fromMM(26, H, [-half, -LEN / 2, half, LEN / 2], 0.56, (z) => {
+    if (z < BASE) {
+      return {
+        outer: [roundRect(-half, -LEN / 2, half, LEN / 2, 2, 3)],
+        holes: [disc(SCREW / 2, 12, -(rOut + TAB / 2), 0), disc(SCREW / 2, 12, rOut + TAB / 2, 0)],
+      };
+    }
+    const d = z - cz;
+    const xo = Math.sqrt(Math.max(0, rOut * rOut - d * d));
+    if (xo <= 0.05) return { outer: [] };
+    const xi = Math.abs(d) < rIn ? Math.sqrt(rIn * rIn - d * d) : 0;
+    const band = (a: number, b: number) => roundRect(a, -LEN / 2, b, LEN / 2, 0, 1);
+    // Above the cable's centre the snap opening splits the ring whatever the wall is doing.
+    const cut = d > 0 ? Math.max(xi, gap) : xi;
+    return { outer: cut > 0 ? [band(-xo, -cut), band(cut, xo)] : [band(-xo, xo)] };
+  });
+})();
+
 /** The "Phone stand" template, built the way the template builds it and printed the way you
  *  would actually print it: standing on its base.
  *
@@ -252,9 +396,12 @@ const PHONE_STAND: Solid = (() => {
   const sy0 = (W - SLOT) / 2, sy1 = sy0 + SLOT;
 
   const LAYERS = 30;
-  const S = Math.max(maxX, W) / 0.56;              // longest horizontal dim -> 0.56 of the bed
-  const px = (x: number): number => 0.5 + (x - maxX / 2) / S;
-  const py = (y: number): number => 0.5 + (y - W / 2) / S;
+  const S = Math.max(maxX, W) / 0.52;              // longest horizontal dim -> 0.52 of the bed
+  /* Turned 180 degrees on the bed so the seat and lip face the FRONT. Built the other way
+     round the stand looked away from you, up the back-left of the plate, and the one face
+     that says "phone stand" — the seat, the lip, the cable slot — was the hidden one. */
+  const px = (x: number): number => 0.5 - (x - maxX / 2) / S;
+  const py = (y: number): number => 0.5 - (y - W / 2) / S;
   const box = (x0: number, x1: number, y0: number, y1: number): Vec2[] =>
     [[px(x0), py(y0)], [px(x1), py(y0)], [px(x1), py(y1)], [px(x0), py(y1)]];
 
@@ -321,47 +468,24 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
   // ---- flat, printed lying down: few layers, and that contrast is the rhythm ----
   {
     name: "gear",
-    solid: prism(GEAR_POLY, 0.075, 7),
+    // Bore, keyway and lightening holes. A toothed disc with a solid middle is a cog in a
+    // diagram; the bore is what says it goes on a shaft.
+    solid: prism(GEAR_POLY, 0.075, 7, undefined, [
+      [...disc(0.095, 18), [0.5 - 0.028, 0.5 + 0.095], [0.5 - 0.028, 0.5 + 0.125],
+       [0.5 + 0.028, 0.5 + 0.125], [0.5 + 0.028, 0.5 + 0.095]],
+      ...[0, 1, 2, 3, 4].map((i) => {
+        const a = (i / 5) * Math.PI * 2 + Math.PI / 10;
+        return disc(0.043, 12, 0.5 + Math.cos(a) * 0.165, 0.5 + Math.sin(a) * 0.165);
+      }),
+    ]),
   },
   {
     name: "name tag",
     solid: prism(rect(TAG_W, TAG_D), 0.045, 5, NAME_BARS),
   },
-  {
-    name: "wall hook",
-    // Back plate flat on the bed, arm rising off it and leaning over at the tip — the
-    // orientation you would actually choose, and the one where it reads as a HOOK.
-    // Flat on its side it was an indistinguishable C next to the bracket and the clip.
-    // Paired sections 0.005 apart make the footprint STEP rather than taper.
-    solid: {
-      sections: [
-        { z: 0, loops: [rectAt(0.46, 0.20, 0.5, 0.5)] },
-        { z: 0.20, loops: [rectAt(0.46, 0.20, 0.5, 0.5)] },
-        { z: 0.205, loops: [rectAt(0.13, 0.20, 0.36, 0.5)] },
-        { z: 0.62, loops: [rectAt(0.13, 0.20, 0.36, 0.5)] },
-        { z: 1, loops: [rectAt(0.13, 0.20, 0.64, 0.5)] },
-      ],
-      height: 0.30, layers: 18,
-    },
-  },
-  {
-    name: "L-bracket",
-    // Standing: one leg flat on the bed, the other rising. Same reason as the hook —
-    // the distinguishing feature of a bracket is the right angle standing UP.
-    solid: {
-      sections: [
-        { z: 0, loops: [rectAt(0.46, 0.26, 0.5, 0.5)] },
-        { z: 0.17, loops: [rectAt(0.46, 0.26, 0.5, 0.5)] },
-        { z: 0.175, loops: [rectAt(0.11, 0.26, 0.33, 0.5)] },
-        { z: 1, loops: [rectAt(0.11, 0.26, 0.33, 0.5)] },
-      ],
-      height: 0.28, layers: 16,
-    },
-  },
-  {
-    name: "cable clip",
-    solid: prism(centred([[.32,.24],[.68,.24],[.68,.38],[.46,.38],[.46,.62],[.68,.62],[.68,.76],[.32,.76]]), 0.085, 7),
-  },
+  { name: "wall hook", solid: WALL_HOOK },
+  { name: "L-bracket", solid: L_BRACKET },
+  { name: "cable clip", solid: CABLE_CLIP },
   {
     name: "phone stand",
     solid: PHONE_STAND,

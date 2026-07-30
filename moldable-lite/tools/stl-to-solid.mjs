@@ -23,6 +23,7 @@ const TARGET  = Number(process.argv[3] ?? 0.60);   // longest footprint dim, in 
 const LAYERS  = Number(process.argv[4] ?? 26);     // printed layers in the animation
 const RDPF    = Number(process.argv[5] ?? 0.010);  // simplify tol, fraction of max dim
 const MINA    = Number(process.argv[6] ?? 0.0016); // drop loops below this fraction of the footprint area
+const MAXL    = Number(process.argv[7] ?? 40);     // keep at most this many loops per layer, largest first
 
 /* ---------- read ---------- */
 const buf = fs.readFileSync(FILE);
@@ -163,7 +164,7 @@ const HEIGHT = zh / S;
 const footArea = ((x1 - x0) / S) * ((y1 - y0) / S);
 const tol = (MAXD * RDPF) / S;
 
-let kept = 0, dropped = 0, pts = 0;
+let kept = 0, dropped = 0, pts = 0, capped = 0;
 const layers = raw.map(ls => {
   const out = [];
   for (let l of ls) {
@@ -175,13 +176,22 @@ const layers = raw.map(ls => {
   }
   // Biggest first: the nozzle rides loop 0, and it should ride the part's outline.
   out.sort((a, b) => Math.abs(area(b)) - Math.abs(area(a)));
+  if (out.length > MAXL) { capped += out.length - MAXL; out.length = MAXL; }
   return out;
 });
-console.error(`footprint ${((x1-x0)/S).toFixed(3)} x ${((y1-y0)/S).toFixed(3)}  height ${HEIGHT.toFixed(3)}`);
+if (capped) console.error(`capped ${capped} loops at ${MAXL}/layer`);
+
+// A model that tapers to nothing (a skull's horns, a rocket's tip) can end in layers whose
+// every loop fell under minAreaFrac. Drawing those is a visible pause at the end of the
+// print, so trim them and shorten the solid to match.
+while (layers.length > 1 && layers[layers.length - 1].length === 0) layers.pop();
+const height = HEIGHT * (layers.length / LAYERS);
+
+console.error(`footprint ${((x1-x0)/S).toFixed(3)} x ${((y1-y0)/S).toFixed(3)}  height ${height.toFixed(3)}`);
 console.error(`loops kept ${kept} (dropped ${dropped})  points ${pts}  avg ${(pts/Math.max(kept,1)).toFixed(1)}/loop`);
 console.error(`loops per layer: ${layers.map(l => l.length).join(',')}`);
 
 const q = v => Math.round(v * 1000);
 const enc = layers.map(ls => ls.map(l => l.map(([x, y]) => `${q(x)},${q(y)}`).join(',')).join(';')).join('|');
 console.error(`encoded ${enc.length} chars`);
-process.stdout.write(JSON.stringify({ height: +HEIGHT.toFixed(4), layers: LAYERS, enc }));
+process.stdout.write(JSON.stringify({ height: +height.toFixed(4), layers: layers.length, enc }));

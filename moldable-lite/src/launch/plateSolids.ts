@@ -286,27 +286,11 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
     solid: prism(centred([[.20,.80],[.20,.66],[.30,.66],[.30,.60],[.22,.60],[.60,.20],[.72,.28],[.44,.66],[.74,.66],[.74,.80]]), 0.13, 10),
   },
   {
-    name: "articulated dragon",
-    // Flat, segmented, as print-in-place articulated models actually come off the bed:
-    // the top view IS the recognisable thing, so this is the one orientation where the
-    // shape and the physics agree.
-    solid: (() => {
-      const N = 15;
-      const upper: Vec2[] = [], lower: Vec2[] = [];
-      for (let i = 0; i < N; i++) {
-        const t = i / (N - 1);
-        const x = 0.14 + t * 0.72;
-        const y = 0.5 + Math.sin(t * Math.PI * 1.5) * 0.115;      // serpentine spine
-        // Body tapers head-to-tail; the segment bumps are a GENTLE ripple. Alternating
-        // hard scallops (1.7x / 0.6x) turned the outline into a lightning bolt.
-        const taper = 1 - t * 0.7;
-        const head = i <= 1 ? 2.1 : i === 2 ? 1.35 : 1;          // wedge head
-        const ripple = 1 + 0.2 * Math.cos(i * Math.PI);
-        const half = 0.058 * taper * head * ripple;
-        upper.push([x, y - half]);
-        lower.push([x, y + half]);
-      }
-      return prism([...upper, ...lower.reverse()], 0.055, 6);
-    })(),
+    name: "bone dragon",
+    // Sliced from the real mesh, coiled flat on the bed the way a print-in-place skeleton
+    // comes off it. The hand-drawn predecessor was a serpentine ribbon of 15 spine points
+    // and read as a lightning bolt: a vertebra, a rib and a horn are separate islands, and
+    // no single tapered outline is ever going to be a dragon.
+    solid: fromLayers(MESH_SOLIDS.boneDragon.enc, MESH_SOLIDS.boneDragon.height),
   },
 ];

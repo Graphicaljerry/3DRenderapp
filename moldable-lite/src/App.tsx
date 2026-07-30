@@ -33,7 +33,7 @@ import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
 import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube } from "./components/icons";
-import { FOOTPRINTS, FOOTPRINT_NAMES, extraLoopsFor, buildToolpath, type Pt, type Move } from "./launch/plateArt";
+import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
@@ -4081,10 +4081,12 @@ function LaunchBackdrop() {
     const still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
     let raf = 0, w = 0, h = 0, dpr = 1;
-    let plate: { x: number; y: number; side: number } | null = null;
-    let plateBmp: HTMLCanvasElement | null = null;   // static bed, redrawn on resize/theme
-    let beadBmp: HTMLCanvasElement | null = null;    // extruded plastic, drawn incrementally
-    let beadCtx: CanvasRenderingContext2D | null = null;
+    let view: IsoView | null = null;
+    let bedBmp: HTMLCanvasElement | null = null;    // static bed, redrawn on resize/theme
+    let partBmp: HTMLCanvasElement | null = null;   // printed layers, drawn incrementally
+    let partCtx: CanvasRenderingContext2D | null = null;
+    let box = { x: 0, y: 0, w: 0, h: 0 };           // the region a frame touches
+    let fade = { from: 0, to: 0 };
 
     const tokens = () => {
       const cs = getComputedStyle(document.documentElement);
@@ -4093,333 +4095,247 @@ function LaunchBackdrop() {
         accent: cs.getPropertyValue("--accent").trim() || "#498a6f",
         subtle: cs.getPropertyValue("--subt").trim() || "#8b968f",
         dark,
-        // Light mode sat on the same alphas as dark and washed out completely against
-        // an off-white page — the plate was barely there. Light needs MORE ink, not
-        // the same, because it is dark-on-light instead of light-on-dark.
-        grid: dark ? 0.05 : 0.10,
-        gridMajor: dark ? 0.10 : 0.19,
-        bezel: dark ? 0.16 : 0.30,
-        bead: dark ? 0.42 : 0.52,
-        fill: dark ? 0.07 : 0.10,
+        grid: dark ? 0.07 : 0.13,
+        gridMajor: dark ? 0.14 : 0.24,
+        bezel: dark ? 0.22 : 0.36,
+        bead: dark ? 0.55 : 0.62,
       };
     };
 
-    /** Where the bed can go: to the RIGHT of the real text column, measured from the DOM.
-     *  The old geometry was fractions of the canvas (centre at 0.63w, mask to 0.58w)
-     *  tuned against one 1440x900 window. On an iPad the text column is the same 620px
-     *  but the canvas is narrower, so the plate started at 461 while the text still ran
-     *  to 660 — the recent-project cards sat on top of live grid lines. On a phone the
-     *  plate started at -83, i.e. off the left edge entirely. Measuring the column makes
-     *  it correct at every width instead of at one. */
-    const layout = (): { x: number; y: number; side: number; fadeFrom: number; fadeTo: number } | null => {
+    /** Where the bed goes: to the RIGHT of the real text column, measured from the DOM,
+     *  so the two never overlap at any width. Below ~420px of free space there is no
+     *  room for a bed worth looking at and the backdrop sits out (the CSS drops to one
+     *  centred column at the matching width). */
+    const layout = (): boolean => {
       const col = document.querySelector(".launch-col") as HTMLElement | null;
       const rect = cv.getBoundingClientRect();
       const colRight = col ? col.getBoundingClientRect().right - rect.left : w * 0.46;
       const GAP = 28;
       const left = colRight + GAP;
       const avail = w - left - 16;
-      // Below this there is no room for a bed worth looking at. A plate crammed into
-      // 300px beside the text reads as a stamp, not a build plate — measured on iPad
-      // portrait, where the two-column grid left exactly that. The CSS drops to one
-      // column at the matching width, so below this the backdrop simply sits out.
-      if (avail < 420) return null;
-      const side = Math.min(avail, h * 0.84, 900);
-      const x = left + Math.max(0, (avail - side) / 2);
-      const y = Math.max(12, h * 0.5 - side / 2);
-      return { x, y, side, fadeFrom: Math.max(0, colRight - 40), fadeTo: colRight + GAP + side * 0.10 };
+      if (avail < 420) { view = null; return false; }
+      // Isometric spreads the bed to 2*COS30 = 1.73x its own width and 1*SIN30 = 0.5x
+      // deep, and a tall part adds its height on top. Sizing by `avail` directly (as if
+      // the projection were 1:1) overflowed the viewport by ~100px on a laptop.
+      const bedW = Math.min(avail / 1.72, (h * 0.66) / 1.15, 470);
+      view = { cx: left + avail / 2, cy: h * 0.52 + bedW * 0.18, w: bedW };
+      fade = { from: Math.max(0, colRight - 40), to: colRight + GAP + bedW * 0.12 };
+      // Everything a frame can touch: the bed's diamond plus headroom for the tallest part.
+      const halfW = bedW * Math.cos(Math.PI / 6) + 30;
+      const halfD = bedW * 0.5 + 40;
+      box = { x: view.cx - halfW, y: view.cy - halfD - bedW * 0.75, w: halfW * 2, h: halfD * 2 + bedW * 0.75 };
+      box.x = Math.max(0, box.x); box.y = Math.max(0, box.y);
+      box.w = Math.min(w - box.x, box.w); box.h = Math.min(h - box.y, box.h);
+      return true;
     };
 
-    let fade = { from: 0, to: 0 };
-    const drawPlate = () => {
-      const t = tokens();
-      const L = layout();
-      if (!L) { plate = null; plateBmp = null; ctx.clearRect(0, 0, w, h); return; }
-      const { x, y, side } = L;
-      fade = { from: L.fadeFrom, to: L.fadeTo };
-      plate = { x, y, side };
-      const DIV = 32;                       // 8 mm per division on a 256 mm bed
-      const step = side / DIV;
-
+    const newLayer = (): [HTMLCanvasElement, CanvasRenderingContext2D] | null => {
       const bmp = document.createElement("canvas");
       bmp.width = Math.max(1, Math.round(w * dpr));
       bmp.height = Math.max(1, Math.round(h * dpr));
       const g = bmp.getContext("2d");
-      if (!g) return;
+      if (!g) return null;
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
-      plateBmp = bmp;
+      return [bmp, g];
+    };
 
-      const glow = g.createRadialGradient(x + side * 0.8, y + side * 0.15, 0, x + side * 0.8, y + side * 0.15, side * 0.9);
-      glow.addColorStop(0, t.accent); glow.addColorStop(1, "transparent");
-      g.globalAlpha = t.dark ? 0.05 : 0.05;
-      g.fillStyle = glow;
-      g.fillRect(0, 0, w, h);
-
+    /** The bed: an isometric grid with a raised bezel. Static — cached and blitted. */
+    const drawBed = () => {
+      if (!view) return;
+      const t = tokens();
+      const made = newLayer();
+      if (!made) return;
+      const [bmp, g] = made;
+      bedBmp = bmp;
+      const V = view;
+      const line = (a: [number, number], b: [number, number]) => {
+        g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke();
+      };
       g.strokeStyle = t.accent;
       g.lineWidth = 1;
+      const DIV = 16;
       for (let i = 0; i <= DIV; i++) {
+        const u = i / DIV;
         g.globalAlpha = i % 4 === 0 ? t.gridMajor : t.grid;
-        const gx = Math.round(x + i * step) + 0.5;
-        const gy = Math.round(y + i * step) + 0.5;
-        g.beginPath(); g.moveTo(gx, y); g.lineTo(gx, y + side); g.stroke();
-        g.beginPath(); g.moveTo(x, gy); g.lineTo(x + side, gy); g.stroke();
+        line(iso(V, u, 0, 0), iso(V, u, 1, 0));
+        line(iso(V, 0, u, 0), iso(V, 1, u, 0));
       }
-      g.globalAlpha = t.bezel; g.strokeRect(Math.round(x) + 0.5, Math.round(y) + 0.5, side, side);
-      g.globalAlpha = t.bezel * 0.5; g.strokeRect(Math.round(x + 6) + 0.5, Math.round(y + 6) + 0.5, side - 12, side - 12);
-
-      g.fillStyle = t.subtle;
-      g.font = '500 10px "JetBrains Mono", ui-monospace, monospace';
-      g.strokeStyle = t.subtle;
-      const b = y + side, quarter = side / 4;
-      for (let i = 0; i <= 4; i++) {
-        const gx = x + i * quarter, gy = b - i * quarter;
-        g.globalAlpha = t.dark ? 0.28 : 0.42;
-        g.beginPath(); g.moveTo(gx, b); g.lineTo(gx, b + 5); g.stroke();
-        g.beginPath(); g.moveTo(x, gy); g.lineTo(x - 5, gy); g.stroke();
-        g.globalAlpha = t.dark ? 0.5 : 0.68;
-        const mm = i * 64;
-        g.textAlign = "center"; g.textBaseline = "top";
-        if (i > 0) g.fillText(i === 4 ? `${mm} mm` : String(mm), gx, b + 10);
-        g.textAlign = "right"; g.textBaseline = "middle";
-        if (i > 0) g.fillText(String(mm), x - 10, gy);
-      }
-      g.globalAlpha = t.dark ? 0.45 : 0.6;
-      g.textAlign = "left"; g.textBaseline = "top";
-      g.fillText("0,0", x + 4, b + 10);
+      // Bezel: the bed's outline plus a short skirt, so it reads as a plate with
+      // thickness rather than a drawn grid floating in space.
+      g.globalAlpha = t.bezel;
+      g.lineWidth = 1.4;
+      const c = [iso(V, 0, 0, 0), iso(V, 1, 0, 0), iso(V, 1, 1, 0), iso(V, 0, 1, 0)];
+      g.beginPath();
+      c.forEach((p, i) => (i ? g.lineTo(p[0], p[1]) : g.moveTo(p[0], p[1])));
+      g.closePath(); g.stroke();
+      const skirt = V.w * 0.022;
+      g.globalAlpha = t.bezel * 0.6;
+      for (const p of [c[1], c[2], c[3]]) line(p as [number, number], [p[0], p[1] + skirt]);
+      g.beginPath();
+      g.moveTo(c[1][0], c[1][1] + skirt); g.lineTo(c[2][0], c[2][1] + skirt); g.lineTo(c[3][0], c[3][1] + skirt);
+      g.stroke();
       g.globalAlpha = 1;
     };
 
-    /** Fade everything out under the text column so type sits in clean air. */
     const applyMask = () => {
       if (fade.to <= fade.from) return;
       const g = ctx.createLinearGradient(fade.from, 0, fade.to, 0);
       g.addColorStop(0, "rgba(0,0,0,1)"); g.addColorStop(1, "rgba(0,0,0,0)");
       ctx.globalCompositeOperation = "destination-out";
       ctx.fillStyle = g;
-      // Only the gradient band: nothing is ever painted left of fade.from, so erasing
-      // from x=0 every frame was clearing empty pixels.
       ctx.fillRect(fade.from, 0, fade.to - fade.from, h);
       ctx.globalCompositeOperation = "source-over";
       ctx.globalAlpha = 1;
     };
 
-    let part = new Date().getDate() % FOOTPRINTS.length;
-    let moves: Move[] = [];
-    let lengths: number[] = [];
-    let total = 0;
-    // The machine's rhythm: perimeters deliberate, infill brisk, travels darting. One
-    // constant speed for everything was the biggest "screensaver, not printer" tell —
-    // the eye reads the change of pace as the machine changing what it is doing.
-    const speedOf = (m: Move) => (m.travel ? 2.7 : m.wall ? 1.0 : 1.75);
-    let durs: number[] = [];
-    let totalTime = 1;
-    let wallPath: Path2D | null = null;
-    let drawnUpTo = 0;   // index of the last move already committed to the bead layer
-    let drawnFrac = 0;   // how much of moves[drawnUpTo] is committed
+    let part = new Date().getDate() % SOLIDS.length;
+    let drawnLayers = 0;   // layers already committed to partBmp
 
-    const newBeadLayer = () => {
-      const bmp = document.createElement("canvas");
-      bmp.width = Math.max(1, Math.round(w * dpr));
-      bmp.height = Math.max(1, Math.round(h * dpr));
-      const g = bmp.getContext("2d");
-      if (!g) return;
-      g.setTransform(dpr, 0, 0, dpr, 0, 0);
-      beadBmp = bmp; beadCtx = g;
-      drawnUpTo = 0; drawnFrac = 0;
+    const resetPart = () => {
+      const made = newLayer();
+      if (!made) return;
+      [partBmp, partCtx] = made;
+      drawnLayers = 0;
     };
 
-    const planPart = () => {
-      if (!plate) return;
-      const { x, y, side } = plate;
-      const poly: Pt[] = FOOTPRINTS[part].map(([nx, ny]) => ({ x: x + nx * side, y: y + ny * side }));
-      const extra = extraLoopsFor(FOOTPRINTS[part]).map((loopPts) =>
-        loopPts.map(([nx, ny]) => ({ x: x + nx * side, y: y + ny * side })));
-      moves = buildToolpath(poly, side * 0.018, side * 0.030, extra);
-      lengths = moves.map((m) => Math.hypot(m.b.x - m.a.x, m.b.y - m.a.y));
-      total = lengths.reduce((s, v) => s + v, 0) || 1;
-      durs = moves.map((m, i) => lengths[i] / speedOf(m));
-      totalTime = durs.reduce((s, v) => s + v, 0) || 1;
-      wallPath = new Path2D();
-      for (const m of moves) if (m.wall && !m.travel) { wallPath.moveTo(m.a.x, m.a.y); wallPath.lineTo(m.b.x, m.b.y); }
-      newBeadLayer();
-    };
-
-    /** Map print progress (0..1 of print TIME) to distance along the path, walking the
-     *  per-move durations — this is where the speed profile becomes visible motion. */
-    const distAtProgress = (frac: number): number => {
-      let tLeft = frac * totalTime, d = 0;
-      for (let i = 0; i < moves.length; i++) {
-        if (tLeft <= durs[i]) return d + (durs[i] > 0 ? (tLeft / durs[i]) * lengths[i] : 0);
-        tLeft -= durs[i];
-        d += lengths[i];
-      }
-      return total;
-    };
-    /** Is the nozzle extruding at this distance (false while it travels)? */
-    const extrudingAt = (dist: number): boolean => {
-      let acc = 0;
-      for (let i = 0; i < moves.length; i++) {
-        acc += lengths[i];
-        if (dist <= acc) return !moves[i].travel;
-      }
-      return false;
-    };
-
-    /** Commit bead up to `dist` along the path. Only the NEW span is stroked. */
-    const extrudeTo = (dist: number): Pt | null => {
-      const g = beadCtx;
-      if (!g) return null;
+    /** Commit every layer up to `upto` onto the cached bitmap. Only NEW layers are
+     *  stroked, so a frame is O(layers added this frame) — normally one, often zero —
+     *  rather than O(all layers so far). */
+    const commitTo = (upto: number) => {
+      const g = partCtx;
+      if (!g || !view) return;
       const t = tokens();
-      // Opaque here, faded at COMPOSITE time. Stroking translucently made every
-      // round line-cap overlap its neighbour and double the alpha, leaving a row of
-      // dots along the bead where the segments met.
+      const { solid } = SOLIDS[part];
+      g.strokeStyle = t.accent;
+      g.lineJoin = "round";
+      g.lineCap = "round";
+      for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) {
+        const f = solid.layers ? L / solid.layers : 1;
+        const poly = sliceAt(solid, f);
+        const z = f * solid.height;
+        // Lower layers sit slightly back: a faint depth cue that costs one lerp.
+        g.globalAlpha = 0.55 + 0.45 * f;
+        g.lineWidth = Math.max(1, view.w * 0.0045);
+        g.beginPath();
+        poly.forEach(([x, y], i) => {
+          const q = iso(view!, x, y, z);
+          i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+        });
+        g.closePath();
+        g.stroke();
+      }
+      drawnLayers = Math.max(drawnLayers, Math.min(upto + 1, solid.layers + 1));
+    };
+
+    /** Raised lettering, drawn once the part is topped out. */
+    const drawTopLoops = (g: CanvasRenderingContext2D) => {
+      const { solid } = SOLIDS[part];
+      if (!solid.topLoops || !view) return;
+      const t = tokens();
       g.strokeStyle = t.accent;
       g.globalAlpha = 1;
-      g.lineCap = "round";
-      g.lineJoin = "round";
-      // Perimeter heavier than infill — the hierarchy a second wall used to fake.
-      const wWall = Math.max(1.8, (plate?.side ?? 400) * 0.009);
-      const wFill = Math.max(1.3, (plate?.side ?? 400) * 0.0062);
-      const widthOf = (m: Move) => (m.wall ? wWall : wFill);
-      let acc = 0, head: Pt | null = null;
-      for (let i = 0; i < moves.length; i++) {
-        const L = lengths[i];
-        if (acc + L <= dist) {
-          if (i > drawnUpTo || (i === drawnUpTo && drawnFrac < 1)) {
-            const from = i === drawnUpTo ? drawnFrac : 0;
-            if (!moves[i].travel) {
-              g.lineWidth = widthOf(moves[i]);
-              g.beginPath();
-              g.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * from, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * from);
-              g.lineTo(moves[i].b.x, moves[i].b.y);
-              g.stroke();
-            }
-            drawnUpTo = i; drawnFrac = 1;
-          }
-          acc += L;
-          head = moves[i].b;
-          continue;
-        }
-        const f = L > 0 ? (dist - acc) / L : 1;
-        // `from` must be resolved BEFORE drawnUpTo moves on. Updating the cursor first
-        // made `i === drawnUpTo` false for a newly-entered move, so its leading fraction
-        // was never stroked and the bead came out dashed.
-        const from = i === drawnUpTo ? drawnFrac : 0;
-        if (f > from && !moves[i].travel) {
-          g.lineWidth = widthOf(moves[i]);
-          g.beginPath();
-          g.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * from, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * from);
-          g.lineTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f);
-          g.stroke();
-        }
-        drawnUpTo = i; drawnFrac = Math.max(from, f);
-        head = { x: moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f, y: moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f };
-        break;
+      g.lineWidth = Math.max(1, view.w * 0.005);
+      for (const loop of solid.topLoops) {
+        g.beginPath();
+        loop.forEach(([x, y], i) => {
+          const q = iso(view!, x, y, solid.height);
+          i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+        });
+        g.closePath();
+        g.stroke();
       }
-      return head;
     };
 
-    const PRINT = 9000;   // laying the first layer
-    const HOLD = 2200;    // finished part sits on the bed
+    const PRINT = 8200;   // laying the part up
+    const HOLD = 2400;    // finished part on the bed
     const CLEAR = 900;    // bed clears
     const CYCLE = PRINT + HOLD + CLEAR;
-    let t0 = 0, lastPaint = 0, cycleIx = 0;
+    let t0 = 0, lastPaint = 0, cycleIx = 0, toppedOut = false;
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       if (!t0) t0 = now;
-      if (now - lastPaint < 33) return;   // 30 fps is ample and halves the cost
+      if (now - lastPaint < 33) return;    // 30 fps: ample, and halves the cost
       lastPaint = now;
-      if (!plate || !plateBmp) return;   // no room beside the text at this width
+      if (!view || !bedBmp) return;
 
       const elapsed = now - t0;
       const ix = Math.floor(elapsed / CYCLE);
-      if (ix !== cycleIx) { cycleIx = ix; part = (part + 1) % FOOTPRINTS.length; planPart(); }
-      if (!moves.length) planPart();
+      if (ix !== cycleIx) {
+        cycleIx = ix;
+        part = (part + 1) % SOLIDS.length;
+        toppedOut = false;
+        resetPart();
+      }
+      if (!partBmp) resetPart();
 
-      const p = (elapsed % CYCLE);
+      const p = elapsed % CYCLE;
+      const { solid, name } = SOLIDS[part];
       const printing = p < PRINT;
-      const dist = printing ? distAtProgress(p / PRINT) : total;
-      const head = extrudeTo(dist);
-      const extruding = printing && extrudingAt(dist);
+      // Ease-out so the first layers land briskly and the top settles — a linear stack
+      // reads as a progress bar.
+      const prog = printing ? 1 - Math.pow(1 - p / PRINT, 1.6) : 1;
+      const upto = Math.floor(prog * solid.layers);
+      commitTo(upto);
+      if (!printing && !toppedOut && partCtx) { drawTopLoops(partCtx); toppedOut = true; }
       const fadeA = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
 
-      // Composite only the PLATE'S BOX, not the whole viewport. Everything that changes
-      // lives inside the bed, but the frame was clearing and blitting two full-canvas
-      // bitmaps plus a full-height mask — at an iPad's 1366x1024 CSS px and dpr 2 that
-      // is ~5.6M pixels touched three times per frame, which is what made the animation
-      // feel heavy there while being fine on a laptop. The plate box is roughly a third
-      // of that, and the mask below is now a narrow band instead of half the screen.
-      const pad = 26;
-      const bx = Math.max(0, plate.x - pad), by = Math.max(0, plate.y - pad);
-      const bw = Math.min(w - bx, plate.side + pad * 2), bh = Math.min(h - by, plate.side + pad * 2);
       const blit = (src: HTMLCanvasElement) =>
-        ctx.drawImage(src, bx * dpr, by * dpr, bw * dpr, bh * dpr, bx, by, bw, bh);
-      ctx.clearRect(bx, by, bw, bh);
-      blit(plateBmp);
-      if (beadBmp) { ctx.globalAlpha = fadeA * tokens().bead; blit(beadBmp); ctx.globalAlpha = 1; }
+        ctx.drawImage(src, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);
+      ctx.clearRect(box.x, box.y, box.w, box.h);
+      blit(bedBmp);
       const t = tokens();
-      if (printing && head) {
-        // Hot tail: the last stretch of bead behind the nozzle glows brighter and
-        // "cools" with distance — fresh extrusion, not ink. Drawn on the live canvas
-        // only, so the settled bead layer keeps its uniform tone.
-        if (extruding) {
-          const TAIL = plate.side * 0.055;
-          let remain = Math.min(TAIL, dist), acc = 0, i = 0;
-          for (; i < moves.length && acc + lengths[i] < dist - remain; i++) acc += lengths[i];
-          ctx.lineCap = "round";
-          ctx.strokeStyle = t.accent;
-          let dAt = dist - remain;
-          for (; i < moves.length && dAt < dist; i++) {
-            const segStart = acc, segEnd = acc + lengths[i];
-            acc = segEnd;
-            if (moves[i].travel || lengths[i] === 0) { dAt = Math.max(dAt, segEnd); continue; }
-            const f0 = Math.max(0, (dAt - segStart) / lengths[i]);
-            const f1 = Math.min(1, (dist - segStart) / lengths[i]);
-            if (f1 <= f0) { dAt = segEnd; continue; }
-            const heat = 1 - (dist - (segStart + f1 * lengths[i])) / TAIL;   // 0 cold .. 1 at nozzle
-            ctx.globalAlpha = (t.dark ? 0.5 : 0.4) + 0.4 * Math.max(0, heat);
-            ctx.lineWidth = (moves[i].wall ? Math.max(1.8, plate.side * 0.009) : Math.max(1.3, plate.side * 0.0062)) * 1.05;
-            ctx.beginPath();
-            ctx.moveTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f0, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f0);
-            ctx.lineTo(moves[i].a.x + (moves[i].b.x - moves[i].a.x) * f1, moves[i].a.y + (moves[i].b.y - moves[i].a.y) * f1);
-            ctx.stroke();
-            dAt = segEnd;
-          }
-        }
-        // The nozzle: full and haloed while extruding, small and quiet while
-        // travelling — a nozzle that glows identically while laying nothing reads
-        // as a cursor.
-        const r = Math.max(2.2, plate.side * 0.011) * (extruding ? 1 : 0.62);
-        ctx.globalAlpha = extruding ? 0.95 : 0.55;
-        ctx.fillStyle = t.accent;
-        ctx.beginPath(); ctx.arc(head.x, head.y, r, 0, Math.PI * 2); ctx.fill();
-        if (extruding) {
-          ctx.globalAlpha = 0.16;
-          ctx.beginPath(); ctx.arc(head.x, head.y, r * 2.6, 0, Math.PI * 2); ctx.fill();
-        }
-        ctx.globalAlpha = 1;
-      }
-      // Completion beat: one soft contour pulse the moment the layer finishes — the
-      // machine announcing "layer done", not just stopping.
-      if (!printing && wallPath && p < PRINT + 450) {
-        const u = (p - PRINT) / 450;
-        ctx.globalAlpha = 0.30 * (1 - u) * fadeA;
+      if (partBmp) { ctx.globalAlpha = fadeA * tokens().bead; blit(partBmp); ctx.globalAlpha = 1; }
+
+      if (printing) {
+        // The nozzle rides the layer being laid: a dot travelling the current contour,
+        // plus that contour drawn bright. This is the only thing moving once a layer
+        // is down, and it is what makes the stack read as PRINTING rather than fading in.
+        const f = solid.layers ? upto / solid.layers : 1;
+        const poly = sliceAt(solid, f);
+        const z = f * solid.height;
         ctx.strokeStyle = t.accent;
-        ctx.lineWidth = Math.max(1.8, plate.side * 0.009) + 3 * (1 - u);
-        ctx.lineCap = "round";
-        ctx.stroke(wallPath);
+        ctx.globalAlpha = 0.95;
+        ctx.lineWidth = Math.max(1.4, view.w * 0.006);
+        ctx.lineJoin = "round";
+        ctx.beginPath();
+        poly.forEach(([x, y], i) => {
+          const q = iso(view!, x, y, z);
+          i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]);
+        });
+        ctx.closePath();
+        ctx.stroke();
+        // Position around the contour, so the dot circles the layer as it is laid.
+        const around = ((p / PRINT) * solid.layers * 1.7) % 1;
+        const fi = around * poly.length;
+        const i0 = Math.floor(fi) % poly.length, i1 = (i0 + 1) % poly.length;
+        const ft = fi - Math.floor(fi);
+        const a = poly[i0], b = poly[i1];
+        const q = iso(view, a[0] + (b[0] - a[0]) * ft, a[1] + (b[1] - a[1]) * ft, z);
+        const r = Math.max(2.2, view.w * 0.012);
+        ctx.fillStyle = t.accent;
+        ctx.globalAlpha = 0.95;
+        ctx.beginPath(); ctx.arc(q[0], q[1], r, 0, Math.PI * 2); ctx.fill();
+        ctx.globalAlpha = 0.16;
+        ctx.beginPath(); ctx.arc(q[0], q[1], r * 2.6, 0, Math.PI * 2); ctx.fill();
         ctx.globalAlpha = 1;
       }
-      // Printer HUD: what it is making and how far along — quiet, mono, inside the
-      // plate's top-left. Gives the loop a story; you catch the name and watch for
-      // that part. Fades out with the bed.
+
+      // Printer HUD, in the bed's own top-left corner.
       {
         const pct = Math.round((printing ? p / PRINT : 1) * 100);
+        const anchor = iso(view, 0, 0, 0);
         ctx.globalAlpha = (t.dark ? 0.6 : 0.75) * fadeA;
         ctx.fillStyle = t.subtle;
         ctx.font = '500 11px "JetBrains Mono", ui-monospace, monospace';
-        ctx.textAlign = "left"; ctx.textBaseline = "top";
-        ctx.fillText(printing ? `${FOOTPRINT_NAMES[part]} · first layer ${pct}%` : `${FOOTPRINT_NAMES[part]} · done`, plate.x + 10, plate.y + 10);
+        ctx.textAlign = "center"; ctx.textBaseline = "bottom";
+        const label = printing
+          ? `${name} · layer ${Math.min(upto + 1, solid.layers)}/${solid.layers} · ${pct}%`
+          : `${name} · done`;
+        // Clear of the TALLEST solid (0.62 of bed width) without floating in space:
+        // the back corner sits 0.5w above centre, so 0.18w above it just clears a rocket.
+        ctx.fillText(label, view.cx, anchor[1] - view.w * 0.18);
+        ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
       }
       applyMask();
@@ -4427,20 +4343,26 @@ function LaunchBackdrop() {
 
     /** Reduced motion: the finished part, no nozzle, no loop. */
     const drawStill = () => {
-      if (!plate || !plateBmp) return;
-      planPart();
-      extrudeTo(total);
-      ctx.clearRect(0, 0, w, h);
-      ctx.drawImage(plateBmp, 0, 0, w, h);
-      if (beadBmp) { ctx.globalAlpha = tokens().bead; ctx.drawImage(beadBmp, 0, 0, w, h); ctx.globalAlpha = 1; }
+      if (!view || !bedBmp) return;
+      resetPart();
+      commitTo(SOLIDS[part].solid.layers);
+      if (partCtx) drawTopLoops(partCtx);
+      const blit = (src: HTMLCanvasElement) =>
+        ctx.drawImage(src, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);
+      ctx.clearRect(box.x, box.y, box.w, box.h);
+      blit(bedBmp);
+      if (partBmp) { ctx.globalAlpha = tokens().bead; blit(partBmp); ctx.globalAlpha = 1; }
       applyMask();
     };
 
     const render = () => {
       cancelAnimationFrame(raf);
-      drawPlate();
+      ctx.clearRect(0, 0, w, h);
+      if (!layout()) { bedBmp = null; partBmp = null; return; }
+      drawBed();
+      resetPart();
+      toppedOut = false;
       if (still) { drawStill(); return; }
-      planPart();
       t0 = 0; lastPaint = 0; cycleIx = 0;
       raf = requestAnimationFrame(frame);
     };

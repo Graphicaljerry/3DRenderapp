@@ -4211,17 +4211,20 @@ function LaunchBackdrop() {
       g.lineCap = "round";
       for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) {
         const f = solid.layers ? L / solid.layers : 1;
-        const poly = sliceAt(solid, f);
         const z = f * solid.height;
         // Lower layers sit slightly back: a faint depth cue that costs one lerp.
         g.globalAlpha = 0.55 + 0.45 * f;
         g.lineWidth = Math.max(1, view.w * 0.0045);
+        // Every loop of the layer in ONE path: a mesh-sliced part has five or six islands
+        // per layer and stroking each separately costs five state changes for nothing.
         g.beginPath();
-        poly.forEach(([x, y], i) => {
-          const q = iso(view!, x, y, z);
-          i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
-        });
-        g.closePath();
+        for (const poly of sliceAt(solid, f)) {
+          poly.forEach(([x, y], i) => {
+            const q = iso(view!, x, y, z);
+            i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+          });
+          g.closePath();
+        }
         g.stroke();
       }
       drawnLayers = Math.max(drawnLayers, Math.min(upto + 1, solid.layers + 1));
@@ -4292,20 +4295,24 @@ function LaunchBackdrop() {
         // plus that contour drawn bright. This is the only thing moving once a layer
         // is down, and it is what makes the stack read as PRINTING rather than fading in.
         const f = solid.layers ? upto / solid.layers : 1;
-        const poly = sliceAt(solid, f);
+        const loops = sliceAt(solid, f);
         const z = f * solid.height;
         ctx.strokeStyle = t.accent;
         ctx.globalAlpha = 0.95;
         ctx.lineWidth = Math.max(1.4, view.w * 0.006);
         ctx.lineJoin = "round";
         ctx.beginPath();
-        poly.forEach(([x, y], i) => {
-          const q = iso(view!, x, y, z);
-          i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]);
-        });
-        ctx.closePath();
+        for (const poly of loops) {
+          poly.forEach(([x, y], i) => {
+            const q = iso(view!, x, y, z);
+            i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1]);
+          });
+          ctx.closePath();
+        }
         ctx.stroke();
-        // Position around the contour, so the dot circles the layer as it is laid.
+        // Position around the contour, so the dot circles the layer as it is laid. Loop 0 is
+        // the largest by construction, so the nozzle rides the part's outline, not a window.
+        const poly = loops[0] ?? [[0.5, 0.5] as [number, number]];
         const around = ((p / PRINT) * solid.layers * 1.7) % 1;
         const fi = around * poly.length;
         const i0 = Math.floor(fi) % poly.length, i1 = (i0 + 1) % poly.length;

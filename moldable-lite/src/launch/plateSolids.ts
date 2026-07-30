@@ -12,10 +12,14 @@
    file is geometry, and the entry screen must not pull a WebGL context or a renderer into
    the critical path. */
 
+import { MESH_SOLIDS } from "./meshSolids";
+
 export type Vec2 = [number, number];
-/** A cross-section at `z` (0..1 of the solid's height). Every section of one solid MUST
- *  have the same point count so consecutive sections can be interpolated per-vertex. */
-export type Section = { z: number; poly: Vec2[] };
+/** A cross-section at `z` (0..1 of the solid's height), as the closed loops a slicer would
+ *  lay down there — usually one, but a hollow or many-part cut has several. Within a
+ *  non-stepped solid every section MUST carry the same loops with the same point counts, so
+ *  consecutive sections can be interpolated per-vertex. */
+export type Section = { z: number; loops: Vec2[][] };
 export type Solid = {
   /** Sections sorted by z, first at 0 and last at 1. */
   sections: Section[];
@@ -25,13 +29,16 @@ export type Solid = {
   layers: number;
   /** Closed loops drawn only on the TOP layer: raised lettering, etc. */
   topLoops?: Vec2[][];
+  /** Mesh-sliced: one section per printed layer, snapped to rather than interpolated.
+   *  Real slices change loop COUNT from layer to layer, so there is nothing to lerp. */
+  stepped?: boolean;
 };
 
 /* ---------- builders ---------- */
 
 /** A constant cross-section extruded straight up — how flat parts actually print. */
 function prism(poly: Vec2[], height: number, layers: number, topLoops?: Vec2[][]): Solid {
-  return { sections: [{ z: 0, poly }, { z: 1, poly }], height, layers, topLoops };
+  return { sections: [{ z: 0, loops: [poly] }, { z: 1, loops: [poly] }], height, layers, topLoops };
 }
 
 /** A solid of revolution from a [z, radius] profile, centred on the bed. */
@@ -44,22 +51,52 @@ function revolve(profile: [number, number][], sides: number, height: number, lay
     }
     return out;
   };
-  return { sections: profile.map(([z, r]) => ({ z, poly: ring(Math.max(r, 0.004)) })), height, layers };
+  return { sections: profile.map(([z, r]) => ({ z, loops: [ring(Math.max(r, 0.004))] })), height, layers };
 }
 
-/** Interpolate a solid's cross-section at `t` (0..1 of its height). */
-export function sliceAt(s: Solid, t: number): Vec2[] {
+/** Decode a solid sliced from a real mesh by tools/stl-to-solid.mjs: layers separated by
+ *  `|`, loops by `;`, coordinates as integers in thousandths of the bed width. */
+export function fromLayers(enc: string, height: number): Solid {
+  const layers = enc.split("|").map((l) =>
+    l.split(";").filter(Boolean).map((s) => {
+      const n = s.split(",");
+      const poly: Vec2[] = [];
+      for (let i = 0; i + 1 < n.length; i += 2) poly.push([+n[i] / 1000, +n[i + 1] / 1000]);
+      return poly;
+    }),
+  );
+  const last = Math.max(1, layers.length - 1);
+  return {
+    sections: layers.map((loops, i) => ({ z: i / last, loops })),
+    height,
+    layers: last,
+    stepped: true,
+  };
+}
+
+/** A solid's cross-section at `t` (0..1 of its height), as closed loops. */
+export function sliceAt(s: Solid, t: number): Vec2[][] {
   const secs = s.sections;
-  if (t <= secs[0].z) return secs[0].poly;
+  if (s.stepped) {
+    const i = Math.max(0, Math.min(secs.length - 1, Math.round(t * (secs.length - 1))));
+    return secs[i].loops;
+  }
+  if (t <= secs[0].z) return secs[0].loops;
   for (let i = 1; i < secs.length; i++) {
     if (t <= secs[i].z) {
       const a = secs[i - 1], b = secs[i];
       const span = b.z - a.z;
       const f = span > 1e-9 ? (t - a.z) / span : 0;
-      return a.poly.map((p, k) => [p[0] + (b.poly[k][0] - p[0]) * f, p[1] + (b.poly[k][1] - p[1]) * f] as Vec2);
+      return a.loops.map((loop, li) => {
+        const to = b.loops[li] ?? loop;
+        return loop.map((p, k) => {
+          const q = to[k] ?? p;
+          return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f] as Vec2;
+        });
+      });
     }
   }
-  return secs[secs.length - 1].poly;
+  return secs[secs.length - 1].loops;
 }
 
 /* ---------- isometric projection ---------- */
@@ -179,28 +216,19 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
       };
       return {
         sections: [
-          { z: 0, poly: finned(0.085) }, { z: 0.16, poly: finned(0.085) },
-          { z: 0.19, poly: body(0.085) }, { z: 0.60, poly: body(0.085) },
-          { z: 0.78, poly: body(0.062) }, { z: 1, poly: body(0.006) },
+          { z: 0, loops: [finned(0.085)] }, { z: 0.16, loops: [finned(0.085)] },
+          { z: 0.19, loops: [body(0.085)] }, { z: 0.60, loops: [body(0.085)] },
+          { z: 0.78, loops: [body(0.062)] }, { z: 1, loops: [body(0.006)] },
         ],
         height: 0.62, layers: 30,
       };
     })(),
   },
   {
-    name: "benchy",
-    solid: {
-      // Hull -> cabin -> funnel. Point counts match across sections by construction.
-      sections: [
-        { z: 0, poly: centred([[.20,.42],[.62,.36],[.80,.44],[.80,.58],[.62,.66],[.20,.60]]) },
-        { z: 0.42, poly: centred([[.16,.40],[.64,.34],[.84,.44],[.84,.58],[.64,.68],[.16,.62]]) },
-        { z: 0.46, poly: centred([[.38,.42],[.60,.40],[.66,.45],[.66,.56],[.60,.61],[.38,.59]]) },
-        { z: 0.74, poly: centred([[.38,.42],[.60,.40],[.66,.45],[.66,.56],[.60,.61],[.38,.59]]) },
-        { z: 0.78, poly: centred([[.44,.46],[.52,.455],[.55,.48],[.55,.52],[.52,.545],[.44,.54]]) },
-        { z: 1, poly: centred([[.44,.46],[.52,.455],[.55,.48],[.55,.52],[.52,.545],[.44,.54]]) },
-      ],
-      height: 0.34, layers: 22,
-    },
+    name: "3DBenchy",
+    // Sliced from the real mesh. The hand-drawn version before it was a six-point hull with
+    // a box and a stub on top: it read as "a boat", which is exactly what it was.
+    solid: fromLayers(MESH_SOLIDS.benchy.enc, MESH_SOLIDS.benchy.height),
   },
 
   // ---- flat, printed lying down: few layers, and that contrast is the rhythm ----
@@ -220,11 +248,11 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
     // Paired sections 0.005 apart make the footprint STEP rather than taper.
     solid: {
       sections: [
-        { z: 0, poly: rectAt(0.46, 0.20, 0.5, 0.5) },
-        { z: 0.20, poly: rectAt(0.46, 0.20, 0.5, 0.5) },
-        { z: 0.205, poly: rectAt(0.13, 0.20, 0.36, 0.5) },
-        { z: 0.62, poly: rectAt(0.13, 0.20, 0.36, 0.5) },
-        { z: 1, poly: rectAt(0.13, 0.20, 0.64, 0.5) },
+        { z: 0, loops: [rectAt(0.46, 0.20, 0.5, 0.5)] },
+        { z: 0.20, loops: [rectAt(0.46, 0.20, 0.5, 0.5)] },
+        { z: 0.205, loops: [rectAt(0.13, 0.20, 0.36, 0.5)] },
+        { z: 0.62, loops: [rectAt(0.13, 0.20, 0.36, 0.5)] },
+        { z: 1, loops: [rectAt(0.13, 0.20, 0.64, 0.5)] },
       ],
       height: 0.30, layers: 18,
     },
@@ -235,10 +263,10 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
     // the distinguishing feature of a bracket is the right angle standing UP.
     solid: {
       sections: [
-        { z: 0, poly: rectAt(0.46, 0.26, 0.5, 0.5) },
-        { z: 0.17, poly: rectAt(0.46, 0.26, 0.5, 0.5) },
-        { z: 0.175, poly: rectAt(0.11, 0.26, 0.33, 0.5) },
-        { z: 1, poly: rectAt(0.11, 0.26, 0.33, 0.5) },
+        { z: 0, loops: [rectAt(0.46, 0.26, 0.5, 0.5)] },
+        { z: 0.17, loops: [rectAt(0.46, 0.26, 0.5, 0.5)] },
+        { z: 0.175, loops: [rectAt(0.11, 0.26, 0.33, 0.5)] },
+        { z: 1, loops: [rectAt(0.11, 0.26, 0.33, 0.5)] },
       ],
       height: 0.28, layers: 16,
     },

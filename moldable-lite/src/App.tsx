@@ -4098,7 +4098,11 @@ function LaunchBackdrop() {
         grid: dark ? 0.07 : 0.13,
         gridMajor: dark ? 0.14 : 0.24,
         bezel: dark ? 0.22 : 0.36,
-        bead: dark ? 0.55 : 0.62,
+        // The part is composited over the bed at this alpha. It used to be ~0.6, which held
+        // the whole stack at hologram strength; now that layers fill and stack into a body,
+        // the airiness comes from the per-layer fill ramp instead and this can sit near
+        // opaque without the bed grid showing through the part.
+        bead: dark ? 0.9 : 0.94,
       };
     };
 
@@ -4209,22 +4213,38 @@ function LaunchBackdrop() {
       g.strokeStyle = t.accent;
       g.lineJoin = "round";
       g.lineCap = "round";
+      g.fillStyle = t.accent;
+      /* Per-layer fill alpha, scaled so a FULL stack lands near opaque whatever the layer
+         count: a 5-layer name tag and a 30-layer vase both have to end up solid, and one
+         fixed alpha washes out whichever of the two it was not tuned for. */
+      const base = 1 - Math.pow(0.02, 1 / Math.max(1, solid.layers));
       for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) {
         const f = solid.layers ? L / solid.layers : 1;
         const z = f * solid.height;
-        // Lower layers sit slightly back: a faint depth cue that costs one lerp.
-        g.globalAlpha = 0.55 + 0.45 * f;
+        const { loops, fill } = sliceAt(solid, f);
+        const path = (from: number, to: number) => {
+          g.beginPath();
+          for (let i = from; i < to; i++) {
+            loops[i].forEach(([x, y], k) => {
+              const q = iso(view!, x, y, z);
+              k ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
+            });
+            g.closePath();
+          }
+        };
+        /* Fill the outer boundaries, faintly at the base and more solidly as the part rises.
+           Layers land in ascending z onto the same bitmap, so a higher layer paints over the
+           one below and the stack resolves into a solid body whose only remaining lines are
+           the terraces where each layer oversteps the last — which is what a print looks
+           like. Keeping the base airy leaves the blueprint reading intact underneath. */
+        g.globalAlpha = base * (0.65 + 0.7 * f);
+        path(0, fill);
+        g.fill();
+        // Every loop in ONE path: a mesh-sliced layer has thirty islands and stroking each
+        // separately costs thirty state changes for nothing.
+        g.globalAlpha = 0.5 + 0.45 * f;
         g.lineWidth = Math.max(1, view.w * 0.0045);
-        // Every loop of the layer in ONE path: a mesh-sliced part has five or six islands
-        // per layer and stroking each separately costs five state changes for nothing.
-        g.beginPath();
-        for (const poly of sliceAt(solid, f)) {
-          poly.forEach(([x, y], i) => {
-            const q = iso(view!, x, y, z);
-            i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
-          });
-          g.closePath();
-        }
+        path(0, loops.length);
         g.stroke();
       }
       drawnLayers = Math.max(drawnLayers, Math.min(upto + 1, solid.layers + 1));
@@ -4235,18 +4255,29 @@ function LaunchBackdrop() {
       const { solid } = SOLIDS[part];
       if (!solid.topLoops || !view) return;
       const t = tokens();
-      g.strokeStyle = t.accent;
-      g.globalAlpha = 1;
       g.lineWidth = Math.max(1, view.w * 0.005);
+      g.beginPath();
       for (const loop of solid.topLoops) {
-        g.beginPath();
         loop.forEach(([x, y], i) => {
           const q = iso(view!, x, y, solid.height);
           i ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
         });
         g.closePath();
-        g.stroke();
       }
+      /* The tag's top face is now a solid slab, so accent letters on it are invisible —
+         drawing them in the same ink as the thing they sit on. Clear the bars out of the
+         slab first, put back a lighter tint, then outline: the letters read as raised and
+         catching light, which is what they are. */
+      g.globalCompositeOperation = "destination-out";
+      g.globalAlpha = 1;
+      g.fill();
+      g.globalCompositeOperation = "source-over";
+      g.fillStyle = t.accent;
+      g.globalAlpha = 0.3;
+      g.fill();
+      g.strokeStyle = t.accent;
+      g.globalAlpha = 1;
+      g.stroke();
     };
 
     const PRINT = 8200;   // laying the part up
@@ -4295,7 +4326,7 @@ function LaunchBackdrop() {
         // plus that contour drawn bright. This is the only thing moving once a layer
         // is down, and it is what makes the stack read as PRINTING rather than fading in.
         const f = solid.layers ? upto / solid.layers : 1;
-        const loops = sliceAt(solid, f);
+        const { loops } = sliceAt(solid, f);
         const z = f * solid.height;
         ctx.strokeStyle = t.accent;
         ctx.globalAlpha = 0.95;

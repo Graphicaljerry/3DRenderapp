@@ -24,6 +24,7 @@ const LAYERS  = Number(process.argv[4] ?? 26);     // printed layers in the anim
 const RDPF    = Number(process.argv[5] ?? 0.010);  // simplify tol, fraction of max dim
 const MINA    = Number(process.argv[6] ?? 0.0016); // drop loops below this fraction of the footprint area
 const MAXL    = Number(process.argv[7] ?? 40);     // keep at most this many loops per layer, largest first
+const ROT     = Number(process.argv[8] ?? 0);      // spin the model on the bed, degrees CCW in bed coords
 
 /* ---------- read ---------- */
 const buf = fs.readFileSync(FILE);
@@ -37,6 +38,22 @@ for (let i = 0; i < nTri; i++) {
 let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
 for (let i = 0; i < V.length; i += 3)
   for (let a = 0; a < 3; a++) { const v = V[i + a]; if (v < lo[a]) lo[a] = v; if (v > hi[a]) hi[a] = v; }
+
+/* Spin the model on the bed before anything else, so every step downstream sees the final
+   orientation. Which way a part faces matters: the isometric view puts +x+y nearest the
+   viewer, so a model whose "front" runs along that diagonal reads as facing you. */
+if (ROT) {
+  const a = (ROT * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
+  const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2;
+  for (let i = 0; i < V.length; i += 3) {
+    const dx = V[i] - cx, dy = V[i + 1] - cy;
+    V[i] = cx + dx * ca - dy * sa;
+    V[i + 1] = cy + dx * sa + dy * ca;
+  }
+  lo = [Infinity, Infinity, lo[2]]; hi = [-Infinity, -Infinity, hi[2]];
+  for (let i = 0; i < V.length; i += 3)
+    for (let a2 = 0; a2 < 2; a2++) { const v = V[i + a2]; if (v < lo[a2]) lo[a2] = v; if (v > hi[a2]) hi[a2] = v; }
+}
 const size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
 const MAXD = Math.max(size[0], size[1]);
 console.error(`tris ${nTri}  bbox ${size.map(s => s.toFixed(2)).join(' x ')}`);

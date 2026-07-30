@@ -19,7 +19,13 @@ export type Vec2 = [number, number];
  *  lay down there — usually one, but a hollow or many-part cut has several. Within a
  *  non-stepped solid every section MUST carry the same loops with the same point counts, so
  *  consecutive sections can be interpolated per-vertex. */
-export type Section = { z: number; loops: Vec2[][] };
+export type Section = {
+  z: number;
+  loops: Vec2[][];
+  /** The first `fill` loops are outer boundaries and get filled; the rest are holes inside
+   *  them and are only stroked. Absent means every loop is an outer boundary. */
+  fill?: number;
+};
 export type Solid = {
   /** Sections sorted by z, first at 0 and last at 1. */
   sections: Section[];
@@ -54,49 +60,70 @@ function revolve(profile: [number, number][], sides: number, height: number, lay
   return { sections: profile.map(([z, r]) => ({ z, loops: [ring(Math.max(r, 0.004))] })), height, layers };
 }
 
+/** Is `p` inside the closed polygon `poly`? Crossing count along +x. */
+function inside(p: Vec2, poly: Vec2[]): boolean {
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i], b = poly[j];
+    if ((a[1] > p[1]) !== (b[1] > p[1]) &&
+        p[0] < ((b[0] - a[0]) * (p[1] - a[1])) / (b[1] - a[1]) + a[0]) hit = !hit;
+  }
+  return hit;
+}
+
 /** Decode a solid sliced from a real mesh by tools/stl-to-solid.mjs: layers separated by
  *  `|`, loops by `;`, coordinates as integers in thousandths of the bed width. */
 export function fromLayers(enc: string, height: number): Solid {
-  const layers = enc.split("|").map((l) =>
-    l.split(";").filter(Boolean).map((s) => {
+  const sections: Section[] = enc.split("|").map((l, i, all) => {
+    const loops = l.split(";").filter(Boolean).map((s) => {
       const n = s.split(",");
       const poly: Vec2[] = [];
-      for (let i = 0; i + 1 < n.length; i += 2) poly.push([+n[i] / 1000, +n[i + 1] / 1000]);
+      for (let k = 0; k + 1 < n.length; k += 2) poly.push([+n[k] / 1000, +n[k + 1] / 1000]);
       return poly;
-    }),
-  );
-  const last = Math.max(1, layers.length - 1);
-  return {
-    sections: layers.map((loops, i) => ({ z: i / last, loops })),
-    height,
-    layers: last,
-    stepped: true,
-  };
+    });
+    /* Split outer boundaries from holes so the layer can be FILLED and still read as the
+       part rather than a blob: a Benchy hull is a ring, and filling it whole would flood the
+       cockpit. Nesting depth, not size — an island can sit inside a hole inside an island.
+       Done once at decode, never per frame. */
+    const outer: Vec2[][] = [], holes: Vec2[][] = [];
+    for (const loop of loops) {
+      let depth = 0;
+      for (const other of loops) if (other !== loop && inside(loop[0], other)) depth++;
+      (depth % 2 ? holes : outer).push(loop);
+    }
+    return { z: i / Math.max(1, all.length - 1), loops: [...outer, ...holes], fill: outer.length };
+  });
+  return { sections, height, layers: Math.max(1, sections.length - 1), stepped: true };
 }
 
-/** A solid's cross-section at `t` (0..1 of its height), as closed loops. */
-export function sliceAt(s: Solid, t: number): Vec2[][] {
+/** A layer's closed loops. The first `fill` are outer boundaries; the rest are holes. */
+export type Slice = { loops: Vec2[][]; fill: number };
+
+/** A solid's cross-section at `t` (0..1 of its height). */
+export function sliceAt(s: Solid, t: number): Slice {
   const secs = s.sections;
+  const of = (sec: Section): Slice => ({ loops: sec.loops, fill: sec.fill ?? sec.loops.length });
   if (s.stepped) {
     const i = Math.max(0, Math.min(secs.length - 1, Math.round(t * (secs.length - 1))));
-    return secs[i].loops;
+    return of(secs[i]);
   }
-  if (t <= secs[0].z) return secs[0].loops;
+  if (t <= secs[0].z) return of(secs[0]);
   for (let i = 1; i < secs.length; i++) {
     if (t <= secs[i].z) {
       const a = secs[i - 1], b = secs[i];
       const span = b.z - a.z;
       const f = span > 1e-9 ? (t - a.z) / span : 0;
-      return a.loops.map((loop, li) => {
+      const loops = a.loops.map((loop, li) => {
         const to = b.loops[li] ?? loop;
         return loop.map((p, k) => {
           const q = to[k] ?? p;
           return [p[0] + (q[0] - p[0]) * f, p[1] + (q[1] - p[1]) * f] as Vec2;
         });
       });
+      return { loops, fill: a.fill ?? loops.length };
     }
   }
-  return secs[secs.length - 1].loops;
+  return of(secs[secs.length - 1]);
 }
 
 /* ---------- isometric projection ---------- */

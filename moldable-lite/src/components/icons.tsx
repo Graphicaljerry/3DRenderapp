@@ -53,6 +53,15 @@ export const IconChevron = ({ size = 14 }: { size?: number }) => (
     <path d="m6 9 6 6 6-6" />
   </svg>
 );
+/** Improve-this-description. A four-point star with a smaller companion — the
+ *  established "let the model rewrite this" mark, drawn on the set's own grid rather
+ *  than borrowed as an emoji. */
+export const IconSparkle = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M12 3.5c.9 3.6 1.9 4.6 5.5 5.5-3.6.9-4.6 1.9-5.5 5.5-.9-3.6-1.9-4.6-5.5-5.5 3.6-.9 4.6-1.9 5.5-5.5Z" />
+    <path d="M17.5 15c.4 1.7.9 2.2 2.6 2.6-1.7.4-2.2.9-2.6 2.6-.4-1.7-.9-2.2-2.6-2.6 1.7-.4 2.2-.9 2.6-2.6Z" />
+  </svg>
+);
 export const IconGlobe = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
     <circle cx="12" cy="12" r="9" />

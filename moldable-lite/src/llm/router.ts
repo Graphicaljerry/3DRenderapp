@@ -11,7 +11,7 @@ import { AUTO_MODEL } from "./openrouterModels";
 import { localLoaded } from "./local";
 
 /** Cap a brain call; the underlying request may still finish, we just stop waiting. */
-function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+export function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
   return Promise.race([p, new Promise<null>((res) => setTimeout(() => res(null), ms))]);
 }
 
@@ -19,7 +19,7 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
  *  cheap default (a 3-token classification doesn't need model routing), and the
  *  on-device brain is only used when its weights are ALREADY loaded — a routing
  *  hint must never trigger a 0.9 GB download. Null = skip the LLM, use regexes. */
-function utilityBrain(s: LlmSettings, keys: Record<string, string | undefined>): LlmSettings | null {
+export function utilityBrain(s: LlmSettings, keys: Record<string, string | undefined>): LlmSettings | null {
   if (!llmReady(s, keys)) return null;
   if (s.provider === "local" && !localLoaded()) return null;
   if (s.provider === "openrouter" && s.model === AUTO_MODEL) return { ...s, model: "" }; // preset default

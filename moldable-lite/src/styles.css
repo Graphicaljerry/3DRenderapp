@@ -329,7 +329,12 @@ button { font-family: inherit; cursor: pointer; }
    the tab sequence away from the field it submits. */
 .send { order: 1; position: relative; z-index: 1; margin-left: -40px; margin-bottom: 4px; width: 32px; height: 32px; border: none; border-radius: 999px; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
 .composer .attach { order: 2; }
-.composer .mic { order: 3; }
+/* Sits with attach and the mic — the three controls that act on what you are about to
+   send, rather than on the app. Must carry an explicit order: Send is order 1 with a
+   -40px margin that tucks it inside the field, so anything left at the default order 0
+   lands underneath it and swallows the clicks. */
+.composer .improve { order: 3; }
+.composer .mic { order: 4; }
 /* Dictation mic — quiet next to Send; pulses while listening. */
 .mic { width: 34px; height: 34px; margin-bottom: 3px; border: none; border-radius: 9px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
 .mic:hover { color: var(--ink); background: var(--surf); }
@@ -1111,6 +1116,65 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .dock-ask textarea { width: 100%; border: 1px solid var(--bord); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 12.5px; resize: vertical; background: var(--bg); color: var(--ink); }
 .dock-ask .param-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .dock-ask .fine { margin: 0; }
+
+/* ---------- Improve this description ----------
+   Sits inside the composer with the mic and send, because it acts on what is in the
+   box — not in the modebar above, which is where engine DECISIONS live. */
+/* Same box as the mic beside it, so the row reads as one set of three. */
+.improve {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 34px; height: 34px; flex: 0 0 auto; margin-bottom: 3px;
+  border: none; border-radius: 9px; background: transparent; color: var(--mut); cursor: pointer;
+}
+.improve:hover:not(:disabled) { background: var(--surf); color: var(--accent-d); }
+.improve:disabled { opacity: .4; cursor: default; }
+.improve:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.improve.busy { color: var(--accent-d); }
+/* The revert offer. Deliberately a full sentence with a real verb rather than "Undo":
+   the choice is between two sets of WORDS, and the user needs to know which is which. */
+.improve-note {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 6px 2px 0; font-size: 11.5px; color: var(--mut);
+}
+.improve-note .link { padding: 0; font-size: 11.5px; }
+.improve-note .x { border: none; background: none; color: var(--subt); padding: 0; line-height: 1; cursor: pointer; margin-left: auto; }
+
+/* ---------- Vague request → questions, in the transcript ----------
+   Styled as a panel rather than an assistant bubble: it is a control the user acts on,
+   and dressing it as speech would make the buttons read as a transcript of buttons. */
+.clarify {
+  display: flex; flex-direction: column; gap: 12px;
+  padding: 12px 13px; border: 1px solid var(--bord); border-radius: var(--r-md);
+  background: var(--bg); box-shadow: var(--shadow-sm);
+}
+.clarify.done { opacity: .72; box-shadow: none; background: none; }
+.clarify-head { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink2); }
+.clarify-head svg { color: var(--accent-d); flex: 0 0 auto; }
+.clarify-q { display: flex; flex-direction: column; gap: 6px; }
+.clarify-ask { margin: 0; font-size: 12.5px; color: var(--ink); }
+.clarify-why { margin: 0; font-size: 11px; line-height: 1.45; color: var(--mut); }
+.clarify-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.clarify-chip {
+  display: inline-flex; align-items: baseline; gap: 6px;
+  padding: 6px 11px; border: 1px solid var(--bord); border-radius: var(--r-full);
+  background: var(--bg); font-size: 12px; color: var(--ink2); cursor: pointer;
+  transition: background-color var(--ms-ui) var(--ease-ui), border-color var(--ms-ui) var(--ease-ui), color var(--ms-ui) var(--ease-ui);
+}
+.clarify-chip:hover:not(.on):not(:disabled) { background: var(--surf); }
+.clarify-chip.on { background: var(--accent-w); border-color: var(--accent); color: var(--accent-d); font-weight: 500; }
+.clarify-chip:disabled { cursor: default; }
+.clarify-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Marks the answer the app would have assumed on its own — so a pre-filled card reads
+   as the app showing its work, not as a choice already made for you. */
+.clarify-rec { font-size: 9.5px; letter-spacing: .02em; text-transform: uppercase; color: var(--mut); }
+.clarify-chip.on .clarify-rec { color: var(--accent-d); opacity: .75; }
+.clarify-text {
+  width: 100%; padding: 6px 10px; border: 1px solid var(--bord); border-radius: var(--r-sm);
+  background: var(--bg); font-size: 12px; color: var(--ink);
+}
+.clarify-text:focus-visible { outline: none; border-color: var(--accent); }
+.clarify-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+@media (prefers-reduced-motion: reduce) { .clarify-chip { transition: none; } }
 
 /* ---------- Inspector dock ----------
    A real column beside the stage, not an overlay that replaces it. Sibling of

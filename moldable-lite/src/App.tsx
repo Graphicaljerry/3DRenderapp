@@ -18,6 +18,7 @@ import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } fro
 import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { classifyIntent, polishMeshPrompt } from "./llm/router";
+import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } from "./llm/clarify";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
@@ -90,6 +91,18 @@ export type ChatMessage = {
   model?: string; // which AI produced this reply (shown small under the bubble)
   thinking?: string; // the model's reasoning stream, kept collapsed for the curious
   sources?: { url: string; title?: string }[]; // web pages a research lookup used
+  clarify?: ClarifyState; // a request too vague to build — the questions, in the chat
+};
+
+/** A question card sitting in the transcript. `answers` opens pre-filled with every
+ *  recommended option, so Build it works before the user touches anything; `done`
+ *  freezes the card once it has been built from or skipped, leaving it readable as a
+ *  record of what was actually chosen. */
+export type ClarifyState = {
+  prompt: string;                   // the request the questions are about
+  questions: ClarifyQuestion[];
+  answers: Record<string, string>;
+  done?: boolean;
 };
 export type Mode = "precise" | "generative";
 export type ModePref = "auto" | Mode; // composer switch: Auto lets the app pick the engine
@@ -1034,6 +1047,28 @@ export default function App() {
       return next;
     });
   const [input, setInput] = useState("");
+  // Ask before guessing, when a fresh request is too vague to build confidently. On by
+  // default and switchable off in Settings → Building, because someone who types full
+  // specs every time should never see a card.
+  const [clarifyOn, setClarifyOn] = useState(() => localStorage.getItem("moldable_clarify") !== "off");
+  const setClarify = (v: boolean) => {
+    setClarifyOn(v);
+    try { localStorage.setItem("moldable_clarify", v ? "on" : "off"); } catch { /* private mode */ }
+  };
+  // Improve-this-prompt, run from the composer. `improveBefore` holds what the user
+  // actually typed so the rewrite is one tap from being undone — a rewrite you cannot
+  // take back is a rewrite you have to proofread before every send.
+  const [improving, setImproving] = useState(false);
+  const [improveBefore, setImproveBefore] = useState<string | null>(null);
+  const [improveNote, setImproveNote] = useState<string | null>(null);
+  // Typing again means the rewrite is no longer what is in the box, so the offer to
+  // revert to "the original" would be a lie. Composer edits route through here; the
+  // other setInput callers (voice, Apply-to-prompt) are additive and keep it.
+  const onInputChange = (v: string) => {
+    setInput(v);
+    if (improveBefore !== null) setImproveBefore(null);
+    if (improveNote !== null) setImproveNote(null);
+  };
   const [showSettings, setShowSettings] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
@@ -2731,9 +2766,11 @@ export default function App() {
   // "Thinking…" bubbles side by side, two API calls, and the loser of the race
   // surfacing as a network error. A ref flips the instant the first call enters.
   const sendingRef = useRef(false);
-  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
+  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean }) {
     if (sendingRef.current) return;
     sendingRef.current = true;
+    setImproveBefore(null); // the composer is being emptied; there is nothing left to revert
+    setImproveNote(null);
     try {
       await sendInner(promptText, forceMode, override);
     } finally {
@@ -2741,7 +2778,63 @@ export default function App() {
     }
   }
 
-  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string } }) {
+  /** A chip picked, or a measurement typed, on a question card in the transcript. */
+  function answerClarify(msgId: string, qid: string, value: string) {
+    setMessages((m) => m.map((x) => (
+      x.id === msgId && x.clarify
+        ? { ...x, clarify: { ...x.clarify, answers: { ...x.clarify.answers, [qid]: value } } }
+        : x
+    )));
+  }
+
+  /** Build from a question card. `withAnswers: false` is the Just build it path — the
+   *  request goes exactly as typed, which is the reason every question is optional.
+   *  Either way the card freezes rather than disappearing, so the transcript keeps a
+   *  record of what was chosen. */
+  function buildFromClarify(msgId: string, withAnswers: boolean) {
+    const c = messages.find((x) => x.id === msgId)?.clarify;
+    if (!c || c.done) return;
+    setMessages((m) => m.map((x) => (x.id === msgId && x.clarify ? { ...x, clarify: { ...x.clarify, done: true } } : x)));
+    void send(withAnswers ? applyAnswers(c.prompt, c.questions, c.answers) : c.prompt, undefined, { skipClarify: true });
+  }
+
+  /** Composer's Improve button. Rewrites what is typed into something specific enough to
+   *  build and keeps the original one tap away — this is a button rather than a silent
+   *  always-on pass precisely so the words that get built are words the user saw. */
+  async function improveInput() {
+    const before = input.trim();
+    if ((!before && !image) || improving) return;
+    setImproving(true);
+    setImproveNote(null);
+    try {
+      let img: { dataBase64: string; mediaType: string } | undefined;
+      if (image) {
+        try {
+          const du = await blobToDataURL(image.blob);
+          img = { dataBase64: du.split(",")[1], mediaType: image.blob.type || "image/png" };
+        } catch { /* improve from the text alone */ }
+      }
+      const ref = await refineRequest(
+        before,
+        llm.provider === "anthropic" ? { ...llm, model } : llm,
+        { anthropic: key, ...llmKeys },
+        effectiveProxy,
+        {
+          image: img,
+          canvas: result && project ? `the part "${project.name}"` : undefined,
+          engine: mode === "generative" ? "mesh" : "cad",
+        },
+      );
+      const next = ref?.improved.trim();
+      if (!ref) setImproveNote("Couldn't reach the AI to rewrite that — send it as it is, or try again.");
+      else if (!next || next.toLowerCase() === before.toLowerCase()) setImproveNote("Already specific enough to build.");
+      else { setImproveBefore(before); setInput(next); }
+    } finally {
+      setImproving(false);
+    }
+  }
+
+  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean }) {
     if (pendingRef.current) discardPending(true); // a new ask supersedes the held proposal
     const p = promptText.trim();
     if (status === "generating") return;
@@ -2807,6 +2900,41 @@ export default function App() {
     }
     // The mode switch decides: Generative -> mesh provider; Precise + photo -> vision CAD.
     const useGen = (routedMode ?? forceMode ?? mode) === "generative";
+
+    // ---- Too vague to build? Ask — with the answers already filled in. ----
+    // After routing, so the questions suit the engine that will actually build (a mesh
+    // ask needs pose and style; a CAD ask needs the measurement it has to fit), and
+    // before any of the expensive work. Fresh builds only: an edit already has the
+    // canvas for context, and a card between every tweak would be a tax rather than a
+    // help. Best-effort throughout — no brain, a timeout, or nothing worth asking and
+    // this falls through to the identical build it would have run anyway.
+    if (!override?.skipClarify && clarifyOn && !guided && !result && !image?.markup && (p || image)) {
+      let clarifyImg: { dataBase64: string; mediaType: string } | undefined;
+      if (image) {
+        try {
+          const du = await blobToDataURL(image.blob);
+          clarifyImg = { dataBase64: du.split(",")[1], mediaType: image.blob.type || "image/png" };
+        } catch { /* ask from the text alone */ }
+      }
+      const ref = await refineRequest(p, brainLlm, brainKeys, effectiveProxy, {
+        image: clarifyImg,
+        engine: useGen ? "mesh" : "cad",
+      });
+      if (ref?.questions.length) {
+        // The photo deliberately stays in the composer — Build it re-enters send() and
+        // the reference has to still be attached when it does.
+        const thumb = image ? await blobToDataURL(image.blob).catch(() => undefined) : undefined;
+        setInput("");
+        setMessages((m) => [...m,
+          { id: mid(), role: "user", text: p || "Reference image", image: thumb, mode: useGen ? "generative" : "precise" },
+          {
+            id: mid(), role: "assistant", text: "",
+            clarify: { prompt: p, questions: ref.questions, answers: defaultAnswers(ref.questions) },
+          },
+        ]);
+        return;
+      }
+    }
 
     if (useGen) {
       if (!p && !image) return;
@@ -3737,8 +3865,18 @@ export default function App() {
         messages={messages}
         status={status}
         input={input}
-        setInput={setInput}
+        setInput={onInputChange}
         onSend={send}
+        improveCtl={{
+          busy: improving,
+          can: !!input.trim() || !!image,
+          run: () => void improveInput(),
+          before: improveBefore,
+          undo: () => { if (improveBefore !== null) { setInput(improveBefore); setImproveBefore(null); } },
+          note: improveNote,
+          dismissNote: () => setImproveNote(null),
+        }}
+        clarifyCtl={{ answer: answerClarify, build: buildFromClarify }}
         onRetryModel={retryWithModel}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}
@@ -3991,6 +4129,8 @@ export default function App() {
           onSaveTint={saveUserTint}
           theme={theme}
           onSaveTheme={setThemeState}
+          clarifyOn={clarifyOn}
+          onSetClarify={setClarify}
           units={units}
           onSaveUnits={(u) => setUnits(() => u)}
           dimsMode={dimsMode}
@@ -4901,6 +5041,8 @@ function SettingsModal({
   onGridOpacity,
   lastSyncAt,
   onSynced,
+  clarifyOn,
+  onSetClarify,
   onClose,
 }: {
   initialKey: string;
@@ -4935,6 +5077,8 @@ function SettingsModal({
   onGridOpacity: (v: number) => void;
   lastSyncAt: number | null;
   onSynced: () => void;
+  clarifyOn: boolean;
+  onSetClarify: (v: boolean) => void;
   onClose: () => void;
 }) {
   const [pane, setPane] = useState<SettingsPane>(initialPane ?? "ai");
@@ -5156,6 +5300,17 @@ function SettingsModal({
         {pane === "ai" && (
           <>
             <p className="pane-desc">The brain that writes your CAD code in <b>Precise</b> mode.</p>
+            <SGroup title="Before building" hint="What happens between your description and the model">
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <input type="checkbox" checked={clarifyOn} onChange={(e) => onSetClarify(e.target.checked)} style={{ width: "auto" }} />
+                Ask me for missing details when a new request is vague
+              </label>
+              <p className="fine choice-hint">
+                On (default): a request the app would otherwise have to guess at raises a short set of questions in the chat — each one already carrying a
+                suggested answer, so <b>Build it</b> is always one tap away and you are only correcting what you care about. Off: every request builds
+                immediately from the app's own assumptions. Either way, the ✨ button beside the composer rewrites a description on demand.
+              </p>
+            </SGroup>
             <SGroup title="Brain" hint="Gemini & Groq have free tiers · Claude is the most accurate">
             <label>Provider</label>
             <select

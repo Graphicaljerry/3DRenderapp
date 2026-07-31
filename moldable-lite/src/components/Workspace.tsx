@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
 import type { Pin } from "../store/types";
-import type { ChatMessage, Mode, ModePref } from "../App";
+import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
@@ -28,7 +28,7 @@ import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type Upda
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1351,6 +1351,18 @@ interface Props {
   input: string;
   setInput: (v: string) => void;
   onSend: (p: string, forceMode?: Mode) => void;
+  /** Composer's Improve button. `before` non-null means the box currently holds a
+   *  rewrite and `undo` puts the user's own words back. */
+  improveCtl: {
+    busy: boolean; can: boolean; run: () => void;
+    before: string | null; undo: () => void;
+    note: string | null; dismissNote: () => void;
+  };
+  /** Question cards living in the transcript: pick an answer, or build from one. */
+  clarifyCtl: {
+    answer: (msgId: string, qid: string, value: string) => void;
+    build: (msgId: string, withAnswers: boolean) => void;
+  };
   onRetryModel: (text: string, mode: Mode, value: string) => void;
   onExample: () => void;
   onTemplate: (t: Template) => void;
@@ -1882,7 +1894,7 @@ export function Workspace(p: Props) {
             <button className="panel-collapse wide" title="Hide chat" onClick={() => setChatOpen(false)}>‹ Hide</button>
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} />
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} />
 
           {p.providerWall && (
           <div className="wall-card" role="status">
@@ -2034,9 +2046,39 @@ export function Workspace(p: Props) {
                         : "Describe a part, or a change…"
                 }
               />
+              {/* A button, not an always-on pass. Rewriting what someone typed on their
+                  behalf, silently, is the one thing this app should never do to a
+                  description that becomes a physical object — so the rewrite is asked
+                  for, shown in the box, and revertible before it is ever sent. */}
+              <button
+                type="button"
+                className={`improve${p.improveCtl.busy ? " busy" : ""}`}
+                title="Improve this description — fills in the measurements and details a buildable request needs. Uses your reference photo too."
+                aria-label="Improve this description"
+                disabled={!p.improveCtl.can || p.improveCtl.busy || p.status === "generating"}
+                onClick={p.improveCtl.run}
+              >
+                {p.improveCtl.busy ? <span className="spinner sm" /> : <IconSparkle size={15} />}
+              </button>
               <MicButton value={p.input} onChange={p.setInput} />
               <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
             </form>
+
+            {(p.improveCtl.before !== null || p.improveCtl.note) && (
+              <div className="improve-note" role="status">
+                {p.improveCtl.before !== null ? (
+                  <>
+                    <span>Rewritten to be buildable.</span>
+                    <button className="link sm" onClick={p.improveCtl.undo}>Use what I wrote</button>
+                  </>
+                ) : (
+                  <>
+                    <span>{p.improveCtl.note}</span>
+                    <button className="x" aria-label="Dismiss" onClick={p.improveCtl.dismissNote}><IconX /></button>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
@@ -2940,10 +2982,11 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
+  clarifyCtl: Props["clarifyCtl"];
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -2967,8 +3010,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
   // (a changing function prop would defeat the memo for every row).
-  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey });
-  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey };
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl };
   const rowApi = useMemo(() => ({
     startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
@@ -2978,6 +3021,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     // App rebuilds these arrows every render; the rows must not see that churn.
     hasBrainKey: (p: LlmProviderId) => rowCb.current.hasBrainKey(p),
     hasGenKey: (p: string) => rowCb.current.hasGenKey(p),
+    clarifyAnswer: (msgId: string, qid: string, v: string) => rowCb.current.clarifyCtl.answer(msgId, qid, v),
+    clarifyBuild: (msgId: string, withAnswers: boolean) => rowCb.current.clarifyCtl.build(msgId, withAnswers),
   }), []);
 
   return (
@@ -3028,6 +3073,83 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   );
 }
 
+/** A request the app could not build confidently, answered in place.
+ *
+ *  It opens with every question already carrying its recommended answer, so **Build it**
+ *  works before the user touches anything. That is the whole design: the card exists to
+ *  SHOW what the app was about to assume and let you correct it — not to make you fill
+ *  in a form before it will work. Hence the second button, which builds the request
+ *  exactly as typed and ignores the questions entirely.
+ *
+ *  Answered or skipped, the card freezes instead of vanishing, so the transcript still
+ *  says which numbers the part was actually built from. */
+function ClarifyCard({ msgId, c, busy, api }: {
+  msgId: string; c: ClarifyState; busy: boolean;
+  api: {
+    clarifyAnswer: (msgId: string, qid: string, v: string) => void;
+    clarifyBuild: (msgId: string, withAnswers: boolean) => void;
+  };
+}) {
+  // Free-text lives here rather than in the message: an answer only becomes the message's
+  // answer once it is non-empty, so clearing the box cannot silently blank a question.
+  const [typed, setTyped] = useState<Record<string, string>>({});
+  return (
+    <div className={`clarify${c.done ? " done" : ""}`}>
+      <p className="clarify-head">
+        <IconSparkle size={14} />
+        {c.done ? "Built with these" : "Two or three details and this will fit properly"}
+      </p>
+      {c.questions.map((q) => {
+        const picked = c.answers[q.id] ?? "";
+        return (
+          <div className="clarify-q" key={q.id}>
+            <p className="clarify-ask">{q.ask}</p>
+            {q.why && <p className="clarify-why">{q.why}</p>}
+            <div className="clarify-opts" role="radiogroup" aria-label={q.ask}>
+              {q.options.map((o, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  role="radio"
+                  aria-checked={picked === o.value}
+                  className={`clarify-chip${picked === o.value ? " on" : ""}`}
+                  disabled={c.done || busy}
+                  onClick={() => {
+                    setTyped((s) => ({ ...s, [q.id]: "" }));
+                    api.clarifyAnswer(msgId, q.id, o.value);
+                  }}
+                >
+                  {o.label}
+                  {o.recommended && <span className="clarify-rec">suggested</span>}
+                </button>
+              ))}
+            </div>
+            {q.allowText && !c.done && (
+              <input
+                className="clarify-text"
+                value={typed[q.id] ?? ""}
+                placeholder="or type the exact measurement…"
+                aria-label={`${q.ask} — type your own answer`}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setTyped((s) => ({ ...s, [q.id]: v }));
+                  if (v.trim()) api.clarifyAnswer(msgId, q.id, v.trim());
+                }}
+              />
+            )}
+          </div>
+        );
+      })}
+      {!c.done && (
+        <div className="clarify-actions">
+          <button className="primary sm" disabled={busy} onClick={() => api.clarifyBuild(msgId, true)}>Build it</button>
+          <button className="ghost sm" disabled={busy} onClick={() => api.clarifyBuild(msgId, false)}>Build what I asked for</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One chat bubble. Memoised: chat history is immutable once written, so a row only
     re-renders when something about THAT message changes. */
 const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, api }: {
@@ -3038,6 +3160,8 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
     cancelEdit: () => void; setEditText: (s: string) => void;
     onRetryModel: (text: string, mode: Mode, value: string) => void;
     hasBrainKey: (p: LlmProviderId) => boolean; hasGenKey: (p: string) => boolean;
+    clarifyAnswer: (msgId: string, qid: string, v: string) => void;
+    clarifyBuild: (msgId: string, withAnswers: boolean) => void;
   };
 }) {
   const setEditingId = api.cancelEdit;
@@ -3051,7 +3175,9 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
   return (
         <div className={`msg ${m.role} ${m.error ? "err" : ""}`}>
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
-          {editing ? (
+          {m.clarify ? (
+            <ClarifyCard msgId={m.id} c={m.clarify} busy={busy} api={api} />
+          ) : editing ? (
             <div className="bubble-edit">
               <textarea
                 autoFocus

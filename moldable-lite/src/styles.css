@@ -385,10 +385,8 @@ button { font-family: inherit; cursor: pointer; }
 /* The pill lives top-LEFT and the docks top-RIGHT, so they coexist — until the
    column is too narrow to hold both, where the docks drop below the pill instead
    of sliding under it. */
-@container (max-width: 640px) {
-  .right-dock { top: 58px; }
-  .inspector-dock { top: 58px; }
-}
+/* Narrow-column repositioning lives at the END of the file: these fight the components'
+   own base rules at equal specificity, so source order is the tiebreak. */
 /* The tab pill NEVER wraps internally (a lone icon on a second row inside the pill
    read as a broken overlay at iPad widths) — when the head runs out of room the
    whole tools cluster drops to its own row instead (see the 680px tier). */
@@ -398,13 +396,14 @@ button { font-family: inherit; cursor: pointer; }
 .viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 32px; box-sizing: border-box; }
 .viewer-head .viewer-tools .seg.sm { align-items: stretch; }
 .viewer-head .viewer-tools .seg.sm .iconbtn { height: 100%; }
-.tabs button { border: 1px solid transparent; background: transparent; border-radius: 7px; padding: 5px 12px; font-size: 13px; font-weight: 500; color: var(--mut); }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: transparent; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 500; color: var(--mut); }
+.tabs button svg { flex: 0 0 auto; }
 .tabs button:hover:not(.on) { color: var(--ink2); }
 .tabs button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
 /* The head cluster reads as one raised object, like the tab strip opposite it. */
 .viewer-head .viewer-tools { background: var(--bg); border-radius: 11px; box-shadow: 0 2px 9.3px rgba(0,0,0,.05); padding: 3px; gap: 2px; flex-wrap: nowrap; }
-.viewer-head .viewer-tools .ghost { border-color: transparent; background: transparent; }
+.viewer-head .viewer-tools .ghost { border-color: transparent; background: transparent; white-space: nowrap; }
 .viewer-head .viewer-tools .ghost:hover { background: var(--surf); border-color: transparent; }
 /* Toolbar buttons carry an icon + a text label; the label collapses when the viewer
    COLUMN (not the viewport — the chat width matters) gets narrow, so on iPad the row
@@ -1329,6 +1328,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* Beside the Inspector card, and BELOW the head band — the tools pill now clusters left
    with the tab strip and can reach this far right, so the stats card ducks under it. */
 .viewer-body:has(.inspector-dock:not([style*="none"])) .right-dock { right: calc(var(--dock-w, 262px) + 24px); top: 56px; }
+/* The head's pills stop where the Inspector card begins — the icon tabs made the row
+   long enough to reach it. --dock-w inherits from the section, so a resized dock keeps
+   pushing the boundary correctly. */
+.viewer:has(.inspector-dock:not([style*="none"])) .viewer-head { padding-right: calc(var(--dock-w, 262px) + 32px); }
 .viewer-body:has(.inspector-dock:not([style*="none"])) .export-menu { right: calc(var(--dock-w, 262px) + 24px); }
 
 .side-panel { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 6; width: 300px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--bord); border-radius: 12px; box-shadow: var(--shadow-md); overflow: hidden; }
@@ -1487,8 +1490,12 @@ details.guide { margin-top: 10px; }
   .topbar { flex: 0 0 auto; height: auto; flex-wrap: wrap; padding: 8px 12px; row-gap: 6px; }
   .project { max-width: 34vw; }
   /* Stacked: 3D viewer on top (glanceable), chat + composer on the bottom so the
-     input sits in the thumb zone. Explicit grid-row overrides DOM order. */
-  .split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(300px, 46vh); gap: 8px; padding: 8px; }
+     input sits in the thumb zone. Explicit grid-row overrides DOM order.
+     The chat floor is 230px — enough for the head, two bubbles and the composer
+     stack — because every pixel of floor comes straight out of the 3D view, and
+     the phone screenshot that prompted this had the model in a ~200px letterbox
+     while the chat held 300px+ of mostly empty transcript. */
+  .split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) minmax(230px, 42vh); gap: 8px; padding: 0 8px 6px; }
   .split .viewer { grid-row: 1; }
   .split .chat { grid-row: 2; }
   .split.chat-collapsed { grid-template-columns: 1fr; grid-template-rows: 1fr 40px; }
@@ -1496,25 +1503,48 @@ details.guide { margin-top: 10px; }
   .split.chat-collapsed .chat-rail { grid-row: 2; }
   .chat-resize { display: none; } /* stacked layout: no column to resize */
   .chat-rail-label { writing-mode: horizontal-tb; transform: none; }
+  .chat-rail { border-radius: 12px; }
   .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
   .modehint { display: none; }
   .messages { padding: 12px; }
   .statusbar { flex-wrap: wrap; row-gap: 6px; }
   .viewer-head { flex-wrap: wrap; row-gap: 6px; }
 }
+/* Phones. The screenshot that drove this block: a ~200px letterbox of 3D view buried
+   under two rows of topbar, two of toolbars, two of statusbar, and a stats card
+   colliding with the gizmo and zoom cluster. The rule here is one row per band, and
+   anything informational yields to the canvas. */
+@media (max-width: 760px) {
+  /* One topbar row. Templates and Library leave — both live one tap away (the chat's
+     empty state and template strip; the Launchpad's recents and All projects via the
+     wordmark) — and the engine readout is a fact, not a control. */
+  .topbar { flex-wrap: nowrap; height: 48px; padding: 0 10px; gap: 6px; }
+  .topbar .navlink { display: none; }
+  .topbar-right { gap: 6px; flex: 0 0 auto; }
+  .topbar-right > .pill { display: none; }
+  .topbar .brand { min-width: 0; flex: 1 1 auto; overflow: hidden; }
+  .topbar .brand > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* One statusbar row: it scrolls sideways rather than wrapping under itself, Export
+     pinned by its own auto margin. Build/update chips are diagnostics — shed. */
+  .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 8px 2px max(6px, env(safe-area-inset-bottom)); }
+  .statusbar > * { flex: 0 0 auto; }
+  .build-tag, .update-chip { display: none; }
+  .bedchip-name { display: none; } /* the volume identifies the printer well enough here */
+  .statusbar .primary { padding: 6px 12px; font-size: 12px; }
+  /* The stats card was the worst collider on the short canvas, and every number in it
+     is one tap away in Printability. */
+  .mesh-stats { display: none; }
+}
 @media (max-width: 480px) {
   .lib-grid { grid-template-columns: 1fr; }
   .tpl-grid { grid-template-columns: repeat(2, 1fr); }
   .row3 { grid-template-columns: 1fr; }
-  /* Phones: the topbar can't seat every button. Templates and the engine pill
-     leave (both are reachable from the chat / entry screen); the brand side may
-     shrink and the project title truncates instead of pushing the row out. */
-  .topbar { padding: 0 10px; gap: 6px; }
-  .topbar-right { gap: 5px; flex: 0 0 auto; }
-  .topbar-right .pill { display: none; }
-  .topbar-right .ghost { padding-left: 9px; padding-right: 9px; }
-  .topbar .brand { min-width: 0; flex: 1 1 auto; overflow: hidden; }
-  .topbar .brand > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The narrowest tier: the statusbar keeps dims, printer, Export. The readiness dots
+     duplicate Printability's verdict, and a project title squeezed to one character
+     tells you nothing — the wordmark (the way home) outranks it. */
+  .p2p { display: none; }
+  .dims { font-size: 11.5px; }
+  .topbar .sep, .topbar .project { display: none; }
 }
 /* Narrow viewers (iPad portrait, phones): the plate bar can't share the bottom row with
    the view-angle buttons — stack it just above them, centred, full available width. */
@@ -1864,3 +1894,31 @@ details.guide { margin-top: 10px; }
 /* Build number beside the wordmark on the launchpad. Aligned to the wordmark's baseline
    rather than centred, so it reads as a version suffix and not as a second brand element. */
 .launch-top .brand .build-tag { align-self: flex-end; padding-bottom: 2px; margin-left: -2px; }
+
+/* ---------- narrow viewer columns: canvas furniture below the two-row head ----------
+   At the end of the file on purpose: these override base rules of equal specificity
+   (.canvas-rail, .inspector-dock, .right-dock set their own `top`), and an @container
+   block earlier in the file silently loses that cascade — which is exactly the bug
+   this replaces. Head geometry measured in a 390px column: tabs pill 10-43, tools
+   pill 49-87, so 96px clears both rows. */
+@container (max-width: 640px) {
+  .right-dock { top: 96px; }
+  .canvas-rail { top: 96px; }
+  .dock-rail { width: 34px; }
+  /* The Inspector becomes a bottom sheet inside the canvas card: full width, pinned to
+     the bottom. Hugging + a 262px column can't work here — with the card pushed to
+     96px its old max-height overflowed the canvas, whose overflow:hidden then CLIPPED
+     the list mid-item and the body entirely. width needs !important because the resize
+     state writes an inline pixel width, and a sheet must ignore it. */
+  .inspector-dock { top: 96px; bottom: 12px; left: 12px; max-height: none; width: auto !important; max-width: none; }
+  /* The section list turns into one scrollable chip row, giving the vertical room to
+     the panel body — seven stacked rows would leave a phone-height sheet no body at all. */
+  .inspector-dock .dock-list { flex-direction: row; overflow-x: auto; gap: 6px; padding-bottom: 2px; }
+  .inspector-dock .dock-item { width: auto; white-space: nowrap; padding: 7px 12px; border: 1px solid var(--bord); border-radius: 999px; }
+  .inspector-dock .dock-item.on { border-color: var(--accent); }
+  /* While the sheet is up it owns the canvas: the tool rail (z 30) and zoom cluster
+     otherwise draw OVER it (the sheet lives at z 7) and truncate its left column.
+     Closing the sheet brings them straight back. */
+  .viewer-body:has(.inspector-dock:not([style*="none"])) .canvas-rail,
+  .viewer-body:has(.inspector-dock:not([style*="none"])) .zoom-ctl { display: none; }
+}

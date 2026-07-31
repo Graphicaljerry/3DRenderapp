@@ -1138,9 +1138,15 @@ const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string }> = [
   { key: "export", label: "Export" },
 ];
 /* The canvas tab strip (Figma "Viewer head"). The non-3d keys ARE DockPanel values, so
-   a tab click is nothing more than setDockPanel(key). */
-const CANVAS_TABS: ReadonlyArray<readonly [("3d" | "code" | "params" | "print" | "history"), string]> = [
-  ["3d", "3D View"], ["code", "Source"], ["params", "Params"], ["print", "Printability"], ["history", "History"],
+   a tab click is nothing more than setDockPanel(key). Each tab carries an icon so the
+   strip can shed its labels in a narrow viewer column (container query on .btn-label)
+   instead of wrapping to a second row on a phone. */
+const CANVAS_TABS: ReadonlyArray<{ key: "3d" | "code" | "params" | "print" | "history"; label: string; icon: JSX.Element }> = [
+  { key: "3d", label: "3D View", icon: <IconCube size={15} /> },
+  { key: "code", label: "Source", icon: <IconCode size={15} /> },
+  { key: "params", label: "Params", icon: <IconSliders size={15} /> },
+  { key: "print", label: "Printability", icon: <IconPrinter size={15} /> },
+  { key: "history", label: "History", icon: <IconHistory size={15} /> },
 ];
 
 /** "July 31st, 2026" — the chat head's date, ordinal and all. */
@@ -2098,6 +2104,7 @@ export function Workspace(p: Props) {
 
         <section
           className={`viewer${p.tab === "params" ? " params-docked" : ""}${dragOverCanvas ? " drop" : ""}`}
+          style={{ "--dock-w": `${dockOpen ? dockW : 0}px` } as CSSProperties}
           onDragOver={(e) => { e.preventDefault(); setDragOverCanvas(true); }}
           onDragLeave={() => setDragOverCanvas(false)}
           onDrop={onDrop}
@@ -2109,7 +2116,7 @@ export function Workspace(p: Props) {
                   by returning the Inspector to Selection. The active pill mirrors
                   whichever deep section is open, so strip and Inspector can't disagree. */}
               <div className="tabs" role="tablist" aria-label="Workspace views">
-                {CANVAS_TABS.map(([key, label]) => {
+                {CANVAS_TABS.map(({ key, label, icon }) => {
                   // 3D View is home base: active whenever no strip section is open in
                   // the Inspector — Selection/Objects/Export still count as "viewing".
                   const deep = dockOpen && (dockPanel === "code" || dockPanel === "params" || dockPanel === "print" || dockPanel === "history");
@@ -2120,12 +2127,15 @@ export function Workspace(p: Props) {
                       role="tab"
                       aria-selected={on}
                       className={on ? "on" : ""}
+                      title={label}
+                      aria-label={label}
                       onClick={() => {
                         if (key === "3d") setDockPanel("selection");
                         else { setDockPanel(key); setDockOpen(true); }
                       }}
                     >
-                      {label}
+                      {icon}
+                      <span className="btn-label">{label}</span>
                     </button>
                   );
                 })}
@@ -2171,7 +2181,9 @@ export function Workspace(p: Props) {
               )}
           </div>
 
-          <div className="viewer-body" style={{ "--dock-w": `${dockOpen ? dockW : 0}px` } as CSSProperties}>
+          {/* --dock-w lives on the SECTION, not here: the head is a sibling of this div
+              and needs the same number to keep its pills clear of the Inspector card. */}
+          <div className="viewer-body">
             {/* The stage is never hidden: every panel now docks beside it. */}
             <div style={{ display: "block", height: "100%" }}>
               <Viewer

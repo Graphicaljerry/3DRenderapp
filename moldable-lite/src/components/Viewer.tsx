@@ -622,6 +622,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const rcAx = new THREE.Raycaster();
     // Drag-to-orbit state: the gizmo owns its pointer just like every other drag.
     let axDrag: { pointerId: number; x: number; y: number; moved: boolean } | null = null;
+    // Was the pointer inside the corner box on the previous move? The hover below changes
+    // the cursor and grows a ball, and it is the only code that can undo either — so it has
+    // to remember that it has something to undo.
+    let axHover = false;
     // Corner-anchor drag: pull a bounding-box dot to scale the part uniformly about its
     // centre (Spline-style). Live preview via the transform pivot; one scale op on release.
     let anchorDrag: { pointerId: number; centerPx: THREE.Vector2; center: THREE.Vector3; d0: number; f: number } | null = null;
@@ -1321,11 +1325,28 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         return;
       }
       // Hovering the gizmo: highlight the ball under the pointer, quiet everything else.
+      // One cursor for the whole widget. It used to split — 'pointer' on a ball, 'grab' on
+      // the space between — so crossing the 92px corner flickered between two cursors on
+      // what is a single control. 'grab' was the wrong half anyway: dragging the rest of
+      // the canvas orbits too and shows a plain arrow there, so the corner was the only
+      // place in the viewer advertising a hand for the same gesture.
       if (s2 && !s2.pushDrag && !s2.box && inAxes(e)) {
         const hit = axPick(e);
         for (const b of axBalls) b.scale.setScalar(b === hit ? 1.3 : 1);
-        renderer.domElement.style.cursor = hit ? "pointer" : "grab";
+        renderer.domElement.style.cursor = "pointer";
+        axHover = true;
         return;
+      }
+      // Leaving the corner has to undo what entering it did. Nothing else will: the only
+      // code that clears a gizmo cursor is applyGizmoCursor, and its caller returns early
+      // whenever the move/rotate tool is off — which is the default — so both the cursor
+      // and the grown ball used to follow you across the whole canvas for the rest of the
+      // session. Deliberately falls through rather than returning, so the hover logic below
+      // can put back whatever the pointer is actually over now.
+      if (axHover && !axDrag) {
+        axHover = false;
+        for (const b of axBalls) b.scale.setScalar(1);
+        if (renderer.domElement.style.cursor === "pointer") renderer.domElement.style.cursor = "";
       }
       // Push-pull drag: project the pointer onto the drag plane and read the along-normal distance.
       if (s2?.pushDrag) {

@@ -1463,6 +1463,7 @@ interface Props {
   onOpenSettings: () => void;
   onOpenLibrary: () => void;
   onNew: () => void;
+  onHome: () => void;
   pins: Pin[];
   pinCtl: {
     active: { pin: Pin; index: number; face: string } | null;
@@ -1746,7 +1747,11 @@ export function Workspace(p: Props) {
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <button className="brandbtn" onClick={p.onNew} title="Start fresh (your current work stays in the Library)" aria-label="Moldable — start fresh">
+          {/* The wordmark is the way back to the Launchpad — the convention every app
+              on the web shares. It used to be a duplicate "+ New chat", so the start
+              screen had no route back at all short of a reload. Your part is not
+              discarded: it returns as the resume chip. */}
+          <button className="brandbtn" onClick={p.onHome} title="Back to the start screen (your part is kept)" aria-label="Moldable — back to the start screen">
             <CubeMark />
             <span className="wordmark">Moldable</span>
           </button>

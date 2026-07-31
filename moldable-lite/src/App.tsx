@@ -219,8 +219,14 @@ export default function App() {
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_LS) ?? MODELS[0].id);
   // "entered" survives reloads for free-mode users too (not only key holders).
   const [entered, setEnteredState] = useState(false);
+  // The Launchpad's staggered entrance is a first-impression, worth 770 ms when the page
+  // loads. Now that the wordmark navigates back to it mid-session it would replay on every
+  // trip — and the resume chip and recents animate in LAST, so the one thing a returning
+  // user came for is the slowest to arrive. Play it on arrival, not on the way back.
+  const [beenHome, setBeenHome] = useState(false);
   const setEntered = (v: boolean) => {
     if (v) localStorage.setItem("moldable_entered", "1");
+    else localStorage.removeItem("moldable_entered"); // going home un-enters — the flag has to follow
     setEnteredState(v);
   };
   const [printer, setPrinter] = useState<PrinterDefaults>(loadPrinter);
@@ -1286,10 +1292,11 @@ export default function App() {
   // search, rename and delete, so the entry screen shows the few you actually want and
   // hands off to it for everything else.
   const [recent, setRecent] = useState<{ id: string; name: string; engine: string; thumb?: string }[]>([]);
-  useEffect(() => {
-    const id = localStorage.getItem("moldable_last_project");
-    if (id) void getProject(id).then((p) => { if (p) setResume({ id: p.id, name: p.name }); });
-    void listProjects().then((all) => {
+  /** Re-read the four most recent projects. Called at boot and again on every return to
+      the Launchpad — otherwise the row would still show what existed at page load, and
+      the part you had open a second ago would be missing from your own recents. */
+  function loadRecent() {
+    return listProjects().then((all) => {
       setRecent(
         [...all]
           .sort((a, b) => b.updatedAt - a.updatedAt)
@@ -1297,6 +1304,11 @@ export default function App() {
           .map((p) => ({ id: p.id, name: p.name, engine: p.engine, thumb: p.thumb })),
       );
     }).catch(() => { /* no store yet — the row just doesn't render */ });
+  }
+  useEffect(() => {
+    const id = localStorage.getItem("moldable_last_project");
+    if (id) void getProject(id).then((p) => { if (p) setResume({ id: p.id, name: p.name }); });
+    void loadRecent();
   }, []);
   async function resumeLast() {
     if (!resume) return;
@@ -3601,6 +3613,19 @@ export default function App() {
     setShowLibrary(false);
   }
 
+  /** The wordmark goes home. It used to fire startNew — the same thing the "+ New chat"
+      button beside it already does — which left the Launchpad reachable only by reloading
+      the page. Nothing is discarded here: the open part stays in memory and in the store,
+      and is put back on the Launchpad as the resume chip and the first recent, so the trip
+      is round. */
+  function goHome() {
+    const pr = projectRef.current;
+    if (pr) setResume({ id: pr.id, name: pr.name });
+    void loadRecent();
+    setBeenHome(true);
+    setEntered(false);
+  }
+
   const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");
 
   if (!entered) {
@@ -3623,6 +3648,7 @@ export default function App() {
         accountEmail={accountEmail}
         onFree={enterFree}
         onSubmit={(text) => { setEntered(true); void send(text); }}
+        animateIn={!beenHome}
       />
     );
   }
@@ -3842,6 +3868,7 @@ export default function App() {
         onOpenSettings={() => { setSettingsPane("ai"); setShowSettings(true); }}
         onOpenLibrary={() => setShowLibrary(true)}
         onNew={startNew}
+        onHome={goHome}
         pins={pins}
         pinCtl={{
           active: activePin,
@@ -4588,7 +4615,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -4606,6 +4633,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onOpenRecent?: (id: string) => void;
   onAllProjects?: () => void;
   accountEmail?: string | null;
+  animateIn?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [showSignIn, setShowSignIn] = useState(false);
@@ -4682,9 +4710,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
       </header>
 
       <main className="launch-main">
-       {/* 420 ms staggered fade-up, every load. It used to be gated to once per tab,
-           which meant a reload dropped you onto a dead screen with no sense of entry. */}
-       <div className="launch-col play">
+       {/* 420 ms staggered fade-up on every load — it used to be gated to once per tab,
+           which meant a reload dropped you onto a dead screen with no sense of entry.
+           Coming BACK from the workspace is not an entrance, so it skips the stagger and
+           the screen is simply there. */}
+       <div className={`launch-col${animateIn ? " play" : ""}`}>
         <h1 className="launch-h1">What do you want to make?</h1>
         <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
 

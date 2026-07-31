@@ -1267,8 +1267,18 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .pm-sep { height: 1px; background: var(--bord); margin: 4px 4px; }
 
 /* ---------- topbar: clickable brand + profile ---------- */
-.brandbtn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; cursor: pointer; }
+/* The brand navigates home, so it needs to read as a control. A colour shift on the
+   mark alone is enough — the wordmark holds still, because moving or underlining a
+   logotype on hover looks like a rendering bug rather than an affordance. */
+.brandbtn { display: inline-flex; align-items: center; gap: 8px; background: none; border: none; padding: 0; cursor: pointer; border-radius: 6px; }
 .brandbtn .wordmark { font-size: 17px; font-weight: 700; color: var(--ink); }
+/* `stroke`, not `color`: the cube paints a literal hex rather than currentColor, so it
+   holds its teal across both themes and would ignore an inherited colour. */
+.brandbtn svg { transition: stroke .15s ease; }
+@media (hover: hover) and (pointer: fine) {
+  .brandbtn:hover svg { stroke: var(--accent-d); }
+}
+.brandbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .profile { width: 40px; height: 36px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 

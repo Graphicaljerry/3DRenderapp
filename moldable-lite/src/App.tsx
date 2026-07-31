@@ -4240,47 +4240,38 @@ function LaunchBackdrop() {
       partTopY = Number.isFinite(top) ? top : view.cy;
     };
 
+    /* Clear the part bitmap, allocating one only if there isn't a usable one already.
+       Allocating a fresh full-size canvas costs 65 ms at dpr 2 on a 1440 x 900 window
+       (2880 x 1800 pixels), and this runs at EVERY part change — a guaranteed hitch every
+       11.5 seconds, landing exactly on the transition. Clearing is a fraction of that. */
     const resetPart = () => {
-      const made = newLayer();
-      if (!made) return;
-      [partBmp, partCtx] = made;
+      const pw = Math.max(1, Math.round(w * dpr)), ph = Math.max(1, Math.round(h * dpr));
+      if (!partBmp || !partCtx || partBmp.width !== pw || partBmp.height !== ph) {
+        const made = newLayer();
+        if (!made) return;
+        [partBmp, partCtx] = made;
+      } else {
+        partCtx.clearRect(0, 0, w, h);
+      }
       drawnLayers = 0;
+      trace = null;
       measurePart();
     };
 
-    /* Paint layer `L` of the current solid onto `g`.
-       `frac` below 1 lays down only PART of it — whole loops in printing order, then a
-       partial trace of the one in progress — and returns the screen position of the head of
-       that trace, which is where the nozzle is. Painting a whole layer at once reads as
-       switching it on rather than printing it; on a part whose layer is thirty separate
-       islands, like the dragon, that is the whole difference between building and
-       accumulating. Returns null when the layer is empty. */
+    /** Paint the whole of layer `L` onto `g`. Used for layers that are already finished;
+     *  the one still being laid goes through paintLive, which traces it. */
     const paintLayer = (
       g: CanvasRenderingContext2D,
       solid: (typeof SOLIDS)[number]["solid"],
       L: number,
-      frac: number,
       t: ReturnType<typeof tokens>,
-    ): [number, number] | null => {
-      if (!view) return null;
+    ) => {
+      if (!view) return;
       const f = solid.layers ? L / solid.layers : 1;
       const z = f * solid.height;
       const { loops, fill } = sliceAt(solid, f);
-      if (!loops.length) return null;
-
-      // Vertex count stands in for path length: within one layer the loops are all drawn at
-      // the same scale, and this costs no square roots on every frame.
-      let whole = loops.length, partial = -1, partialPts = 0;
-      if (frac < 1) {
-        const total = loops.reduce((n, l) => n + l.length, 0);
-        const upto = Math.max(1, Math.floor(frac * total));
-        let done = 0;
-        whole = 0;
-        for (let i = 0; i < loops.length; i++) {
-          if (done + loops[i].length <= upto) { done += loops[i].length; whole = i + 1; }
-          else { partial = i; partialPts = upto - done; break; }
-        }
-      }
+      if (!loops.length) return;
+      const whole = loops.length;
 
       const path = (from: number, to: number) => {
         g.beginPath();
@@ -4324,21 +4315,106 @@ function LaunchBackdrop() {
         g.stroke();
       }
 
-      let head: [number, number] | null = null;
-      if (partial >= 0 && partialPts > 0) {
-        const loop = loops[partial];
-        g.globalAlpha = partial < fill ? 0.75 + 0.25 * f : 0.3 + 0.25 * f;
-        g.lineWidth = partial < fill ? wallW : innerW;
-        g.beginPath();
-        for (let k = 0; k <= partialPts && k < loop.length; k++) {
-          const q = iso(view, loop[k][0], loop[k][1], z);
-          k ? g.lineTo(q[0], q[1]) : g.moveTo(q[0], q[1]);
-          head = q;
+      g.globalAlpha = 1;
+    };
+
+    /* The layer being laid, projected and measured ONCE and reused every frame after.
+       The bead used to advance by whole VERTICES: a name tag's layer is a four-point
+       rectangle, so the head moved in quarter-perimeter jumps and the line visibly lagged
+       the dot. Measuring in SCREEN space (so the head travels at a constant apparent speed
+       whatever the projection is doing) and interpolating inside a segment fixes both. */
+    let trace: {
+      part: number; layer: number; fill: number;
+      pts: [number, number][][]; cum: number[][]; ends: number[]; total: number;
+    } | null = null;
+
+    const traceFor = (solid: (typeof SOLIDS)[number]["solid"], L: number) => {
+      if (trace && trace.part === part && trace.layer === L) return trace;
+      const f = solid.layers ? L / solid.layers : 1;
+      const z = f * solid.height;
+      const { loops, fill } = sliceAt(solid, f);
+      const pts: [number, number][][] = [], cum: number[][] = [], ends: number[] = [];
+      let total = 0;
+      for (const loop of loops) {
+        const q = loop.map(([x, y]) => iso(view!, x, y, z));
+        const c = [0];
+        for (let i = 1; i <= q.length; i++) {
+          const a = q[i - 1], b = q[i % q.length];
+          c.push(c[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1]));
         }
+        total += c[q.length];
+        pts.push(q); cum.push(c); ends.push(total);
+      }
+      trace = { part: part, layer: L, fill, pts, cum, ends, total };
+      return trace;
+    };
+
+    /** Lay down `frac` of layer `L` onto `g`, returning the exact position of the head. */
+    const paintLive = (
+      g: CanvasRenderingContext2D,
+      solid: (typeof SOLIDS)[number]["solid"],
+      L: number,
+      frac: number,
+      t: ReturnType<typeof tokens>,
+    ): [number, number] | null => {
+      if (!view) return null;
+      const tr = traceFor(solid, L);
+      if (!tr.pts.length || !(tr.total > 0)) return null;
+      const f = solid.layers ? L / solid.layers : 1;
+      const dist = Math.max(0, Math.min(1, frac)) * tr.total;
+
+      let whole = 0;
+      while (whole < tr.ends.length && tr.ends[whole] <= dist) whole++;
+
+      const path = (from: number, to: number) => {
+        g.beginPath();
+        for (let i = from; i < to; i++) {
+          const q = tr.pts[i];
+          for (let k = 0; k < q.length; k++) (k ? g.lineTo(q[k][0], q[k][1]) : g.moveTo(q[k][0], q[k][1]));
+          g.closePath();
+        }
+      };
+      g.lineJoin = "round";
+      g.lineCap = "round";
+      const wallW = Math.max(1.2, view.w * 0.0075), innerW = Math.max(1, view.w * 0.0035);
+      const solidTo = Math.min(whole, tr.fill);
+      if (solidTo > 0) {
+        g.fillStyle = t.body;
+        g.globalAlpha = 0.42 + 0.48 * f;
+        path(0, solidTo);
+        g.fill();
+      }
+      g.strokeStyle = t.accent;
+      if (solidTo > 0) {
+        g.globalAlpha = 0.75 + 0.25 * f;
+        g.lineWidth = wallW;
+        path(0, solidTo);
+        g.stroke();
+      }
+      if (whole > tr.fill) {
+        g.globalAlpha = 0.3 + 0.25 * f;
+        g.lineWidth = innerW;
+        path(tr.fill, whole);
+        g.stroke();
+      }
+
+      let head: [number, number] | null = whole > 0 ? tr.pts[whole - 1][0] : null;
+      if (whole < tr.pts.length) {
+        const q = tr.pts[whole], c = tr.cum[whole];
+        const along = dist - (whole ? tr.ends[whole - 1] : 0);
+        let seg = 0;
+        while (seg + 1 < c.length && c[seg + 1] < along) seg++;
+        const span = c[seg + 1] - c[seg];
+        const u = span > 1e-6 ? (along - c[seg]) / span : 0;
+        const a = q[seg], b = q[(seg + 1) % q.length];
+        head = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+        g.globalAlpha = whole < tr.fill ? 0.75 + 0.25 * f : 0.3 + 0.25 * f;
+        g.lineWidth = whole < tr.fill ? wallW : innerW;
+        g.beginPath();
+        g.moveTo(q[0][0], q[0][1]);
+        for (let k = 1; k <= seg; k++) g.lineTo(q[k][0], q[k][1]);
+        g.lineTo(head[0], head[1]);       // ends exactly under the nozzle, never behind it
         g.stroke();                       // open on purpose: this bead is still being laid
-      } else if (whole > 0) {
-        const loop = loops[whole - 1];
-        head = iso(view, loop[0][0], loop[0][1], z);
       }
       g.globalAlpha = 1;
       return head;
@@ -4348,12 +4424,11 @@ function LaunchBackdrop() {
      *  painted, so a frame is O(layers added this frame) — normally one, often zero —
      *  rather than O(all layers so far). The layer in progress is not committed: it is
      *  repainted live each frame until it finishes. */
-    const commitTo = (upto: number) => {
+    const commitTo = (upto: number, t: ReturnType<typeof tokens>) => {
       const g = partCtx;
       if (!g || !view) return;
-      const t = tokens();
       const { solid } = SOLIDS[part];
-      for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) paintLayer(g, solid, L, 1, t);
+      for (let L = drawnLayers; L <= upto && L <= solid.layers; L++) paintLayer(g, solid, L, t);
       drawnLayers = Math.max(drawnLayers, Math.min(upto + 1, solid.layers + 1));
     };
 
@@ -4420,7 +4495,8 @@ function LaunchBackdrop() {
       const upto = Math.floor(exact);
       // Completed layers only. The one in progress is repainted live below, partially, so
       // it looks laid down rather than switched on.
-      commitTo(printing ? upto - 1 : solid.layers);
+      const t = tokens();
+      commitTo(printing ? upto - 1 : solid.layers, t);
       if (!printing && !toppedOut && partCtx) { drawTopLoops(partCtx); toppedOut = true; }
       const fadeA = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
 
@@ -4428,14 +4504,13 @@ function LaunchBackdrop() {
         ctx.drawImage(src, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);
       ctx.clearRect(box.x, box.y, box.w, box.h);
       blit(bedBmp);
-      const t = tokens();
-      if (partBmp) { ctx.globalAlpha = fadeA * tokens().bead; blit(partBmp); ctx.globalAlpha = 1; }
+      if (partBmp) { ctx.globalAlpha = fadeA * t.bead; blit(partBmp); ctx.globalAlpha = 1; }
 
       if (printing) {
         // The layer in progress, laid down loop by loop, with the nozzle at the head of the
         // bead. This is the only thing moving once a layer is down, and it is what makes the
         // stack read as PRINTING rather than fading in.
-        const head = paintLayer(ctx, solid, upto, exact - upto, t);
+        const head = paintLive(ctx, solid, upto, exact - upto, t);
         if (head) {
           const r = Math.max(2.2, view.w * 0.012);
           ctx.fillStyle = t.accent;
@@ -4470,7 +4545,7 @@ function LaunchBackdrop() {
     const drawStill = () => {
       if (!view || !bedBmp) return;
       resetPart();
-      commitTo(SOLIDS[part].solid.layers);
+      commitTo(SOLIDS[part].solid.layers, tokens());
       if (partCtx) drawTopLoops(partCtx);
       const blit = (src: HTMLCanvasElement) =>
         ctx.drawImage(src, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);

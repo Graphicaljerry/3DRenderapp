@@ -1182,16 +1182,44 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .dock-head .x { border: none; background: none; color: var(--subt); font-size: 15px; line-height: 1; padding: 0 2px; cursor: pointer; }
 .dock-head .x:hover { color: var(--ink); }
 .dock-eyebrow { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--mut); }
-.dock-list { display: flex; flex-direction: column; gap: 3px; flex: 0 0 auto; }
+/* Accordion. The seven headers are sized to always fit, so the only thing that scrolls
+   is the open section's body — which means opening a section never scrolls its own
+   header out of view, and the header the content belongs to is always the one directly
+   above it. The stack only scrolls as a whole on a viewport too short for the headers
+   alone, which the scrollIntoView in Workspace covers. */
+.dock-sections {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 3px;
+}
+/* Closed sections hold their height; only the open one gives room back. */
+.dock-section { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; }
+.dock-section.on { flex: 0 1 auto; }
+/* Source is the exception that has to grow — see DOCK_ITEMS `fill` in Workspace.tsx. */
+.dock-section.on.fill { flex: 1 1 auto; }
+.dock-sec-h { margin: 0; font-size: inherit; font-weight: inherit; }
 .dock-item {
+  display: flex; align-items: center; gap: 7px; flex: 0 0 auto;
   width: 100%; text-align: left; padding: 9px 12px; border-radius: 8px;
   border: 1px solid transparent; background: none; font-size: 13px; color: var(--ink2);
 }
 .dock-item:hover:not(.on) { background: var(--surf); }
-.dock-item.on { background: var(--accent-w); border-color: var(--accent); color: var(--accent-d); font-weight: 500; }
-.dock-body {
-  flex: 1; min-height: 0; overflow: auto; margin-top: 3px;
+/* The open header wears its body's surface and squares off the seam, so header and
+   content read as one block rather than a chip that happens to sit above a box. */
+.dock-item.on {
+  background: var(--surf); color: var(--accent-d); font-weight: 500;
+  border-bottom-left-radius: 0; border-bottom-right-radius: 0;
+}
+.dock-caret { display: inline-flex; color: var(--subt); transform: rotate(-90deg); transition: transform .18s var(--panel-ease); }
+.dock-item.on .dock-caret { color: var(--accent-d); transform: rotate(0deg); }
+@media (prefers-reduced-motion: reduce) { .dock-caret { transition: none; } }
+.dock-section-body {
+  /* Sizes to its content — a one-line hint no longer floats in a tall empty box — but
+     shrinks and scrolls instead of pushing the headers below it out of the panel. The
+     floor keeps it from collapsing to nothing when the panel is very short; it is under
+     the natural height of the shortest panel, so it never shows as padding. */
+  flex: 1 1 auto; min-height: 64px; overflow: auto;
   background: var(--surf); border-radius: 8px;
+  border-top-left-radius: 0; border-top-right-radius: 0;
 }
 .dock-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; }
 .dock-sub { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--mut); }
@@ -1204,8 +1232,13 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .dock-note, .dock-empty { margin: 0; font-size: 11.5px; line-height: 1.5; color: var(--mut); }
 .dock-empty { padding: 16px 12px; text-align: center; }
 /* Panels written for a full-width tab or a floating card, re-homed in a 238px column. */
-.dock-body > .panel, .dock-body > .layers-panel { height: auto; width: auto; border: 0; border-radius: 0; box-shadow: none; background: none; animation: none; padding: 12px 10px; }
-.dock-body .lp-head { padding-top: 0; }
+.dock-section-body > .panel, .dock-section-body > .layers-panel { height: auto; width: auto; border: 0; border-radius: 0; box-shadow: none; background: none; animation: none; padding: 12px 10px; }
+/* Each panel used to caption itself, because the tab list above was too far away to read
+   as its label. The section header is now directly on the content, so those captions are
+   the title twice over — "Printability" under "Printability". Scoped to the dock, since
+   the same markup titles the floating Selection card where it IS the only label. */
+.dock-section-body > .layers-panel > .lp-head { display: none; }
+.dock-section-body > .panel > h3 { display: none; }
 /* The docked stage keeps its own room: the dock is opaque, so shift canvas
    furniture that would otherwise sit underneath it. */
 /* Offset follows the RESIZABLE dock width (set inline as --dock-w), not a constant:

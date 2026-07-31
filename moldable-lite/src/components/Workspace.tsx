@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
@@ -1074,7 +1074,6 @@ function DockSelection({ feature, dims, units, modelSelected, ask }: {
       : null;
     return (
       <div className="dock-panel">
-        <p className="dock-sub">Selection</p>
         <DockRow k={kind} v={detail} />
         {size && <DockRow k="Size" v={size} />}
         <DockRow k="Position" v={`X ${n(feature.cx)}   Y ${n(feature.cy)}   Z ${n(feature.cz)}`} />
@@ -1092,7 +1091,6 @@ function DockSelection({ feature, dims, units, modelSelected, ask }: {
   if (modelSelected && dims) {
     return (
       <div className="dock-panel">
-        <p className="dock-sub">Selection</p>
         <DockRow k="Object" v="Whole part" />
         <DockRow k="Size" v={`${n(dims.x)} × ${n(dims.y)} × ${n(dims.z)} ${u}`} />
         <p className="dock-note">Edit any size from Set size… — the whole part rescales to match.</p>
@@ -1102,7 +1100,6 @@ function DockSelection({ feature, dims, units, modelSelected, ask }: {
   if (ask && ask.count) {
     return (
       <div className="dock-panel">
-        <p className="dock-sub">Selection</p>
         <DockRow k="Faces" v={`${ask.count} selected`} />
         <p className="dock-note">Shift-click to add more, or shift-drag to box-select.</p>
         <DockAsk ask={ask} />
@@ -1131,9 +1128,19 @@ function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]
 }
 
 type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
-const DOCK_ITEMS: ReadonlyArray<readonly [DockPanel, string]> = [
-  ["selection", "Selection"], ["objects", "Objects"], ["params", "Parameters"],
-  ["print", "Printability"], ["code", "Source"], ["history", "History"], ["export", "Export"],
+/** `fill` sections stretch to the room that is left; the rest size to their own content.
+    Source is the one panel that cannot size itself — `.code-panel` is a flex column with
+    the textarea at `flex: 1`, so it needs a definite height to lay out against. Every
+    other panel is a list or a stack of rows, and letting those size to content is the
+    whole point: a one-line hint no longer sits in a tall empty box. */
+const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string; fill?: boolean }> = [
+  { key: "selection", label: "Selection" },
+  { key: "objects", label: "Objects" },
+  { key: "params", label: "Parameters" },
+  { key: "print", label: "Printability" },
+  { key: "code", label: "Source", fill: true },
+  { key: "history", label: "History" },
+  { key: "export", label: "Export" },
 ];
 const TAB_PANEL = { "3d": "selection", code: "code", params: "params", print: "print", history: "history" } as const;
 
@@ -1588,6 +1595,36 @@ export function Workspace(p: Props) {
   // description behind whichever panel happened to be open.
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
   useEffect(() => { if (picked) { setDockPanel("selection"); setDockOpen(true); } }, [picked]);
+  // The accordion sizes so the seven headers always fit and only the open body scrolls,
+  // so opening a section never scrolls its header away. On a short viewport the headers
+  // alone can outgrow the panel, though — then the stack scrolls, and the section you
+  // just opened is the one that has to be in view.
+  const dockSectionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const host = dockSectionsRef.current;
+    if (!host || host.scrollHeight <= host.clientHeight) return;
+    const sec = host.querySelector(".dock-section.on");
+    if (!sec) return;
+    // Put the open section's top at the top of the stack, so its header and the content
+    // under it are both in view. Done by hand rather than with scrollIntoView: `nearest`
+    // aligns the BOTTOM edge of a section taller than the stack, which pushes the header
+    // off the top, and `start` would also scroll any ancestor that happens to be
+    // scrollable. This moves exactly one element.
+    host.scrollTop += sec.getBoundingClientRect().top - host.getBoundingClientRect().top;
+  }, [dockPanel, dockOpen]);
+  // Up/Down/Home/End walk the section headers, the standard accordion contract. Guarded
+  // on a header actually having focus, so arrows still move the caret in the Source
+  // editor and step the parameter fields inside an open panel.
+  const onDockHeaderKeys = (e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const heads = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-dock-header]"));
+    const i = heads.indexOf(document.activeElement as HTMLButtonElement);
+    if (i < 0) return;
+    e.preventDefault();
+    const n = heads.length;
+    const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : e.key === "ArrowDown" ? (i + 1) % n : (i - 1 + n) % n;
+    heads[next]?.focus();
+  };
   void showLayers; void setShowLayers; // retained: context-menu Rename still drives this
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
@@ -2568,44 +2605,68 @@ export function Workspace(p: Props) {
                 onDoubleClick={() => { setDockW(DOCK_W_DEFAULT); saveDockW(DOCK_W_DEFAULT); }}
               />
               <div className="dock-head">
-                <p className="dock-eyebrow">Inspector <Hint text="One panel at a time, beside the model. Pick a face or an edge and Selection describes it; the others inspect the whole part." /></p>
+                <p className="dock-eyebrow">Inspector <Hint text="One section open at a time, beside the model. Pick a face or an edge and Selection describes it; the others inspect the whole part." /></p>
                 <button className="panel-collapse" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}>›</button>
               </div>
-              <div className="dock-list">
-                {DOCK_ITEMS.map(([key, label]) => (
-                  <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key} onClick={() => setDockPanel(key)}>
-                    {label}
-                  </button>
-                ))}
-              </div>
-              <div className="dock-body">
-                {dockPanel === "selection" && (
-                  <DockSelection
-                    feature={p.featureCtl.selected}
-                    dims={p.dims}
-                    units={p.units}
-                    modelSelected={p.modelSelected}
-                    ask={
-                      p.facesCtl.faces.length > 0
-                        ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
-                        : p.featureCtl.selected
-                          ? { text: p.featureCtl.text, setText: p.featureCtl.setText, onAsk: p.featureCtl.askAi, onClear: p.featureCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep" }
-                          : undefined
-                    }
-                  />
-                )}
-                {dockPanel === "objects" && objectsPanel}
-                {dockPanel === "params" && (
-                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
-                )}
-                {dockPanel === "print" && (
-                  <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
-                )}
-                {dockPanel === "code" && (
-                  <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
-                )}
-                {dockPanel === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
-                {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
+              {/* An accordion, not a tab list over a shared pane. Stacked labels above one
+                  body put up to six unrelated labels between a section and the content it
+                  named, with only the highlight asserting the link — a vertical label list
+                  needs its content BESIDE it (a settings sidebar) for adjacency to carry
+                  the relationship, and 262px has no room for that. So the label sits on its
+                  own content instead. Still one at a time: `dockPanel` is unchanged, and so
+                  are the things that drive it (a pick, the Export button, Path to print). */}
+              <div className="dock-sections" ref={dockSectionsRef} onKeyDown={onDockHeaderKeys}>
+                {DOCK_ITEMS.map(({ key, label, fill }) => {
+                  const open = dockPanel === key;
+                  return (
+                    <section key={key} className={`dock-section${open ? " on" : ""}${open && fill ? " fill" : ""}`}>
+                      <h3 className="dock-sec-h">
+                        <button
+                          id={`dock-h-${key}`}
+                          data-dock-header
+                          className={`dock-item${open ? " on" : ""}`}
+                          aria-expanded={open}
+                          aria-controls={`dock-p-${key}`}
+                          onClick={() => setDockPanel(key)}
+                        >
+                          <span className="dock-caret" aria-hidden="true"><IconChevron size={12} /></span>
+                          {label}
+                        </button>
+                      </h3>
+                      {open && (
+                        <div className="dock-section-body" id={`dock-p-${key}`} role="region" aria-labelledby={`dock-h-${key}`}>
+                          {key === "selection" && (
+                            <DockSelection
+                              feature={p.featureCtl.selected}
+                              dims={p.dims}
+                              units={p.units}
+                              modelSelected={p.modelSelected}
+                              ask={
+                                p.facesCtl.faces.length > 0
+                                  ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
+                                  : p.featureCtl.selected
+                                    ? { text: p.featureCtl.text, setText: p.featureCtl.setText, onAsk: p.featureCtl.askAi, onClear: p.featureCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep" }
+                                    : undefined
+                              }
+                            />
+                          )}
+                          {key === "objects" && objectsPanel}
+                          {key === "params" && (
+                            <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
+                          )}
+                          {key === "print" && (
+                            <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
+                          )}
+                          {key === "code" && (
+                            <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
+                          )}
+                          {key === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
+                          {key === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
               </div>
             </aside>
           </div>

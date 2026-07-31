@@ -163,7 +163,9 @@ interface Props {
 export type SelectKind = "face" | "edge" | "vertex" | "point";
 
 const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // grayscale display copies
-const THEME_SCENE = { light: "#eceff0", dark: "#17181a" } as const; // dark: neutral, no blue cast
+// Must match --canvas in styles.css: the scene IS the canvas card's surface, and any
+// difference shows as a colour seam inside the rounded corners.
+const THEME_SCENE = { light: "#d5d6d7", dark: "#17181a" } as const; // dark: neutral, no blue cast
 // Solid build plate (Bambu/Orca-style): a slab sized to the printer bed so models
 // stand off the background instead of floating on gridlines.
 function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
@@ -325,7 +327,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const dynamicRes = FULL_DPR !== LOW_DPR;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#eceff0");
+    scene.background = new THREE.Color(THEME_SCENE.light);
 
     const camera = new THREE.PerspectiveCamera(45, el.clientWidth / el.clientHeight, 0.1, 5000);
     camera.up.set(0, 0, 1);

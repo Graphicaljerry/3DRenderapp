@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
@@ -869,9 +869,9 @@ function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }
 /** Tools-and-gestures cheat sheet — the toolbar's hover tooltips don't exist on touch
  *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
 /* The Inspector dock. One panel at a time, docked beside a stage that stays live —
-   replacing the tab strip's habit of hiding the canvas to show a full-width panel.
-   The top tab strip and this list are two views of the SAME state (TAB_PANEL maps
-   between them), so "3D View" reads as active exactly when "Selection" does. */
+   replacing the old tab strip's habit of hiding the canvas to show a full-width panel.
+   The canvas tab strip and this list are two views of the SAME state (CANVAS_TABS keys
+   are DockPanel values), so "3D View" reads as active exactly when no deep section is. */
 /* The contextual toolbar. Anchored AT the selection instead of parked in the canvas
    corner underneath the tool rail — pointer travel is ~0, and the rail can no longer
    draw over the panel it just opened (rail z-index 30 vs .pin-panel 6, same corner).
@@ -1128,21 +1128,28 @@ function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]
 }
 
 type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
-/** `fill` sections stretch to the room that is left; the rest size to their own content.
-    Source is the one panel that cannot size itself — `.code-panel` is a flex column with
-    the textarea at `flex: 1`, so it needs a definite height to lay out against. Every
-    other panel is a list or a stack of rows, and letting those size to content is the
-    whole point: a one-line hint no longer sits in a tall empty box. */
-const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string; fill?: boolean }> = [
+const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string }> = [
   { key: "selection", label: "Selection" },
   { key: "objects", label: "Objects" },
   { key: "params", label: "Parameters" },
   { key: "print", label: "Printability" },
-  { key: "code", label: "Source", fill: true },
+  { key: "code", label: "Source" },
   { key: "history", label: "History" },
   { key: "export", label: "Export" },
 ];
-const TAB_PANEL = { "3d": "selection", code: "code", params: "params", print: "print", history: "history" } as const;
+/* The canvas tab strip (Figma "Viewer head"). The non-3d keys ARE DockPanel values, so
+   a tab click is nothing more than setDockPanel(key). */
+const CANVAS_TABS: ReadonlyArray<readonly [("3d" | "code" | "params" | "print" | "history"), string]> = [
+  ["3d", "3D View"], ["code", "Source"], ["params", "Params"], ["print", "Printability"], ["history", "History"],
+];
+
+/** "July 31st, 2026" — the chat head's date, ordinal and all. */
+function chatDate(): string {
+  const d = new Date();
+  const day = d.getDate();
+  const suffix = day % 10 === 1 && day !== 11 ? "st" : day % 10 === 2 && day !== 12 ? "nd" : day % 10 === 3 && day !== 13 ? "rd" : "th";
+  return `${d.toLocaleDateString("en-US", { month: "long" })} ${day}${suffix}, ${d.getFullYear()}`;
+}
 
 function HelpSheet({ onClose }: { onClose: () => void }) {
   const rows: { icon: JSX.Element; text: string }[] = [
@@ -1607,36 +1614,7 @@ export function Workspace(p: Props) {
   // description behind whichever panel happened to be open.
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
   useEffect(() => { if (picked) { setDockPanel("selection"); setDockOpen(true); } }, [picked]);
-  // The accordion sizes so the seven headers always fit and only the open body scrolls,
-  // so opening a section never scrolls its header away. On a short viewport the headers
-  // alone can outgrow the panel, though — then the stack scrolls, and the section you
-  // just opened is the one that has to be in view.
-  const dockSectionsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const host = dockSectionsRef.current;
-    if (!host || host.scrollHeight <= host.clientHeight) return;
-    const sec = host.querySelector(".dock-section.on");
-    if (!sec) return;
-    // Put the open section's top at the top of the stack, so its header and the content
-    // under it are both in view. Done by hand rather than with scrollIntoView: `nearest`
-    // aligns the BOTTOM edge of a section taller than the stack, which pushes the header
-    // off the top, and `start` would also scroll any ancestor that happens to be
-    // scrollable. This moves exactly one element.
-    host.scrollTop += sec.getBoundingClientRect().top - host.getBoundingClientRect().top;
-  }, [dockPanel, dockOpen]);
-  // Up/Down/Home/End walk the section headers, the standard accordion contract. Guarded
-  // on a header actually having focus, so arrows still move the caret in the Source
-  // editor and step the parameter fields inside an open panel.
-  const onDockHeaderKeys = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
-    const heads = Array.from(e.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-dock-header]"));
-    const i = heads.indexOf(document.activeElement as HTMLButtonElement);
-    if (i < 0) return;
-    e.preventDefault();
-    const n = heads.length;
-    const next = e.key === "Home" ? 0 : e.key === "End" ? n - 1 : e.key === "ArrowDown" ? (i + 1) % n : (i - 1 + n) % n;
-    heads[next]?.focus();
-  };
+  const dockLabel = DOCK_ITEMS.find((d) => d.key === dockPanel)?.label ?? "";
   void showLayers; void setShowLayers; // retained: context-menu Rename still drives this
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
@@ -1891,7 +1869,10 @@ export function Workspace(p: Props) {
         >
           <div className="chat-bar">
             <span className="chat-title">Chat</span>
-            <button className="panel-collapse wide" title="Hide chat" onClick={() => setChatOpen(false)}>‹ Hide</button>
+            {/* Today, in words — the transcript below is undated, so the head carries
+                the one timestamp the session needs. */}
+            <span className="chat-date">{chatDate()}</span>
+            <button className="chat-hide" title="Hide chat" onClick={() => setChatOpen(false)}>Hide</button>
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
             brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} />
@@ -1911,13 +1892,10 @@ export function Workspace(p: Props) {
         )}
         <div className="composer-wrap">
             <div className="modebar">
-              <div className="modebar-row">
-                <Hint text="How the shape gets made. Precise builds exact, editable millimetre parts you can export as STEP — brackets, cases, adapters. Generative builds an organic AI mesh — figurines, sculpted shapes — which cannot be dimensioned. Auto reads your description and picks for you." />
-                <div className="seg">
-                  <button className={p.modePref === "auto" ? "on auto-live" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
-                  <button className={p.modePref === "precise" ? "on" : ""} title="Precise (CAD) — exact, editable, dimensioned parts · STEP export" onClick={() => p.pickMode("precise")}>Precise (CAD)</button>
-                  <button className={p.modePref === "generative" ? "on" : ""} title="Generative (AI mesh) — organic / sculptural shapes from text or a photo" onClick={() => p.pickMode("generative")}>Generative (AI mesh)</button>
-                </div>
+              {/* Figma order, top to bottom: WHO builds it (Model row), HOW it builds
+                  (mode seg), then the ask itself. One decision per row. */}
+              <div className="modebar-row modebar-model">
+                <span className="mb-label">Model</span>
                 {p.modePref !== "generative" ? (
                   <BrainPicker brain={p.brain} hasKey={p.hasBrainKey} onPick={p.onPickBrain} />
                 ) : (
@@ -1935,6 +1913,14 @@ export function Workspace(p: Props) {
                     <span className="web-state">{p.webMode === "auto" ? "Auto" : p.webMode === "on" ? "On" : "Off"}</span>
                   </button>
                 )}
+              </div>
+              <div className="modebar-row">
+                <div className="seg">
+                  <button className={p.modePref === "auto" ? "on auto-live" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
+                  <button className={p.modePref === "precise" ? "on" : ""} title="Precise (CAD) — exact, editable, dimensioned parts · STEP export" onClick={() => p.pickMode("precise")}>Precise (CAD)</button>
+                  <button className={p.modePref === "generative" ? "on" : ""} title="Generative (AI mesh) — organic / sculptural shapes from text or a photo" onClick={() => p.pickMode("generative")}>Generative (AI mesh)</button>
+                </div>
+                <Hint text="How the shape gets made. Precise builds exact, editable millimetre parts you can export as STEP — brackets, cases, adapters. Generative builds an organic AI mesh — figurines, sculpted shapes — which cannot be dimensioned. Auto reads your description and picks for you." />
                 {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
               </div>
               {/* This line renders ONLY when it says something you could not already
@@ -2043,7 +2029,7 @@ export function Workspace(p: Props) {
                         : "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
                       : p.guided
                         ? "Upload a photo of the part, or describe it with any measurements…"
-                        : "Describe a part, or a change…"
+                        : "What would you like to build?"
                 }
               />
               {/* A button, not an always-on pass. Rewriting what someone typed on their
@@ -2117,6 +2103,33 @@ export function Workspace(p: Props) {
           onDrop={onDrop}
         >
           <div className="viewer-head">
+              {/* Figma's "Viewer head" tab strip. NOT a second panel system: each tab is
+                  a shortcut into the Inspector section of the same name (dockPanel is
+                  the single source of truth), and 3D View hands focus back to the stage
+                  by returning the Inspector to Selection. The active pill mirrors
+                  whichever deep section is open, so strip and Inspector can't disagree. */}
+              <div className="tabs" role="tablist" aria-label="Workspace views">
+                {CANVAS_TABS.map(([key, label]) => {
+                  // 3D View is home base: active whenever no strip section is open in
+                  // the Inspector — Selection/Objects/Export still count as "viewing".
+                  const deep = dockOpen && (dockPanel === "code" || dockPanel === "params" || dockPanel === "print" || dockPanel === "history");
+                  const on = key === "3d" ? !deep : dockOpen && dockPanel === key;
+                  return (
+                    <button
+                      key={key}
+                      role="tab"
+                      aria-selected={on}
+                      className={on ? "on" : ""}
+                      onClick={() => {
+                        if (key === "3d") setDockPanel("selection");
+                        else { setDockPanel(key); setDockOpen(true); }
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="viewer-tools">
                   <div className="seg sm">
@@ -2647,68 +2660,50 @@ export function Workspace(p: Props) {
                 onDoubleClick={() => { setDockW(DOCK_W_DEFAULT); saveDockW(DOCK_W_DEFAULT); }}
               />
               <div className="dock-head">
-                <p className="dock-eyebrow">Inspector <Hint text="One section open at a time, beside the model. Pick a face or an edge and Selection describes it; the others inspect the whole part." /></p>
-                <button className="panel-collapse" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}>›</button>
+                <p className="dock-eyebrow">Inspector</p>
+                <button className="panel-collapse" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}><IconChevron size={14} /></button>
               </div>
-              {/* An accordion, not a tab list over a shared pane. Stacked labels above one
-                  body put up to six unrelated labels between a section and the content it
-                  named, with only the highlight asserting the link — a vertical label list
-                  needs its content BESIDE it (a settings sidebar) for adjacency to carry
-                  the relationship, and 262px has no room for that. So the label sits on its
-                  own content instead. Still one at a time: `dockPanel` is unchanged, and so
-                  are the things that drive it (a pick, the Export button, Path to print). */}
-              <div className="dock-sections" ref={dockSectionsRef} onKeyDown={onDockHeaderKeys}>
-                {DOCK_ITEMS.map(({ key, label, fill }) => {
-                  const open = dockPanel === key;
-                  return (
-                    <section key={key} className={`dock-section${open ? " on" : ""}${open && fill ? " fill" : ""}`}>
-                      <h3 className="dock-sec-h">
-                        <button
-                          id={`dock-h-${key}`}
-                          data-dock-header
-                          className={`dock-item${open ? " on" : ""}`}
-                          aria-expanded={open}
-                          aria-controls={`dock-p-${key}`}
-                          onClick={() => setDockPanel(key)}
-                        >
-                          <span className="dock-caret" aria-hidden="true"><IconChevron size={12} /></span>
-                          {label}
-                        </button>
-                      </h3>
-                      {open && (
-                        <div className="dock-section-body" id={`dock-p-${key}`} role="region" aria-labelledby={`dock-h-${key}`}>
-                          {key === "selection" && (
-                            <DockSelection
-                              feature={p.featureCtl.selected}
-                              dims={p.dims}
-                              units={p.units}
-                              modelSelected={p.modelSelected}
-                              ask={
-                                p.facesCtl.faces.length > 0
-                                  ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
-                                  : p.featureCtl.selected
-                                    ? { text: p.featureCtl.text, setText: p.featureCtl.setText, onAsk: p.featureCtl.askAi, onClear: p.featureCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep" }
-                                    : undefined
-                              }
-                            />
-                          )}
-                          {key === "objects" && objectsPanel}
-                          {key === "params" && (
-                            <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
-                          )}
-                          {key === "print" && (
-                            <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
-                          )}
-                          {key === "code" && (
-                            <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
-                          )}
-                          {key === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
-                          {key === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
-                        </div>
-                      )}
-                    </section>
-                  );
-                })}
+              {/* Figma "Inspector dock": the section list, then one body underneath that
+                  reopens with the active section's name as an uppercase label. The label
+                  is what carries the list-to-content link across the distance. Still one
+                  at a time — `dockPanel` and everything that drives it (a pick, the
+                  Export button, Path to print, the canvas tab strip) are unchanged. */}
+              <div className="dock-list">
+                {DOCK_ITEMS.map(({ key, label }) => (
+                  <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key} onClick={() => setDockPanel(key)}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="dock-body" role="region" aria-label={dockLabel}>
+                <p className="dock-sec-label">{dockLabel}</p>
+                {dockPanel === "selection" && (
+                  <DockSelection
+                    feature={p.featureCtl.selected}
+                    dims={p.dims}
+                    units={p.units}
+                    modelSelected={p.modelSelected}
+                    ask={
+                      p.facesCtl.faces.length > 0
+                        ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
+                        : p.featureCtl.selected
+                          ? { text: p.featureCtl.text, setText: p.featureCtl.setText, onAsk: p.featureCtl.askAi, onClear: p.featureCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep" }
+                          : undefined
+                    }
+                  />
+                )}
+                {dockPanel === "objects" && objectsPanel}
+                {dockPanel === "params" && (
+                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
+                )}
+                {dockPanel === "print" && (
+                  <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
+                )}
+                {dockPanel === "code" && (
+                  <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
+                )}
+                {dockPanel === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
+                {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
               </div>
             </aside>
           </div>
@@ -2724,10 +2719,10 @@ export function Workspace(p: Props) {
               {p.printer.name && <span className="bedchip-name">{p.printer.name}</span>}
               <span>{p.printer.bed.x}×{p.printer.bed.y} mm</span>
             </button>
+            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => { setDockPanel("print"); setDockOpen(true); }} />
             {p.status === "generating" && <GenTimer />}
             <BuildTag />
             <DesktopUpdateChip />
-            <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => { setDockPanel("print"); setDockOpen(true); }} />
             {/* Opens the Export panel in the dock rather than a dropdown of its own. The
                 old .export-menu opted out of the app's solo-menu invariant and had no
                 Escape or outside-click dismissal — it closed on re-click, onMouseLeave,

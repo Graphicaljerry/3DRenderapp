@@ -1034,7 +1034,7 @@ export default function App() {
     // CSS — without updating them here, toggling dark→light kept native form
     // controls (the chat composer) rendering dark in a light UI.
     document.documentElement.style.colorScheme = theme;
-    document.documentElement.style.backgroundColor = theme === "dark" ? "#121213" : "#e9edec"; // mirror index.html pre-paint + --surf
+    document.documentElement.style.backgroundColor = theme === "dark" ? "#121213" : "#e8e8e8"; // mirror index.html pre-paint + --page
     localStorage.setItem("moldable_theme", theme);
     scheduleSync(); // no-op until signed in (accountEmailRef guards it)
   }, [theme]);

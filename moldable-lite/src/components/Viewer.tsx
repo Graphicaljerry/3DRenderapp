@@ -164,6 +164,7 @@ interface Props {
   magnetPlace: {
     diameter: number;
     depth: number;
+    snap: number; // grid step in mm; 0 = freeform (alignment to placed pockets still applies)
     align: { at: [number, number, number]; normal: [number, number, number] }[];
     onPlace: (spot: {
       at: [number, number, number];
@@ -836,25 +837,45 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
       return out;
     };
-    // ---- Magnet tool: turn a surface hit into the pocket spot — 1 mm grid on the
-    // face's in-plane axes, then pulled into line with any already-placed pocket
-    // within 2 mm on an axis (same-face rows AND opposite-face coaxial pairs both
-    // fall out of matching in-plane coordinates). ----
+    // ---- Magnet tool: turn a surface hit into the pocket spot.
+    // Work in the FACE's own two in-plane directions, not world X/Y/Z: rounding world
+    // axes on a tilted face walks the point across the surface, which is why a pocket
+    // that should have sat square above another came out offset.
+    // Order of authority: alignment with an already-placed pocket beats the grid (and
+    // applies in free mode too), because "square with that one" is the thing being
+    // asked for; the grid is only the fallback when nothing is near. A pocket on the
+    // FAR side of the wall aligns too — its centre projects onto this plane — so a
+    // magnet can be placed dead in line with one on the opposite face.
     const magnetSpotFrom = (hit: THREE.Intersection): { at: [number, number, number]; normal: [number, number, number]; alignedTo: [number, number, number] | null } | null => {
       const s2 = st.current;
       const mp = magIx.current;
       if (!s2?.mesh || !mp || !hit.face) return null;
       const wn = hit.face.normal.clone().transformDirection(s2.mesh.matrixWorld).normalize();
-      const k = [Math.abs(wn.x), Math.abs(wn.y), Math.abs(wn.z)].indexOf(Math.max(Math.abs(wn.x), Math.abs(wn.y), Math.abs(wn.z)));
-      const at: [number, number, number] = [hit.point.x, hit.point.y, hit.point.z];
+      const p0 = hit.point.clone();
+      // A stable in-plane basis for this face (any consistent choice works — the same
+      // basis is used for the cursor and for every placed pocket it's compared to).
+      const ref = Math.abs(wn.z) < 0.9 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(1, 0, 0);
+      const u = new THREE.Vector3().crossVectors(ref, wn).normalize();
+      const v = new THREE.Vector3().crossVectors(wn, u).normalize();
+      const orig = wn.clone().multiplyScalar(p0.dot(wn)); // plane point closest to the model origin
+      const uv = (q: THREE.Vector3) => [q.clone().sub(orig).dot(u), q.clone().sub(orig).dot(v)] as [number, number];
+      const cur = uv(p0);
+      const out: [number, number] = [cur[0], cur[1]];
       let alignedTo: [number, number, number] | null = null;
-      for (const a of k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1]) {
-        let v = Math.round(at[a]); // 1 mm grid
+      const PULL = 3; // mm — a deliberate "line it up with that one" radius
+      for (let i = 0; i < 2; i++) {
+        let best: { d: number; at: [number, number, number]; val: number } | null = null;
         for (const pm of mp.align) {
-          if (Math.abs(v - pm.at[a]) <= 2) { v = Math.round(pm.at[a] * 100) / 100; alignedTo = pm.at; }
+          // Same face or the one straight through the wall; a side wall is not a datum.
+          if (Math.abs(new THREE.Vector3(...pm.normal).normalize().dot(wn)) < 0.9) continue;
+          const d = Math.abs(uv(new THREE.Vector3(...pm.at))[i] - cur[i]);
+          if (d <= PULL && (!best || d < best.d)) best = { d, at: pm.at, val: uv(new THREE.Vector3(...pm.at))[i] };
         }
-        at[a] = v;
+        if (best) { out[i] = best.val; alignedTo = best.at; }
+        else if (mp.snap > 0) out[i] = Math.round(cur[i] / mp.snap) * mp.snap;
       }
+      const w = orig.clone().addScaledVector(u, out[0]).addScaledVector(v, out[1]);
+      const at: [number, number, number] = [+w.x.toFixed(3), +w.y.toFixed(3), +w.z.toFixed(3)];
       return { at, normal: [wn.x, wn.y, wn.z], alignedTo };
     };
     // ---- Measure snapping: pull a clicked/dragged point onto the nearest tessellation

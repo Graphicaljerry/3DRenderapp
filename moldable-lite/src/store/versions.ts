@@ -57,6 +57,48 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
   };
 }
 
+/** Rewrite the HEAD version in place, keeping its id (so redo branches stay valid).
+ *  For edits that arrive as a stream — a parameter drag lands dozens of commits —
+ *  where one undo step should cover the whole gesture rather than each tick of it. */
+export function replaceHeadVersion(project: Project, snap: Snapshot): Project {
+  const i = headIndex(project);
+  if (i < 0) return appendVersion(project, snap);
+  const prev = project.versions[i];
+  const v: Version = {
+    ...prev,
+    summary: snap.summary,
+    engine: snap.engine,
+    code: snap.code,
+    params: snap.params,
+    ops: snap.ops,
+    importFile: snap.importFile,
+    importKind: snap.importKind,
+    spec: snap.spec,
+    dims: snap.dims,
+    glb: snap.glb,
+    meshXform: snap.meshXform,
+    genSource: snap.genSource,
+  };
+  const versions = [...project.versions];
+  versions[i] = v;
+  return {
+    ...project,
+    engine: snap.engine,
+    code: snap.code,
+    params: snap.params,
+    ops: snap.ops,
+    importFile: snap.importFile,
+    importKind: snap.importKind,
+    spec: snap.spec,
+    glb: snap.glb,
+    meshXform: snap.meshXform,
+    genSource: snap.genSource,
+    updatedAt: Date.now(),
+    versions,
+    headId: v.id,
+  };
+}
+
 /** Set a past snapshot as HEAD; records the restore as a new append-only version. Pure. */
 export function restoreVersion(project: Project, versionId: string): Project {
   const t = project.versions.find((v) => v.id === versionId);

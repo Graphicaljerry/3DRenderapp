@@ -49,14 +49,14 @@ import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine, costLabel, co
 import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
-import { appendVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
+import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
 import type { Project, Pin } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { IS_DESKTOP } from "./lib/desktopUpdate";
-import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 // On-demand UI (code-split): the SVG modal's svg/extrude graph carries
 // three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
@@ -419,6 +419,12 @@ export default function App() {
     });
 
   const [result, setResult] = useState<EngineResult | null>(null);
+  /** The live result, readable from callbacks that outlive their render. Canvas tools
+   *  fire from listeners installed by an earlier render, so reading `result` there can
+   *  hand a build the PREVIOUS op chain — two magnet pockets placed in quick succession
+   *  had the second drop the first from the version it recorded. */
+  const resultRef = useRef<EngineResult | null>(null);
+  resultRef.current = result;
   const [splitPieces, setSplitPieces] = useState<SplitPiece[] | null>(null);
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
@@ -1717,7 +1723,10 @@ export default function App() {
     clearPaintHistory(); // strokes are keyed to the old triangle list; they can't replay onto new geometry
     applyResultNoCommit(res);
 
-    const base = project ?? newProject(name, res.kind);
+    // projectRef, not the closure's `project`: canvas tools commit from listeners older
+    // than the current render, and appending onto a stale project silently discards the
+    // versions recorded since it.
+    const base = projectRef.current ?? newProject(name, res.kind);
     const named = base.versions.length === 0 && name ? { ...base, name } : base;
     const snap = appendVersion(named, {
       engine: res.kind,
@@ -1791,6 +1800,44 @@ export default function App() {
   const paramBusy = useRef(false);
   const paramPending = useRef<CadParams | null>(null);
   const lastGoodParams = useRef<CadParams | null>(null);
+  /** An adjustment is a real edit, so Undo has to cover it — it used to rebuild without
+   *  recording anything, and undo skipped straight past every dimension change to the
+   *  previous AI turn. Coalesced by key and time so ONE drag (or a run of arrow-key
+   *  nudges on the same row) is one undo step instead of forty, and the version carries
+   *  `ops`, so stepping back through an adjustment keeps the magnet pockets. */
+  const paramEdit = useRef<{ key: string; at: number } | null>(null);
+  function recordParamVersion(res: EngineResult, values: CadParams) {
+    const proj = projectRef.current;
+    if (!proj || res.source.kind !== "code") return;
+    // Diff against the version at HEAD — the last state actually recorded. Diffing
+    // against "last good" instead recorded nothing at all: every live drag tick builds
+    // successfully and moves that mark, so by the time the release committed there was
+    // no difference left to describe.
+    const i = headIndex(proj);
+    const base = { ...(cadDefaults ?? {}), ...(i >= 0 ? proj.versions[i]?.params ?? {} : {}) };
+    const changed = Object.keys(values).filter((k) => values[k] !== base[k]);
+    if (!changed.length) return;
+    const key = changed.slice().sort().join(",");
+    const now = Date.now();
+    const mark = paramEdit.current;
+    const coalesce = !!mark && mark.key === key && now - mark.at < 2500 && headIndex(proj) >= 0
+      && /^Adjusted /.test(proj.versions[headIndex(proj)]?.summary ?? "");
+    paramEdit.current = { key, at: now };
+    const label = changed.map(humanizeParam).join(", ");
+    const snap = {
+      engine: res.kind,
+      summary: `Adjusted ${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`,
+      code: res.source.code,
+      params: values,
+      ops: res.source.ops,
+      importFile: importFileRef.current ?? undefined,
+      importKind: importFileRef.current ? importKindRef.current : undefined,
+      dims: res.dims,
+    };
+    const next = coalesce ? replaceHeadVersion(proj, snap) : appendVersion(proj, snap);
+    next.chat = projectRef.current?.chat ?? proj.chat;
+    persist(next);
+  }
   async function applyParams(values: CadParams) {
     if (!sel || !result || result.source.kind !== "code") return;
     if (paramBusy.current) { paramPending.current = values; return; }
@@ -1806,6 +1853,7 @@ export default function App() {
     // re-enters this function through the same render closure, where `paramValues` is
     // whatever it was at render time.
     const prevValues = lastGoodParams.current ?? paramValues;
+    const changed = Object.keys(values).filter((k) => values[k] !== prevValues[k]);
     setParamValues(values);
     setStatus("generating");
     try {
@@ -1813,7 +1861,10 @@ export default function App() {
       // rebuilding from code+params alone silently erased every one of them.
       const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values, ops: result.source.ops });
       lastGoodParams.current = values;
-      if (paramGen.current === gen) applyResultNoCommit(res);
+      if (paramGen.current === gen) {
+        applyResultNoCommit(res);
+        recordParamVersion(res, values);
+      }
     } catch (err: any) {
       if (paramGen.current === gen) {
         // Un-buildable values must NOT stick. Every commit sends the whole map, so a
@@ -1821,8 +1872,7 @@ export default function App() {
         // failed them all — the panel became permanently stuck with no way back but
         // guessing which row was at fault. Roll back and name the culprit.
         setParamValues(prevValues);
-        const bad = Object.keys(values).filter((k) => values[k] !== prevValues[k]).map(humanizeParam);
-        const which = bad.length ? `${bad.join(", ")} ` : "";
+        const which = changed.length ? `${changed.map(humanizeParam).join(", ")} ` : "";
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${which}won't build at that value — kept the last one that worked. (${String(err?.message ?? err)})`, error: true }]);
       }
     } finally {
@@ -2413,26 +2463,32 @@ export default function App() {
   // click to sink it. "Pair through the wall" also pockets the OPPOSITE face on the
   // same axis, so helmet-panel magnet pairs land coaxial. Placement runs the same
   // free CAD "hole" op the drill tool uses — no AI call.
-  type MagnetTool = { size: MagnetSize; fit: MagnetFit; pair: boolean; placed: { at: [number, number, number]; normal: [number, number, number] }[] };
+  type MagnetTool = { size: MagnetSize; fit: MagnetFit; pair: boolean; snap: number; placed: { at: [number, number, number]; normal: [number, number, number] }[] };
   const [magnetTool, setMagnetTool] = useState<MagnetTool | null>(null);
   const magnetToolRef = useRef(magnetTool);
   magnetToolRef.current = magnetTool;
   function toggleMagnetTool() {
     if (magnetToolRef.current) { setMagnetTool(null); return; }
     dismissOverlays(); // one tool at a time — put down select/measure/paint/hole first
-    setMagnetTool({ size: MAGNET_SIZES[5], fit: "press", pair: false, placed: [] }); // 8×3 — the helmet staple
+    // Glue by default: a press-fit that works loose drops a magnet inside a finished
+    // part, and nobody re-prints a helmet for that. 8×3 is the cosplay-panel staple.
+    setMagnetTool({ size: MAGNET_SIZES[5], fit: "glue", pair: false, snap: 1, placed: [] });
   }
   async function placeMagnet(spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) {
     const t = magnetToolRef.current;
     if (!t) return;
-    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
+    // Read the LIVE result, not the render's: this fires from a canvas listener, so the
+    // closure's `result` can predate the pocket placed a moment ago — and building from
+    // that op chain drops it.
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code" || !sel || activeKind !== "replicad") {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Magnet pockets work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
       setMagnetTool(null);
       return;
     }
     const { diameter, depth } = magnetPocket(t.size, t.fit);
-    const src = result.source;
-    const rc = result.recenter ?? [0, 0, 0];
+    const src = cur.source;
+    const rc = cur.recenter ?? [0, 0, 0];
     const mkOp = (at: [number, number, number], normal: [number, number, number]) => ({
       type: "hole" as const,
       at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]] as [number, number, number],
@@ -2446,23 +2502,23 @@ export default function App() {
     if (t.pair) {
       if (spot.back && spot.back.thickness >= depth * 2 + 0.8) {
         ops.push(mkOp(spot.back.at, spot.back.normal));
-        pairNote = ` ×2 — paired straight through the ${Math.round(spot.back.thickness * 10) / 10} mm wall`;
+        pairNote = ` — and a matching one on the back of the same ${Math.round(spot.back.thickness * 10) / 10} mm wall, exactly in line`;
       } else {
         pairNote = spot.back
-          ? ` (no pair — the ${Math.round(spot.back.thickness * 10) / 10} mm wall is too thin for two ${depth} mm pockets)`
-          : " (no pair — couldn't find an opposite face on that axis)";
+          ? ` — no back pocket: that wall is only ${Math.round(spot.back.thickness * 10) / 10} mm thick, too thin to hold two ${depth} mm pockets`
+          : " — no back pocket: nothing directly behind this spot";
       }
     }
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
-      const what = `⌀${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-in" : "glue-in"} fit, ⌀${diameter} × ${depth} mm)${pairNote}`;
+      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, hole ⌀${diameter} × ${depth} mm deep)${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
       // Each placement gets a one-line receipt: a far-side pocket is invisible from
       // this angle, and a skipped pair (thin wall) would otherwise fail silently.
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added a ${what}.` }]);
       setMagnetTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }, ...(ops.length > 1 && spot.back ? [{ at: spot.back.at, normal: spot.back.normal }] : [])] } : d));
-      explainOnce("magnet", `Sunk a **magnet pocket** — free, no AI. Press-in fits add 0.1 mm; drop the magnet in flush and it grips through the plastic. Placing another nearby snaps into line with this one (watch for the dashed guide). Undo reverts it.`);
+      explainOnce("magnet", `Sunk a **magnet pocket** — free, no AI. The hole is cut a hair wider than the magnet so a drop of super glue holds it in flush, and it grips right through the plastic. Place another near this one and it snaps square with it — the dashed line shows what it lined up with. Want it exactly under the cursor instead? Set snapping to **Free** in the panel. Undo reverts it.`);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't sink a magnet pocket there: " + String(err?.message ?? err), error: true }]);
     } finally {
@@ -3800,6 +3856,14 @@ export default function App() {
     setShowTemplates(false);
     setEntered(true);
     if (projectRef.current || messages.length) startNew();
+    // A mesh template is a sculpt, not a program: it goes through the normal generative
+    // path (engine picker, pricing line, the usual progress) with its prompt pre-written.
+    // The gallery card says it costs a generation, so the run is never a surprise.
+    if (t.kind === "mesh") {
+      setMode("generative");
+      void send(t.prompt ?? t.summary, "generative");
+      return;
+    }
     setMode("precise");
     const s = await ensureEngine();
     if (s.kind !== "replicad") {
@@ -3808,7 +3872,7 @@ export default function App() {
     }
     setStatus("generating");
     try {
-      const res = await s.engine.build({ kind: "code", code: t.code });
+      const res = await s.engine.build({ kind: "code", code: t.code! });
       applyResultNoCommit(res);
       // Commit into a NEW project directly (the closure's `project` is stale after startNew).
       const snap = appendVersion(newProject(t.name, res.kind), {
@@ -5195,17 +5259,19 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState(false);
 
-  async function auth(op: "github" | "google" | "magic" | "signup" | "signin") {
+  async function auth(op: "github" | "google" | "magic" | "signup" | "signin" | "reset") {
     setBusy(true);
     setErr(false);
     setMsg(
       op === "magic" ? "Sending your login link…"
+      : op === "reset" ? "Sending your reset link…"
       : op === "signup" ? "Creating your account…"
       : op === "signin" ? "Signing in…"
       : `Taking you to ${op === "github" ? "GitHub" : "Google"}…`,
     );
     try {
       if (op === "magic") setMsg(await cloudMagicLink(email.trim()));
+      else if (op === "reset") setMsg(await cloudResetPassword(email.trim()));
       else if (op === "signup") setMsg(await cloudSignUp(email.trim(), pw));
       else if (op === "signin") {
         await cloudSignIn(email.trim(), pw);
@@ -5375,7 +5441,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 
         <p className="launch-label">{recent?.length ? "Or start from a template" : "Start from a template"}</p>
         <div className="launch-chips">
-          {TEMPLATES.slice(0, 4).map((t) => (
+          {TEMPLATES.filter((t) => t.kind === "cad").slice(0, 4).map((t) => (
             <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>
               {templateThumb(t.id) && <img src={templateThumb(t.id)} alt="" aria-hidden="true" />}
               {t.name}
@@ -5410,6 +5476,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <div className="param-actions">
             <button className="primary sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signup")}>Create account</button>
             <button className="ghost sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signin")}>Sign in</button>
+            <button className="link" disabled={busy || !email.includes("@")} onClick={() => auth("reset")}>Forgot password?</button>
           </div>
         </details>
 
@@ -5619,7 +5686,7 @@ function SettingsModal({
     if (/failed to fetch|network/i.test(raw)) return "Couldn't reach the sync server — check your connection and any ad-blocker (allow supabase.co).";
     return raw;
   }
-  async function doCloud(op: "signup" | "signin" | "signout" | "sync" | "github" | "google" | "magic" | "setpw") {
+  async function doCloud(op: "signup" | "signin" | "signout" | "sync" | "github" | "google" | "magic" | "setpw" | "reset") {
     setCloudBusy(true);
     setSyncErr(false);
     setSyncMsg(
@@ -5627,6 +5694,7 @@ function SettingsModal({
       : op === "signin" ? "Signing in…"
       : op === "github" || op === "google" ? `Taking you to ${op === "github" ? "GitHub" : "Google"}…`
       : op === "magic" ? "Sending your login link…"
+      : op === "reset" ? "Sending your reset link…"
       : op === "setpw" ? "Setting your password…"
       : op === "sync" ? "Syncing…"
       : "",
@@ -5634,6 +5702,7 @@ function SettingsModal({
     try {
       if (op === "github" || op === "google") await cloudOAuth(op); // navigates away on success
       if (op === "magic") setSyncMsg(await cloudMagicLink(email.trim()));
+      if (op === "reset") setSyncMsg(await cloudResetPassword(email.trim()));
       if (op === "setpw") { setSyncMsg(await cloudSetPassword(pw)); setPw(""); }
       if (op === "signup") setSyncMsg(await cloudSignUp(email.trim(), pw));
       if (op === "signin") {
@@ -5783,6 +5852,23 @@ function SettingsModal({
                     {t.label}
                   </button>
                 ))}
+                {/* Any colour at all — the presets are a starting point, not the menu.
+                    The swatch IS the picker (a colour input styled as the dot), so it
+                    reads as one more choice in the row rather than a settings sub-page. */}
+                <label
+                  className={`tint-swatch tint-custom${BUBBLE_TINTS.some((t) => t.color.toLowerCase() === userTint.toLowerCase()) ? "" : " on"}`}
+                  style={{ ["--sw" as string]: userTint }}
+                  title="Pick any colour for your own chat bubbles"
+                >
+                  <span className="tint-dot" />
+                  Custom
+                  <input
+                    type="color"
+                    value={/^#[0-9a-f]{6}$/i.test(userTint) ? userTint : "#498a6f"}
+                    aria-label="Custom chat bubble colour"
+                    onChange={(e) => onSaveTint(e.target.value)}
+                  />
+                </label>
               </div>
             </SGroup>
             <SGroup title="Workspace" hint="also switchable from the viewer's View menu">
@@ -6201,6 +6287,7 @@ function SettingsModal({
                 <div className="param-actions">
                   <button className="primary sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signin")}>Sign in</button>
                   <button className="ghost sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signup")}>Create account</button>
+                  <button className="link" disabled={cloudBusy || !email.includes("@")} onClick={() => doCloud("reset")}>Forgot password?</button>
                 </div>
                 <p className="fine">Signed in on the web with Google or a login link? Those finish in a browser, so they can't complete in this app. Open Moldable on the web → Settings → Sync → <b>Set a password</b>, then use it here. You'll stay signed in after that.</p>
               </>
@@ -6226,6 +6313,7 @@ function SettingsModal({
                   <div className="param-actions">
                     <button className="primary sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signup")}>Create account</button>
                     <button className="ghost sm" disabled={cloudBusy || !email.includes("@") || pw.length < 6} onClick={() => doCloud("signin")}>Sign in</button>
+                    <button className="link" disabled={cloudBusy || !email.includes("@")} onClick={() => doCloud("reset")}>Forgot password?</button>
                   </div>
                 </details>
               </>

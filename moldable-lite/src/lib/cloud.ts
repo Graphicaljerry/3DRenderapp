@@ -104,6 +104,17 @@ export async function cloudMagicLink(email: string): Promise<string> {
   return `Login link sent to ${email} — open it in THIS browser (check spam; sender mail.app.supabase.io). No password needed.`;
 }
 
+/** Forgotten password: emails a link that signs this browser in, after which the
+ *  "Set a password" field writes a new one. Deliberately the same recovery path as the
+ *  magic link (Supabase's resetPasswordForEmail), so there is no separate reset page to
+ *  host and the user lands back in the app already signed in. */
+export async function cloudResetPassword(email: string): Promise<string> {
+  const c = await supa();
+  const { error } = await c.auth.resetPasswordForEmail(email, { redirectTo: appUrl() });
+  if (error) throw new Error(error.message);
+  return `Reset link sent to ${email} — open it in THIS browser (check spam). It signs you straight in; then set a new password below.`;
+}
+
 /** Subscribe to sign-in/out; returns an unsubscribe function. */
 export async function onAuthChange(cb: (email: string | null) => void): Promise<() => void> {
   const c = await supa();

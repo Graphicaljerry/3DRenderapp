@@ -27,16 +27,28 @@ export function TemplatesModal({ onPick, onClose, busy }: { onPick: (t: Template
           <h2>Templates</h2>
           <button className="x" onClick={onClose} aria-label="Close templates"><IconX size={16} /></button>
         </div>
-        <p className="fine">Common prints, ready to go — tap one and it builds instantly, no AI call, no key. Every dimension stays live: drag the sliders or just ask for changes.</p>
-        <div className="tpl-grid">
-          {TEMPLATES.map((t) => (
-            <button key={t.id} className="tpl-card" disabled={busy} onClick={() => onPick(t)} title={`Build the ${t.name.toLowerCase()} template`}>
-              <Thumb t={t} />
-              <span className="tpl-name">{t.name}</span>
-              <span className="tpl-blurb">{t.blurb}</span>
-            </button>
-          ))}
-        </div>
+        <p className="fine">
+          <b>Parts</b> build instantly — no AI call, no key — and every dimension stays live: drag it in
+          Adjust or just ask for changes. <b>Sculpts</b> are shapes CAD can't hold, so they run on the
+          mesh engine: one generation each, at whatever your chosen engine charges.
+        </p>
+        {(["cad", "mesh"] as const).map((kind) => (
+          <section key={kind} className="tpl-sect">
+            <h3 className="tpl-sect-title">
+              {kind === "cad" ? "Parts — exact, editable, free" : "Sculpts — organic shapes, one AI generation each"}
+            </h3>
+            <div className="tpl-grid">
+              {TEMPLATES.filter((t) => t.kind === kind).map((t) => (
+                <button key={t.id} className="tpl-card" disabled={busy} onClick={() => onPick(t)}
+                  title={kind === "cad" ? `Build the ${t.name.toLowerCase()} — instant, free` : `Sculpt the ${t.name.toLowerCase()} on the mesh engine`}>
+                  <Thumb t={t} />
+                  <span className="tpl-name">{t.name}</span>
+                  <span className="tpl-blurb">{t.blurb}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+        ))}
       </div>
     </div>
   );
@@ -47,7 +59,7 @@ export function TemplateStrip({ onPick, onMore, busy }: { onPick: (t: Template) 
   return (
     <div className="tpl-strip">
       <div className="tpl-strip-grid">
-        {TEMPLATES.slice(0, 4).map((t) => (
+        {TEMPLATES.filter((t) => t.kind === "cad").slice(0, 4).map((t) => (
           <button key={t.id} className="tpl-card sm" disabled={busy} onClick={() => onPick(t)} title={`Build the ${t.name.toLowerCase()} template`}>
             <Thumb t={t} />
             <span className="tpl-name">{t.name}</span>
@@ -55,7 +67,7 @@ export function TemplateStrip({ onPick, onMore, busy }: { onPick: (t: Template) 
         ))}
       </div>
       <button className="tpl-more" onClick={onMore}>
-        All {TEMPLATES.length} templates — one tap, no key needed →
+        All {TEMPLATES.length} templates — parts and sculpts →
       </button>
     </div>
   );

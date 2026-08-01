@@ -302,6 +302,26 @@ button { font-family: inherit; cursor: pointer; }
 .md .md-code { background: color-mix(in srgb, var(--mut) 10%, transparent); border: 1px solid var(--bord); border-radius: 8px; padding: 8px 10px; overflow-x: auto; font-size: 12px; margin: 6px 0 8px; }
 .md .md-code code { background: none; padding: 0; }
 .md a { color: var(--accent-d); }
+/* The working state, un-bubbled: the step timeline sits straight on the chat surface
+   so it reads as "still working" rather than as a delivered answer. Same box metrics
+   as .bubble minus the fill, so nothing shifts when the reply lands in its bubble. */
+.bubble-open { font-size: 12.5px; line-height: 1.45; color: var(--ink2); padding: 2px 2px; white-space: pre-wrap; }
+/* A reply arriving: the typed opening, then the rest fading up behind it. */
+.reveal-type { white-space: pre-wrap; }
+.reveal-type::after {
+  content: ""; display: inline-block; width: 2px; height: 1em; margin-left: 1px;
+  vertical-align: -2px; background: var(--accent); animation: caret 0.9s steps(2, start) infinite;
+}
+.reveal-rest { animation: reveal-up 0.42s cubic-bezier(0.23, 1, 0.32, 1) both; }
+@keyframes caret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes reveal-up {
+  from { opacity: 0; transform: translateY(6px); mask-image: linear-gradient(to bottom, #000 0%, transparent 45%); -webkit-mask-image: linear-gradient(to bottom, #000 0%, transparent 45%); }
+  to { opacity: 1; transform: translateY(0); mask-image: linear-gradient(to bottom, #000 100%, transparent 100%); -webkit-mask-image: linear-gradient(to bottom, #000 100%, transparent 100%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-rest { animation: none; }
+  .reveal-type::after { animation: none; }
+}
 .think-live { margin-top: 8px; border-top: 1px dashed var(--bord); padding-top: 7px; }
 .think-title { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--subt); }
 .think-body { font-size: 12px; line-height: 1.5; color: var(--mut); white-space: pre-wrap; }
@@ -345,11 +365,19 @@ button { font-family: inherit; cursor: pointer; }
 
 /* The user's own messages get a slight green tint so they read as "yours". */
 /* Appearance settings: chat-bubble tint swatches. */
+/* Templates split into two sections — free parametric parts, then AI sculpts — so a
+   tap can never spend a generation you didn't expect. */
+.tpl-sect { margin-top: 14px; }
+.tpl-sect-title { margin: 0 0 8px; font-size: 11.5px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--subt); }
 .tint-swatches { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
 .tint-swatch { display: inline-flex; align-items: center; gap: 7px; padding: 6px 11px 6px 8px; border: 1px solid transparent; border-radius: var(--r-full); background: var(--ctl); color: var(--ink2); font-size: 12px; font-weight: 500; transition: border-color .15s ease, background-color .15s ease; }
 .tint-swatch:hover { border-color: var(--bord-strong); }
 .tint-swatch.on { border-color: var(--sw); background: color-mix(in srgb, var(--sw) 12%, transparent); color: var(--ink); }
 .tint-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--sw); border: 1px solid color-mix(in srgb, var(--ink) 12%, transparent); }
+/* The custom swatch: a real colour input, sized to the chip and made invisible so the
+   chip itself is the target (the OS picker still opens from it). */
+.tint-custom { position: relative; cursor: pointer; }
+.tint-custom input[type="color"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; border: none; padding: 0; cursor: pointer; }
 /* The user's own messages: a tint of --user-tint (default teal accent) over a base a
    touch darker than the assistant bubble, so they stand out and read as "yours".
    The tint colour is user-configurable in Settings › Appearance. */

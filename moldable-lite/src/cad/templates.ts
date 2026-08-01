@@ -13,7 +13,11 @@ export interface Template {
   name: string;
   blurb: string; // one line on the card
   summary: string; // the chat line after it builds
-  code: string;
+  /** "cad" builds locally from `code` — instant, free, every dimension a live slider.
+   *  "mesh" hands `prompt` to the generative engine: organic shapes CAD can't hold. */
+  kind: "cad" | "mesh";
+  code?: string;   // cad only
+  prompt?: string; // mesh only
 }
 
 // Thumbnails are real in-app renders (assets/templates/<id>.webp), captured by the
@@ -28,6 +32,7 @@ export const TEMPLATES: Template[] = [
     id: "phone-stand",
     name: "Phone stand",
     blurb: "Angled desk stand with a cable slot",
+    kind: "cad",
     summary:
       "A desk phone stand — 70 mm wide, leaning back 62°, with a lip to hold the phone and a slot for the charging cable. Drag the sliders to fit your phone, or just ask for changes.",
     code: `const defaultParams = { width: 70, seatDepth: 22, angle: 62, thickness: 9, lipHeight: 14, supportLength: 78, cableSlotWidth: 14 };
@@ -61,76 +66,10 @@ function main(replicad, params) {
 }`,
   },
   {
-    id: "cable-clip",
-    name: "Cable clip",
-    blurb: "Snap-in clip with screw tabs",
-    summary:
-      "A cable clip for a 6 mm cable — the cable snaps in through the top opening, and the two tabs take 3 mm screws (or double-sided tape). Tune cableDiameter to your cable.",
-    code: `const defaultParams = { cableDiameter: 6, wall: 2.4, length: 12, baseThickness: 2.5, tabLength: 9, screwHoleDiameter: 3.4 };
-function main(replicad, params) {
-  const p = { ...defaultParams, ...params };
-  const { drawCircle, drawRectangle, makeCylinder } = replicad;
-  const rIn = p.cableDiameter / 2 + 0.15; // FDM: cables should snap in, not fight
-  const wall = Math.max(1.6, p.wall);
-  const base = Math.max(1.6, p.baseThickness);
-  const rOut = rIn + wall;
-  const cz = base + rIn; // cable centre: cable rests on the base
-  const opening = p.cableDiameter * 0.72; // narrower than the cable → snap fit
-  const ring = drawCircle(rOut)
-    .cut(drawCircle(rIn))
-    .translate(0, cz)
-    .cut(drawRectangle(opening, rOut + 2).translate(0, cz + (rOut + 2) / 2));
-  const baseW = 2 * (rOut + Math.max(4, p.tabLength));
-  const profile = ring.fuse(drawRectangle(baseW, base).translate(0, base / 2));
-  let clip = profile.sketchOnPlane("XZ").extrude(p.length);
-  const holeX = rOut + Math.max(4, p.tabLength) / 2;
-  const hole = (x) => makeCylinder(p.screwHoleDiameter / 2, base + 2, [x, -p.length / 2, -1], [0, 0, 1]);
-  return clip.cut(hole(-holeX)).cut(hole(holeX));
-}`,
-  },
-  {
-    id: "wall-hook",
-    name: "Wall hook",
-    blurb: "J-hook on a screw-mount plate",
-    summary:
-      "A wall hook — a 30 × 70 mm back plate with two screw holes and a rounded J-hook that reaches 34 mm out. Prints flat on its back, no supports.",
-    code: `const defaultParams = { plateWidth: 30, plateHeight: 70, plateThickness: 4, hookWidth: 18, hookReach: 34, innerRadius: 10, tipHeight: 16, thickness: 6, screwHoleDiameter: 4.4 };
-function main(replicad, params) {
-  const p = { ...defaultParams, ...params };
-  const { drawRoundedRectangle, drawCircle, draw } = replicad;
-  const t = Math.max(3, p.thickness);
-  const rIn = Math.max(3, p.innerRadius);
-  const rOut = rIn + t;
-  const reach = Math.max(rOut + 2, p.hookReach);
-  const tip = Math.max(4, p.tipHeight);
-  const holeY = p.plateHeight / 2 - 8;
-  const plate = drawRoundedRectangle(p.plateWidth, p.plateHeight, 3)
-    .cut(drawCircle(p.screwHoleDiameter / 2).translate(0, holeY))
-    .cut(drawCircle(p.screwHoleDiameter / 2).translate(0, -holeY))
-    .sketchOnPlane("XY")
-    .extrude(p.plateThickness);
-  // J profile in the YZ plane: drawing x = up the plate, drawing y = out of the wall.
-  const u0 = -t / 2;
-  const profile = draw([u0, -1])
-    .lineTo([u0, reach - rOut])
-    .threePointsArc(rOut, rOut, 0.2929 * rOut, 0.7071 * rOut)
-    .lineTo([u0 + rOut + tip, reach])
-    .lineTo([u0 + rOut + tip, reach - t])
-    .lineTo([u0 + rOut, reach - t])
-    .threePointsArc(-rIn, -rIn, -0.7071 * rIn, -0.2929 * rIn)
-    .lineTo([u0 + t, -1])
-    .close();
-  const hook = profile
-    .sketchOnPlane("YZ")
-    .extrude(p.hookWidth)
-    .translate([-p.hookWidth / 2, 0, p.plateThickness]); // profile starts at v=-1 → embeds 1 mm into the plate
-  return plate.fuse(hook);
-}`,
-  },
-  {
     id: "box-with-lid",
     name: "Box with lid",
     blurb: "Rounded box + friction-fit lid",
+    kind: "cad",
     summary:
       "A 60 × 40 × 30 mm inside-dimension box with a friction-fit lid (printed beside it). clearance sets how snug the lid plug fits — 0.2 mm is a good FDM default. Want to try the lid on? Open the Objects panel and tap **Separate 2 parts** — then move the lid onto the box and tap **Check fit**.",
     code: `const defaultParams = { innerWidth: 60, innerDepth: 40, innerHeight: 30, wall: 2, lidThickness: 2.5, plugHeight: 5, clearance: 0.2, cornerRadius: 4 };
@@ -160,149 +99,114 @@ function main(replicad, params) {
   {
     id: "desk-hook",
     name: "Headphone desk hook",
-    blurb: "Clamps a desk edge, no screws",
+    blurb: "Thumbscrew clamps it to any desk",
+    kind: "cad",
     summary:
-      "A headphone hook that clamps over a desk edge — set deskThickness to your desktop (it adds 0.4 mm clearance) and it grips with no screws. The lower arm hangs headphones or a bag.",
-    code: `const defaultParams = { deskThickness: 25, clampDepth: 45, width: 22, thickness: 6, armDrop: 40, hookLength: 40, lipHeight: 12, clearance: 0.4 };
+      "A headphone hook that clamps to your desk with a printed thumbscrew — wind it up and the pad presses against the underside, so one hook fits any desktop from 15 to 45 mm and never slips. Drop the arm lower or lengthen the hook with the sliders.",
+    code: `const defaultParams = { deskThickness: 25, clampDepth: 45, width: 22, thickness: 6, armDrop: 40, hookLength: 40, lipHeight: 12, screwDiameter: 12, screwTravel: 16 };
 function main(replicad, params) {
   const p = { ...defaultParams, ...params };
-  const { drawRectangle } = replicad;
+  const { drawRectangle, drawCircle, makeCylinder } = replicad;
   const t = Math.max(4, p.thickness);
-  const dt = p.deskThickness + p.clearance; // the desk slides in here
   const D = Math.max(15, p.clampDepth);
   const drop = Math.max(10, p.armDrop);
   const H = Math.max(15, p.hookLength);
   const lip = Math.max(4, p.lipHeight);
+  const travel = Math.max(6, p.screwTravel);          // how far the screw can wind up
+  const throat = Math.max(10, p.deskThickness) + travel; // the jaw opening the desk sits in
+  const boss = Math.max(8, p.screwDiameter) + 2 * 3;   // wall around the screw thread
   const rect = (w, h, cx, cz) => drawRectangle(w, h).translate(cx, cz);
-  const profile = rect(t, dt + drop + 2 * t, t / 2, (dt - drop) / 2) // front face wrapping the edge
-    .fuse(rect(D + t, t, (t - D) / 2, dt + t / 2)) // top jaw, resting on the desk
-    .fuse(rect(0.7 * D + t, t, (t - 0.7 * D) / 2, -t / 2)) // bottom jaw, under the desk
-    .fuse(rect(H + t, t, (H + t) / 2, -(drop + t / 2))) // hanger bar
-    .fuse(rect(t, lip + t, H + t / 2, -drop + (lip - t) / 2)); // lip so things can't slide off
-  return profile.sketchOnPlane("XZ").extrude(p.width);
-}`,
-  },
-  {
-    id: "plant-pot",
-    name: "Plant pot",
-    blurb: "Tapered pot with drainage holes",
-    summary:
-      "A tapered plant pot — 95 mm across the top, 85 mm tall, with four drainage holes in the floor. Resize it with the sliders; wall and floor stay printable.",
-    code: `const defaultParams = { topDiameter: 95, bottomDiameter: 65, height: 85, wall: 2.4, floor: 3.5, drainHoles: 4, drainHoleDiameter: 8 };
-function main(replicad, params) {
-  const p = { ...defaultParams, ...params };
-  const { draw, makeCylinder } = replicad;
-  const rT = Math.max(15, p.topDiameter / 2);
-  const rB = Math.min(rT, Math.max(12, p.bottomDiameter / 2));
-  const wall = Math.max(1.6, p.wall);
-  const floor = Math.max(2, p.floor);
-  const profile = draw([0, 0])
-    .lineTo([rB, 0])
-    .lineTo([rT, p.height])
-    .lineTo([rT - wall, p.height])
-    .lineTo([rB - wall, floor])
-    .lineTo([0, floor])
-    .close();
-  let pot = profile.sketchOnPlane("XZ").revolve();
-  const n = Math.min(8, Math.max(1, Math.round(p.drainHoles)));
-  const ringR = Math.max(0, rB - wall - p.drainHoleDiameter / 2 - 2) * 0.6;
-  for (let i = 0; i < n; i++) {
-    const ang = (i / n) * 2 * Math.PI;
-    pot = pot.cut(makeCylinder(p.drainHoleDiameter / 2, floor + 2, [Math.cos(ang) * ringR, Math.sin(ang) * ringR, -1], [0, 0, 1]));
-  }
-  return pot;
-}`,
-  },
-  {
-    id: "coaster",
-    name: "Coaster",
-    blurb: "Hex coaster with a drip recess",
-    summary:
-      "A hexagonal coaster, 95 mm across, with a raised rim and a shallow recess to catch drips. sides changes the shape (6 = hex, 8 = octagon…), rimWidth and recessDepth tune the rest.",
-    code: `const defaultParams = { diameter: 95, height: 8, rimWidth: 5, recessDepth: 2, sides: 6 };
-function main(replicad, params) {
-  const p = { ...defaultParams, ...params };
-  const { drawPolysides } = replicad;
-  const n = Math.min(12, Math.max(3, Math.round(p.sides)));
-  const h = Math.max(3, p.height);
-  const recess = Math.min(h - 2, Math.max(0.6, p.recessDepth));
-  const R = p.diameter / 2;
-  const rIn = Math.max(10, R - Math.max(2, p.rimWidth));
-  const body = drawPolysides(R, n).fillet(3).sketchOnPlane("XY").extrude(h);
-  const pocket = drawPolysides(rIn, n).fillet(3).sketchOnPlane("XY", h - recess).extrude(recess + 1);
-  return body.cut(pocket).chamfer(0.8, (e) => e.inPlane("XY", h));
+  // Side profile: front face down the desk edge, top jaw on the desktop, bottom jaw
+  // carrying the screw boss, then the hanger bar and its lip.
+  const profile = rect(t, throat + drop + 2 * t, t / 2, (throat - drop) / 2)
+    .fuse(rect(D + t, t, (t - D) / 2, throat + t / 2))
+    .fuse(rect(0.8 * D + t, boss, (t - 0.8 * D) / 2, -boss / 2))
+    .fuse(rect(H + t, t, (H + t) / 2, -(drop + t / 2)))
+    .fuse(rect(t, lip + t, H + t / 2, -drop + (lip - t) / 2));
+  let hook = profile.sketchOnPlane("XZ").extrude(p.width);
+  // Screw hole up through the bottom boss. Printed M-thread is unreliable, so this is
+  // a clearance bore for the printed screw below (or an M6 bolt and a nut).
+  const bore = Math.max(6, p.screwDiameter);
+  const cx = -(0.8 * D) / 2;
+  hook = hook.cut(makeCylinder(bore / 2, boss + 4, [cx, -p.width / 2, -boss - 2], [0, 0, 1]));
+  // The thumbscrew itself, printed beside the hook: a knurled-ish flanged knob + shaft.
+  const knob = drawCircle(bore / 2 + 5).sketchOnPlane("XY").extrude(6)
+    .fuse(makeCylinder(bore / 2 - 0.25, travel + 8, [0, 0, 6], [0, 0, 1]))
+    .fuse(makeCylinder(bore / 2 + 2, 2.5, [0, 0, travel + 12], [0, 0, 1])) // pressure pad
+    .translate([cx, p.width / 2 + bore + 12, 0]);
+  return hook.fuse(knob);
 }`,
   },
   {
     id: "bag-clip",
-    name: "Bag clip",
-    blurb: "Slide-on clip keeps bags fresh",
+    name: "Squeeze bag clip",
+    blurb: "Pinch the tails, jaws open, let go to grip",
+    kind: "cad",
     summary:
-      "A slide-on bag clip — fold the bag over, slide the clip on. 90 mm long with a 1.6 mm slot and a flared mouth so it starts easily. Print a few!",
-    code: `const defaultParams = { length: 90, slotGap: 1.6, wall: 3, slotDepth: 14, flare: 2 };
+      "A squeeze-to-open bag clip — pinch the two tails behind the loop and the jaws spring apart; let go and the padded tips clamp back onto the bag. One piece, prints flat, no assembly. A bigger loop makes a softer squeeze; more teeth grip a slipperier bag.",
+    code: `const defaultParams = { jawLength: 52, tailLength: 20, width: 16, thickness: 3, springRadius: 6, mouth: 2, gripLength: 16, teeth: 4 };
 function main(replicad, params) {
   const p = { ...defaultParams, ...params };
-  const { drawRoundedRectangle, draw } = replicad;
-  const wall = Math.max(2, p.wall);
-  const gap = Math.max(0.8, p.slotGap);
-  const depth = Math.max(6, p.slotDepth);
-  const W = gap + 2 * wall;
-  const H = depth + wall;
-  const flare = Math.max(0.5, p.flare);
-  const mouth = draw([-gap / 2 - flare, H / 2 + 1])
-    .lineTo([gap / 2 + flare, H / 2 + 1])
-    .lineTo([gap / 2, H / 2 - 2.5 * flare])
-    .lineTo([-gap / 2, H / 2 - 2.5 * flare])
-    .close();
-  const profile = drawRoundedRectangle(W, H, Math.min(1.5, wall * 0.5))
-    .cut(drawRoundedRectangle(gap, depth * 2, 0.4).translate(0, H / 2)) // slot, overshooting the top
-    .cut(mouth);
-  return profile.sketchOnPlane("YZ").extrude(p.length);
+  const { drawCircle, drawRoundedRectangle } = replicad;
+  const t = Math.max(2.2, p.thickness);
+  const J = Math.max(24, p.jawLength);
+  const T = Math.max(8, p.tailLength);
+  const R = Math.max(3.5, p.springRadius);   // loop radius — this sets the spring rate
+  const g = Math.max(1.2, p.mouth);          // gap at the tips, where the bag is pinched
+  const grip = Math.min(J - 8, Math.max(6, p.gripLength));
+  const yJaw = R + t / 2;                    // jaw centreline, tangent to the loop
+  const padH = R - g / 2;                    // pad closing the mouth to the tip gap
+  // A UNION of whole primitives — circles and rectangles — never a traced outline: every
+  // boundary closes by construction, which is what keeps the solid watertight.
+  let s2 = drawCircle(R + t).cut(drawCircle(R));
+  s2 = s2.fuse(drawRoundedRectangle(J, t, t * 0.35).translate(J / 2, yJaw))
+         .fuse(drawRoundedRectangle(J, t, t * 0.35).translate(J / 2, -yJaw))
+         .fuse(drawRoundedRectangle(T, t, t * 0.35).translate(-T / 2 - R, yJaw))
+         .fuse(drawRoundedRectangle(T, t, t * 0.35).translate(-T / 2 - R, -yJaw));
+  if (padH > 0.4) {
+    // Contact at the TIPS, like a clothes peg: the pads bring the faces together there
+    // while the rest of the jaw stays open, so the squeeze has somewhere to go.
+    s2 = s2.fuse(drawRoundedRectangle(grip, padH, 0.6).translate(J - grip / 2, g / 2 + padH / 2))
+           .fuse(drawRoundedRectangle(grip, padH, 0.6).translate(J - grip / 2, -(g / 2 + padH / 2)));
+  }
+  const n = Math.min(8, Math.max(0, Math.round(p.teeth)));
+  for (let i = 0; i < n; i++) {
+    const x = J - grip + 3 + (i * Math.max(0, grip - 6)) / Math.max(1, n - 1);
+    s2 = s2.fuse(drawRoundedRectangle(1.3, 1.1, 0.3).translate(x, g / 2 - 0.1))
+           .fuse(drawRoundedRectangle(1.3, 1.1, 0.3).translate(x, -(g / 2 - 0.1)));
+  }
+  return s2.sketchOnPlane("XY").extrude(Math.max(8, p.width));
 }`,
   },
   {
-    id: "cable-winder",
-    name: "Earbud / cable winder",
-    blurb: "Bone-shaped tidy for loose cables",
+    id: "pen-holder",
+    name: "Twisted pen holder",
+    blurb: "Faceted desk pot with a spiral twist",
+    kind: "cad",
     summary:
-      "A pocket cable winder — wrap earbuds or a spare cable around the waist, and the 4.5 mm hole takes a keyring. length and notchDepth set how much cable it swallows.",
-    code: `const defaultParams = { length: 78, width: 32, thickness: 5, notchWidth: 26, notchDepth: 9, cornerRadius: 6, keyringHoleDiameter: 4.5 };
+      "A desk pen pot with a twist — a faceted column that rotates as it rises, so it throws a different edge at you from every angle. Change the number of sides, how far it twists, or how tall it stands with the sliders.",
+    code: `const defaultParams = { sides: 7, diameter: 82, height: 105, twist: 55, wall: 3, floor: 4 };
 function main(replicad, params) {
   const p = { ...defaultParams, ...params };
-  const { drawRoundedRectangle, drawCircle } = replicad;
-  const nw = Math.min(p.length - 20, Math.max(8, p.notchWidth));
-  const nd = Math.min(p.width / 2 - 5, Math.max(3, p.notchDepth));
-  const notch = drawRoundedRectangle(nw, 2 * nd, Math.min(nd * 0.9, nw / 2 - 0.5));
-  return drawRoundedRectangle(p.length, p.width, p.cornerRadius)
-    .cut(notch.translate(0, p.width / 2))
-    .cut(notch.translate(0, -p.width / 2))
-    .cut(drawCircle(p.keyringHoleDiameter / 2).translate(p.length / 2 - 7, 0))
-    .sketchOnPlane("XY")
-    .extrude(Math.max(2.5, p.thickness));
-}`,
-  },
-  {
-    id: "spacer",
-    name: "Washer / spacer",
-    blurb: "Any size, chamfered, in seconds",
-    summary:
-      "A 12 mm washer/spacer with a 5.3 mm bore (M5 clearance) and a chamfered top edge. Three sliders — outer, bore, height — cover almost any spacing job.",
-    code: `const defaultParams = { outerDiameter: 12, boreDiameter: 5.3, height: 6 };
-function main(replicad, params) {
-  const p = { ...defaultParams, ...params };
-  const { makeCylinder } = replicad;
-  const rOut = Math.max(2, p.outerDiameter / 2);
-  const rIn = Math.min(rOut - 1, Math.max(0.75, p.boreDiameter / 2));
-  const h = Math.max(1, p.height);
-  return makeCylinder(rOut, h, [0, 0, 0], [0, 0, 1])
-    .cut(makeCylinder(rIn, h + 2, [0, 0, -1], [0, 0, 1]))
-    .chamfer(Math.min(0.6, h / 4, (rOut - rIn) / 3), (e) => e.inPlane("XY", h));
+  const { drawPolysides } = replicad;
+  const n = Math.min(12, Math.max(3, Math.round(p.sides)));
+  const r = Math.max(18, p.diameter / 2);
+  const H = Math.max(40, p.height);
+  const wall = Math.max(1.8, Math.min(r - 6, p.wall));
+  const floor = Math.max(2.4, Math.min(H - 10, p.floor));
+  // The twist is the extrusion's own, so the facets stay true ruled surfaces — the
+  // inner bore twists by the SAME angle or the wall would vary in thickness as it rises.
+  const twist = p.twist;
+  const outer = drawPolysides(r, n, 0).sketchOnPlane("XY").extrude(H, { twistAngle: twist });
+  const bore = drawPolysides(r - wall, n, 0).sketchOnPlane("XY", floor).extrude(H, { twistAngle: twist });
+  return outer.cut(bore);
 }`,
   },
   {
     id: "tolerance-coupon",
     name: "Tolerance test coupon",
     blurb: "Measure YOUR printer's real fit",
+    kind: "cad",
     summary:
       "A fit-calibration coupon: six ⌀10 mm holes, each cut with a per-side gap from 0.05 to 0.55 mm (notches above a hole count its step: 1 notch = 0.05 mm, then +0.1 mm per extra notch) plus a ⌀10 test peg. Print it, push the peg into each hole, and note the TIGHTEST one it firmly fits — enter that number in Settings → Printer → Fit calibration, and every future snug/press/loose fit uses your printer's reality.",
     code: `const defaultParams = { pegDiameter: 10, startClearance: 0.05, step: 0.1, holes: 6, thickness: 6 };
@@ -334,5 +238,58 @@ function main(replicad, params) {
     .fuse(makeCylinder(d / 2 + 3, 3, [-(W / 2 + d / 2 + 6), 0, 0], [0, 0, 1]));
   return plate.fuse(peg);
 }`,
+  },
+  // ---- Generative (AI mesh) templates -------------------------------------------
+  // Organic shapes a parametric kernel cannot hold: these hand a well-formed prompt to
+  // the mesh engine rather than building locally, so they cost a generation — the card
+  // says so. Prompts are written the way the engines actually reward: subject first,
+  // then silhouette, then the print constraints (flat base, no thin spurs).
+  {
+    id: "mesh-cat",
+    name: "Sitting cat",
+    blurb: "Smooth stylised cat figurine",
+    kind: "mesh",
+    summary: "A sitting cat figurine — smooth stylised forms, tail curled around the front paws.",
+    prompt: "A stylised sitting cat figurine, smooth rounded forms, ears alert, tail curled around the front paws, flat stable base, no thin fragile parts, single solid piece for 3D printing",
+  },
+  {
+    id: "mesh-dragon",
+    name: "Dragon head trophy",
+    blurb: "Wall-mount dragon bust",
+    kind: "mesh",
+    summary: "A dragon head wall trophy — horns swept back, flat mounting plate behind.",
+    prompt: "A dragon head wall trophy mount, mouth closed, horns swept back along the skull, scaled brow ridges, flat vertical mounting plate at the back of the neck, chunky printable detail, single solid piece",
+  },
+  {
+    id: "mesh-skull-planter",
+    name: "Skull planter",
+    blurb: "Hollow skull pot for succulents",
+    kind: "mesh",
+    summary: "A skull planter — the cranium opens into a bowl for a small succulent.",
+    prompt: "A human skull planter, the top of the cranium opened into a smooth bowl cavity for a small succulent, stylised low detail, flat base so it stands level, thick walls, single solid piece for 3D printing",
+  },
+  {
+    id: "mesh-knight",
+    name: "Chess knight",
+    blurb: "Carved horse-head knight",
+    kind: "mesh",
+    summary: "A chess knight — carved horse head on a round stepped base.",
+    prompt: "A chess knight piece, carved horse head with a flowing mane, angled muzzle, round stepped base, classic Staunton proportions, smooth surfaces, single solid piece for 3D printing",
+  },
+  {
+    id: "mesh-fox",
+    name: "Low-poly fox",
+    blurb: "Faceted origami-style fox",
+    kind: "mesh",
+    summary: "A low-poly fox — sharp flat facets, sitting with the tail wrapped round.",
+    prompt: "A low-poly faceted fox, sitting pose with a big bushy tail wrapped around the paws, sharp flat triangular facets like folded paper, pointed ears and snout, flat base, single solid piece for 3D printing",
+  },
+  {
+    id: "mesh-octopus",
+    name: "Octopus desk buddy",
+    blurb: "Curled tentacles, chunky and cute",
+    kind: "mesh",
+    summary: "An octopus desk ornament — round head, eight curled tentacles as the feet.",
+    prompt: "A cute chunky octopus ornament, large round smooth head, big friendly eyes, eight thick tentacles curling outward and downward to form a stable base, no thin tips, single solid piece for 3D printing",
   },
 ];

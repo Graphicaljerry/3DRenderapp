@@ -1366,6 +1366,7 @@ interface Props {
       size: { d: number; h: number; note?: string };
       fit: "press" | "glue";
       pair: boolean;
+      snap: number; // grid step in mm; 0 = freeform
       placed: { at: [number, number, number]; normal: [number, number, number] }[];
     } | null;
     canUse: boolean; // CAD models only — meshes can't be drilled
@@ -2308,7 +2309,7 @@ export function Workspace(p: Props) {
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
                   : null}
                 magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
-                  ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
+                  ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, snap: p.magnetCtl.tool.snap, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
                   : null}
                 onContext={(h) => {
                   // Right-click selects what it lands on (standard editor behavior), then opens the menu.
@@ -2515,17 +2516,29 @@ export function Workspace(p: Props) {
                               );
                             })}
                           </div>
-                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Fit">
-                            <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
-                              title="Press-in: +0.1 mm — seats with a thumb, holds without glue" onClick={() => p.magnetCtl.patch({ fit: "press" })}>Press-in</button>
+                          <div className="paint-lbl">How it's held in</div>
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="How the magnet is held in">
                             <button className={p.magnetCtl.tool.fit === "glue" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "glue"}
-                              title="Glue-in: +0.25 mm and a touch deeper — room for a drop of CA" onClick={() => p.magnetCtl.patch({ fit: "glue" })}>Glue-in</button>
+                              title="The hole is cut 0.25 mm wider than the magnet, with a little extra depth, so a drop of super glue has somewhere to sit. The magnet can't work loose later — the safe choice, and the default."
+                              onClick={() => p.magnetCtl.patch({ fit: "glue" })}>Glued in</button>
+                            <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
+                              title="The hole is cut just 0.1 mm wider, so the magnet seats with thumb pressure and is held by friction alone — no glue needed, but a hard knock can pop it out."
+                              onClick={() => p.magnetCtl.patch({ fit: "press" })}>Push fit</button>
                           </div>
-                          <label className="magnet-pair" title="Also sink the matching pocket straight through the wall on the opposite face — the pair lands on the same axis, which is what makes two parts snap together aligned">
+                          <div className="paint-lbl">Placing</div>
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Placement snapping">
+                            <button className={p.magnetCtl.tool.snap > 0 ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.snap > 0}
+                              title="Positions land on a 1 mm grid — tidy, repeatable spacing."
+                              onClick={() => p.magnetCtl.patch({ snap: 1 })}>1 mm grid</button>
+                            <button className={p.magnetCtl.tool.snap === 0 ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.snap === 0}
+                              title="The pocket goes exactly where the cursor is. Lining up with a pocket you've already placed still works."
+                              onClick={() => p.magnetCtl.patch({ snap: 0 })}>Free</button>
+                          </div>
+                          <label className="magnet-pair" title="For a magnet on BOTH sides of the same wall — a lid that grabs from either face, say. The second pocket goes exactly opposite the first. Leave this off if the other magnet belongs to a separate part.">
                             <input type="checkbox" checked={p.magnetCtl.tool.pair} onChange={(e) => p.magnetCtl.patch({ pair: e.target.checked })} />
-                            <span>Pair through the wall</span>
+                            <span>Add one on the back too</span>
                           </label>
-                          <div className="magnet-hint">Hover the model, click to sink. Nearby pockets snap into line — watch for the dashed guide.</div>
+                          <div className="magnet-hint">Hover the model, click to sink the pocket. Place one near another and it lines up square with it — the dashed line shows what it caught.</div>
                         </div>
                       </div>
                     )}
@@ -3145,6 +3158,11 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     clarifyBuild: (msgId: string, withAnswers: boolean) => rowCb.current.clarifyCtl.build(msgId, withAnswers),
   }), []);
 
+  // How many messages were already on screen when this list first mounted.
+  const baseCountRef = useRef<number | null>(null);
+  if (baseCountRef.current === null) baseCountRef.current = messages.length;
+  const baseCount = baseCountRef.current;
+
   return (
     <div className="messages">
       {messages.length === 0 && (
@@ -3169,10 +3187,15 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
           </div>
         </div>
       )}
-      {messages.map((m) => (
+      {messages.map((m, i) => (
         <MessageRow
           key={m.id}
           m={m}
+          // Only replies that ARRIVE while you're watching get the type-on reveal.
+          // Everything already in the transcript at mount (a reopened project, a
+          // restored session) renders instantly — a whole history typing itself out
+          // on load would be intolerable.
+          fresh={i >= baseCount}
           // Narrowed on purpose: only the row being edited sees editText, and only the
           // streaming row sees `thinking` — so a keystroke or a token re-renders ONE
           // bubble instead of re-parsing every message's markdown.
@@ -3272,8 +3295,8 @@ function ClarifyCard({ msgId, c, busy, api }: {
 
 /** One chat bubble. Memoised: chat history is immutable once written, so a row only
     re-renders when something about THAT message changes. */
-const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, api }: {
-  m: ChatMessage; editing: boolean; editText: string; thinking: string; busy: boolean;
+const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, api }: {
+  m: ChatMessage; fresh: boolean; editing: boolean; editText: string; thinking: string; busy: boolean;
   brainProvider: LlmProviderId; brainModel: string; genProvider: string; genModel: string;
   api: {
     startEdit: (m: ChatMessage) => void; submitEdit: (m: ChatMessage) => void;
@@ -3315,7 +3338,11 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
             </div>
           ) : (
             <>
-              <div className={`bubble ${m.streaming ? "muted" : ""}`}>
+              {/* The working state is NOT a bubble: while it's thinking there's no reply
+                  to contain, and the grey slab made the timeline read as an answer. The
+                  checks and step text sit straight on the chat background (both themes
+                  carry enough contrast), and the bubble arrives with the reply itself. */}
+              <div className={m.role === "assistant" && m.streaming ? "bubble-open" : `bubble ${m.streaming ? "muted" : ""}`}>
                 {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
                 {/* Every photo travelling with this message, INSIDE the bubble: extra
                     uploads on a user message, product photos found online on a research
@@ -3334,7 +3361,9 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
                      connector line down to the next; `text` is the live (shimmering) one. */
                   <ThinkSteps steps={m.steps ?? []} active={m.text} />
                 ) : (
-                  m.text && (m.role === "assistant" && !m.error ? <Markdown text={m.text} /> : <span>{m.text}</span>)
+                  m.text && (m.role === "assistant" && !m.error
+                    ? <Reveal text={m.text} animate={fresh} />
+                    : <span>{m.text}</span>)
                 )}
                 {/* The model's own reasoning, streaming under the timeline. */}
                 {m.streaming && thinking && (
@@ -3397,6 +3426,37 @@ function hostOf(url: string): string {
   } catch {
     return url.slice(0, 24);
   }
+}
+
+/** A reply arriving: the opening runs out character by character under a caret, and
+ *  about a third of the way in the rest of the answer fades up into place behind it.
+ *  Typing the WHOLE thing would make a long reply slower to appear than to read, and
+ *  fading the whole thing has no sense of something being written — the handoff is the
+ *  point. Rendered as plain text while typing and as markdown from the handoff on, so
+ *  no half-parsed `**` is ever on screen. Honours prefers-reduced-motion. */
+function Reveal({ text, animate }: { text: string; animate: boolean }) {
+  const reduced = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const [typed, setTyped] = useState(() => (animate && !reduced ? 0 : -1)); // -1 = done
+  // Deliberately NOT keyed on `typed`: depending on the state the loop sets makes the
+  // effect's own cleanup cancel the frame it just scheduled, and the text freezes one
+  // character in. One run per message, one rAF loop, driven to completion.
+  useEffect(() => {
+    if (!animate || reduced) return;
+    const target = Math.max(1, Math.round(text.length * 0.35));
+    const dur = Math.min(900, 120 + target * 11); // long replies don't type for longer
+    const t0 = performance.now();
+    let raf = 0;
+    const tick = () => {
+      const k = Math.min(1, (performance.now() - t0) / dur);
+      if (k >= 1) { setTyped(-1); return; }
+      setTyped(Math.max(1, Math.round(target * k)));
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [text, animate, reduced]);
+  if (typed < 0) return <div className={animate && !reduced ? "reveal-rest" : undefined}><Markdown text={text} /></div>;
+  return <span className="reveal-type">{text.slice(0, typed)}</span>;
 }
 
 /** The working reply as a step timeline: every completed stage keeps its row (check

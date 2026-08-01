@@ -144,9 +144,29 @@ export function usesMultiView(providerId: string, modelId: string): boolean {
  *  Premium keyed providers beat the free tier (accuracy); within a provider the
  *  model must match the input (photo vs text). Quality/speed words in the prompt
  *  steer the free tier between its fast and its high-quality model. */
+/** How much sculpting the request actually asks for, 0–1.
+ *
+ *  Auto used to walk a fixed preference order and take each provider's `recommended`
+ *  model, which meant "whichever paid engine you have a key for, at its best tier" —
+ *  a keychain, not a decision, and the expensive answer to a request for a cube. The
+ *  words carry more than that: a subject with fur, scales, faces or filigree needs the
+ *  geometry a premium engine resolves; a bracket, a plaque or a "simple" anything does
+ *  not, and the cheap tier's result is indistinguishable once it's printed.
+ */
+export function meshComplexity(prompt: string, hasImage: boolean): number {
+  const p = prompt.toLowerCase();
+  let score = hasImage ? 0.45 : 0.35; // a photo carries detail a text prompt has to earn
+  const rich = /\b(detailed|intricate|ornate|realistic|lifelike|high.?quality|accurate|best|filigree|engraved|fur|scales|feathers|hair|face|portrait|bust|figurine|character|creature|dragon|skull|statue|sculpt|jewel|texture[d]?)\b/g;
+  const plain = /\b(quick|fast|draft|rough|simple|basic|low.?poly|blocky|plain|flat|smooth|primitive|placeholder|test|cube|box|cylinder|sphere|bracket|plate|spacer|washer|plaque)\b/g;
+  score += Math.min(0.4, (p.match(rich)?.length ?? 0) * 0.16);
+  score -= Math.min(0.45, (p.match(plain)?.length ?? 0) * 0.18);
+  if (p.split(/\s+/).filter(Boolean).length > 24) score += 0.08; // a long brief describes a lot
+  return Math.max(0, Math.min(1, score));
+}
+
 export function pickAutoGenEngine(opts: { hasImage: boolean; prompt: string; hasKey: (id: string) => boolean }): { provider: string; model: string; label: string; reason: string } {
-  const wantsDetail = /\b(detailed|high.?quality|accurate|realistic|intricate|best)\b/i.test(opts.prompt);
-  const wantsFast = /\b(quick|fast|draft|rough|simple)\b/i.test(opts.prompt);
+  const detail = meshComplexity(opts.prompt, opts.hasImage);
+  const wantsDetail = detail >= 0.55;
   const order = ["fal", "tripo", "meshy", "replicate", "hf"];
   for (const id of order) {
     const prov = PROVIDERS.find((pp) => pp.id === id);
@@ -154,13 +174,25 @@ export function pickAutoGenEngine(opts: { hasImage: boolean; prompt: string; has
     if (prov.needsKey && !opts.hasKey(prov.id)) continue;
     const fits = prov.models.filter((m) => (opts.hasImage ? m.image : m.text));
     if (!fits.length) continue;
-    let model = fits.find((m) => m.recommended) ?? fits[0];
+    // Within the provider, the ask picks the tier — not the price list. A simple shape
+    // takes the cheapest capable model; a detailed one takes the recommended tier.
+    const byPrice = [...fits].sort((a, b) => (a.usd ?? 0) - (b.usd ?? 0));
+    const cheapest = byPrice[0];
+    const best = fits.find((m) => m.recommended) ?? byPrice[byPrice.length - 1];
+    let model = wantsDetail ? best : cheapest;
     if (prov.id === "hf" && opts.hasImage) {
-      // Free tier: fast+reliable by default; step up for "detailed", stay light for "quick".
-      if (wantsDetail && !wantsFast) model = fits.find((m) => /Hunyuan/i.test(m.id)) ?? model;
-      if (wantsFast) model = fits.find((m) => /stable-fast/i.test(m.id)) ?? model;
+      // Free tier is metered in GPU minutes rather than money: spend them on detail only
+      // when the request asks for it, and stay on the fast model otherwise.
+      model = wantsDetail ? (fits.find((m) => /Hunyuan/i.test(m.id)) ?? model) : (fits.find((m) => /stable-fast/i.test(m.id)) ?? model);
     }
-    const reason = prov.needsKey ? "your best keyed engine" : wantsDetail ? "free, high quality" : "free & reliable";
+    const saved = (best.usd ?? 0) - (model.usd ?? 0);
+    const reason = prov.needsKey
+      ? wantsDetail
+        ? "detailed subject — using the high-quality tier"
+        : saved > 0
+          ? `simple shape — the cheaper tier is enough (saves ~$${saved.toFixed(2)})`
+          : "your keyed engine"
+      : wantsDetail ? "free, high quality" : "free & reliable";
     return { provider: prov.id, model: model.id, label: model.label.split(" (")[0].split(" — ")[0], reason };
   }
   const hf = PROVIDERS[0];

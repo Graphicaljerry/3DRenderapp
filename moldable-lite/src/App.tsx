@@ -245,8 +245,13 @@ function sourceText(source: BuildInput): string {
 export default function App() {
   const [key, setKey] = useState(() => localStorage.getItem(KEY_LS) ?? "");
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_LS) ?? MODELS[0].id);
-  // "entered" survives reloads for free-mode users too (not only key holders).
-  const [entered, setEnteredState] = useState(false);
+  // "entered" survives reloads for free-mode users too (not only key holders). The flag
+  // was being WRITTEN and never read, so every refresh dumped you back on the launchpad
+  // mid-session. Now a reload puts you back in the workspace you were in; the launchpad
+  // is reached deliberately — New chat, or the wordmark.
+  const [entered, setEnteredState] = useState(() => {
+    try { return localStorage.getItem("moldable_entered") === "1"; } catch { return false; }
+  });
   // The Launchpad's staggered entrance is a first-impression, worth 770 ms when the page
   // loads. Now that the wordmark navigates back to it mid-session it would replay on every
   // trip — and the resume chip and recents animate in LAST, so the one thing a returning
@@ -1402,7 +1407,16 @@ export default function App() {
   }
   useEffect(() => {
     const id = localStorage.getItem("moldable_last_project");
-    if (id) void getProject(id).then((p) => { if (p) setResume({ id: p.id, name: p.name }); });
+    if (id) {
+      void getProject(id).then((p) => {
+        if (!p) return;
+        // Reloading INSIDE the workspace reopens what was on the canvas — an empty
+        // workspace after a refresh reads as "my work is gone". From the launchpad it
+        // stays an offer (the resume chip), because that screen is a deliberate choice.
+        if (localStorage.getItem("moldable_entered") === "1") void openProjectById(p);
+        else setResume({ id: p.id, name: p.name });
+      });
+    }
     void loadRecent();
   }, []);
   async function resumeLast() {

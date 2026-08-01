@@ -657,13 +657,11 @@ button { font-family: inherit; cursor: pointer; }
 .update-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .update-chip.installing { color: var(--mut); border-color: var(--bord); background: none; font-weight: 500; }
 
-/* Pinned to the CORNER itself, not a member of the right-dock stack: that stack
-   steps left to clear the open Inspector card, which stranded the zoom buttons in
-   the middle of the canvas. bottom matches the right-dock's floor — directly above
-   the orientation gizmo's corner viewport. */
-.zoom-ctl { position: absolute; right: 10px; bottom: 112px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
-/* The collapsed-inspector rail is flush to the right edge — step just clear of it. */
-.viewer-body:has(.dock-rail) .zoom-ctl { right: 52px; }
+/* BOTTOM-LEFT corner. Pinned right-and-above-the-gizmo it still read as floating in
+   the canvas — a control anchored 112px off the bottom edge has no edge to belong to.
+   The left corner is the only one nothing else claims (the orientation gizmo owns
+   bottom-right, the view pills the bottom centre), and the tool rail ends well above it. */
+.zoom-ctl { position: absolute; left: 10px; bottom: 12px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 /* Open Inspector: the corner belongs to the card (a tall panel — Adjust with a dozen
    rows — reached straight down over the buttons). The cluster takes the corner of the
    FREE canvas instead: left of the card, and all the way down, because the orientation
@@ -1728,6 +1726,20 @@ details.guide { margin-top: 10px; }
   overflow: hidden;
   text-overflow: ellipsis;
   opacity: 0.9;
+}
+
+/* Dark mode: --chrome sits within a few percent of the dark canvas, so the rail
+   dissolved into the scene. Lift its surface and add a hairline — the pill has to read
+   as chrome floating OVER the stage, not as part of it. */
+[data-theme="dark"] .canvas-rail {
+  background: #24262a;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 18px 22px -8px rgba(0, 0, 0, 0.55);
+}
+[data-theme="dark"] .zoom-ctl,
+[data-theme="dark"] .view-snaps {
+  background: #24262a;
+  border-color: rgba(255, 255, 255, 0.09);
 }
 
 /* ---- In-canvas tool rail (Photoshop-style, left edge) + top-right cluster ----

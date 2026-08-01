@@ -42,6 +42,17 @@ export type Solid = {
 
 /* ---------- builders ---------- */
 
+/** A rounded-ish n-gon, used where a circle is wanted without 40 points. Lives with the
+ *  builders because module-init consts (GEAR_SOLID) need it before the parts section. */
+const disc = (r: number, sides = 20, cx = 0.5, cy = 0.5): Vec2[] => {
+  const out: Vec2[] = [];
+  for (let i = 0; i < sides; i++) {
+    const a = (i / sides) * Math.PI * 2;
+    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
+  }
+  return out;
+};
+
 /** A constant cross-section extruded straight up — how flat parts actually print. */
 function prism(poly: Vec2[], height: number, layers: number, topLoops?: Vec2[][], holes: Vec2[][] = []): Solid {
   const loops = [poly, ...holes];
@@ -160,19 +171,57 @@ function centred(poly: Vec2[]): Vec2[] {
   return poly.map(([x, y]) => [x + dx, y + dy] as Vec2);
 }
 
-/** 12-tooth gear footprint. */
+/** 12-tooth gear footprint. Flanks taper (tip narrower than root) — square-cut teeth
+ *  read as a sprocket. */
 const GEAR_POLY: Vec2[] = (() => {
   const pts: Vec2[] = [];
   const TEETH = 12, RO = 0.30, RI = 0.235;
   for (let i = 0; i < TEETH; i++) {
     const a0 = (i / TEETH) * Math.PI * 2;
     const step = (Math.PI * 2) / TEETH / 4;
-    for (const [k, r] of [[0, RI], [1, RO], [2, RO], [3, RI]] as [number, number][]) {
+    for (const [k, r] of [[0, RI], [1.25, RO], [1.75, RO], [3, RI]] as [number, number][]) {
       const a = a0 + k * step;
       pts.push([0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r]);
     }
   }
   return pts;
+})();
+
+/** The gear's shaft bore with its keyway, as ONE clean loop: an arc that opens at the
+ *  top and squares off into the key slot. The old version appended the slot's corners
+ *  after a full circle, which self-intersected — on screen the middle was a blob. */
+const GEAR_BORE: Vec2[] = (() => {
+  const r = 0.078, kw = 0.022, kd = 0.026, N = 28;
+  const half = Math.asin(kw / r);                 // half-angle the slot removes from the arc
+  const start = Math.PI / 2 + half;               // left slot edge, sweeping the long way round
+  const sweep = Math.PI * 2 - 2 * half;           // ends at the right slot edge
+  const out: Vec2[] = [];
+  for (let i = 0; i <= N; i++) {
+    const a = start + (i / N) * sweep;
+    out.push([0.5 + Math.cos(a) * r, 0.5 + Math.sin(a) * r]);
+  }
+  out.push([0.5 + kw, 0.5 + r + kd], [0.5 - kw, 0.5 + r + kd]);
+  return out;
+})();
+
+/** Bore + keyway through everything, five round lightening holes, and a counterbored
+ *  hub: the top quarter swaps the bore loop for a wider recess circle, so the finished
+ *  part sinks around the shaft the way a real gear's hub does. Same loop and point
+ *  counts either side of the step, so the two-percent transition band lerps cleanly. */
+const GEAR_SOLID: Solid = (() => {
+  const holes = [0, 1, 2, 3, 4].map((i) => {
+    const a = (i / 5) * Math.PI * 2 + Math.PI / 10;
+    return disc(0.046, 20, 0.5 + Math.cos(a) * 0.168, 0.5 + Math.sin(a) * 0.168);
+  });
+  const lower = [GEAR_POLY, GEAR_BORE, ...holes];
+  const upper = [GEAR_POLY, disc(0.112, GEAR_BORE.length), ...holes];
+  return {
+    sections: [
+      { z: 0, loops: lower, fill: 1 }, { z: 0.72, loops: lower, fill: 1 },
+      { z: 0.76, loops: upper, fill: 1 }, { z: 1, loops: upper, fill: 1 },
+    ],
+    height: 0.075, layers: 8,
+  };
 })();
 
 /** "JERRY" as raised bars on the tag's top face — 3x5 grid glyphs, y UP in grid space. */
@@ -216,15 +265,6 @@ const rect = (w: number, d: number): Vec2[] => [
   [0.5 - w / 2, 0.5 - d / 2], [0.5 + w / 2, 0.5 - d / 2],
   [0.5 + w / 2, 0.5 + d / 2], [0.5 - w / 2, 0.5 + d / 2],
 ];
-/** A rounded-ish n-gon, used where a circle is wanted without 40 points. */
-const disc = (r: number, sides = 20, cx = 0.5, cy = 0.5): Vec2[] => {
-  const out: Vec2[] = [];
-  for (let i = 0; i < sides; i++) {
-    const a = (i / sides) * Math.PI * 2;
-    out.push([cx + Math.cos(a) * r, cy + Math.sin(a) * r]);
-  }
-  return out;
-};
 
 /* ---------- helpers for the parts built from real millimetres ---------- */
 
@@ -468,16 +508,9 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
   // ---- flat, printed lying down: few layers, and that contrast is the rhythm ----
   {
     name: "gear",
-    // Bore, keyway and lightening holes. A toothed disc with a solid middle is a cog in a
-    // diagram; the bore is what says it goes on a shaft.
-    solid: prism(GEAR_POLY, 0.075, 7, undefined, [
-      [...disc(0.095, 18), [0.5 - 0.028, 0.5 + 0.095], [0.5 - 0.028, 0.5 + 0.125],
-       [0.5 + 0.028, 0.5 + 0.125], [0.5 + 0.028, 0.5 + 0.095]],
-      ...[0, 1, 2, 3, 4].map((i) => {
-        const a = (i / 5) * Math.PI * 2 + Math.PI / 10;
-        return disc(0.043, 12, 0.5 + Math.cos(a) * 0.165, 0.5 + Math.sin(a) * 0.165);
-      }),
-    ]),
+    // Bore, keyway, lightening holes, counterbored hub. A toothed disc with a solid
+    // middle is a cog in a diagram; the bore is what says it goes on a shaft.
+    solid: GEAR_SOLID,
   },
   {
     name: "name tag",

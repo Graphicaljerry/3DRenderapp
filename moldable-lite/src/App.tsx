@@ -4462,8 +4462,11 @@ function LaunchBackdrop() {
       if (solidTo > 0) {
         g.fillStyle = t.body;
         g.globalAlpha = 0.42 + 0.48 * f;
-        path(0, solidTo);
-        g.fill();
+        // Every loop, even-odd: the hole loops PUNCH the fill instead of being drawn on
+        // top of it, so a bore shows the plate through — a cutout, not an engraving.
+        // (fromLayers computes nesting parity, so even-odd is exactly right for meshes.)
+        path(0, whole);
+        g.fill("evenodd");
       }
       /* Outer wall solid, inner loops as the blueprint. A single stroke weight for both gave
          every line equal say, and on a busy part the interior detail then competed with the
@@ -4548,8 +4551,10 @@ function LaunchBackdrop() {
       if (solidTo > 0) {
         g.fillStyle = t.body;
         g.globalAlpha = 0.42 + 0.48 * f;
-        path(0, solidTo);
-        g.fill();
+        // Completed loops only, even-odd — a hole the bead has finished tracing starts
+        // punching immediately; one still being traced stays a line until it closes.
+        path(0, whole);
+        g.fill("evenodd");
       }
       g.strokeStyle = t.accent;
       if (solidTo > 0) {

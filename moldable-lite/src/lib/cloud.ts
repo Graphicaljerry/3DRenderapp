@@ -90,7 +90,26 @@ export async function completeAuthReturn(): Promise<{ email: string } | null> {
   return u;
 }
 
+/** Can THIS machine reach the sync service? OAuth navigates the whole tab to the
+    service's URL — when supabase.co is blocked (DNS filter, VPN, ad-block shields,
+    some ISP resolvers), that lands the user on a dead browser error page
+    (ERR_ADDRESS_UNREACHABLE — a real report). Check first and fail with words. */
+async function ensureReachable(): Promise<void> {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch(`${SUPA_URL}/auth/v1/health`, { signal: ctl.signal, headers: { apikey: SUPA_KEY } });
+    clearTimeout(t);
+    if (!r.ok && r.status !== 401) throw new Error(String(r.status));
+  } catch {
+    throw new Error(
+      "Your network can't reach the sync service (supabase.co looks blocked or unreachable from here — the service itself is up). Common culprits: DNS filtering, a VPN, or browser shields. Try another network or DNS (e.g. 1.1.1.1), or allow supabase.co, then try again.",
+    );
+  }
+}
+
 export async function cloudOAuth(provider: "github" | "google"): Promise<void> {
+  await ensureReachable(); // fail HERE with an explanation, not on a dead browser page
   const c = await supa();
   const { error } = await c.auth.signInWithOAuth({ provider, options: { redirectTo: appUrl() } });
   if (error) throw new Error(error.message);
@@ -98,6 +117,7 @@ export async function cloudOAuth(provider: "github" | "google"): Promise<void> {
 }
 
 export async function cloudMagicLink(email: string): Promise<string> {
+  await ensureReachable();
   const c = await supa();
   const { error } = await c.auth.signInWithOtp({ email, options: { emailRedirectTo: appUrl() } });
   if (error) throw new Error(error.message);
@@ -109,6 +129,7 @@ export async function cloudMagicLink(email: string): Promise<string> {
  *  magic link (Supabase's resetPasswordForEmail), so there is no separate reset page to
  *  host and the user lands back in the app already signed in. */
 export async function cloudResetPassword(email: string): Promise<string> {
+  await ensureReachable();
   const c = await supa();
   const { error } = await c.auth.resetPasswordForEmail(email, { redirectTo: appUrl() });
   if (error) throw new Error(error.message);
@@ -130,6 +151,7 @@ export async function cloudUser(): Promise<{ email: string } | null> {
 }
 
 export async function cloudSignUp(email: string, password: string): Promise<string> {
+  await ensureReachable();
   const c = await supa();
   const { data, error } = await c.auth.signUp({ email, password });
   if (error) throw new Error(error.message);
@@ -139,6 +161,7 @@ export async function cloudSignUp(email: string, password: string): Promise<stri
 }
 
 export async function cloudSignIn(email: string, password: string): Promise<void> {
+  await ensureReachable();
   const c = await supa();
   const { error } = await c.auth.signInWithPassword({ email, password });
   if (error) throw new Error(error.message);

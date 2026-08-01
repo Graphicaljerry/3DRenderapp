@@ -11,7 +11,7 @@ import { getEngineSelection, type EngineSelection } from "./engine/selectEngine"
 import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfacePattern } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import type { GenerativeEngine } from "./engine/generativeEngine";
-import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp } from "./engine/types";
+import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
@@ -2584,12 +2584,131 @@ export default function App() {
   const magnetToolRef = useRef(magnetTool);
   magnetToolRef.current = magnetTool;
   function toggleMagnetTool() {
+    setHoleEdit(null); // tool change drops any hole-edit selection
     if (magnetToolRef.current) { setMagnetTool(null); return; }
     dismissOverlays(); // one tool at a time — put down select/measure/paint/hole first
     // Glue by default: a press-fit that works loose drops a magnet inside a finished
     // part, and nobody re-prints a helmet for that. 8×3 is the cosplay-panel staple.
     setMagnetTool({ size: MAGNET_SIZES[5], fit: "glue", pair: false, snap: 1, placed: [] });
   }
+  // ---- Non-destructive hole editing -------------------------------------------
+  // Magnet pockets and screw holes are OPS in the parametric chain, never baked —
+  // so clicking one (with its tool armed) selects it for editing: resize in place,
+  // Move (next click re-places it), Remove, or Remove all. Every change rebuilds
+  // from the modified chain and lands as a version, so Undo walks back through it.
+  const [holeEdit, setHoleEdit] = useState<{ family: "magnet" | "screw"; index: number; moving: boolean } | null>(null);
+  const holeEditRef = useRef<typeof holeEdit>(null);
+  holeEditRef.current = holeEdit;
+  const isFamilyOp = (o: CadOp, family: "magnet" | "screw") =>
+    family === "magnet" ? o.type === "hole" && (o as { tag?: string }).tag === "magnet" : o.type === "screw";
+
+  /** Index (into source.ops) of the same-family drilled op under a canvas click:
+   *  laterally inside its bore, and between its entry plane and floor along the axis. */
+  function holeOpAt(at: [number, number, number], family: "magnet" | "screw"): number {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return -1;
+    const rc = cur.recenter ?? [0, 0, 0];
+    const ops = cur.source.ops ?? [];
+    for (let i = 0; i < ops.length; i++) {
+      const o = ops[i] as CadOp & { at: [number, number, number]; normal: [number, number, number] };
+      if (!isFamilyOp(o, family)) continue;
+      const dx = at[0] - (o.at[0] - rc[0]), dy = at[1] - (o.at[1] - rc[1]), dz = at[2] - (o.at[2] - rc[2]);
+      const along = dx * o.normal[0] + dy * o.normal[1] + dz * o.normal[2];
+      const lat = Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - along * along));
+      const r = (o.type === "hole" ? o.diameter : o.type === "screw" ? Math.max(o.countersink, o.major) : 0) / 2;
+      const depth = (o as { depth?: number }).depth || 12;
+      if (lat <= r + 0.4 && along <= 1.5 && along >= -(depth + 1.5)) return i;
+    }
+    return -1;
+  }
+
+  /** Rebuild the CAD solid from a modified op chain (the editing workhorse). */
+  async function rebuildWithOps(nextOps: CadOp[], summary: string, prompt: string) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code" || !sel) return;
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: cur.source.code, params: cur.source.params, ops: nextOps });
+      applyResult(res, project?.name ?? "Model", summary, prompt);
+      appendMsg({ role: "assistant", text: `${summary}. Undo reverts it.` });
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't rebuild after the hole edit: ${String(err?.message ?? err)}`, error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Re-place the selected hole at a newly clicked spot (Move mode). */
+  async function moveHoleTo(spot: { at: [number, number, number]; normal: [number, number, number] }) {
+    const he = holeEditRef.current;
+    const cur = resultRef.current;
+    if (!he || !cur || cur.source.kind !== "code") return;
+    const rc = cur.recenter ?? [0, 0, 0];
+    const ops = [...(cur.source.ops ?? [])];
+    const o = { ...(ops[he.index] as CadOp & { at: [number, number, number]; normal: [number, number, number] }) };
+    o.at = [spot.at[0] + rc[0], spot.at[1] + rc[1], spot.at[2] + rc[2]];
+    o.normal = spot.normal;
+    ops[he.index] = o;
+    setHoleEdit({ ...he, moving: false });
+    await rebuildWithOps(ops, he.family === "magnet" ? "Moved the magnet pocket" : "Moved the screw hole", "move hole");
+  }
+
+  /** Resize the selected magnet pocket to the tool's (possibly just-changed) preset. */
+  async function editMagnetApply(next: { size?: MagnetSize; fit?: MagnetFit }) {
+    const t = magnetToolRef.current;
+    const he = holeEditRef.current;
+    const cur = resultRef.current;
+    if (!t || !he || he.family !== "magnet" || !cur || cur.source.kind !== "code") return;
+    const size = next.size ?? t.size;
+    const fit = next.fit ?? t.fit;
+    const { diameter, depth } = magnetPocket(size, fit);
+    const ops = [...(cur.source.ops ?? [])];
+    ops[he.index] = { ...(ops[he.index] as HoleOp), diameter, depth };
+    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm)`, "resize magnet");
+  }
+
+  /** Resize/refit the selected screw hole to the tool's (possibly just-changed) preset. */
+  async function editScrewApply(next: { size?: ScrewSize; fit?: ScrewFit; countersink?: boolean }) {
+    const t = screwToolRef.current;
+    const he = holeEditRef.current;
+    const cur = resultRef.current;
+    if (!t || !he || he.family !== "screw" || !cur || cur.source.kind !== "code") return;
+    const size = next.size ?? t.size;
+    const fit = next.fit ?? t.fit;
+    const cs = next.countersink ?? t.countersink;
+    const cut = screwCut(size, fit, cs);
+    const ops = [...(cur.source.ops ?? [])];
+    ops[he.index] = { ...(ops[he.index] as ScrewOp), minor: cut.minor, major: cut.major, pitch: cut.pitch, depth: cut.depth, countersink: cut.countersink };
+    await rebuildWithOps(ops, `Changed the screw hole — now a ${cut.what}`, "resize screw");
+  }
+
+  /** Delete the selected hole from the chain. */
+  async function deleteEditedHole() {
+    const he = holeEditRef.current;
+    const cur = resultRef.current;
+    if (!he || !cur || cur.source.kind !== "code") return;
+    const ops = [...(cur.source.ops ?? [])];
+    ops.splice(he.index, 1);
+    setHoleEdit(null);
+    await rebuildWithOps(ops, he.family === "magnet" ? "Removed the magnet pocket" : "Removed the screw hole", "remove hole");
+  }
+
+  /** Erase every hole this tool ever drilled. */
+  async function removeAllHoles(family: "magnet" | "screw") {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = cur.source.ops ?? [];
+    const keep = ops.filter((o) => !isFamilyOp(o, family));
+    const n = ops.length - keep.length;
+    if (!n) return;
+    setHoleEdit(null);
+    await rebuildWithOps(keep, `Removed all ${n} ${family === "magnet" ? "magnet pocket" : "screw hole"}${n > 1 ? "s" : ""}`, `remove all ${family}`);
+  }
+
+  /** How many ops of a family the current model carries (drives "Remove all (N)"). */
+  const familyOpCount = (family: "magnet" | "screw") =>
+    result?.source.kind === "code" ? (result.source.ops ?? []).filter((o) => isFamilyOp(o, family)).length : 0;
+
   async function placeMagnet(spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) {
     const t = magnetToolRef.current;
     if (!t) return;
@@ -2602,11 +2721,23 @@ export default function App() {
       setMagnetTool(null);
       return;
     }
+    // Move mode: this click is the pocket's new home. A click ON an existing pocket
+    // (outside move mode) selects it for editing instead of drilling a second bore
+    // through it.
+    if (holeEditRef.current?.family === "magnet" && holeEditRef.current.moving) { await moveHoleTo(spot); return; }
+    const hitIx = holeOpAt(spot.at, "magnet");
+    if (hitIx >= 0) {
+      setHoleEdit({ family: "magnet", index: hitIx, moving: false });
+      explainOnce("hole-edit", "That's an existing pocket, so you're now **editing** it: pick a different size/fit to resize it in place, **Move** to re-place it with your next click, or **Remove**. Click bare surface to drill a new one. Everything is undoable.", "Editing that pocket — resize, Move or Remove in the panel.");
+      return;
+    }
+    setHoleEdit(null); // drilling fresh — drop any lingering selection
     const { diameter, depth } = magnetPocket(t.size, t.fit);
     const src = cur.source;
     const rc = cur.recenter ?? [0, 0, 0];
     const mkOp = (at: [number, number, number], normal: [number, number, number]) => ({
       type: "hole" as const,
+      tag: "magnet",
       at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]] as [number, number, number],
       normal,
       diameter,
@@ -2742,6 +2873,7 @@ export default function App() {
   const screwToolRef = useRef(screwTool);
   screwToolRef.current = screwTool;
   function toggleScrewTool() {
+    setHoleEdit(null); // tool change drops any hole-edit selection
     if (screwToolRef.current) { setScrewTool(null); return; }
     dismissOverlays();
     setScrewTool({ size: SCREW_SIZES[2], fit: "bite", countersink: true, snap: 1, placed: [] }); // M3 — the maker staple
@@ -2755,6 +2887,14 @@ export default function App() {
       setScrewTool(null);
       return;
     }
+    if (holeEditRef.current?.family === "screw" && holeEditRef.current.moving) { await moveHoleTo(spot); return; }
+    const scrHit = holeOpAt(spot.at, "screw");
+    if (scrHit >= 0) {
+      setHoleEdit({ family: "screw", index: scrHit, moving: false });
+      explainOnce("hole-edit", "That's an existing hole, so you're now **editing** it: pick a different size/fit to change it in place, **Move** to re-place it with your next click, or **Remove**. Click bare surface to cut a new one. Everything is undoable.", "Editing that screw hole — resize, Move or Remove in the panel.");
+      return;
+    }
+    setHoleEdit(null);
     const cut = screwCut(t.size, t.fit, t.countersink);
     const src = cur.source;
     const rc = cur.recenter ?? [0, 0, 0];
@@ -4300,6 +4440,7 @@ export default function App() {
     setSelectedFaces([]);
     setModelSelected(false);
     setHoleDraft(null); // drop any un-drilled hole draft
+    setHoleEdit(null); // and any hole-edit selection
     setMagnetTool(null); // magnet mode goes down with the rest
     setScrewTool(null);
   };
@@ -4582,6 +4723,13 @@ export default function App() {
           patch: (patch) => setMagnetTool((t) => (t ? { ...t, ...patch } : t)),
           place: (spot) => void placeMagnet(spot),
           pocket: magnetTool ? magnetPocket(magnetTool.size, magnetTool.fit) : null,
+          edit: holeEdit?.family === "magnet" ? { moving: holeEdit.moving } : null,
+          editApply: (next) => void editMagnetApply(next),
+          editMove: () => setHoleEdit((h) => (h ? { ...h, moving: !h.moving } : h)),
+          editDelete: () => void deleteEditedHole(),
+          editDone: () => setHoleEdit(null),
+          removeAll: () => void removeAllHoles("magnet"),
+          placedCount: familyOpCount("magnet"),
         }}
         screwCtl={{
           tool: screwTool,
@@ -4591,6 +4739,13 @@ export default function App() {
           patch: (patch) => setScrewTool((t) => (t ? { ...t, ...patch } : t)),
           place: (spot) => void placeScrew(spot),
           cut: screwTool ? screwCut(screwTool.size, screwTool.fit, screwTool.countersink) : null,
+          edit: holeEdit?.family === "screw" ? { moving: holeEdit.moving } : null,
+          editApply: (next) => void editScrewApply(next),
+          editMove: () => setHoleEdit((h) => (h ? { ...h, moving: !h.moving } : h)),
+          editDelete: () => void deleteEditedHole(),
+          editDone: () => setHoleEdit(null),
+          removeAll: () => void removeAllHoles("screw"),
+          placedCount: familyOpCount("screw"),
         }}
         views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
         onPickView={pickView}

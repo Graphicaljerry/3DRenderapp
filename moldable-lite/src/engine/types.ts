@@ -25,6 +25,7 @@ export interface HoleOp {
   normal: Vec3; // face outward normal at the point (carried from the pick — no re-finding)
   diameter: number;
   depth: number;
+  tag?: string; // which tool drilled it ("magnet") — drives non-destructive editing; the kernel ignores it
 }
 /** A screw hole: pilot bore plus, optionally, a modelled helical thread and a
  *  countersink. `major > minor` with a pitch cuts the spiral groove a screw bites

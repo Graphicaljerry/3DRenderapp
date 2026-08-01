@@ -1405,6 +1405,13 @@ interface Props {
     patch: (p: Partial<NonNullable<Props["magnetCtl"]["tool"]>>) => void;
     place: (spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) => void;
     pocket: { diameter: number; depth: number } | null; // the current size+fit as a pocket
+    edit: { moving: boolean } | null; // a placed pocket is selected for editing
+    editApply: (next: { size?: { d: number; h: number; note?: string }; fit?: "press" | "glue" }) => void;
+    editMove: () => void;
+    editDelete: () => void;
+    editDone: () => void;
+    removeAll: () => void;
+    placedCount: number;
   };
   screwCtl: {
     tool: {
@@ -1420,6 +1427,13 @@ interface Props {
     patch: (p: Partial<NonNullable<Props["screwCtl"]["tool"]>>) => void;
     place: (spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) => void;
     cut: { minor: number; major: number; pitch: number; depth: number; countersink: number; what: string } | null;
+    edit: { moving: boolean } | null; // a placed hole is selected for editing
+    editApply: (next: { size?: ScrewSizeLike; fit?: "through" | "bite" | "insert"; countersink?: boolean }) => void;
+    editMove: () => void;
+    editDelete: () => void;
+    editDone: () => void;
+    removeAll: () => void;
+    placedCount: number;
   };
   onPickImage: (f: File) => void;
   onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
@@ -2585,7 +2599,7 @@ export function Workspace(p: Props) {
                               return (
                                 <button key={`${s.d}x${s.h}`} role="radio" aria-checked={on} className={`msize${on ? " on" : ""}`}
                                   title={s.note ? `${s.d}×${s.h} mm — ${s.note}` : `${s.d}×${s.h} mm`}
-                                  onClick={() => p.magnetCtl.patch({ size: s })}>
+                                  onClick={() => { p.magnetCtl.patch({ size: s }); p.magnetCtl.editApply({ size: s }); }}>
                                   {s.d}×{s.h}
                                 </button>
                               );
@@ -2595,10 +2609,10 @@ export function Workspace(p: Props) {
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="How the magnet is held in">
                             <button className={p.magnetCtl.tool.fit === "glue" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "glue"}
                               title="The hole is cut 0.25 mm wider than the magnet, with a little extra depth, so a drop of super glue has somewhere to sit. The magnet can't work loose later — the safe choice, and the default."
-                              onClick={() => p.magnetCtl.patch({ fit: "glue" })}>Glued in</button>
+                              onClick={() => { p.magnetCtl.patch({ fit: "glue" }); p.magnetCtl.editApply({ fit: "glue" }); }}>Glued in</button>
                             <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
                               title="The hole is cut just 0.1 mm wider, so the magnet seats with thumb pressure and is held by friction alone — no glue needed, but a hard knock can pop it out."
-                              onClick={() => p.magnetCtl.patch({ fit: "press" })}>Push fit</button>
+                              onClick={() => { p.magnetCtl.patch({ fit: "press" }); p.magnetCtl.editApply({ fit: "press" }); }}>Push fit</button>
                           </div>
                           <div className="paint-lbl">Placing</div>
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="Placement snapping">
@@ -2613,7 +2627,24 @@ export function Workspace(p: Props) {
                             <input type="checkbox" checked={p.magnetCtl.tool.pair} onChange={(e) => p.magnetCtl.patch({ pair: e.target.checked })} />
                             <span>Add one on the back too</span>
                           </label>
-                          <div className="magnet-hint">Hover the model, click to sink the pocket. Place one near another and it lines up square with it — the dashed line shows what it caught.</div>
+                          {p.magnetCtl.edit ? (
+                            <>
+                              <div className="paint-lbl">Editing this pocket</div>
+                              <div className="hole-edit-actions">
+                                <button className={`ghost sm${p.magnetCtl.edit.moving ? " on" : ""}`} onClick={p.magnetCtl.editMove} title="Re-place it: your next click on the model is its new home">{p.magnetCtl.edit.moving ? "Click the new spot…" : "Move"}</button>
+                                <button className="ghost sm" onClick={p.magnetCtl.editDelete} title="Fill this pocket back in — the model rebuilds without it">Remove</button>
+                                <button className="ghost sm" onClick={p.magnetCtl.editDone} title="Stop editing — clicks place new pockets again">Done</button>
+                              </div>
+                              <div className="magnet-hint">Size and fit above now change THIS pocket, in place. All undoable.</div>
+                            </>
+                          ) : (
+                            <div className="magnet-hint">Hover the model, click to sink the pocket. Click an existing pocket to edit it — resize, move or remove, nothing is baked in. Place one near another and it lines up square with it.</div>
+                          )}
+                          {p.magnetCtl.placedCount > 0 && !p.magnetCtl.edit && (
+                            <button className="ghost sm hole-clear" onClick={p.magnetCtl.removeAll} title="Fill every magnet pocket back in — the model rebuilds without them (undoable)">
+                              Remove all ({p.magnetCtl.placedCount})
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}
@@ -2645,7 +2676,7 @@ export function Workspace(p: Props) {
                                 <button key={s.id} role="radio" aria-checked={on} className={`msize${on ? " on" : ""}`}
                                   disabled={noInsert}
                                   title={noInsert ? `No standard heat-set insert for ${s.label}` : s.note ? `${s.label} — ${s.note}` : s.label}
-                                  onClick={() => p.screwCtl.patch({ size: s })}>
+                                  onClick={() => { p.screwCtl.patch({ size: s }); p.screwCtl.editApply({ size: s }); }}>
                                   {s.label}
                                 </button>
                               );
@@ -2655,17 +2686,17 @@ export function Workspace(p: Props) {
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="Hole type">
                             <button className={p.screwCtl.tool.fit === "bite" ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.fit === "bite"}
                               title="The screw threads INTO this part: the bore is the plastic tap size and the wall is ribbed at the thread pitch, so the screw cuts its own path and holds like a tapped hole."
-                              onClick={() => p.screwCtl.patch({ fit: "bite" })}>Bites in</button>
+                              onClick={() => { p.screwCtl.patch({ fit: "bite" }); p.screwCtl.editApply({ fit: "bite" }); }}>Bites in</button>
                             <button className={p.screwCtl.tool.fit === "through" ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.fit === "through"}
                               title="The screw slides through this part and tightens into the next one (or a nut) — a standard clearance bore, all the way through."
-                              onClick={() => p.screwCtl.patch({ fit: "through" })}>Slides through</button>
+                              onClick={() => { p.screwCtl.patch({ fit: "through" }); p.screwCtl.editApply({ fit: "through" }); }}>Slides through</button>
                             <button className={p.screwCtl.tool.fit === "insert" ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.fit === "insert"}
                               title="Pocket for a heat-set brass insert (Ruthex-style) — melt it in with a soldering iron and the screw threads into brass, the strongest hold in plastic."
-                              onClick={() => { const cur = p.screwCtl.tool!.size; p.screwCtl.patch({ fit: "insert", ...(cur.insertBore ? {} : { size: p.screwCtl.sizes.find((x) => x.insertBore)! }) }); }}>Heat-set</button>
+                              onClick={() => { const cur = p.screwCtl.tool!.size; const sz = cur.insertBore ? cur : p.screwCtl.sizes.find((x) => x.insertBore)!; p.screwCtl.patch({ fit: "insert", ...(cur.insertBore ? {} : { size: sz }) }); p.screwCtl.editApply({ fit: "insert", size: sz }); }}>Heat-set</button>
                           </div>
                           {p.screwCtl.tool.fit === "through" && (
                             <label className="magnet-pair" title="Widens the top of the hole into an 82° cone, so a flat (countersunk) screw head sits flush with the surface.">
-                              <input type="checkbox" checked={p.screwCtl.tool.countersink} onChange={(e) => p.screwCtl.patch({ countersink: e.target.checked })} />
+                              <input type="checkbox" checked={p.screwCtl.tool.countersink} onChange={(e) => { p.screwCtl.patch({ countersink: e.target.checked }); p.screwCtl.editApply({ countersink: e.target.checked }); }} />
                               <span>Flush head (countersink)</span>
                             </label>
                           )}
@@ -2676,7 +2707,24 @@ export function Workspace(p: Props) {
                             <button className={p.screwCtl.tool.snap === 0 ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.snap === 0}
                               onClick={() => p.screwCtl.patch({ snap: 0 })}>Free</button>
                           </div>
-                          <div className="magnet-hint">{p.screwCtl.cut ? p.screwCtl.cut.what : ""} Hover the model, click to cut. Nearby holes snap into line.</div>
+                          {p.screwCtl.edit ? (
+                            <>
+                              <div className="paint-lbl">Editing this hole</div>
+                              <div className="hole-edit-actions">
+                                <button className={`ghost sm${p.screwCtl.edit.moving ? " on" : ""}`} onClick={p.screwCtl.editMove} title="Re-place it: your next click on the model is its new home">{p.screwCtl.edit.moving ? "Click the new spot…" : "Move"}</button>
+                                <button className="ghost sm" onClick={p.screwCtl.editDelete} title="Fill this hole back in — the model rebuilds without it">Remove</button>
+                                <button className="ghost sm" onClick={p.screwCtl.editDone} title="Stop editing — clicks cut new holes again">Done</button>
+                              </div>
+                              <div className="magnet-hint">Size and fit above now change THIS hole, in place. All undoable.</div>
+                            </>
+                          ) : (
+                            <div className="magnet-hint">{p.screwCtl.cut ? p.screwCtl.cut.what : ""} Hover the model, click to cut. Click an existing hole to edit it — resize, move or remove, nothing is baked in.</div>
+                          )}
+                          {p.screwCtl.placedCount > 0 && !p.screwCtl.edit && (
+                            <button className="ghost sm hole-clear" onClick={p.screwCtl.removeAll} title="Fill every screw hole back in — the model rebuilds without them (undoable)">
+                              Remove all ({p.screwCtl.placedCount})
+                            </button>
+                          )}
                         </div>
                       </div>
                     )}

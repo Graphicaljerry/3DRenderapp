@@ -688,6 +688,11 @@ button { font-family: inherit; cursor: pointer; }
 .apb-hint { font-size: 11px; color: var(--mut); }
 @media (max-width: 900px) { .apb-hint { display: none; } }
 
+/* Hole editing (magnet/screw flyouts) */
+.hole-edit-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.hole-edit-actions .ghost.sm.on { border-color: var(--accent); color: var(--accent-d); }
+.hole-clear { margin-top: 6px; }
+
 /* Typed-degrees rotate in the Move flyout */
 .rotate-deg { width: 58px; padding: 5px 6px; font: inherit; font-size: 12.5px; background: var(--bg); color: var(--ink); border: 1px solid var(--bord-strong); border-radius: 8px; }
 .apb-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }

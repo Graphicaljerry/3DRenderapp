@@ -139,6 +139,7 @@ interface Props {
   onTransformCommit: (c: TransformCommit) => void;
   onMeasurePoint: (p: [number, number, number]) => void;
   onMeasureSegment: (a: [number, number, number], b: [number, number, number]) => void; // drag-a-line measure
+  onMeasureDelete: (id: string) => void; // tap a measurement's label in measure mode
   onPushPull: (distance: number) => void;
   // Fires as the drag moves (snapped). `solid` is the closed prism (display coords) for the
   // Manifold boolean live preview — present only for extrude drags with a captured cap.
@@ -271,11 +272,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -922,6 +923,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // Measure tool: click a surface point (snapped); App pairs two clicks into a
       // measurement. (Press-and-drag measures live in onDown/onMove/onUp.)
       if (cb.current.measureMode) {
+        // A tap on a measurement's dimension label deletes that measurement —
+        // checked before the surface raycast so labels floating over the part win.
+        const lh = rc.intersectObjects(s2.measures.children, false).find((o) => (o.object as THREE.Object3D).userData?.measureId);
+        if (lh) {
+          cb.current.onMeasureDelete(String((lh.object as THREE.Object3D).userData.measureId));
+          return;
+        }
         if (!s2.mesh) return;
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (!hit) return;
@@ -1060,6 +1068,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (s2 && cb.current.measureMode && s2.mesh && e.button === 0 && !inAxes(e)) {
         const rect0 = renderer.domElement.getBoundingClientRect();
         rc.setFromCamera(new THREE.Vector2(((e.clientX - rect0.left) / rect0.width) * 2 - 1, -((e.clientY - rect0.top) / rect0.height) * 2 + 1), camera);
+        // A press on a measurement's dimension label deletes that measurement — it must
+        // win over the mesh behind it, or the tape would arm and eat every label tap.
+        const lh = rc.intersectObjects(s2.measures.children, false).find((o) => o.object.userData?.measureId);
+        if (lh) {
+          cb.current.onMeasureDelete(String(lh.object.userData.measureId));
+          e.preventDefault();
+          return;
+        }
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (hit) {
           let modelSize = 40;
@@ -1894,6 +1910,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const label = makeLabel(fmtDist(a.distanceTo(b), units), { fg: "#0f766e", bg: "rgba(255,255,255,0.94)", border: "#0d9488" });
       label.position.copy(a.clone().add(b).multiplyScalar(0.5));
       label.userData.dimLabel = true; label.userData.baseH = modelSize * 0.05;
+      label.userData.measureId = meas.id; // tap-to-delete raycasts for this
       s.measures.add(label);
     }
     if (measurePending) addDot(measurePending);

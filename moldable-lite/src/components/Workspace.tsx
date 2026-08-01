@@ -1576,6 +1576,11 @@ interface Props {
     toggle: () => void;
     pending: [number, number, number] | null;
     items: Measurement[];
+    // A fresh measurement lives here until Save moves it into items — taps near
+    // either end re-anchor it, so the flow is: two taps → adjust → Save.
+    draft: Measurement | null;
+    saveDraft: () => void;
+    discardDraft: () => void;
     point: (p: [number, number, number]) => void;
     segment: (a: [number, number, number], b: [number, number, number]) => void;
     remove: (id: string) => void;
@@ -2293,7 +2298,7 @@ export function Workspace(p: Props) {
                 transformMode={p.transformCtl.mode}
                 measureMode={p.measureCtl.mode}
                 measurePending={p.measureCtl.pending}
-                measurements={p.measureCtl.items}
+                measurements={p.measureCtl.draft ? [...p.measureCtl.items, p.measureCtl.draft] : p.measureCtl.items}
                 pushArrow={p.featureCtl.pushArrow}
                 onPushPull={p.featureCtl.pushPull}
                 onPushPullLive={p.featureCtl.pushLive}
@@ -2304,6 +2309,7 @@ export function Workspace(p: Props) {
                 onTransformCommit={p.transformCtl.commit}
                 onMeasurePoint={p.measureCtl.point}
                 onMeasureSegment={p.measureCtl.segment}
+                onMeasureDelete={p.measureCtl.remove}
                 diff={p.aiDiff}
                 paramPeek={p.paramPeek}
                 holeGhost={p.holeCtl.draft ? { at: p.holeCtl.draft.at, normal: p.holeCtl.draft.normal, diameter: p.holeCtl.draft.diameter, depth: p.holeCtl.draft.depth, ref: p.holeCtl.draft.ref?.center ?? null } : null}
@@ -2676,11 +2682,24 @@ export function Workspace(p: Props) {
               {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
                 <div className="box-hint">Shift-click faces to build a selection · shift-drag to box-select</div>
               )}
-              {p.measureCtl.mode && (
+              {p.measureCtl.mode && !p.measureCtl.draft && (
                 <div className="box-hint">
-                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points, or press and drag a tape line — ends snap to corners and edges"}
+                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points, or press and drag a tape line — ends snap to corners and edges. Tap a label to delete that measure."}
                 </div>
               )}
+              {p.measureCtl.mode && p.measureCtl.draft && (() => {
+                const dm = p.measureCtl.draft;
+                const mm = Math.hypot(dm.a[0] - dm.b[0], dm.a[1] - dm.b[1], dm.a[2] - dm.b[2]);
+                const dist = p.units === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${Math.round(mm * 10) / 10} mm`;
+                return (
+                  <div className="measure-confirm" role="group" aria-label="Confirm measurement">
+                    <span className="mc-dist">{dist}</span>
+                    <span className="mc-tip">Tap near either end to move it — ends snap to corners &amp; edges</span>
+                    <button className="primary sm" onClick={p.measureCtl.saveDraft} title="Keep this measurement">Save</button>
+                    <button className="ghost sm" onClick={p.measureCtl.discardDraft} title="Throw this measurement away">Discard</button>
+                  </div>
+                );
+              })()}
               {p.tab === "3d" && p.splitCtl.pieces && p.splitCtl.pieces.length > 0 && (
                 <SplitPiecesPanel splitCtl={p.splitCtl} />
               )}

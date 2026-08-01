@@ -2774,16 +2774,45 @@ export default function App() {
 
   /** Measure tool: first click sets an anchor, second click records a point-to-point
    *  measurement (a labelled distance line in the viewer). No AI, no model change. */
+  // A measurement is a DRAFT until saved: the confirm pill offers Save/Discard, and while
+  // drafting, another tap moves the NEAREST end to the newly tapped (snapped) point — so
+  // anchor editing needs no drag plumbing, just "tap where it should be". Leaving the
+  // tool commits the draft (never silently destroys work); Discard is the explicit out.
+  const [draftMeasure, setDraftMeasure] = useState<Measurement | null>(null);
+  const draftMeasureRef = useRef(draftMeasure);
+  draftMeasureRef.current = draftMeasure;
   function onMeasurePoint(p: [number, number, number]) {
+    if (draftMeasureRef.current) {
+      const dm = draftMeasureRef.current;
+      const d = (q: [number, number, number]) => Math.hypot(q[0] - p[0], q[1] - p[1], q[2] - p[2]);
+      setDraftMeasure(d(dm.a) <= d(dm.b) ? { ...dm, a: p } : { ...dm, b: p });
+      return;
+    }
     if (!measurePending) { setMeasurePending(p); return; }
-    setMeasurements((m) => [...m, { id: mid(), a: measurePending, b: p }]);
+    setDraftMeasure({ id: mid(), a: measurePending, b: p });
     setMeasurePending(null);
   }
-  /** Drag-a-line measure: both ends arrive at once (viewer-side tape drag). */
+  /** Drag-a-line measure: both ends arrive at once (viewer-side tape drag). Drawing
+   *  while a draft is up REPLACES it — dragging again is the natural "redo". */
   function onMeasureSegment(a: [number, number, number], b: [number, number, number]) {
-    setMeasurements((m) => [...m, { id: mid(), a, b }]);
+    setDraftMeasure({ id: mid(), a, b });
     setMeasurePending(null); // a stray earlier single click shouldn't chain into the next one
   }
+  function saveDraftMeasure() {
+    const dm = draftMeasureRef.current;
+    if (dm) setMeasurements((m) => [...m, dm]);
+    setDraftMeasure(null);
+  }
+  /** Tap a measurement's LABEL (in measure mode) to delete it — a draft discards. */
+  function onMeasureDelete(id: string) {
+    if (draftMeasureRef.current?.id === id) { setDraftMeasure(null); return; }
+    setMeasurements((m) => m.filter((x) => x.id !== id));
+  }
+  useEffect(() => {
+    // Leaving the tool commits the draft: the old behaviour was instant-commit, so
+    // exit keeping the measurement is what nobody will be surprised by.
+    if (!measureMode && draftMeasureRef.current) saveDraftMeasure();
+  }, [measureMode]);
 
   // ---------------- generate ----------------
   /** Enter the guided "fix a broken part" flow: precise mode, a photo-first nudge,
@@ -2900,6 +2929,26 @@ export default function App() {
       return;
     }
 
+    // ---- Feedback FIRST, work second. ----
+    // The user's message and a working placeholder land in the transcript BEFORE any of
+    // the slow pre-work (engine classification, the clarify pass, web research, image
+    // encoding). Without this, a launchpad submit with photos showed the EMPTY workspace
+    // — template strip and all — for the full pre-work duration, and follow-ups sat
+    // silent for up to twenty seconds before anything visibly happened. Every path
+    // below either streams into this placeholder, replaces it (clarify card, routing
+    // notes insert above it), or resolves it before returning.
+    if (!p && !image) return;
+    const userMsgId = mid();
+    const placeholderId = mid();
+    const preThumb = image ? await blobToDataURL(image.blob) : undefined;
+    const preRefThumbs = refs.length ? await Promise.all(refs.map((r) => blobToDataURL(r.blob))) : undefined;
+    setInput("");
+    setMessages((m) => [...m,
+      { id: userMsgId, role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
+      { id: placeholderId, role: "assistant", text: "Reading your request…", streaming: true },
+    ]);
+    const setStage = (text: string) => setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text, streaming: true } : x)));
+
     // Fresh chat + the user never touched the engine switch → route by what the words
     // describe. Organic/sculptural things are beyond CAD's reach and belong on the mesh
     // engine; dimensioned functional parts belong in CAD. When the words alone don't
@@ -2927,19 +2976,25 @@ export default function App() {
             routeImg = { dataBase64: dataUrl.split(",")[1], mediaType: image.blob.type || "image/png" };
           } catch { /* classify from text alone */ }
         }
+        setStage("Choosing the right engine for this…");
         const cls = await classifyIntent(p, brainLlm, brainKeys, effectiveProxy, routeImg);
         if (cls === "mesh" && mode === "precise") routedMode = "generative";
         else if (cls === "cad" && mode === "generative") routedMode = "precise";
       }
       if (routedMode) {
         setMode(routedMode);
+        setMessages((m) => m.map((x) => (x.id === userMsgId ? { ...x, mode: routedMode! } : x)));
         const seen = image ? "Your attachment looks" : "This sounds";
-        setMessages((m) => [...m, {
-          id: mid(), role: "assistant",
-          text: routedMode === "generative"
-            ? `${seen} organic/sculptural — **Auto** chose **Generative (AI mesh)**, which models freeform shapes far better than CAD. Switch engines anytime with the buttons above.`
-            : `${seen} like a dimensioned, functional part — **Auto** chose **Precise (CAD)** for exact measurements and STEP export. Switch engines anytime with the buttons above.`,
-        }]);
+        setMessages((m) => {
+          const note = {
+            id: mid(), role: "assistant" as const,
+            text: routedMode === "generative"
+              ? `${seen} organic/sculptural — **Auto** chose **Generative (AI mesh)**, which models freeform shapes far better than CAD. Switch engines anytime with the buttons above.`
+              : `${seen} like a dimensioned, functional part — **Auto** chose **Precise (CAD)** for exact measurements and STEP export. Switch engines anytime with the buttons above.`,
+          };
+          const i = m.findIndex((x) => x.id === placeholderId);
+          return i < 0 ? [...m, note] : [...m.slice(0, i), note, ...m.slice(i)];
+        });
       }
     }
     // A CAD model is on the canvas and the ask is sculptural ("make it look like a
@@ -2963,6 +3018,7 @@ export default function App() {
     // help. Best-effort throughout — no brain, a timeout, or nothing worth asking and
     // this falls through to the identical build it would have run anyway.
     if (!override?.skipClarify && clarifyOn && !guided && !result && !image?.markup && (p || image)) {
+      setStage("Checking nothing important is missing…");
       let clarifyImg: { dataBase64: string; mediaType: string } | undefined;
       if (image) {
         try {
@@ -2976,16 +3032,11 @@ export default function App() {
       });
       if (ref?.questions.length) {
         // The photo deliberately stays in the composer — Build it re-enters send() and
-        // the reference has to still be attached when it does.
-        const thumb = image ? await blobToDataURL(image.blob).catch(() => undefined) : undefined;
-        setInput("");
-        setMessages((m) => [...m,
-          { id: mid(), role: "user", text: p || "Reference image", image: thumb, mode: useGen ? "generative" : "precise" },
-          {
-            id: mid(), role: "assistant", text: "",
-            clarify: { prompt: p, questions: ref.questions, answers: defaultAnswers(ref.questions) },
-          },
-        ]);
+        // the reference has to still be attached when it does. The card takes the
+        // placeholder's seat; the user message went up before the pre-work.
+        setMessages((m) => m.map((x) => (x.id === placeholderId
+          ? { ...x, text: "", streaming: false, clarify: { prompt: p, questions: ref.questions, answers: defaultAnswers(ref.questions) } }
+          : x)));
         return;
       }
     }
@@ -3017,6 +3068,7 @@ export default function App() {
       }
       const prov = getProvider(ge.provider);
       if (prov?.needsKey && !providerKeys[prov.id]) {
+        setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `${prov.label} needs an API key — add it in Settings (just opened), then press Retry on your message.`, streaming: false } : x)));
         setShowSettings(true);
         return;
       }
@@ -3088,20 +3140,13 @@ export default function App() {
           "Refining the current model as a mesh (snapshot → image→3D). The CAD version stays in History.",
         );
       }
-      const genThumb = genImage ? await blobToDataURL(genImage.blob) : undefined;
-      // Every attached photo shows in the bubble — the transcript should show what the
-      // user actually gave, even where an engine only consumes the primary.
-      const genRefThumbs = await Promise.all(refs.map((r) => blobToDataURL(r.blob)));
-      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (genImage ? "Reference image" : ""), image: genThumb, images: genRefThumbs.length ? genRefThumbs : undefined, mode: "generative" }]);
       // Price BEFORE anything runs — the answer to "which platform is going to bill
-      // me, and how much?" belongs in the very first line, not on the invoice.
+      // me, and how much?" belongs in the very first line, not on the invoice. The user
+      // message and placeholder are already up (posted before the pre-work).
       const costNote = costLabel(ge.provider, genModel);
       const costTag = costNote ? ` · ${costNote}` : "";
-      const ph = mid();
-      setMessages((m) => [
-        ...m,
-        { id: ph, role: "assistant", text: switchedTo ? `Switched to ${switchedTo} — it supports text → 3D${costTag}. Preparing…` : `Preparing… (${prov?.label ?? ge.provider}${costTag})`, streaming: true },
-      ]);
+      const ph = placeholderId;
+      setStage(switchedTo ? `Switched to ${switchedTo} — it supports text → 3D${costTag}. Preparing…` : `Preparing… (${prov?.label ?? ge.provider}${costTag})`);
       setStatus("generating");
 
       const genEngine = await getGenEngine();
@@ -3193,6 +3238,7 @@ export default function App() {
     if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
       // Intercept inline instead of force-opening Settings on whatever pane was last
       // used and throwing the prompt away. The card keeps the sentence and both exits.
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Precise CAD needs an AI provider — pick one in the card below.", streaming: false } : x)));
       setProviderWall(promptText);
       return;
     }
@@ -3223,13 +3269,11 @@ export default function App() {
       const cc = rg.centroid.map((v, i) => r1(v + rc0[i]));
       markupRegionLine = ` The marked region maps to these coordinates in the program's own frame (mm, Z-up): x ${lo[0]} to ${hi[0]}, y ${lo[1]} to ${hi[1]}, z ${lo[2]} to ${hi[2]} (centre ≈ ${cc.join(", ")}); the circled surface faces roughly (${rg.normal.join(", ")}). The feature(s) whose geometry lies in that box are the target.`;
     }
-    setInput("");
     setStreamingText("");
     setStreamingThink("");
-    const refThumbs = await Promise.all(visionRefs.map((r) => blobToDataURL(r.blob)));
-    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? (visionImage.markup ? "Change the marked region" : "Recreate this part") : ""), image: visionThumb, images: refThumbs.length ? refThumbs : undefined, mode: "precise" }]);
-    const placeholderId = mid();
-    setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
+    // The user message and placeholder went up before the pre-work; from here the
+    // shared placeholder narrates this path.
+    setStage("Thinking…");
     setStatus("generating");
 
     // Narrated thinking: every request shows its working steps live in the thinking
@@ -4227,10 +4271,14 @@ export default function App() {
           toggle: toggleMeasureTool,
           pending: measurePending,
           items: measurements,
+          draft: draftMeasure,
+          saveDraft: saveDraftMeasure,
+          discardDraft: () => setDraftMeasure(null),
           point: onMeasurePoint,
           segment: onMeasureSegment,
-          remove: (id) => setMeasurements((m) => m.filter((x) => x.id !== id)),
-          clear: () => { setMeasurements([]); setMeasurePending(null); },
+          remove: onMeasureDelete, // draft-aware: deleting the draft's label discards it
+
+          clear: () => { setMeasurements([]); setMeasurePending(null); setDraftMeasure(null); },
         }}
       />
       {showSettings && (

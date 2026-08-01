@@ -157,6 +157,20 @@ interface Props {
    *  the ghost FOLLOWS the cursor across the target plane — snapped to the magnet
    *  increment and magnetized to the reference's axes — and a click sets it. */
   holePlace: { active: boolean; snap: number; onPlace: (at: [number, number, number]) => void } | null;
+  /** Magnet tool: hover ANY face and a disc-pocket ghost rides the cursor (1 mm grid,
+   *  pulled into line with already-placed pockets in `align`); a tap places it. The
+   *  tap also reports the point straight through the wall on the OPPOSITE face —
+   *  that's what makes paired magnets land coaxial, one on each side. */
+  magnetPlace: {
+    diameter: number;
+    depth: number;
+    align: { at: [number, number, number]; normal: [number, number, number] }[];
+    onPlace: (spot: {
+      at: [number, number, number];
+      normal: [number, number, number];
+      back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null;
+    }) => void;
+  } | null;
 }
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
@@ -272,7 +286,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
@@ -284,6 +298,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   // follows the cursor at frame rate — no React re-render per mousemove).
   const holeIx = useRef<{ ghost: Props["holeGhost"]; place: Props["holePlace"] }>({ ghost: holeGhost, place: holePlace });
   holeIx.current = { ghost: holeGhost, place: holePlace };
+  // Magnet-tool state, read imperatively by the hover/tap handlers (same reasoning
+  // as the hole tool: the ghost follows the cursor at frame rate, no re-renders).
+  const magIx = useRef<Props["magnetPlace"]>(magnetPlace);
+  magIx.current = magnetPlace;
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
   // Set by the mount effect: "the scene changed, draw again" (see render-on-demand).
@@ -818,6 +836,27 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
       return out;
     };
+    // ---- Magnet tool: turn a surface hit into the pocket spot — 1 mm grid on the
+    // face's in-plane axes, then pulled into line with any already-placed pocket
+    // within 2 mm on an axis (same-face rows AND opposite-face coaxial pairs both
+    // fall out of matching in-plane coordinates). ----
+    const magnetSpotFrom = (hit: THREE.Intersection): { at: [number, number, number]; normal: [number, number, number]; alignedTo: [number, number, number] | null } | null => {
+      const s2 = st.current;
+      const mp = magIx.current;
+      if (!s2?.mesh || !mp || !hit.face) return null;
+      const wn = hit.face.normal.clone().transformDirection(s2.mesh.matrixWorld).normalize();
+      const k = [Math.abs(wn.x), Math.abs(wn.y), Math.abs(wn.z)].indexOf(Math.max(Math.abs(wn.x), Math.abs(wn.y), Math.abs(wn.z)));
+      const at: [number, number, number] = [hit.point.x, hit.point.y, hit.point.z];
+      let alignedTo: [number, number, number] | null = null;
+      for (const a of k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1]) {
+        let v = Math.round(at[a]); // 1 mm grid
+        for (const pm of mp.align) {
+          if (Math.abs(v - pm.at[a]) <= 2) { v = Math.round(pm.at[a] * 100) / 100; alignedTo = pm.at; }
+        }
+        at[a] = v;
+      }
+      return { at, normal: [wn.x, wn.y, wn.z], alignedTo };
+    };
     // ---- Measure snapping: pull a clicked/dragged point onto the nearest tessellation
     // VERTEX (then the nearest triangle edge) of the hit face, with screen-constant
     // radii — so hole rims and part corners measure exactly, not "wherever the pixel
@@ -882,6 +921,35 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         const at = holeHover(e);
         if (at) holeIx.current.place.onPlace(at);
         return;
+      }
+      // Magnet tool owns taps on the model: the ghost's spot becomes a pocket. It also
+      // reports the point straight through the wall (first far surface whose normal
+      // faces back at us) so a paired pocket lands coaxial on the opposite side.
+      if (magIx.current && s2.mesh) {
+        const hit = rc.intersectObject(s2.mesh, false)[0];
+        if (hit?.face) {
+          const sp = magnetSpotFrom(hit);
+          if (sp) {
+            const n = new THREE.Vector3(...sp.normal);
+            const rc2 = new THREE.Raycaster(new THREE.Vector3(...sp.at).addScaledVector(n, -0.05), n.clone().negate(), 0.01, 4000);
+            // The ray starts INSIDE the solid, so every surface it can meet shows its
+            // back side — and raycast culls backfaces on front-side materials, which
+            // made the far wall unhittable. DoubleSide for just this one cast.
+            const mat = s2.mesh.material as THREE.Material;
+            const side0 = mat.side;
+            mat.side = THREE.DoubleSide;
+            const hits = rc2.intersectObject(s2.mesh, false);
+            mat.side = side0;
+            const bh = hits.find((h) => h.face && h.face.normal.clone().transformDirection(s2.mesh!.matrixWorld).dot(n) < -0.5);
+            let back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null = null;
+            if (bh?.face) {
+              const wn2 = bh.face.normal.clone().transformDirection(s2.mesh.matrixWorld).normalize();
+              back = { at: [bh.point.x, bh.point.y, bh.point.z], normal: [wn2.x, wn2.y, wn2.z], thickness: bh.distance + 0.05 };
+            }
+            magIx.current.onPlace({ at: sp.at, normal: sp.normal, back });
+          }
+        }
+        return; // a tap on empty space already put the tool down above
       }
       // Paint/Fill tool: click a face → smart-fill the region → set it to the active filament
       // slot (0 = eraser), update the overlay live, and hand the stroke to App to persist.
@@ -1431,6 +1499,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         renderer.domElement.style.cursor = at ? "crosshair" : "";
         return;
       }
+      // Magnet tool: the disc-pocket ghost rides the cursor over ANY face; off the
+      // model it hides. Purely imperative, same as the hole ghost.
+      if (magIx.current) {
+        const s3 = st.current;
+        if (s3?.mesh) {
+          const rect2 = canvasRect();
+          rc.setFromCamera(new THREE.Vector2(((e.clientX - rect2.left) / rect2.width) * 2 - 1, -((e.clientY - rect2.top) / rect2.height) * 2 + 1), camera);
+          const hit = rc.intersectObject(s3.mesh, false)[0];
+          const sp = hit?.face ? magnetSpotFrom(hit) : null;
+          if (sp) layoutMagnetGhost(sp.at, sp.normal, sp.alignedTo);
+          else hideMagnetGhost();
+          renderer.domElement.style.cursor = sp ? "crosshair" : "";
+        }
+        return;
+      }
       // Anchor hover works IN transform mode (that's when the box shows): resize cursor + grow.
       if (s2.selBox && !s2.transforming) {
         const r0 = canvasRect();
@@ -1505,6 +1588,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // Cursor left mid-hover: park the drill ghost back on the draft's committed spot.
       const g = holeIx.current.ghost;
       if (g && holeIx.current.place?.active) layoutHoleGhost(g.at);
+      if (magIx.current) hideMagnetGhost(); // the magnet ghost only exists under the cursor
     };
     // Safari fires pointercancel for system gestures (palm rejection, Scribble); without this
     // a pen drag can die mid-way and leave the drag armed with orbit frozen.
@@ -2271,6 +2355,79 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     cur.ring = ring;
     layoutHoleGhost(holeGhost.at);
   }, [holeGhost]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Magnet-pocket ghost: an accent-green sunk disc + entry ring that ride the cursor
+  // (positioned imperatively from onMove), plus a dashed guide to whichever placed
+  // pocket the spot snapped into line with. Built once per size; hidden off-model.
+  const magGhostObjs = useRef<{ cyl?: THREE.Mesh; ring?: THREE.Mesh; extras: THREE.Object3D[] }>({ extras: [] });
+  const clearMagExtras = () => {
+    for (const o of magGhostObjs.current.extras) {
+      o.removeFromParent();
+      (o as THREE.Mesh).geometry?.dispose?.();
+      ((o as THREE.Mesh).material as THREE.Material | undefined)?.dispose?.();
+    }
+    magGhostObjs.current.extras = [];
+  };
+  const layoutMagnetGhost = (at3: [number, number, number], n3: [number, number, number], alignedTo: [number, number, number] | null) => {
+    const s = st.current;
+    const mp = magIx.current;
+    const { cyl, ring } = magGhostObjs.current;
+    if (!s || !mp || !cyl || !ring) return;
+    const n = new THREE.Vector3(...n3).normalize();
+    const at = new THREE.Vector3(...at3);
+    cyl.position.copy(at.clone().addScaledVector(n, -mp.depth / 2)); // sunk INTO the wall
+    cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+    ring.position.copy(at);
+    ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    cyl.visible = ring.visible = true;
+    clearMagExtras();
+    if (alignedTo) {
+      const dashed = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([at, new THREE.Vector3(...alignedTo)]),
+        new THREE.LineDashedMaterial({ color: 0x498a6f, dashSize: 2, gapSize: 1.4, depthTest: false }),
+      );
+      dashed.computeLineDistances();
+      dashed.renderOrder = 4;
+      s.scene.add(dashed);
+      magGhostObjs.current.extras.push(dashed);
+    }
+    invalidateRef.current(1);
+  };
+  const hideMagnetGhost = () => {
+    const { cyl, ring } = magGhostObjs.current;
+    if (cyl) cyl.visible = false;
+    if (ring) ring.visible = false;
+    clearMagExtras();
+    invalidateRef.current(1);
+  };
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    const cur = magGhostObjs.current;
+    for (const o of [cur.cyl, cur.ring].filter(Boolean) as THREE.Mesh[]) {
+      o.removeFromParent();
+      o.geometry.dispose();
+      (o.material as THREE.Material).dispose();
+    }
+    cur.cyl = cur.ring = undefined;
+    clearMagExtras();
+    if (!magnetPlace) return;
+    const cyl = new THREE.Mesh(
+      new THREE.CylinderGeometry(magnetPlace.diameter / 2, magnetPlace.diameter / 2, magnetPlace.depth, 32),
+      new THREE.MeshBasicMaterial({ color: 0x498a6f, transparent: true, opacity: 0.5, depthTest: false }),
+    );
+    cyl.renderOrder = 4;
+    cyl.visible = false;
+    const ring = new THREE.Mesh(
+      new THREE.TorusGeometry(magnetPlace.diameter / 2, 0.3, 8, 40),
+      new THREE.MeshBasicMaterial({ color: 0x498a6f, depthTest: false }),
+    );
+    ring.renderOrder = 4;
+    ring.visible = false;
+    s.scene.add(cyl, ring);
+    cur.cyl = cyl;
+    cur.ring = ring;
+  }, [magnetPlace?.diameter, magnetPlace?.depth, !!magnetPlace]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
   useEffect(() => {

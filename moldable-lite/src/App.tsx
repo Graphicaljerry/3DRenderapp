@@ -22,6 +22,7 @@ import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } fro
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
 import { downscaleImage } from "./lib/downscale";
+import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -380,7 +381,19 @@ export default function App() {
 
   const [project, setProject] = useState<Project | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const messagesRef = useRef<ChatMessage[]>(messages);
+  messagesRef.current = messages;
   const apiHistory = useRef<ApiMsg[]>([]);
+  /** The last few chat bubbles as plain text — the model's short-term memory. apiHistory
+   *  only holds successful API turns and gets re-seeded to bare code on undo/redo and
+   *  project open, so "like I said two messages ago" lived nowhere the model could see
+   *  (a real report). The transcript is the durable record; this digests it. */
+  const chatDigest = (maxTurns = 10, maxChars = 350): string =>
+    messagesRef.current
+      .filter((m) => !m.streaming && !m.clarify && !m.error && m.text)
+      .slice(-maxTurns)
+      .map((m) => `${m.role === "user" ? "User" : "App"}: ${m.text.length > maxChars ? m.text.slice(0, maxChars) + "…" : m.text}`)
+      .join("\n");
   // Mesh texture toggle: OFF by default ("print-first") — engines return a clean
   // gray geometry-only mesh, which is also the cheaper call on every paid engine
   // (fal Hunyuan textures cost ~3× the white mesh). ON asks for baked color.
@@ -2297,6 +2310,69 @@ export default function App() {
       setStatus("idle");
     }
   }
+
+  // ---- Magnet tool: catalogue-size pocket placement with hover ghost -------------
+  // Pick a disc size (6×2, 8×3, 10×2…), hover the model for a live pocket preview,
+  // click to sink it. "Pair through the wall" also pockets the OPPOSITE face on the
+  // same axis, so helmet-panel magnet pairs land coaxial. Placement runs the same
+  // free CAD "hole" op the drill tool uses — no AI call.
+  type MagnetTool = { size: MagnetSize; fit: MagnetFit; pair: boolean; placed: { at: [number, number, number]; normal: [number, number, number] }[] };
+  const [magnetTool, setMagnetTool] = useState<MagnetTool | null>(null);
+  const magnetToolRef = useRef(magnetTool);
+  magnetToolRef.current = magnetTool;
+  function toggleMagnetTool() {
+    if (magnetToolRef.current) { setMagnetTool(null); return; }
+    dismissOverlays(); // one tool at a time — put down select/measure/paint/hole first
+    setMagnetTool({ size: MAGNET_SIZES[5], fit: "press", pair: false, placed: [] }); // 8×3 — the helmet staple
+  }
+  async function placeMagnet(spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) {
+    const t = magnetToolRef.current;
+    if (!t) return;
+    if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Magnet pockets work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
+      setMagnetTool(null);
+      return;
+    }
+    const { diameter, depth } = magnetPocket(t.size, t.fit);
+    const src = result.source;
+    const rc = result.recenter ?? [0, 0, 0];
+    const mkOp = (at: [number, number, number], normal: [number, number, number]) => ({
+      type: "hole" as const,
+      at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]] as [number, number, number],
+      normal,
+      diameter,
+      depth,
+    });
+    const ops = [mkOp(spot.at, spot.normal)];
+    // The paired pocket needs wall to live in: both pockets plus a 0.8 mm web between.
+    let pairNote = "";
+    if (t.pair) {
+      if (spot.back && spot.back.thickness >= depth * 2 + 0.8) {
+        ops.push(mkOp(spot.back.at, spot.back.normal));
+        pairNote = ` ×2 — paired straight through the ${Math.round(spot.back.thickness * 10) / 10} mm wall`;
+      } else {
+        pairNote = spot.back
+          ? ` (no pair — the ${Math.round(spot.back.thickness * 10) / 10} mm wall is too thin for two ${depth} mm pockets)`
+          : " (no pair — couldn't find an opposite face on that axis)";
+      }
+    }
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
+      const what = `⌀${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-in" : "glue-in"} fit, ⌀${diameter} × ${depth} mm)${pairNote}`;
+      applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
+      // Each placement gets a one-line receipt: a far-side pocket is invisible from
+      // this angle, and a skipped pair (thin wall) would otherwise fail silently.
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added a ${what}.` }]);
+      setMagnetTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }, ...(ops.length > 1 && spot.back ? [{ at: spot.back.at, normal: spot.back.normal }] : [])] } : d));
+      explainOnce("magnet", `Sunk a **magnet pocket** — free, no AI. Press-in fits add 0.1 mm; drop the magnet in flush and it grips through the plastic. Placing another nearby snaps into line with this one (watch for the dashed guide). Undo reverts it.`);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't sink a magnet pocket there: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   function pickFaces(faces: PickedFeature[], additive = false) {
     setSelectedFaces((prev) => {
       if (!additive) return faces;
@@ -2907,6 +2983,7 @@ export default function App() {
         {
           image: img,
           canvas: result && project ? `the part "${project.name}"` : undefined,
+          convo: chatDigest() || undefined,
           engine: mode === "generative" ? "mesh" : "cad",
         },
       );
@@ -2942,6 +3019,9 @@ export default function App() {
     // below either streams into this placeholder, replaces it (clarify card, routing
     // notes insert above it), or resolves it before returning.
     if (!p && !image) return;
+    // Snapshot the conversation BEFORE this turn's bubbles post — the digest is what
+    // "as I said two messages ago" resolves against, and must not include this ask.
+    const convo = chatDigest();
     const userMsgId = mid();
     const placeholderId = mid();
     const preThumb = image ? await blobToDataURL(image.blob) : undefined;
@@ -3037,6 +3117,8 @@ export default function App() {
       }
       const ref = await refineRequest(p, brainLlm, brainKeys, effectiveProxy, {
         image: clarifyImg,
+        canvas: result && project ? `the part "${project.name}"` : undefined,
+        convo: convo || undefined,
         engine: useGen ? "mesh" : "cad",
       });
       if (ref?.questions.length) {
@@ -3383,7 +3465,14 @@ export default function App() {
       (importFileRef.current ? IMPORT_ADDENDUM : "") +
       // Anchor every turn to what's on the canvas — requests like "add a hole in the
       // center" refer to THIS part; never ask the user what the part is.
-      (partContext ? `\n\nCurrent canvas: the user is working on ${partContext}. Edit requests refer to this part.` : "");
+      (partContext ? `\n\nCurrent canvas: the user is working on ${partContext}. Edit requests refer to this part.` : "") +
+      // …and to what was SAID. apiHistory only survives successful turns and is
+      // re-seeded to bare code on undo/redo, so requirements from earlier bubbles
+      // ("32 mm wide, like I said") vanished — each request read as a fresh
+      // conversation (a real report). The transcript digest is rebuilt every turn,
+      // costs a few hundred tokens, and rides the SYSTEM prompt so it is never
+      // recorded into history (no digest-of-digest compounding).
+      (convo ? `\n\nRecent conversation (the request may refer back to details here — honour them):\n${convo}` : "");
     // Extra angles the user attached (left / back / right). One photo leaves depth and
     // the far side to guesswork — the model invents them. Handing the vision model
     // every view it has makes proportions and hidden features observed rather than
@@ -3744,9 +3833,9 @@ export default function App() {
   // mesh (features can't be picked on one), but the keyboard had no such guard — V armed
   // the tool anyway, the Viewer started picking, and the button that would turn it back
   // off was not rendered. Silently doing nothing is the honest behaviour here.
-  const toggleSelectTool = () => { if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return; setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }); };
-  const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } else setMeasurePending(null); return next; });
-  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } };
+  const toggleSelectTool = () => { if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return; setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); setMagnetTool(null); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }); };
+  const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); } else setMeasurePending(null); return next; });
+  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); } };
 
   const undo = () => {
     if (undoPaint()) return; // strokes come off first — they're the newest thing you did
@@ -3772,6 +3861,7 @@ export default function App() {
     setSelectedFaces([]);
     setModelSelected(false);
     setHoleDraft(null); // drop any un-drilled hole draft
+    setMagnetTool(null); // magnet mode goes down with the rest
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -4042,6 +4132,15 @@ export default function App() {
           patch: (patch) => setHoleDraft((d) => (d ? { ...d, ...patch } : d)),
           setAxis: setHoleAxis,
           apply: () => void applyHole(),
+        }}
+        magnetCtl={{
+          tool: magnetTool,
+          canUse: activeKind === "replicad",
+          sizes: MAGNET_SIZES,
+          toggle: toggleMagnetTool,
+          patch: (patch) => setMagnetTool((t) => (t ? { ...t, ...patch } : t)),
+          place: (spot) => void placeMagnet(spot),
+          pocket: magnetTool ? magnetPocket(magnetTool.size, magnetTool.fit) : null,
         }}
         views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
         onPickView={pickView}

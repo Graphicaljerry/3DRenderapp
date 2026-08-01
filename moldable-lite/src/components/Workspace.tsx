@@ -1368,6 +1368,20 @@ interface Props {
     setAxis: (axis: number, v: number) => void;
     apply: () => void;
   };
+  magnetCtl: {
+    tool: {
+      size: { d: number; h: number; note?: string };
+      fit: "press" | "glue";
+      pair: boolean;
+      placed: { at: [number, number, number]; normal: [number, number, number] }[];
+    } | null;
+    canUse: boolean; // CAD models only — meshes can't be drilled
+    sizes: { d: number; h: number; note?: string }[];
+    toggle: () => void;
+    patch: (p: Partial<NonNullable<Props["magnetCtl"]["tool"]>>) => void;
+    place: (spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) => void;
+    pocket: { diameter: number; depth: number } | null; // the current size+fit as a pocket
+  };
   onPickImage: (f: File) => void;
   onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
   refsCount: number; // extra unlabelled reference photos riding with the composer image
@@ -1670,7 +1684,7 @@ export function Workspace(p: Props) {
   // kept them mutually exclusive — Mark and Measure could both render as armed at once.
   // One direction is this effect (another tool wins → Mark stands down); the other is in
   // Mark's own onClick, which disarms the rest before arming itself.
-  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode;
+  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool;
   useEffect(() => { if (otherToolOn) setMarkMode(false); }, [otherToolOn]);
 
   // Paste a reference image from the clipboard anywhere in the app.
@@ -2316,6 +2330,9 @@ export function Workspace(p: Props) {
                 holePlace={p.holeCtl.draft && !p.holeCtl.draft.picking
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
                   : null}
+                magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
+                  ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
+                  : null}
                 onContext={(h) => {
                   // Right-click selects what it lands on (standard editor behavior), then opens the menu.
                   if (h.target.kind === "attachment") p.onAttachSelect(h.target.id);
@@ -2491,6 +2508,52 @@ export function Workspace(p: Props) {
                     )}
                   </div>
                   <div className="rail-tool">
+                    {/* Magnet pockets: catalogue sizes, hover ghost, tap to sink. */}
+                    <button
+                      className={`ghost sm iconbtn${p.magnetCtl.tool ? " on" : ""}`}
+                      aria-pressed={!!p.magnetCtl.tool}
+                      aria-label="Magnets"
+                      disabled={!p.geometry || p.tab !== "3d" || !p.magnetCtl.canUse}
+                      title={p.magnetCtl.canUse
+                        ? "Magnet pockets: pick a disc-magnet size, hover the model for a preview, click to sink the pocket"
+                        : "Magnet pockets work on Precise (CAD) models — mesh models can't be drilled"}
+                      onClick={p.magnetCtl.toggle}
+                    >
+                      <IconMagnet />
+                    <span className="rail-name">Magnets</span>
+                    </button>
+                    {p.magnetCtl.tool && (
+                      <div className="rail-fly">
+                        <div className="magnet-fly">
+                          <div className="paint-lbl">Disc magnet · ⌀×h mm</div>
+                          <div className="magnet-sizes" role="radiogroup" aria-label="Magnet size">
+                            {p.magnetCtl.sizes.map((s) => {
+                              const on = p.magnetCtl.tool!.size.d === s.d && p.magnetCtl.tool!.size.h === s.h;
+                              return (
+                                <button key={`${s.d}x${s.h}`} role="radio" aria-checked={on} className={`msize${on ? " on" : ""}`}
+                                  title={s.note ? `${s.d}×${s.h} mm — ${s.note}` : `${s.d}×${s.h} mm`}
+                                  onClick={() => p.magnetCtl.patch({ size: s })}>
+                                  {s.d}×{s.h}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Fit">
+                            <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
+                              title="Press-in: +0.1 mm — seats with a thumb, holds without glue" onClick={() => p.magnetCtl.patch({ fit: "press" })}>Press-in</button>
+                            <button className={p.magnetCtl.tool.fit === "glue" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "glue"}
+                              title="Glue-in: +0.25 mm and a touch deeper — room for a drop of CA" onClick={() => p.magnetCtl.patch({ fit: "glue" })}>Glue-in</button>
+                          </div>
+                          <label className="magnet-pair" title="Also sink the matching pocket straight through the wall on the opposite face — the pair lands on the same axis, which is what makes two parts snap together aligned">
+                            <input type="checkbox" checked={p.magnetCtl.tool.pair} onChange={(e) => p.magnetCtl.patch({ pair: e.target.checked })} />
+                            <span>Pair through the wall</span>
+                          </label>
+                          <div className="magnet-hint">Hover the model, click to sink. Nearby pockets snap into line — watch for the dashed guide.</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-tool">
                     <button
                       className={`ghost sm iconbtn${markMode ? " on" : ""}`}
                       aria-pressed={markMode}
@@ -2503,6 +2566,7 @@ export function Workspace(p: Props) {
                           if (p.measureCtl.mode) p.measureCtl.toggle();
                           if (p.transformCtl.mode !== "off") p.transformCtl.setMode("off");
                           if (p.paintCtl.mode) p.paintCtl.setMode(false);
+                          if (p.magnetCtl.tool) p.magnetCtl.toggle();
                         }
                         return !v;
                       })}

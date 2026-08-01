@@ -59,10 +59,11 @@ function rules(engine: "cad" | "mesh"): string {
       ].join(" ");
 }
 
-function system(engine: "cad" | "mesh", canvas?: string): string {
+function system(engine: "cad" | "mesh", canvas?: string, convo?: string): string {
   return [
     "You prepare requests for a 3D-printing app that turns plain-language descriptions into printable models.",
     canvas ? `The user already has a model on the canvas: ${canvas}. Requests are usually edits to THIS part.` : "",
+    convo ? `Recent conversation (the request may refer back to it — never ask about something already answered here):\n${convo}` : "",
     rules(engine),
     "",
     "Reply with JSON only, no prose and no code fence:",
@@ -137,6 +138,8 @@ export async function refineRequest(
   opts: {
     image?: { dataBase64: string; mediaType: string };
     canvas?: string;
+    /** Recent chat turns, plain text — so "like I said before" refers to something. */
+    convo?: string;
     engine?: "cad" | "mesh";
   } = {},
 ): Promise<Refinement | null> {
@@ -154,7 +157,7 @@ export async function refineRequest(
 
   try {
     const out = await withTimeout(
-      generateLlm(brain, keys, system(opts.engine ?? "cad", opts.canvas), [{ role: "user", content }], {}, proxyBase),
+      generateLlm(brain, keys, system(opts.engine ?? "cad", opts.canvas, opts.convo), [{ role: "user", content }], {}, proxyBase),
       opts.image ? 15_000 : 10_000,
     );
     if (!out) return null;

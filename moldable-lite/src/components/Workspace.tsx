@@ -3247,6 +3247,18 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
             <>
               <div className={`bubble ${m.streaming ? "muted" : ""}`}>
                 {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
+                {/* Every photo travelling with this message, INSIDE the bubble: extra
+                    uploads on a user message, product photos found online on a research
+                    note. A thumb that 404s or blocks hotlinking hides itself. */}
+                {!!m.images?.length && (
+                  <div className="ref-strip">
+                    {m.images.map((u, i) => (
+                      <a key={i} href={u.startsWith("data:") ? undefined : u} target="_blank" rel="noopener noreferrer" title={u.startsWith("data:") ? "Attached reference photo" : "Product photo found online — open full size"}>
+                        <img src={u} alt="reference photo" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }} />
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {m.text && (m.role === "assistant" && !m.error ? <Markdown text={m.text} /> : <span>{m.text}</span>)}
                 {/* Live reasoning stream while this reply is being generated. */}
                 {m.streaming && thinking && (
@@ -3262,18 +3274,6 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
                   <summary>Thought process</summary>
                   <div className="think-body">{m.thinking}</div>
                 </details>
-              )}
-              {/* Product photos the research found — display-only <img>s (the browser may
-                  fetch them; reading their BYTES is what CORS forbids). A URL that 404s
-                  or blocks hotlinking hides itself rather than showing a broken glyph. */}
-              {!!m.images?.length && (
-                <div className="ref-strip">
-                  {m.images.map((u, i) => (
-                    <a key={i} href={u} target="_blank" rel="noopener noreferrer" title="Product photo found online — open full size">
-                      <img src={u} alt="Product photo found online" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }} />
-                    </a>
-                  ))}
-                </div>
               )}
               {!!m.sources?.length && (
                 <div className="src-row">

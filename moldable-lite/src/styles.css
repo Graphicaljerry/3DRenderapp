@@ -1999,7 +1999,9 @@ details.guide { margin-top: 10px; }
 .launch-imgchip span { flex: 1; font-size: 12.5px; color: var(--ink2); }
 .launch-imgchip button { border: none; background: none; color: var(--subt); cursor: pointer; padding: 2px 6px; }
 .launch-imgchip button:hover { color: var(--ink); }
-/* Product photos a research lookup found, shown on its note in the chat. */
-.ref-strip { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-.ref-strip a { display: block; border: 1px solid var(--bord); border-radius: 8px; overflow: hidden; background: var(--surf); }
-.ref-strip img { display: block; width: 74px; height: 74px; object-fit: cover; }
+/* Photo thumbnails riding inside a chat bubble: extra uploads on a user message,
+   product photos a research lookup found on its note. Small on purpose — the bubble
+   stays a message, not a gallery. */
+.ref-strip { display: flex; gap: 5px; margin: 6px 0 4px; flex-wrap: wrap; }
+.ref-strip a { display: block; border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px; overflow: hidden; }
+.ref-strip img { display: block; width: 52px; height: 52px; object-fit: cover; }

@@ -3059,7 +3059,10 @@ export default function App() {
         );
       }
       const genThumb = genImage ? await blobToDataURL(genImage.blob) : undefined;
-      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (genImage ? "Reference image" : ""), image: genThumb, mode: "generative" }]);
+      // Every attached photo shows in the bubble — the transcript should show what the
+      // user actually gave, even where an engine only consumes the primary.
+      const genRefThumbs = await Promise.all(refs.map((r) => blobToDataURL(r.blob)));
+      setMessages((m) => [...m, { id: mid(), role: "user", text: p || (genImage ? "Reference image" : ""), image: genThumb, images: genRefThumbs.length ? genRefThumbs : undefined, mode: "generative" }]);
       // Price BEFORE anything runs — the answer to "which platform is going to bill
       // me, and how much?" belongs in the very first line, not on the invoice.
       const costNote = costLabel(ge.provider, genModel);
@@ -3193,7 +3196,8 @@ export default function App() {
     setInput("");
     setStreamingText("");
     setStreamingThink("");
-    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? (visionImage.markup ? "Change the marked region" : "Recreate this part") : ""), image: visionThumb, mode: "precise" }]);
+    const refThumbs = await Promise.all(visionRefs.map((r) => blobToDataURL(r.blob)));
+    setMessages((m) => [...m, { id: mid(), role: "user", text: p || (visionImage ? (visionImage.markup ? "Change the marked region" : "Recreate this part") : ""), image: visionThumb, images: refThumbs.length ? refThumbs : undefined, mode: "precise" }]);
     const placeholderId = mid();
     setMessages((m) => [...m, { id: placeholderId, role: "assistant", text: "Thinking…", streaming: true }]);
     setStatus("generating");

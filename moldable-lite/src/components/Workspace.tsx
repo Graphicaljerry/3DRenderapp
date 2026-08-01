@@ -16,7 +16,7 @@ export interface PrintPrepCtl {
   overhangOn: boolean;
   toggleOverhang: () => void;
   thin: { report: ThinWallReport | null; busy: boolean; run: () => void; shown: boolean; toggleShown: () => void };
-  orient: { suggestion: OrientSuggestion | null; run: () => void; apply: () => void; auto: () => void };
+  orient: { suggestion: OrientSuggestion | null; run: () => void; apply: () => void; auto: () => void; face: (normal: [number, number, number]) => void };
   chamfer: { can: boolean; apply: (size: number) => void };
 }
 import type { Version } from "../store/types";
@@ -2419,6 +2419,9 @@ export function Workspace(p: Props) {
                         ) : p.partCount > 1 ? (
                           <Item label={`Separate ${p.partCount} parts`} hint="Move each solid on its own" onClick={p.onSeparateParts} />
                         ) : null}
+                        {t.normal && (
+                          <Item label="This face on the plate" hint="Rotate so the clicked face sits flat" onClick={() => p.printPrep.orient.face(t.normal!)} />
+                        )}
                         <Item label="Lay flat for printing" hint="Best orientation, resting on the plate" onClick={() => p.printPrep.orient.auto()} />
                         {plateItems("model")}
                         <div className="pmenu-sep" />

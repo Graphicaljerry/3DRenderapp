@@ -72,7 +72,7 @@ export interface PickedPoint {
 export interface ContextHit {
   x: number;
   y: number;
-  target: { kind: "model" } | { kind: "attachment"; id: string } | { kind: "empty" };
+  target: { kind: "model"; normal?: [number, number, number] } | { kind: "attachment"; id: string } | { kind: "empty" };
 }
 /** A selected model feature — a face, edge or vertex — with everything an edit needs. */
 export interface PickedFeature {
@@ -415,11 +415,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       rcC.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
       const hitA = rcC.intersectObjects([...s2.attachMap.values()], false)[0];
       const id = hitA ? [...s2.attachMap.entries()].find(([, m]) => m === hitA.object)?.[0] : undefined;
-      const onModel = !hitA && s2.mesh?.visible && s2.mesh && rcC.intersectObject(s2.mesh, false)[0];
+      const onModel = !hitA && s2.mesh && s2.mesh.visible ? rcC.intersectObject(s2.mesh, false)[0] : undefined;
+      // The clicked face's outward normal (model space) rides along — "rest this face
+      // on the plate" needs to know which way the face points.
+      let normal: [number, number, number] | undefined;
+      if (onModel?.face) {
+        const n = onModel.face.normal.clone()
+          .applyMatrix3(new THREE.Matrix3().getNormalMatrix(s2.mesh!.matrixWorld))
+          .normalize();
+        normal = [n.x, n.y, n.z];
+      }
       cb.current.onContext({
         x: e.clientX,
         y: e.clientY,
-        target: id ? { kind: "attachment", id } : onModel ? { kind: "model" } : { kind: "empty" },
+        target: id ? { kind: "attachment", id } : onModel ? { kind: "model", normal } : { kind: "empty" },
       });
     };
     renderer.domElement.addEventListener("pointerdown", onCtxDown);

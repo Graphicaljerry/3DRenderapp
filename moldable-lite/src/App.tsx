@@ -1697,17 +1697,16 @@ export default function App() {
     }
   }
 
-  /** Apply the suggested print orientation: CAD models get a parametric rotate op
-   *  (History/Undo, sliders and export all follow); meshes get the rotation baked in.
-   *  Either path ends resting on the plate — CAD display/export re-ground to z=0,
-   *  bakeMeshTransform settles meshes there itself. */
-  async function applyOrientation(sug?: OrientSuggestion) {
-    const s = sug ?? orientSug;
-    if (!s?.improved || !geometry || !result) return;
+  /** Rotate the WHOLE model about its centre and rest it on the plate: CAD models get
+   *  a parametric rotate op (History/Undo, sliders and export all follow); meshes get
+   *  the rotation baked in. Either path ends resting on the plate — CAD display/export
+   *  re-ground to z=0, bakeMeshTransform settles meshes there itself. */
+  async function rotateOntoPlate(axis: [number, number, number], angleDeg: number, summary: string) {
+    if (!geometry || !result) return;
     if (result.source.kind === "code" && activeKind === "replicad") {
       geometry.computeBoundingBox();
       const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
-      await authorObjectOp({ kind: "rotate", axis: s.axis, angleDeg: s.angleDeg, center: [c.x, c.y, c.z] });
+      await authorObjectOp({ kind: "rotate", axis, angleDeg, center: [c.x, c.y, c.z] });
     } else {
       // Mesh model: bake the rotation, keep the ORIGINAL glb + texture, and record
       // the matrix (meshXform) so the orientation survives reopening the project.
@@ -1715,17 +1714,24 @@ export default function App() {
       const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
       const m = new THREE.Matrix4()
         .makeTranslation(c.x, c.y, c.z)
-        .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(s.axis[0], s.axis[1], s.axis[2]).normalize(), THREE.MathUtils.degToRad(s.angleDeg)))
+        .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(axis[0], axis[1], axis[2]).normalize(), THREE.MathUtils.degToRad(angleDeg)))
         .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
       const baked = bakeMeshTransform(geometry, m);
       const dd = baked.dims;
       applyResult(
         { ...result, geometry: baked.geometry, dims: dd, meshXform: composeXform(result.meshXform, baked.applied) },
         project?.name ?? "Model",
-        `Auto-oriented for printing — ${dd.x} × ${dd.y} × ${dd.z} mm`,
-        "auto-orient",
+        `${summary} — ${dd.x} × ${dd.y} × ${dd.z} mm`,
+        summary,
       );
     }
+  }
+
+  /** Apply the suggested print orientation (auto lay-flat). */
+  async function applyOrientation(sug?: OrientSuggestion) {
+    const s = sug ?? orientSug;
+    if (!s?.improved || !geometry || !result) return;
+    await rotateOntoPlate(s.axis, s.angleDeg, "Auto-oriented for printing");
     setOrientSug(null);
     explainOnce(
       "orient",
@@ -1746,6 +1752,33 @@ export default function App() {
       return;
     }
     await applyOrientation(s);
+  }
+
+  /** "Place on face", slicer-style: rotate the model so the right-clicked face points
+   *  at the bed, then rest it on the plate. The user picks the base; no scoring. */
+  async function snapFaceToPlate(normal: [number, number, number]) {
+    if (!geometry || !result || status === "generating") return;
+    const from = new THREE.Vector3(normal[0], normal[1], normal[2]);
+    if (from.lengthSq() < 0.5) return; // degenerate triangle — nothing trustworthy to align
+    from.normalize();
+    const q = new THREE.Quaternion().setFromUnitVectors(from, new THREE.Vector3(0, 0, -1));
+    const angle = 2 * Math.acos(Math.min(1, Math.abs(q.w)));
+    if (angle < 0.005) {
+      appendMsg({ role: "assistant", text: "That face is already flat on the plate." });
+      return;
+    }
+    // Quaternion → axis + degrees (flip the axis when w < 0 so they reproduce q exactly);
+    // a 180° flip has no unique axis — any horizontal one works, X is fine.
+    const s = Math.sqrt(Math.max(0, 1 - q.w * q.w));
+    const sign = q.w < 0 ? -1 : 1;
+    const axis: [number, number, number] = s < 1e-6 ? [1, 0, 0] : [(q.x / s) * sign, (q.y / s) * sign, (q.z / s) * sign];
+    await rotateOntoPlate(axis, Math.round(THREE.MathUtils.radToDeg(angle) * 10) / 10, "Rested the picked face on the plate");
+    setOrientSug(null); // any auto-orient advice described the old pose
+    explainOnce(
+      "facesnap",
+      "Rotated the model so the face you right-clicked sits flat on the plate — the slicer \"place on face\" move. Great for picking the printing base yourself; **Lay flat — best orientation** (Printability) picks it by support math instead. Undo reverts it.",
+      "Rested that face on the plate. Undo reverts it.",
+    );
   }
 
   /** Elephant-foot guard: chamfer every bed-plane edge of the CAD solid. */
@@ -4590,7 +4623,7 @@ export default function App() {
           overhangOn: overhangView,
           toggleOverhang: () => { setOverhangView((v) => !v); setThinShow(false); },
           thin: { report: thinReport, busy: thinBusy, run: runThinWalls, shown: thinShow, toggleShown: () => setThinShow((v) => !v) },
-          orient: { suggestion: orientSug, run: runOrientSuggest, apply: () => void applyOrientation(), auto: () => void autoOrientDrop() },
+          orient: { suggestion: orientSug, run: runOrientSuggest, apply: () => void applyOrientation(), auto: () => void autoOrientDrop(), face: (n) => void snapFaceToPlate(n) },
           chamfer: { can: activeKind === "replicad" && result?.source.kind === "code", apply: (size) => void applyChamferBottom(size) },
         }}
         modelSelected={(modelSelected || transformMode !== "off") && !attachSelected}

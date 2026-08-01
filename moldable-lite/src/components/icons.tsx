@@ -117,6 +117,21 @@ export const IconMarker = ({ size = 15 }: { size?: number }) => (
     <path d="M17.5 5.5a1.9 1.9 0 0 1 2.7 2.7L12 16.4l-3.6.9.9-3.6Z" />
   </svg>
 );
+/** A screw seen from the side: slotted head, tapering threaded shank. */
+export const IconScrew = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M8 3h8l-1 4H9L8 3ZM12 2v2" />
+    <path d="M9.5 7h5L13 21h-2L9.5 7Z" />
+    <path d="M10 10.5h4M10.5 13.5h3M11 16.5h2" />
+  </svg>
+);
+/** A ribbon badge — the logo layer. */
+export const IconBadge = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <circle cx="12" cy="9" r="6" />
+    <path d="M8.5 14 7 22l5-3 5 3-1.5-8" />
+  </svg>
+);
 export const IconRuler = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <path d="M3.5 16.5 16.5 3.5 20.5 7.5 7.5 20.5Z" />

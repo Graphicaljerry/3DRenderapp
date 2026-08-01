@@ -19,6 +19,8 @@ export interface ViewerHandle {
   resetView: () => void;
   /** Clear all per-face MMU paint from the model. */
   eraseFacePaint: () => void;
+  /** Grow (+1) or shrink (−1) every painted region by one triangle ring. */
+  growPaint: (dir: 1 | -1) => void;
   /** Restore a whole per-triangle paint state (undo/redo of a stroke). Ignored when
       it doesn't match the current mesh — paint is keyed to the triangle list. */
   restoreFacePaint: (tc: Uint8Array | null) => void;
@@ -119,7 +121,9 @@ interface Props {
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   partColors?: Record<string, string>; // per-part fill colour (objectId → hex): "model" + attachment ids
   paintMode?: boolean; // Paint tool active: click a face region to fill it with the active filament
-  paintTool?: "fill" | "brush"; // fill = click bucket (smart-fill); brush = paint-on-drag
+  paintTool?: "fill" | "brush" | "pick"; // bucket / drag / eyedropper
+  paintMirror?: boolean; // paint the X-mirrored region too (best-effort centroid match)
+  onPickSlot?: (slot: number) => void; // eyedropper result (0 = unpainted → eraser)
   paintSlot?: number; // active filament palette index (1-based); 0 = eraser
   paintAngle?: number; // smart-fill angle (deg) — how far a bucket fill flows across creases
   brushSize?: number; // brush radius as a % of the model's largest dimension
@@ -299,11 +303,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -993,7 +997,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (!s2.triColor) return;
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (!hit || hit.faceIndex == null) return;
-        const region = paintFillRegion(s2.tri, hit.faceIndex, cb.current.paintAngle ?? 30);
+        // Eyedropper: read the filament under the cursor instead of painting.
+        if (cb.current.paintTool === "pick") {
+          cb.current.onPickSlot?.(s2.triColor[hit.faceIndex] ?? 0);
+          return;
+        }
+        let region = paintFillRegion(s2.tri, hit.faceIndex, cb.current.paintAngle ?? 30);
+        if (cb.current.paintMirror) {
+          const map = mirrorMapOf(s2.tri, s2.mesh.geometry);
+          region = region.concat(region.map((t) => map[t]).filter((t) => t >= 0));
+        }
         const slot = cb.current.paintSlot ?? 1;
         for (const t of region) s2.triColor[t] = slot;
         updatePaintTris(s2, region, cb.current.paintPalette ?? []);
@@ -1109,7 +1122,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const sz = s2.mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
       const radius = (Math.max(sz.x, sz.y, sz.z) || 40) * (cb.current.brushSize ?? 8) / 100;
       const local = s2.mesh.worldToLocal(hit.point.clone()); // tri positions are in mesh-local space
-      const region = brushRegion(s2.tri, hit.faceIndex, local, radius);
+      let region = brushRegion(s2.tri, hit.faceIndex, local, radius);
+      if (cb.current.paintMirror) {
+        const map = mirrorMapOf(s2.tri, s2.mesh.geometry);
+        region = region.concat(region.map((t) => map[t]).filter((t) => t >= 0));
+      }
       const slot = cb.current.paintSlot ?? 1;
       const touched: number[] = [];
       for (const t of region) if (s2.triColor[t] !== slot) { s2.triColor[t] = slot; touched.push(t); }
@@ -2480,6 +2497,39 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => { invalidateRef.current(4); });
 
   useImperativeHandle(ref, () => wakeOnCall({
+    growPaint(dir: 1 | -1) {
+      const s = st.current;
+      if (!s?.mesh || !ensureTri(s) || !s.tri || !s.triColor) return;
+      if (!s.paintMesh) rebuildPaintMesh(s, cb.current.paintPalette ?? []);
+      const tc = s.triColor;
+      const touched: number[] = [];
+      if (dir === 1) {
+        // Each unpainted triangle bordering paint takes its neighbour's colour.
+        const takes: Array<[number, number]> = [];
+        for (let t = 0; t < s.tri.count; t++) {
+          if (tc[t]) continue;
+          for (let e = 0; e < 3; e++) {
+            const nb = s.tri.adj[t * 3 + e];
+            if (nb >= 0 && tc[nb]) { takes.push([t, tc[nb]]); break; }
+          }
+        }
+        for (const [t, c] of takes) { tc[t] = c; touched.push(t); }
+      } else {
+        // Boundary painted triangles (any unpainted or open edge) get erased.
+        for (let t = 0; t < s.tri.count; t++) {
+          if (!tc[t]) continue;
+          for (let e = 0; e < 3; e++) {
+            const nb = s.tri.adj[t * 3 + e];
+            if (nb < 0 || !tc[nb]) { touched.push(t); break; }
+          }
+        }
+        for (const t of touched) tc[t] = 0;
+      }
+      if (!touched.length) return;
+      updatePaintTris(s, touched, cb.current.paintPalette ?? []);
+      invalidateRef.current(2);
+      cb.current.onPaintStroke?.(tc.slice()); // one undoable stroke
+    },
     resetView() {
       if (st.current) frameToObject(st.current);
     },
@@ -3004,6 +3054,37 @@ function smoothRegion(tri: TriData, start: number, cosThresh = Math.cos((33 * Ma
     }
   }
   return out;
+}
+
+/** Best-effort mirror across the model's X=0 plane: each triangle maps to the one
+ *  whose centroid sits at (−x, y, z), matched through a 0.5 mm hash. Exact on the
+ *  symmetric meshes people actually mirror-paint (characters, helmets); on an
+ *  asymmetric mesh unmatched triangles simply don't mirror — no misfires. */
+const mirrorCache = new WeakMap<object, Int32Array>();
+function mirrorMapOf(tri: TriData, key: object): Int32Array {
+  let map = mirrorCache.get(key);
+  if (map) return map;
+  const q = (v: number) => Math.round(v * 2); // 0.5 mm buckets
+  const c = new THREE.Vector3(), a = new THREE.Vector3();
+  const centroid = (t: number) => {
+    c.set(0, 0, 0);
+    for (let k = 0; k < 3; k++) { a.fromBufferAttribute(tri.pos, tri.idx ? tri.idx.getX(t * 3 + k) : t * 3 + k); c.add(a); }
+    return c.multiplyScalar(1 / 3);
+  };
+  const byKey = new Map<string, number>();
+  const cents = new Float32Array(tri.count * 3);
+  for (let t = 0; t < tri.count; t++) {
+    const p2 = centroid(t);
+    cents[t * 3] = p2.x; cents[t * 3 + 1] = p2.y; cents[t * 3 + 2] = p2.z;
+    byKey.set(`${q(p2.x)},${q(p2.y)},${q(p2.z)}`, t);
+  }
+  map = new Int32Array(tri.count).fill(-1);
+  for (let t = 0; t < tri.count; t++) {
+    const m = byKey.get(`${q(-cents[t * 3])},${q(cents[t * 3 + 1])},${q(cents[t * 3 + 2])}`);
+    if (m !== undefined && m !== t) map[t] = m;
+  }
+  mirrorCache.set(key, map);
+  return map;
 }
 
 /** Paint tool region: the smart-fill flood from `seed` bounded by the smart-fill angle

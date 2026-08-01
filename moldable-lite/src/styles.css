@@ -666,7 +666,6 @@ button { font-family: inherit; cursor: pointer; }
    rows — reached straight down over the buttons). The cluster takes the corner of the
    FREE canvas instead: left of the card, and all the way down, because the orientation
    gizmo it normally clears is behind the card there. */
-.viewer-body:has(.inspector-dock:not([style*="none"])) .zoom-ctl { right: calc(var(--dock-w, 262px) + 24px); bottom: 12px; }
 .zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
 .zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
 /* hole tool panel */

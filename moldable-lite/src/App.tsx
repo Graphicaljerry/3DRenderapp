@@ -23,6 +23,7 @@ import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
 import { downscaleImage } from "./lib/downscale";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
+import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -924,7 +925,8 @@ export default function App() {
   const [measureMode, setMeasureMode] = useState(false);
   // Per-face MMU paint tool (Bambu-style): pick a filament, click a face region to fill it.
   const [paintMode, setPaintModeState] = useState(false);
-  const [paintTool, setPaintTool] = useState<"fill" | "brush">("fill"); // click-bucket vs paint-on-drag
+  const [paintTool, setPaintTool] = useState<"fill" | "brush" | "pick">("fill"); // bucket / drag / eyedropper
+  const [paintMirror, setPaintMirror] = useState(false); // paint both sides of symmetric models at once
   const [paintSlot, setPaintSlot] = useState(1); // active filament palette index (1-based); 0 = eraser
   const [paintAngle, setPaintAngle] = useState(30); // smart-fill angle (deg)
   const [brushSize, setBrushSize] = useState(8); // brush radius as % of the model's largest dimension
@@ -2573,6 +2575,140 @@ export default function App() {
     }
   }
 
+  // ---- Logo layer: SVG or PNG → its own movable solid on the model ----------------
+  // A vector goes straight to the extruder; a bitmap goes through the tracer first,
+  // which judges the art BEFORE anything is built — a photo becomes a refusal with
+  // reasons, not an unprintable blob. The result is an ATTACHMENT: drag it across any
+  // face with the gizmo, size it with the corner dots, then commit it from the Objects
+  // panel — Merge raises it (emboss), Engrave carves it in.
+  async function addLogoFile(file: File) {
+    const name = file.name.replace(/\.(svg|png|jpe?g|webp)$/i, "") || "logo";
+    setStatus("generating");
+    try {
+      let svgText: string;
+      let traceNotes: string[] = [];
+      if (/\.svg$/i.test(file.name) || file.type === "image/svg+xml") {
+        svgText = await file.text();
+      } else {
+        const { traceBitmap, outlinesToSvg, bitmapToImageData } = await import("./svg/trace");
+        const report = traceBitmap(await bitmapToImageData(file));
+        if (report.quality === "unusable") {
+          setMessages((m) => [...m, { id: mid(), role: "assistant", error: true, text:
+            `**${file.name}** can't become a clean logo:\n${report.notes.map((x) => `- ${x}`).join("\n")}\n\nFor a crisp result: solid dark shapes on a light background (or a transparent PNG), hard edges rather than soft gradients, and ~600 px or more on the short side. An SVG traced from the original art is best of all.` }]);
+          return;
+        }
+        traceNotes = report.notes;
+        svgText = outlinesToSvg(report);
+      }
+      const { extrudeSvg } = await import("./svg/extrude");
+      const { geometry: g, dims: d } = extrudeSvg(svgText, { sizeMm: 25, heightMm: 1.2 });
+      addAttachment(g, name);
+      const caveats = traceNotes.length ? `\n\n_${traceNotes.join(" ")}_` : "";
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text:
+        `Added **${name}** (${d.x} × ${d.y} × ${d.z} mm) as its own layer. Drag it onto any face with the arrows/rings, corner dots resize it. Then in **Objects**: **Merge** raises it off the surface (embossed), **Engrave** carves it in. Both turn the model into a mesh — do CAD edits first.${caveats}` }]);
+      explainOnce("logo", `Logos work best as **SVG** (exact curves). PNG/JPG get **traced**: the app finds the ink's outline, so solid, hard-edged, dark-on-light art comes out clean — photos, gradients and fine hairlines don't survive, and the app will say so rather than build a blob.`);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't turn ${file.name} into a logo: ${String(err?.message ?? err)}`, error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  /** Engrave: subtract the placed attachment(s) from the model — mergeAttachments'
+   *  mirror image (boolean −1 instead of +1), for carved-in logos and reliefs. */
+  async function engraveAttachments(ids: string[]) {
+    const targets = attachments.filter((a) => ids.includes(a.id));
+    if (!targets.length || !geometry || !result) return;
+    setStatus("generating");
+    try {
+      let baseGeom = geometry;
+      let g: THREE.BufferGeometry | null = null;
+      for (const t of targets) {
+        const baked = viewer.current?.bakeAttachment(t.id);
+        if (!baked) throw new Error(`couldn't read ${t.name}'s placement`);
+        if (!(await previewSetBase(baseGeom))) throw new Error("this model's mesh couldn't be welded for a boolean");
+        const pos = await previewBoolean(baked, -1);
+        if (!pos) throw new Error(`carving ${t.name} out of the model failed — move it so it overlaps the surface`);
+        g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        baseGeom = g;
+      }
+      g!.computeVertexNormals();
+      g!.computeBoundingBox();
+      const sz = g!.boundingBox!.getSize(new THREE.Vector3());
+      const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
+      const names = targets.map((t) => t.name).join(" + ");
+      const res: EngineResult = {
+        kind: "generative",
+        geometry: g!,
+        dims,
+        source: { kind: "gen", provider: "engrave", model: names },
+        supportsStep: false,
+        glb: geometryToSTL(g!),
+      };
+      applyResult(res, project?.name ?? "Model", `Engraved ${names} into the model`, `engrave ${names}`);
+      const gone = new Set(targets.map((t) => t.id));
+      setAttachments((a) => a.filter((x) => !gone.has(x.id)));
+      setSelAttachIds([]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Engraved **${names}** into the surface — the shape is carved in wherever it overlapped. Undo brings the layer back to adjust.` }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't engrave: ${String(err?.message ?? err)}`, error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
+  // ---- Screw tool: hover-place screw holes, same machinery as magnets -------------
+  // Three fits (see lib/screws.ts): a clearance hole the screw slides through (with an
+  // optional countersink), a ribbed hole the screw bites into — the thread pattern the
+  // headphone hook's report asked for — and a heat-set insert pocket. All one free
+  // ScrewOp in the kernel; the ribs are the concentric profile the worker revolves.
+  type ScrewTool = { size: ScrewSize; fit: ScrewFit; countersink: boolean; snap: number; placed: { at: [number, number, number]; normal: [number, number, number] }[] };
+  const [screwTool, setScrewTool] = useState<ScrewTool | null>(null);
+  const screwToolRef = useRef(screwTool);
+  screwToolRef.current = screwTool;
+  function toggleScrewTool() {
+    if (screwToolRef.current) { setScrewTool(null); return; }
+    dismissOverlays();
+    setScrewTool({ size: SCREW_SIZES[2], fit: "bite", countersink: true, snap: 1, placed: [] }); // M3 — the maker staple
+  }
+  async function placeScrew(spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) {
+    const t = screwToolRef.current;
+    if (!t) return;
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code" || !sel || activeKind !== "replicad") {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Screw holes work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
+      setScrewTool(null);
+      return;
+    }
+    const cut = screwCut(t.size, t.fit, t.countersink);
+    const src = cur.source;
+    const rc = cur.recenter ?? [0, 0, 0];
+    const op = {
+      type: "screw" as const,
+      at: [spot.at[0] + rc[0], spot.at[1] + rc[1], spot.at[2] + rc[2]] as [number, number, number],
+      normal: spot.normal,
+      minor: cut.minor,
+      major: cut.major,
+      pitch: cut.pitch,
+      depth: cut.depth,
+      countersink: cut.countersink,
+    };
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
+      applyResult(res, project?.name ?? "Model", `Added a ${cut.what}`, `screw ${t.size.label}`);
+      postReceipt(`screw:${t.size.id}:${t.fit}:${t.countersink}`, (n) =>
+        n === 1 ? `Added a ${cut.what}.` : `Added ${n} ${cut.what.replace("hole", "holes").replace("pocket", "pockets")}.`);
+      setScrewTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }] } : d));
+      explainOnce("screw", `Cut a **screw hole** — free, no AI. "Bites in" bores the plastic tap size and ribs the wall at the thread pitch, so the screw cuts its own path and holds like a tapped hole; "Slides through" is a clearance bore (flush-head cone optional); "Heat-set insert" pockets the brass insert size. Placing another near this one snaps into line. Undo reverts it.`);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't cut a screw hole there: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   function pickFaces(faces: PickedFeature[], additive = false) {
     setSelectedFaces((prev) => {
       if (!additive) return faces;
@@ -4048,9 +4184,9 @@ export default function App() {
   // mesh (features can't be picked on one), but the keyboard had no such guard — V armed
   // the tool anyway, the Viewer started picking, and the button that would turn it back
   // off was not rendered. Silently doing nothing is the honest behaviour here.
-  const toggleSelectTool = () => { if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return; setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); setMagnetTool(null); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }); };
-  const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); } else setMeasurePending(null); return next; });
-  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); } };
+  const toggleSelectTool = () => { if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return; setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); setMagnetTool(null); setScrewTool(null); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }); };
+  const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } else setMeasurePending(null); return next; });
+  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } };
 
   const undo = () => {
     if (undoPaint()) return; // strokes come off first — they're the newest thing you did
@@ -4077,6 +4213,7 @@ export default function App() {
     setModelSelected(false);
     setHoleDraft(null); // drop any un-drilled hole draft
     setMagnetTool(null); // magnet mode goes down with the rest
+    setScrewTool(null);
   };
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -4357,6 +4494,15 @@ export default function App() {
           place: (spot) => void placeMagnet(spot),
           pocket: magnetTool ? magnetPocket(magnetTool.size, magnetTool.fit) : null,
         }}
+        screwCtl={{
+          tool: screwTool,
+          canUse: activeKind === "replicad",
+          sizes: SCREW_SIZES,
+          toggle: toggleScrewTool,
+          patch: (patch) => setScrewTool((t) => (t ? { ...t, ...patch } : t)),
+          place: (spot) => void placeScrew(spot),
+          cut: screwTool ? screwCut(screwTool.size, screwTool.fit, screwTool.countersink) : null,
+        }}
         views={{ left: views.left?.url, back: views.back?.url, right: views.right?.url }}
         onPickView={pickView}
         onClearView={clearView}
@@ -4401,6 +4547,8 @@ export default function App() {
         selAttachIds={selAttachIds}
         onAttachSelect={selectAttach}
         onMergeAttachments={(ids?: string[]) => { void mergeAttachments(ids); }}
+        onEngraveAttachments={(ids: string[]) => { void engraveAttachments(ids); }}
+        onAddLogo={(f: File) => { void addLogoFile(f); }}
         onRemoveAttachment={removeAttachment}
         partCount={partCount}
         separated={separated}
@@ -4445,6 +4593,10 @@ export default function App() {
           setMode: setPaintMode,
           tool: paintTool,
           setTool: setPaintTool,
+          mirror: paintMirror,
+          setMirror: setPaintMirror,
+          // Eyedropper result: adopt the picked filament and hand back to the bucket.
+          pickSlot: (slot: number) => { setPaintSlot(slot); setPaintTool("fill"); },
           slot: paintSlot,
           setSlot: setPaintSlot,
           angle: paintAngle,

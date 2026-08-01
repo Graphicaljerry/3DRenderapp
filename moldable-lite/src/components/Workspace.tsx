@@ -29,7 +29,7 @@ import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type Upda
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1128,6 +1128,8 @@ function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]
   );
 }
 
+// Structural twin of lib/screws.ts ScrewSize — Workspace stays decoupled from the lib.
+type ScrewSizeLike = { id: string; label: string; d: number; pitch: number; clearance: number; bite: number; head: number; insertBore?: number; insertLen?: number; note?: string };
 type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
 // Icons ride the Inspector rows themselves — the old canvas tab strip duplicated this
 // list (every tab was just setDockPanel), so the strip is gone and its icons moved here.
@@ -1376,6 +1378,21 @@ interface Props {
     place: (spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) => void;
     pocket: { diameter: number; depth: number } | null; // the current size+fit as a pocket
   };
+  screwCtl: {
+    tool: {
+      size: ScrewSizeLike;
+      fit: "through" | "bite" | "insert";
+      countersink: boolean;
+      snap: number;
+      placed: { at: [number, number, number]; normal: [number, number, number] }[];
+    } | null;
+    canUse: boolean;
+    sizes: ScrewSizeLike[];
+    toggle: () => void;
+    patch: (p: Partial<NonNullable<Props["screwCtl"]["tool"]>>) => void;
+    place: (spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) => void;
+    cut: { minor: number; major: number; pitch: number; depth: number; countersink: number; what: string } | null;
+  };
   onPickImage: (f: File) => void;
   onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
   refsCount: number; // extra unlabelled reference photos riding with the composer image
@@ -1422,6 +1439,8 @@ interface Props {
   selAttachIds: string[];
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   onMergeAttachments: (ids?: string[]) => void;
+  onEngraveAttachments: (ids: string[]) => void; // subtract instead of fuse — carved-in logos
+  onAddLogo: (f: File) => void; // SVG straight in, PNG/JPG through the tracer
   onRemoveAttachment: (id: string) => void;
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
   separated: boolean; // the dry-fit sandbox is open (model was split into parts)
@@ -1463,7 +1482,9 @@ interface Props {
   setPartColor: (key: string, hex: string | null) => void;
   paintCtl: {
     mode: boolean; setMode: (v: boolean) => void;
-    tool: "fill" | "brush"; setTool: (t: "fill" | "brush") => void;
+    tool: "fill" | "brush" | "pick"; setTool: (t: "fill" | "brush" | "pick") => void;
+    mirror: boolean; setMirror: (v: boolean) => void;
+    pickSlot: (slot: number) => void;
     slot: number; setSlot: (n: number) => void;
     angle: number; setAngle: (n: number) => void;
     brushSize: number; setBrushSize: (n: number) => void;
@@ -1599,6 +1620,7 @@ interface Props {
 
 export function Workspace(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const logoFileRef = useRef<HTMLInputElement>(null);
   // Composer grows with the text (up to ~5 lines) so long requests stay fully readable.
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const growComposer = () => {
@@ -1680,7 +1702,7 @@ export function Workspace(p: Props) {
   // kept them mutually exclusive — Mark and Measure could both render as armed at once.
   // One direction is this effect (another tool wins → Mark stands down); the other is in
   // Mark's own onClick, which disarms the rest before arming itself.
-  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool;
+  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool || !!p.screwCtl.tool;
   useEffect(() => { if (otherToolOn) setMarkMode(false); }, [otherToolOn]);
 
   // Paste a reference image from the clipboard anywhere in the app.
@@ -1810,6 +1832,11 @@ export function Workspace(p: Props) {
                   {p.attachments.length > 0 && (
                     <button className="primary sm" style={{ width: "100%", marginTop: 6 }} title="Fuse into ONE printable solid (Undo brings the pieces back)" onClick={() => p.onMergeAttachments(p.selAttachIds.length > 1 ? p.selAttachIds : undefined)}>
                       {p.selAttachIds.length > 1 ? `Merge selected (${p.selAttachIds.length})` : "Merge all into model"}
+                    </button>
+                  )}
+                  {p.selAttachIds.length > 0 && (
+                    <button className="ghost sm" style={{ width: "100%", marginTop: 6 }} title="Carve the selected part's shape INTO the model wherever they overlap — an engraved logo or relief (Undo brings the layer back)" onClick={() => p.onEngraveAttachments(p.selAttachIds)}>
+                      Engrave into model
                     </button>
                   )}
                   {p.pins.map((pin, i) => (
@@ -2280,6 +2307,8 @@ export function Workspace(p: Props) {
                 partColors={p.partColors}
                 paintMode={p.paintCtl.mode}
                 paintTool={p.paintCtl.tool}
+                paintMirror={p.paintCtl.mirror}
+                onPickSlot={p.paintCtl.pickSlot}
                 paintSlot={p.paintCtl.slot}
                 paintAngle={p.paintCtl.angle}
                 brushSize={p.paintCtl.brushSize}
@@ -2310,7 +2339,11 @@ export function Workspace(p: Props) {
                   : null}
                 magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
                   ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, snap: p.magnetCtl.tool.snap, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
-                  : null}
+                  : p.screwCtl.tool && p.screwCtl.cut
+                    // The screw tool rides the SAME hover-ghost/snap/align machinery: the
+                    // ghost shows the widest thing being cut (countersink or rib crest).
+                    ? { diameter: Math.max(p.screwCtl.cut.countersink, p.screwCtl.cut.major), depth: p.screwCtl.cut.depth || 12, snap: p.screwCtl.tool.snap, align: p.screwCtl.tool.placed, onPlace: p.screwCtl.place }
+                    : null}
                 onContext={(h) => {
                   // Right-click selects what it lands on (standard editor behavior), then opens the menu.
                   if (h.target.kind === "attachment") p.onAttachSelect(h.target.id);
@@ -2399,6 +2432,7 @@ export function Workspace(p: Props) {
                         <Item label="Cut to fit" hint="Carve its shape + clearance" onClick={() => p.onMakeFit([t.id])} />
                         <Item label="Drop to plate" onClick={() => p.onDropToPlate([t.id])} />
                         <Item label="Merge into model" hint="Fuse into one solid" onClick={() => p.onMergeAttachments([t.id])} />
+                        <Item label="Engrave into model" hint="Carve its shape in" onClick={() => p.onEngraveAttachments([t.id])} />
                         {plateItems(t.id)}
                       </>
                     )}
@@ -2544,6 +2578,93 @@ export function Workspace(p: Props) {
                     )}
                   </div>
                   <div className="rail-tool">
+                    {/* Screw holes: right-sized bores with a ribbed thread pattern to bite into. */}
+                    <button
+                      className={`ghost sm iconbtn${p.screwCtl.tool ? " on" : ""}`}
+                      aria-pressed={!!p.screwCtl.tool}
+                      aria-label="Screws"
+                      disabled={!p.geometry || p.tab !== "3d" || !p.screwCtl.canUse}
+                      title={p.screwCtl.canUse
+                        ? "Screw holes: pick a size, hover the model for a preview, click to cut — clearance, thread-bite (ribbed) or heat-set insert"
+                        : "Screw holes work on Precise (CAD) models — mesh models can't be drilled"}
+                      onClick={p.screwCtl.toggle}
+                    >
+                      <IconScrew />
+                    <span className="rail-name">Screws</span>
+                    </button>
+                    {p.screwCtl.tool && (
+                      <div className="rail-fly">
+                        <div className="magnet-fly">
+                          <div className="paint-lbl">Screw size</div>
+                          <div className="magnet-sizes" role="radiogroup" aria-label="Screw size">
+                            {p.screwCtl.sizes.map((s) => {
+                              const on = p.screwCtl.tool!.size.id === s.id;
+                              const noInsert = p.screwCtl.tool!.fit === "insert" && !s.insertBore;
+                              return (
+                                <button key={s.id} role="radio" aria-checked={on} className={`msize${on ? " on" : ""}`}
+                                  disabled={noInsert}
+                                  title={noInsert ? `No standard heat-set insert for ${s.label}` : s.note ? `${s.label} — ${s.note}` : s.label}
+                                  onClick={() => p.screwCtl.patch({ size: s })}>
+                                  {s.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                          <div className="paint-lbl">What the hole does</div>
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Hole type">
+                            <button className={p.screwCtl.tool.fit === "bite" ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.fit === "bite"}
+                              title="The screw threads INTO this part: the bore is the plastic tap size and the wall is ribbed at the thread pitch, so the screw cuts its own path and holds like a tapped hole."
+                              onClick={() => p.screwCtl.patch({ fit: "bite" })}>Bites in</button>
+                            <button className={p.screwCtl.tool.fit === "through" ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.fit === "through"}
+                              title="The screw slides through this part and tightens into the next one (or a nut) — a standard clearance bore, all the way through."
+                              onClick={() => p.screwCtl.patch({ fit: "through" })}>Slides through</button>
+                            <button className={p.screwCtl.tool.fit === "insert" ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.fit === "insert"}
+                              title="Pocket for a heat-set brass insert (Ruthex-style) — melt it in with a soldering iron and the screw threads into brass, the strongest hold in plastic."
+                              onClick={() => { const cur = p.screwCtl.tool!.size; p.screwCtl.patch({ fit: "insert", ...(cur.insertBore ? {} : { size: p.screwCtl.sizes.find((x) => x.insertBore)! }) }); }}>Heat-set</button>
+                          </div>
+                          {p.screwCtl.tool.fit === "through" && (
+                            <label className="magnet-pair" title="Widens the top of the hole into an 82° cone, so a flat (countersunk) screw head sits flush with the surface.">
+                              <input type="checkbox" checked={p.screwCtl.tool.countersink} onChange={(e) => p.screwCtl.patch({ countersink: e.target.checked })} />
+                              <span>Flush head (countersink)</span>
+                            </label>
+                          )}
+                          <div className="paint-lbl">Placing</div>
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Placement snapping">
+                            <button className={p.screwCtl.tool.snap > 0 ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.snap > 0}
+                              onClick={() => p.screwCtl.patch({ snap: 1 })}>1 mm grid</button>
+                            <button className={p.screwCtl.tool.snap === 0 ? "on" : ""} role="radio" aria-checked={p.screwCtl.tool.snap === 0}
+                              onClick={() => p.screwCtl.patch({ snap: 0 })}>Free</button>
+                          </div>
+                          <div className="magnet-hint">{p.screwCtl.cut ? p.screwCtl.cut.what : ""} Hover the model, click to cut. Nearby holes snap into line.</div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-tool">
+                    {/* Logo: SVG exact, PNG/JPG traced — lands as a draggable layer. */}
+                    <button
+                      className="ghost sm iconbtn"
+                      aria-label="Logo"
+                      disabled={!p.geometry || p.tab !== "3d"}
+                      title="Add a logo: SVG (exact) or PNG/JPG (auto-traced — solid dark-on-light art works best). It arrives as its own layer you drag onto any face, then Merge (raised) or Engrave (carved) from the Objects panel."
+                      onClick={() => logoFileRef.current?.click()}
+                    >
+                      <IconBadge />
+                    <span className="rail-name">Logo</span>
+                    </button>
+                    <input
+                      ref={logoFileRef}
+                      type="file"
+                      accept=".svg,.png,.jpg,.jpeg,.webp"
+                      hidden
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) p.onAddLogo(f);
+                        e.currentTarget.value = "";
+                      }}
+                    />
+                  </div>
+                  <div className="rail-tool">
                     <button
                       className={`ghost sm iconbtn${markMode ? " on" : ""}`}
                       aria-pressed={markMode}
@@ -2557,6 +2678,7 @@ export function Workspace(p: Props) {
                           if (p.transformCtl.mode !== "off") p.transformCtl.setMode("off");
                           if (p.paintCtl.mode) p.paintCtl.setMode(false);
                           if (p.magnetCtl.tool) p.magnetCtl.toggle();
+                          if (p.screwCtl.tool) p.screwCtl.toggle();
                         }
                         return !v;
                       })}
@@ -2590,6 +2712,15 @@ export function Workspace(p: Props) {
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="Paint tool">
                             <button className={p.paintCtl.tool === "fill" ? "on" : ""} role="radio" aria-checked={p.paintCtl.tool === "fill"} title="Fill: click a face region to flood-fill it" onClick={() => p.paintCtl.setTool("fill")}>Fill</button>
                             <button className={p.paintCtl.tool === "brush" ? "on" : ""} role="radio" aria-checked={p.paintCtl.tool === "brush"} title="Brush: press and drag to paint" onClick={() => p.paintCtl.setTool("brush")}>Brush</button>
+                            <button className={p.paintCtl.tool === "pick" ? "on" : ""} role="radio" aria-checked={p.paintCtl.tool === "pick"} title="Eyedropper: click the model to adopt the filament under the cursor" onClick={() => p.paintCtl.setTool("pick")}>Pick</button>
+                          </div>
+                          <label className="magnet-pair" title="Symmetric models (helmets, characters): every fill and stroke also paints the X-mirrored spot on the other side. Best-effort — parts of the mesh with no mirror twin just don't mirror.">
+                            <input type="checkbox" checked={p.paintCtl.mirror} onChange={(e) => p.paintCtl.setMirror(e.target.checked)} />
+                            <span>Mirror both sides</span>
+                          </label>
+                          <div className="param-actions" style={{ marginTop: 0 }}>
+                            <button className="ghost sm" title="Every painted region spreads outward by one ring of triangles — tidy up a fill that stopped just short" onClick={() => p.viewerRef.current?.growPaint(1)}>Grow</button>
+                            <button className="ghost sm" title="Every painted region pulls back by one ring of triangles" onClick={() => p.viewerRef.current?.growPaint(-1)}>Shrink</button>
                           </div>
                           <div className="paint-lbl">Filament</div>
                           <div className="paint-swatches" role="radiogroup" aria-label="Filament">

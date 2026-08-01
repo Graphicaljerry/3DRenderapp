@@ -520,12 +520,11 @@ button { font-family: inherit; cursor: pointer; }
    same 10px corner, so any two open at once overlapped — most visibly the Objects
    panel sitting on top of the selection inspector. Children keep their own widths;
    the column keeps them apart and inside the canvas. It runs the full height and
-   ends above the corner orientation gizmo, with the zoom cluster pinned to its
-   bottom — so a tall Objects panel shrinks and scrolls instead of growing down over
-   the zoom buttons. */
+   ends above the corner orientation gizmo. (The zoom cluster is NOT a member — the
+   stack steps left to clear the open Inspector card, and the corner cluster must
+   stay in the corner; it pins itself, at .zoom-ctl.) */
 .right-dock { position: absolute; top: 10px; right: 10px; bottom: 112px; z-index: 9; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100% - 20px); pointer-events: none; }
 .right-dock > * { pointer-events: auto; position: static; flex: 0 1 auto; min-height: 0; }
-.right-dock > .zoom-ctl { margin-top: auto; flex: 0 0 auto; } /* always last, always clear */
 .right-dock:empty { display: none; }
 .mesh-stats { z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
 .ms-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11.5px; }
@@ -649,7 +648,13 @@ button { font-family: inherit; cursor: pointer; }
 .update-chip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
 .update-chip.installing { color: var(--mut); border-color: var(--bord); background: none; font-weight: 500; }
 
-.zoom-ctl { z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+/* Pinned to the CORNER itself, not a member of the right-dock stack: that stack
+   steps left to clear the open Inspector card, which stranded the zoom buttons in
+   the middle of the canvas. bottom matches the right-dock's floor — directly above
+   the orientation gizmo's corner viewport. */
+.zoom-ctl { position: absolute; right: 10px; bottom: 112px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
+/* The collapsed-inspector rail is flush to the right edge — step just clear of it. */
+.viewer-body:has(.dock-rail) .zoom-ctl { right: 52px; }
 .zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
 .zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
 /* hole tool panel */

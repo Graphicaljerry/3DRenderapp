@@ -2615,16 +2615,17 @@ export function Workspace(p: Props) {
                 {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
                   <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
                 )}
-                {/* Last in the stack, pinned to the bottom by CSS — the panels above
-                    shrink and scroll rather than growing down over it. */}
-                {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
-                  <div className="zoom-ctl" role="group" aria-label="Zoom">
-                    <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>
-                    <button title="Frame the model in view" aria-label="Frame model" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
-                    <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
-                  </div>
-                )}
               </div>
+              {/* NOT in the right-dock: that stack steps left to clear the Inspector
+                  card, which left the zoom buttons floating mid-canvas. The corner
+                  cluster stays glued to the bottom-right, above the orientation gizmo. */}
+              {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (
+                <div className="zoom-ctl" role="group" aria-label="Zoom">
+                  <button title="Zoom in" aria-label="Zoom in" onClick={() => p.viewerRef.current?.zoomBy(1.3)}>+</button>
+                  <button title="Frame the model in view" aria-label="Frame model" onClick={() => p.viewerRef.current?.resetView()}><IconFrame size={12} /></button>
+                  <button title="Zoom out" aria-label="Zoom out" onClick={() => p.viewerRef.current?.zoomBy(1 / 1.3)}>−</button>
+                </div>
+              )}
               {p.pinCtl.active && (
                 <div className="pin-panel">
                   <div className="pin-head">

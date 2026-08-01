@@ -1371,6 +1371,7 @@ interface Props {
   onPickImage: (f: File) => void;
   onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
   refsCount: number; // extra unlabelled reference photos riding with the composer image
+  photoAdvice: string; // model-aware format/resolution guidance for attachments
   onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
   views: Partial<Record<"left" | "back" | "right", string>>;
@@ -2022,7 +2023,10 @@ export function Workspace(p: Props) {
             {p.imageUrl && (
               <div className="imgchip">
                 <img src={p.imageUrl} alt={p.imageMarkup ? "marked screenshot" : "reference"} />
-                <span>{p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : p.refsCount > 0 ? `${p.refsCount + 1} reference photos` : "reference image"}</span>
+                <span>
+                  {p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : p.refsCount > 0 ? `${p.refsCount + 1} reference pictures` : "reference picture"}
+                  {!p.imageMarkup && <Hint text={p.photoAdvice} />}
+                </span>
                 {p.mode === "precise" && !p.imageMarkup && (
                   <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
                 )}
@@ -2050,8 +2054,8 @@ export function Workspace(p: Props) {
               <button
                 type="button"
                 className="attach"
-                title="Upload a photo → 3D"
-                aria-label="Upload a photo to turn into a 3D model"
+                title={`Upload photos or sketches → 3D. ${p.photoAdvice}`}
+                aria-label="Upload photos or sketches to turn into a 3D model"
                 onClick={() => fileRef.current?.click()}
               >
                 <IconPaperclip />

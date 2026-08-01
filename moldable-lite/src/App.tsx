@@ -20,6 +20,7 @@ import { detectProductQuery, researchDimensions, canResearch } from "./llm/resea
 import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } from "./llm/clarify";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
+import { imageAdvice } from "./llm/imageAdvice";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -3874,6 +3875,7 @@ export default function App() {
         onClearImage={clearImage}
         webMode={webMode}
         onCycleWeb={cycleWeb}
+        photoAdvice={imageAdvice({ provider: llm.provider, mesh: modePref === "generative" })}
         animateIn={!beenHome}
       />
     );
@@ -3947,6 +3949,7 @@ export default function App() {
         onPickImage={pickImage}
         onPickImages={pickImages}
         refsCount={refs.length}
+        photoAdvice={imageAdvice({ provider: llm.provider, mesh: mode === "generative" })}
         onMarkup={attachMarkup}
         onClearImage={clearImage}
         aiPreview={{
@@ -4874,7 +4877,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -4892,6 +4895,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onClearImage: () => void;
   webMode: "auto" | "on" | "off";
   onCycleWeb: () => void;
+  photoAdvice: string;
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
   recent?: { id: string; name: string; engine: string; thumb?: string }[];
@@ -5000,8 +5004,13 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           {imageUrl && (
             <div className="launch-imgchip">
               <img src={imageUrl} alt="reference" />
-              <span>{refsCount > 0 ? `${refsCount + 1} reference photos` : "reference photo"}</span>
-              <button type="button" aria-label="Remove reference photos" onClick={onClearImage}><IconX /></button>
+              <span>
+                {refsCount > 0 ? `${refsCount + 1} reference pictures` : "reference picture"}
+                {/* The advice is most actionable right here — while re-shooting is
+                    still one tap away. */}
+                <em className="imgchip-advice">{photoAdvice}</em>
+              </span>
+              <button type="button" aria-label="Remove reference pictures" onClick={onClearImage}><IconX /></button>
             </div>
           )}
           <textarea
@@ -5024,8 +5033,8 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <div className="launch-composer-foot">
             {/* Attaches, like every chat app's clip — drop and paste land in the same
                 place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}
-            <button type="button" className="launch-attach" onClick={() => fileRef.current?.click()}>
-              <IconPaperclip /> Add photos
+            <button type="button" className="launch-attach" title={photoAdvice} onClick={() => fileRef.current?.click()}>
+              <IconPaperclip /> Photos &amp; sketches
             </button>
             <input
               ref={fileRef}

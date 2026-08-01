@@ -3809,6 +3809,9 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
     const move = (ev: PointerEvent) => {
       const dx = ev.clientX - x0;
       if (Math.abs(dx) < 3 && !moved) return;
+      // A drag supersedes any half-typed draft — the input renders `editing[k] ?? value`,
+      // so leaving one behind would freeze the readout at the abandoned text.
+      if (!moved) setEditing((e) => { if (!(k in e)) return e; const n = { ...e }; delete n[k]; return n; });
       moved = true;
       // Fine scrub while Shift is held, as every 3D tool does.
       const scale = (ev.shiftKey ? 0.25 : 1) * o.step;
@@ -3951,7 +3954,15 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
               title={dirty ? `Revert to the AI's ${def}` : "Unchanged"}
               aria-label={`Revert ${humanizeParam(k)}`}
               disabled={busy || !dirty}
-              onClick={() => { const next = { ...local, [k]: def }; setLocal(next); commit(next); }}
+              onClick={() => {
+                // Drop any in-progress typed draft for this row FIRST: the input renders
+                // `editing[k] ?? value`, so a leftover draft kept showing the old number
+                // while the model had already reverted (measured: field 60.5, model 30).
+                setEditing((e) => { const n = { ...e }; delete n[k]; return n; });
+                const next = { ...local, [k]: def };
+                setLocal(next);
+                commit(next);
+              }}
             >
               <IconReset />
             </button>
@@ -3961,7 +3972,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
       </section>
       ))}
       <div className="param-actions">
-        <button className="ghost sm" disabled={busy || !changed} onClick={() => { setLocal(defaults); onApply(defaults); }}>
+        <button className="ghost sm" disabled={busy || !changed} onClick={() => { setEditing({}); setLocal(defaults); onApply(defaults); }}>
           <IconReset /> Reset all{changed ? ` (${changed})` : ""}
         </button>
         <button className="primary sm" disabled={busy} onClick={onSave}>Save as version</button>

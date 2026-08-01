@@ -156,6 +156,12 @@ export type ParamGroup = { title: string; rows: ParamRow[] };
  *  them, because generated parameter names rarely share a prefix. Magnitude always
  *  partitions. Counts are split off because they are not lengths and do not belong on
  *  the same scale as one.
+ *
+ *  Order comes from the DESIGN's values (`defaults`), never the edited ones. Ordering by
+ *  the live value made the list re-sort as you dragged: the row slid out from under the
+ *  cursor mid-scrub, and crossing a band boundary moved it to another section entirely,
+ *  which remounts the node and kills the drag outright. The layout has to hold still
+ *  while you edit it.
  */
 export function groupParams(defaults: CadParams, values: CadParams): ParamGroup[] {
   const all: ParamRow[] = Object.keys(defaults).map((k) => ({
@@ -166,9 +172,9 @@ export function groupParams(defaults: CadParams, values: CadParams): ParamGroup[
   }));
   const counts = all.filter((r) => r.isCount);
   const dims = all.filter((r) => !r.isCount);
-  const maxV = Math.max(1e-6, ...dims.map((r) => Math.abs(r.value)));
-  for (const r of dims) r.frac = Math.abs(r.value) / maxV;
-  dims.sort((a, b) => b.frac - a.frac);
+  const maxV = Math.max(1e-6, ...dims.map((r) => Math.abs(defaults[r.key])));
+  for (const r of dims) r.frac = Math.abs(defaults[r.key]) / maxV;
+  dims.sort((a, b) => b.frac - a.frac || a.key.localeCompare(b.key));
 
   // Below six rows there is nothing to navigate, and section headers would be more
   // chrome than content. One sorted list.

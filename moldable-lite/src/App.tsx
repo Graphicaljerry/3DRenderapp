@@ -1774,17 +1774,29 @@ export default function App() {
   }
 
   /** Slider change: rebuild the SAME code with new dimensions — no AI call, no version spam. */
+  // Every parameter rebuild — live or committed — carries a generation. A newer request
+  // invalidates every older one still in flight, so a slow LIVE build finishing after
+  // the release commit can't repaint the model with the stale mid-drag value (measured:
+  // released at 20 mm, model settled at 17.5 mm).
+  const paramGen = useRef(0);
   async function applyParams(values: CadParams) {
     if (!sel || !result || result.source.kind !== "code" || status === "generating") return;
+    const gen = ++paramGen.current;
+    // The commit supersedes the drag: drop what's queued AND stop the live loop from
+    // starting another iteration. Clearing `next` alone left a window — the loop could
+    // have already picked a queued value up and would then bump the generation PAST
+    // the commit's, so a stale mid-drag value won the race (measured 17.5 vs 20).
+    liveParamRun.current.next = null;
+    liveParamRun.current.stop = true;
     setParamValues(values);
     setStatus("generating");
     try {
       // ops MUST ride along: drilled holes and magnet pockets live in the op chain, and
       // rebuilding from code+params alone silently erased every one of them.
       const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values, ops: result.source.ops });
-      applyResultNoCommit(res);
+      if (paramGen.current === gen) applyResultNoCommit(res);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Those values don't build: " + String(err?.message ?? err), error: true }]);
+      if (paramGen.current === gen) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Those values don't build: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -1795,18 +1807,21 @@ export default function App() {
   // build; release commits through applyParams, which does report), and it queues
   // trailing-latest so a slow kernel rebuild coalesces the stream of drag values
   // instead of piling them up.
-  const liveParamRun = useRef<{ running: boolean; next: CadParams | null }>({ running: false, next: null });
+  const liveParamRun = useRef<{ running: boolean; next: CadParams | null; stop: boolean }>({ running: false, next: null, stop: false });
   async function applyParamsLive(values: CadParams) {
     if (!sel || !result || result.source.kind !== "code") return;
     setParamValues(values);
     if (liveParamRun.current.running) { liveParamRun.current.next = values; return; }
     liveParamRun.current.running = true;
+    liveParamRun.current.stop = false; // a fresh drag clears the previous commit's stop
     const src = result.source;
     let v: CadParams | null = values;
     while (v) {
+      if (liveParamRun.current.stop) break; // a commit landed — it owns the model now
+      const gen = ++paramGen.current;
       try {
         const res = await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops });
-        applyResultNoCommit(res);
+        if (paramGen.current === gen) applyResultNoCommit(res);
       } catch { /* transient drag value — the release commit surfaces real errors */ }
       v = liveParamRun.current.next;
       liveParamRun.current.next = null;

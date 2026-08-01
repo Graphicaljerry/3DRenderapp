@@ -1,17 +1,24 @@
 import { IconX } from "./icons";
 import { TEMPLATES, templateThumb, type Template } from "../cad/templates";
+import { SCULPT_GLYPHS } from "../assets/templates/sculptGlyphs";
 
 function Thumb({ t }: { t: Template }) {
-  const src = templateThumb(t.id);
+  // Parts show their REAL render (captured from this app's own kernel). Sculpts show a
+  // drawing: the engine returns something different every run, so a photo-real preview
+  // would promise a specific result the card can't deliver.
+  const glyph = t.kind === "mesh" ? SCULPT_GLYPHS[t.id] : undefined;
+  const src = glyph ? undefined : templateThumb(t.id);
   return (
-    <div className="tpl-thumb">
+    <div className={`tpl-thumb${glyph ? " sculpt" : ""}`}>
       {src ? (
         <img src={src} alt="" loading="lazy" />
       ) : (
         <span className="tpl-thumb-empty" aria-hidden="true">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" /><path d="M3 7 12 12 21 7" /><path d="M12 12V22" />
-          </svg>
+          {glyph ?? (
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" /><path d="M3 7 12 12 21 7" /><path d="M12 12V22" />
+            </svg>
+          )}
         </span>
       )}
     </div>

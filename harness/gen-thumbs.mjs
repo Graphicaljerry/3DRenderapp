@@ -14,15 +14,17 @@ await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".topbar", { timeout: 60_000 });
 
+// CAD only: a "mesh" template is a prompt for the generative engine, so rendering its
+// card this way would spend a real generation per card. Those cards carry drawn glyphs.
 let templates = await page.evaluate(async () => {
   const mod = await import("/src/cad/templates.ts");
-  return mod.TEMPLATES.map((t) => ({ id: t.id, name: t.name }));
+  return mod.TEMPLATES.filter((t) => t.kind === "cad").map((t) => ({ id: t.id, name: t.name }));
 });
 if (process.argv[2]) templates = templates.filter((t) => t.id === process.argv[2]);
 
 for (const t of templates) {
   await page.getByRole("button", { name: "Templates", exact: true }).click();
-  await page.locator(".overlay").getByTitle(`Build the ${t.name.toLowerCase()} template`).click();
+  await page.locator(".overlay").getByTitle(`Build the ${t.name.toLowerCase()} — instant, free`).click();
   // The thumb effect writes project.thumb ~500ms after the geometry renders.
   let dataUrl = null;
   const deadline = Date.now() + 120_000;

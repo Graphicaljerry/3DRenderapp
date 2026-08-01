@@ -46,6 +46,10 @@ function body(r: CompatRequest, stream: boolean): string {
       systemMsg,
       ...r.messages.map((m) => ({ role: m.role, content: toCompatContent(m.content) })),
     ],
+    // OpenRouter's native usage accounting: the final chunk then carries token counts
+    // AND OpenRouter's own computed USD `cost` — actuals for the meter, no estimating.
+    // OpenRouter-only: other compat gateways may reject parameters they don't know.
+    ...(/openrouter\.ai/.test(r.baseUrl) ? { usage: { include: true } } : {}),
     ...(r.extraBody ?? {}),
   });
 }
@@ -98,6 +102,11 @@ async function parseSSE(res: Response, h: StreamHandlers): Promise<string> {
         if (typeof rt === "string" && rt) {
           think += rt;
           h.onThinking?.(rt, think);
+        }
+        // Usage rides the final chunk when the gateway reports it (OpenRouter with
+        // usage:{include:true}; OpenAI with stream_options). `cost` is OpenRouter's.
+        if (j.usage?.prompt_tokens != null || j.usage?.completion_tokens != null) {
+          h.onUsage?.({ inTok: j.usage.prompt_tokens, outTok: j.usage.completion_tokens, usd: typeof j.usage.cost === "number" ? j.usage.cost : undefined });
         }
       } catch {
         /* ignore keep-alives */
@@ -152,6 +161,9 @@ async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
   const data: any = await res2.json();
   const text = data.choices?.[0]?.message?.content ?? "";
   if (!text) throw new Error("The model returned an empty reply.");
+  if (data.usage?.prompt_tokens != null || data.usage?.completion_tokens != null) {
+    h.onUsage?.({ inTok: data.usage.prompt_tokens, outTok: data.usage.completion_tokens, usd: typeof data.usage.cost === "number" ? data.usage.cost : undefined });
+  }
   return text;
 }
 

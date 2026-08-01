@@ -22,6 +22,7 @@ export interface PrintPrepCtl {
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
+import { fmtTok, fmtUSD } from "../llm/pricing";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
 import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type UpdateState } from "../lib/desktopUpdate";
@@ -1295,6 +1296,8 @@ interface Props {
   activeKind: EngineKind;
   genLabel: string;
   fellBack: boolean;
+  /** A running local Ollama with downloaded models — offer it as a free private brain. */
+  ollamaOffer: { count: number; model: string; onUse: (m: string) => void; onDismiss: () => void } | null;
   bootError?: string;
   authNotice?: string | null;
   onDismissAuthNotice?: () => void;
@@ -1887,6 +1890,14 @@ export function Workspace(p: Props) {
         <div className="banner ok" role="status">
           {p.authNotice}
           <button className="banner-x" aria-label="Dismiss" onClick={p.onDismissAuthNotice}>×</button>
+        </div>
+      )}
+
+      {p.ollamaOffer && (
+        <div className="banner ok" role="status">
+          Ollama found on this machine with {p.ollamaOffer.count} local model{p.ollamaOffer.count === 1 ? "" : "s"} — builds run free, private and offline.
+          <button className="ghost sm" onClick={() => p.ollamaOffer!.onUse(p.ollamaOffer!.model)}>Use {p.ollamaOffer.model}</button>
+          <button className="banner-x" aria-label="Dismiss" onClick={p.ollamaOffer.onDismiss}>×</button>
         </div>
       )}
 
@@ -3284,7 +3295,14 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
                   ))}
                 </div>
               )}
-              {m.role === "assistant" && !m.streaming && m.model && <span className="msg-model">{m.model}</span>}
+              {m.role === "assistant" && !m.streaming && m.model && (
+                <span className="msg-model">
+                  {m.model}
+                  {/* Beta cost meter, small print: tokens and dollars this reply cost
+                      (summed over retries). ≈ marks estimated figures — see pricing.ts. */}
+                  {m.usage && ` · ${fmtTok(m.usage.inTok + m.usage.outTok)} tok · ${fmtUSD(m.usage.usd, m.usage.est)}`}
+                </span>
+              )}
               {/* Retry / edit any typed prompt — including one sent with a photo, so
                   a failed generation can be re-run (the attached photo, if still in
                   the composer, rides along). */}

@@ -19,6 +19,8 @@ import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } from "./llm/clarify";
+import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
+import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
@@ -92,6 +94,7 @@ export type ChatMessage = {
   thinking?: string; // the model's reasoning stream, kept collapsed for the curious
   sources?: { url: string; title?: string }[]; // web pages a research lookup used
   images?: string[]; // product photos a research lookup found (display-only <img> URLs)
+  usage?: { inTok: number; outTok: number; usd: number | null; est: boolean }; // beta cost meter, summed over retries
   clarify?: ClarifyState; // a request too vague to build — the questions, in the chat
 };
 
@@ -1413,6 +1416,21 @@ export default function App() {
 
   // Quick model/engine switches from the in-chat picker (no keys touched — that
   // stays in Settings). Persist so the choice survives a reload, same as Settings.
+  // Local-LLM discovery: one probe of Ollama's well-known port on load. The offer
+  // banner shows while a daemon with models is up and Ollama isn't already the brain.
+  const [ollamaInfo, setOllamaInfo] = useState<OllamaInfo | null>(null);
+  const [ollamaDismissed, setOllamaDismissed] = useState(() => {
+    try { return localStorage.getItem("moldable_ollama_dismissed") === "1"; } catch { return true; }
+  });
+  useEffect(() => { void detectOllama().then(setOllamaInfo); }, []);
+  /** Switch the brain to a detected local model — free, private, offline. */
+  function useOllama(pickedModel: string) {
+    const s: LlmSettings = { provider: "ollama", model: pickedModel };
+    localStorage.setItem(LLM_LS, JSON.stringify(s));
+    setLlm(s);
+    scheduleSync();
+  }
+
   function pickBrain(provider: LlmProviderId, pickedModel: string) {
     if (provider === "anthropic") {
       const s: LlmSettings = { provider, model: pickedModel };
@@ -3358,6 +3376,18 @@ export default function App() {
         // "a stand for an iPhone 17" built while LOOKING at the phone beats memory.
         ? { role: "user", content: [...webRefParts, { type: "text", text: pWithFacts }] }
         : { role: "user", content: pWithFacts };
+    // Beta cost meter: SUM every attempt for this message — retries are real spend,
+    // and hiding them would make the meter lie about what a build actually cost.
+    const spent = { inTok: 0, outTok: 0, usd: 0, priced: true, any: false, est: false };
+    const onUsage: NonNullable<Parameters<typeof generateLlm>[4]>["onUsage"] = (u) => {
+      if (!u.final) return;
+      spent.any = true;
+      spent.inTok += u.inTok ?? 0;
+      spent.outTok += u.outTok ?? 0;
+      if (u.usd == null) spent.priced = false; else spent.usd += u.usd;
+      spent.est ||= !!u.est;
+    };
+    const msgUsage = () => (spent.any ? { inTok: spent.inTok, outTok: spent.outTok, usd: spent.priced ? spent.usd : null, est: spent.est } : undefined);
     // Cap the rolling context so long sessions don't slow down / blow the window.
     let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
@@ -3385,7 +3415,7 @@ export default function App() {
         // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
         const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
         pushStep(`Writing the change with ${shortModelName(effLlm.model)} (edit mode — only the lines that change)…`);
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink }, effectiveProxy);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
         finalRaw = raw;
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {
@@ -3394,7 +3424,7 @@ export default function App() {
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
           const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -3418,7 +3448,7 @@ export default function App() {
           ? `Writing the ${kind === "replicad" ? "CAD program" : "model spec"} with ${shortModelName(effLlm.model)}…`
           : `Attempt ${attempt} — feeding the build error back so the model can fix its code…`);
         try {
-          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink }, effectiveProxy);
+          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
         } catch (err: any) {
           // Cloud brain unreachable + the on-device model is already on this machine →
           // answer locally instead of failing (works fully offline).
@@ -3430,7 +3460,7 @@ export default function App() {
             const note = { id: mid(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
             return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
           });
-          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink }, effectiveProxy);
+          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
         }
         finalRaw = raw;
         try {
@@ -3450,7 +3480,7 @@ export default function App() {
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           const how = await deliverResult(res, name, summary, p, !!visionImage);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           ok = true;
           break;
         } catch (err: any) {
@@ -3857,6 +3887,20 @@ export default function App() {
         activeKind={activeKind}
         genLabel={genEng.provider === "auto" ? "Auto — best engine" : getProvider(genEng.provider)?.label ?? genEng.provider}
         fellBack={sel?.fellBack ?? false}
+        ollamaOffer={
+          ollamaInfo?.models.length && llm.provider !== "ollama" && !ollamaDismissed
+            ? {
+                count: ollamaInfo.models.length,
+                // Prefer a code-capable local model for CAD generation; else the first.
+                model: (ollamaInfo.models.find((m) => /coder|qwen|deepseek|codestral/i.test(m.name)) ?? ollamaInfo.models[0]).name,
+                onUse: (m: string) => { useOllama(m); },
+                onDismiss: () => {
+                  setOllamaDismissed(true);
+                  try { localStorage.setItem("moldable_ollama_dismissed", "1"); } catch { /* private mode */ }
+                },
+              }
+            : null
+        }
         bootError={sel?.bootError}
         authNotice={authNotice}
         onDismissAuthNotice={() => setAuthNotice(null)}
@@ -5120,6 +5164,59 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 
 /** One visually-bounded settings group: a title, an optional one-line hint, then its
     controls — the "categorize, don't overwhelm" building block of the Settings modal. */
+/** The beta cost meter's face: device-local totals, the formula that produced them,
+ *  and (with an OpenRouter key) the key's account-level usage straight from OpenRouter. */
+function SpendMeter({ orKey }: { orKey?: string }) {
+  const [l, setL] = useState(loadLedger);
+  const [orLine, setOrLine] = useState("");
+  useEffect(() => {
+    if (!orKey) return;
+    fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${orKey}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: any) => {
+        const d = j?.data;
+        if (d?.usage != null) setOrLine(`OpenRouter account: $${Number(d.usage).toFixed(2)} used${d.limit != null ? ` of a $${Number(d.limit).toFixed(2)} limit` : ""} on this key (every app, not just Moldable).`);
+      })
+      .catch(() => { /* offline or key without introspection — the local meter stands alone */ });
+  }, [orKey]);
+  const avg = l.builds ? l.usd / l.builds : 0;
+  return (
+    <>
+      <div className="dock-row"><span className="dock-k">Since {l.since}</span><span className="dock-v">{fmtUSD(l.usd, false)}</span></div>
+      <div className="dock-row"><span className="dock-k">Builds</span><span className="dock-v">{l.builds} · avg {fmtUSD(avg, false)}</span></div>
+      <div className="dock-row"><span className="dock-k">All calls</span><span className="dock-v">{l.calls} · {fmtTok(l.inTok)} in / {fmtTok(l.outTok)} out</span></div>
+      {orLine && <p className="fine choice-hint">{orLine}</p>}
+      <p className="fine choice-hint">
+        cost = tokens ÷ 1M × the model's $/Mtok (in and out priced separately). Figures come from the
+        provider's own usage report when it sends one — OpenRouter even reports the exact dollar cost —
+        otherwise ≈ estimates: tokens ≈ characters ÷ 4, plus ~1,600 input tokens per attached photo.
+        A build = routing + optional research + the generation and its retries; all of it lands here.
+        Device-local, your keys, not billing.
+      </p>
+      <button className="ghost sm" onClick={() => { resetLedger(); setL(loadLedger()); }}>Reset meter</button>
+    </>
+  );
+}
+
+/** Detected local Ollama models as one-tap picks for the model field. */
+function OllamaModelChips({ onPick }: { onPick: (m: string) => void }) {
+  const [info, setInfo] = useState<OllamaInfo | null | undefined>(undefined);
+  useEffect(() => { void detectOllama().then((r) => setInfo(r)); }, []);
+  if (info === undefined) return null;
+  if (!info || !info.models.length) {
+    return <p className="fine choice-hint">No local Ollama found at localhost:11434. Install from ollama.com, `ollama pull` a model, and it appears here. On the hosted site, also set OLLAMA_ORIGINS to allow this page.</p>;
+  }
+  return (
+    <div className="launch-chips" style={{ marginTop: 6 }}>
+      {info.models.map((m) => (
+        <button key={m.name} type="button" className="launch-chip" title={m.sizeGB ? `${m.sizeGB.toFixed(1)} GB on disk` : undefined} onClick={() => onPick(m.name)}>
+          {m.name}{m.sizeGB ? ` · ${m.sizeGB.toFixed(1)} GB` : ""}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function SGroup({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) {
   return (
     <section className="sgroup">
@@ -5435,6 +5532,9 @@ function SettingsModal({
                 immediately from the app's own assumptions. Either way, the ✨ button beside the composer rewrites a description on demand.
               </p>
             </SGroup>
+            <SGroup title="Spend" hint="Beta cost meter — this device, your keys">
+              <SpendMeter orKey={llmKeys["openrouter"] || undefined} />
+            </SGroup>
             <SGroup title="Brain" hint="Gemini & Groq have free tiers · Claude is the most accurate">
             <label>Provider</label>
             <select
@@ -5450,6 +5550,7 @@ function SettingsModal({
               ))}
             </select>
             {lpre.hint && <p className="fine choice-hint">{lpre.hint}</p>}
+            {lp === "ollama" && <OllamaModelChips onPick={(m) => setLmodel(m)} />}
             <details className="adv guide">
               <summary>Which one should I pick?</summary>
               <ul className="guide-list">

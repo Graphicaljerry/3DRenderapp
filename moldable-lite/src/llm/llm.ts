@@ -7,6 +7,7 @@ import { generateCompat } from "./openaiCompat";
 import { modelSupportsReasoning, AUTO_MODEL } from "./openrouterModels";
 import { houseStatus, houseUrl } from "./house";
 import { generateLocal, localSupported, LOCAL_MODEL, LOCAL_SIZE_HINT } from "./local";
+import { costUSD, estimateTokens, priceFor, recordSpend, IMAGE_TOKENS, type Usage } from "./pricing";
 
 export type ReasoningEffort = "off" | "low" | "medium" | "high";
 /** OpenRouter "thinking" effort — user-set in Settings, applied to reasoning-capable models. */
@@ -146,7 +147,53 @@ export function llmReady(s: LlmSettings, keys: Record<string, string | undefined
 }
 
 /** Route a generation to the configured provider. Same signature spirit as the Anthropic client. */
+/** Every LLM call in the app funnels through here, which makes it the one honest place
+ *  to METER: provider-reported usage when the transport surfaces it, chars/4 + flat
+ *  per-image estimates when it doesn't (see pricing.ts for the formula). The final,
+ *  reconciled record lands in the device-local ledger and reaches the caller through
+ *  h.onUsage with `final: true`. Build-vs-utility is inferred from onToken — only the
+ *  main generations stream tokens to the UI; routing/clarify/polish calls do not. */
 export async function generateLlm(
+  s: LlmSettings,
+  keys: Record<string, string | undefined>,
+  system: string,
+  messages: ApiMsg[],
+  h: StreamHandlers = {},
+  proxyBase = "",
+): Promise<string> {
+  const seen: { inTok?: number; outTok?: number; usd?: number } = {};
+  const h2: StreamHandlers = {
+    ...h,
+    onUsage: (u) => {
+      if (u.inTok != null) seen.inTok = u.inTok;
+      if (u.outTok != null) seen.outTok = u.outTok;
+      if (u.usd != null) seen.usd = u.usd;
+      h.onUsage?.(u);
+    },
+  };
+  const out = await generateLlmRaw(s, keys, system, messages, h2, proxyBase);
+  // Estimate whatever the provider didn't report. Text only — base64 image payloads
+  // must not be counted as characters; images cost a flat IMAGE_TOKENS each.
+  let inChars = system.length;
+  let imgs = 0;
+  for (const m of messages) {
+    if (typeof m.content === "string") inChars += m.content.length;
+    else for (const part of m.content) {
+      if (part.type === "text") inChars += part.text.length;
+      else imgs += 1;
+    }
+  }
+  const est = seen.inTok == null || seen.outTok == null;
+  const inTok = seen.inTok ?? estimateTokens(inChars) + imgs * IMAGE_TOKENS;
+  const outTok = seen.outTok ?? estimateTokens(out.length);
+  const usd = seen.usd ?? costUSD(inTok, outTok, priceFor(s.provider, s.model));
+  const usage: Usage = { inTok, outTok, usd, est: est && seen.usd == null };
+  recordSpend(usage, h.onToken ? "build" : "utility");
+  h.onUsage?.({ ...usage, final: true });
+  return out;
+}
+
+async function generateLlmRaw(
   s: LlmSettings,
   keys: Record<string, string | undefined>,
   system: string,

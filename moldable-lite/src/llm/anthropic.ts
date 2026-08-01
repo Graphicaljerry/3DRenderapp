@@ -49,6 +49,12 @@ export interface StreamHandlers {
   onToken?: (chunk: string, full: string) => void;
   /** Reasoning/"thinking" stream, when the model emits one (shown live in the chat). */
   onThinking?: (chunk: string, full: string) => void;
+  /** Cost-meter stream. Transports emit PARTIAL records as the API reports them
+   *  (token counts; OpenRouter also its computed USD cost). generateLlm emits one
+   *  reconciled record with `final: true` after the call completes — estimate-filled,
+   *  priced, and already written to the ledger. Callers wanting per-message spend
+   *  should read only the final one. */
+  onUsage?: (u: { inTok?: number; outTok?: number; usd?: number | null; est?: boolean; final?: boolean }) => void;
   signal?: AbortSignal;
 }
 
@@ -116,6 +122,11 @@ export async function streamMessage(r: LlmRequest, h: StreamHandlers = {}): Prom
       const t = evt.delta.thinking || "";
       think += t;
       h.onThinking?.(t, think);
+    } else if (evt.type === "message_start" && evt.message?.usage?.input_tokens != null) {
+      h.onUsage?.({ inTok: evt.message.usage.input_tokens });
+    } else if (evt.type === "message_delta" && evt.usage?.output_tokens != null) {
+      // Cumulative on every delta — the last one seen is the total.
+      h.onUsage?.({ outTok: evt.usage.output_tokens });
     } else if (evt.type === "error") {
       throw new Error(`stream error: ${evt.error?.type} — ${evt.error?.message}`);
     }

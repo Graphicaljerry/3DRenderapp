@@ -93,6 +93,10 @@ function scheduleIdle(fn: () => void): void {
 export type ChatMessage = {
   id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode;
   model?: string; // which AI produced this reply (shown small under the bubble)
+  // While streaming, the bubble is a step timeline: `steps` are the COMPLETED stages
+  // (checked off, connector line drawn) and `text` is the ACTIVE one — so in-place
+  // progress rewrites ("running 40%") tick the live row without growing the list.
+  steps?: string[];
   thinking?: string; // the model's reasoning stream, kept collapsed for the curious
   sources?: { url: string; title?: string }[]; // web pages a research lookup used
   images?: string[]; // product photos a research lookup found (display-only <img> URLs)
@@ -2947,7 +2951,12 @@ export default function App() {
       { id: userMsgId, role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
       { id: placeholderId, role: "assistant", text: "Reading your request…", streaming: true },
     ]);
-    const setStage = (text: string) => setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text, streaming: true } : x)));
+    // Advancing to a new stage checks the current one off into `steps` (the timeline
+    // draws its connector line); writing `text` directly instead updates the active
+    // row in place — that's the channel for progress ticks like "running 40%".
+    const setStage = (text: string) => setMessages((m) => m.map((x) => (x.id === placeholderId
+      ? { ...x, text, steps: x.text && x.text !== text ? [...(x.steps ?? []), x.text] : x.steps, streaming: true }
+      : x)));
 
     // Fresh chat + the user never touched the engine switch → route by what the words
     // describe. Organic/sculptural things are beyond CAD's reach and belong on the mesh
@@ -3152,7 +3161,11 @@ export default function App() {
       const genEngine = await getGenEngine();
       genEngine.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
       genEngine.onProgress = (pr) =>
-        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, streaming: true } : x)));
+        // First tick checks "Preparing…" off the step timeline; the rest rewrite the
+        // active row in place so queue/percent updates don't grow the list.
+        setMessages((m) => m.map((x) => (x.id === ph
+          ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, steps: x.text.startsWith("Generating mesh") ? x.steps : [...(x.steps ?? []), x.text], streaming: true }
+          : x)));
       const runGen = async (provId: string, modelId: string, label: string) => {
         let res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId, texture: genTexture === "on" });
         // AI meshes carry no real-world units — engines routinely hand back a "car-sized
@@ -3195,7 +3208,7 @@ export default function App() {
           // announcement before anyone could read it.
           genEngine.onProgress = (pr) =>
             setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}… ${pr.status}`, streaming: true } : x)));
-          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}…`, streaming: true } : x)));
+          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: `Free GPU turned this job away — retrying on your ${altLabel} key${altTag}…`, steps: [...(x.steps ?? []), x.text], streaming: true } : x)));
           try {
             await runGen(alt.provider, alt.model, altLabel);
           } catch (err2: any) {
@@ -3284,12 +3297,14 @@ export default function App() {
     let lastThink = ""; // model reasoning (kept on the reply for later reading)
     const thinkTrail = () => steps.join("\n") + (lastThink ? `\n\n${lastThink}` : "");
     const pushStep = (s: string) => {
-      steps.push(`▸ ${s}`);
-      setStreamingThink(thinkTrail());
+      steps.push(`▸ ${s}`); // kept for the saved "Thought process" transcript
+      setStage(s); // …and advances the live step timeline in the bubble
     };
+    // Live panel shows ONLY the model's own reasoning — the harness steps already
+    // read as the timeline above it, so mirroring them here would double them up.
     const onThink = (_t: string, full: string) => {
       lastThink = full;
-      setStreamingThink(thinkTrail());
+      setStreamingThink(full);
     };
     if (visionImage) {
       pushStep(visionImage.markup
@@ -3337,7 +3352,6 @@ export default function App() {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
     } else if (wantWeb) {
       pushStep("Searching the web for the product's real dimensions…");
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Researching the product's dimensions online…", streaming: true } : x)));
       const rr = await researchDimensions(p, researchKeys, partContext);
       researched = rr?.text ?? null;
       researchSources = rr?.sources ?? [];
@@ -3352,7 +3366,7 @@ export default function App() {
           return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
         });
       }
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
+      setStage("Thinking…");
     }
     // In the guided replacement flow, dial the requested FDM fit into the prompt so
     // mating features get real clearance (and a `clearance` param to tune live).
@@ -3489,7 +3503,7 @@ export default function App() {
         /* fall through to the reliable full-regenerate loop */
       }
       if (ok) { setStatus("idle"); setStreamingText(""); setStreamingThink(""); return; }
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Thinking…", streaming: true } : x)));
+      setStage("Thinking…");
     }
 
     let usedLocal = effLlm.provider === "local";
@@ -3548,7 +3562,7 @@ export default function App() {
             { role: "assistant", content: raw },
             { role: "user", content: kind === "replicad" ? replicadRepairMessage(err) : jsonRepairMessage(msg) },
           ];
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `Attempt ${attempt} didn't build (${msg.slice(0, 80)}) — retrying…`, streaming: true } : x)));
+          setStage(`Attempt ${attempt} didn't build (${msg.slice(0, 80)}) — retrying…`);
         }
       }
     } catch (err: any) {

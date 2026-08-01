@@ -3293,11 +3293,17 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
                     ))}
                   </div>
                 )}
-                {m.text && (m.role === "assistant" && !m.error ? <Markdown text={m.text} /> : <span>{m.text}</span>)}
-                {/* Live reasoning stream while this reply is being generated. */}
+                {m.role === "assistant" && m.streaming ? (
+                  /* Working reply: a step timeline — done stages check off and draw a
+                     connector line down to the next; `text` is the live (shimmering) one. */
+                  <ThinkSteps steps={m.steps ?? []} active={m.text} />
+                ) : (
+                  m.text && (m.role === "assistant" && !m.error ? <Markdown text={m.text} /> : <span>{m.text}</span>)
+                )}
+                {/* The model's own reasoning, streaming under the timeline. */}
                 {m.streaming && thinking && (
                   <div className="think-live">
-                    <span className="think-title"><span className="spinner sm" /> Thinking</span>
+                    <span className="think-title">Model reasoning</span>
                     <ThinkScroll text={thinking} />
                   </div>
                 )}
@@ -3355,6 +3361,37 @@ function hostOf(url: string): string {
   } catch {
     return url.slice(0, 24);
   }
+}
+
+/** The working reply as a step timeline: every completed stage keeps its row (check
+ *  + a connector line drawn down to the next), the active stage shimmers under a
+ *  pulsing dot. Keys matter: when a stage completes, the active row remounts as a
+ *  done row, which is what replays the check-pop → line-draw → next-step-fade-in
+ *  sequence on every advance. */
+function ThinkSteps({ steps, active }: { steps: string[]; active: string }) {
+  return (
+    <div className="think-steps" role="status" aria-label="Working">
+      {steps.map((s, i) => (
+        <div key={i} className="tstep done">
+          <span className="tstep-rail">
+            <span className="tstep-dot">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </span>
+            <span className="tstep-line" />
+          </span>
+          <span className="tstep-label">{s}</span>
+        </div>
+      ))}
+      <div key={`live-${steps.length}`} className="tstep active">
+        <span className="tstep-rail">
+          <span className="tstep-dot"><i className="tstep-pulse" /></span>
+        </span>
+        <span className="tstep-label">{active}</span>
+      </div>
+    </div>
+  );
 }
 
 /** The live reasoning text, auto-pinned to its newest line as it streams. */

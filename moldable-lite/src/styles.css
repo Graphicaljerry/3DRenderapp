@@ -304,9 +304,37 @@ button { font-family: inherit; cursor: pointer; }
 .md .md-code code { background: none; padding: 0; }
 .md a { color: var(--accent-d); }
 .think-live { margin-top: 8px; border-top: 1px dashed var(--bord); padding-top: 7px; }
-.think-title { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--mut); }
+.think-title { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--subt); }
 .think-body { font-size: 12px; line-height: 1.5; color: var(--mut); white-space: pre-wrap; }
-.think-body.live { max-height: 110px; overflow-y: auto; margin-top: 5px; mask-image: linear-gradient(to bottom, transparent, #000 14px); }
+/* Tall enough to actually READ the reasoning as it streams (was 110px — a report:
+   "I can barely see its thinking process"). */
+.think-body.live { max-height: 240px; overflow-y: auto; margin-top: 5px; mask-image: linear-gradient(to bottom, transparent, #000 14px); }
+
+/* ---- Step-by-step thinking timeline (the working assistant bubble) ----
+   Done stages keep their row: check pops in, then the connector line DRAWS down
+   (scaleY from the top), then the next stage fades in underneath — the delays are
+   what sequence it. The active row's label shimmers Claude-style. Rows are plain
+   flex; the line's flex:1 makes it span whatever height the label wraps to. */
+.think-steps { display: flex; flex-direction: column; min-height: 48px; padding: 3px 2px 0; white-space: normal; }
+.tstep { display: grid; grid-template-columns: 16px 1fr; column-gap: 10px; }
+.tstep-rail { display: flex; flex-direction: column; align-items: center; }
+.tstep-dot { flex: none; width: 16px; height: 16px; border-radius: 50%; display: grid; place-items: center; }
+.tstep.done .tstep-dot { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent-d); animation: tdot-in 0.25s cubic-bezier(0.23, 1, 0.32, 1) both; }
+.tstep.done .tstep-dot svg { width: 9px; height: 9px; }
+.tstep-line { width: 2px; flex: 1; min-height: 8px; margin: 3px 0; border-radius: 1px; background: color-mix(in srgb, var(--accent) 40%, transparent); transform-origin: top center; animation: tline-grow 0.35s cubic-bezier(0.23, 1, 0.32, 1) 0.18s both; }
+.tstep-label { font-size: 12.5px; line-height: 16px; color: var(--ink2); padding: 1px 0 13px; }
+.tstep.active { animation: tstep-in 0.3s cubic-bezier(0.23, 1, 0.32, 1) 0.4s both; }
+.tstep.active .tstep-label { padding-bottom: 2px; font-weight: 500; color: transparent; background: linear-gradient(90deg, var(--mut) 30%, var(--ink) 50%, var(--mut) 70%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; animation: tshimmer 1.8s linear infinite; }
+.tstep-pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: tpulse 1.1s ease-in-out infinite; }
+@keyframes tdot-in { from { transform: scale(0.4); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+@keyframes tline-grow { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes tstep-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes tpulse { 0%, 100% { transform: scale(0.7); opacity: 0.5; box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent); } 50% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 0 5px transparent; } }
+@keyframes tshimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .tstep, .tstep.done .tstep-dot, .tstep-line, .tstep-pulse { animation: none; }
+  .tstep.active .tstep-label { animation: none; color: var(--ink2); background: none; }
+}
 .think-done { margin: 4px 0 0; }
 .think-done summary { font-size: 11.5px; color: var(--mut); cursor: pointer; user-select: none; }
 .think-done summary:hover { color: var(--ink2); }

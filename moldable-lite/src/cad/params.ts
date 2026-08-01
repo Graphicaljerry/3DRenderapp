@@ -84,6 +84,15 @@ export function paramSoftRange(v: number, cur = v): { min: number; max: number; 
   return v < 0 ? grow(-hi, Math.min(0, -lo)) : grow(Math.max(0, lo), hi);
 }
 
+/** The bounds a DRAG may not pass. Deliberately far outside the soft range: that range
+ *  is a recommendation drawn as the meter's fill, and clamping the drag to it made a
+ *  value you could still reach by typing impossible to drag to — the control contradicted
+ *  itself. This is only a sanity rail (no negative sizes, nothing absurd). */
+export function paramHardRange(v: number, cur = v): { min: number; max: number } {
+  const mag = Math.max(Math.abs(v) || 1, Math.abs(cur) || 1);
+  return v < 0 ? { min: -mag * 20, max: 0 } : { min: 0, max: mag * 20 };
+}
+
 const ABBREV: Record<string, string> = {
   dia: "diameter", diam: "diameter", rad: "radius", len: "length", ht: "height",
   thk: "thickness", thick: "thickness", cnt: "count", num: "number", qty: "quantity",

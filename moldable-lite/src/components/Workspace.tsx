@@ -21,7 +21,7 @@ export interface PrintPrepCtl {
 }
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
-import { paramSoftRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
+import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
 import { fmtTok, fmtUSD } from "../llm/pricing";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
@@ -3947,11 +3947,18 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
         // Range from the AI's value, stretched to include wherever the row is NOW —
         // a typed value outside the guess must stay draggable, not snap back into it.
         const { min, max, step: soft } = paramSoftRange(def, v);
+        // The drag is bounded by the HARD rail, not the recommendation: the meter's
+        // fill shows the recommended span, but a value you can type must be one you
+        // can also drag to.
+        const hard = paramHardRange(def, v);
         const step = isInt ? 1 : soft;
         const dirty = v !== def;
         // Position within the SOFT range, drawn as a fill behind the number — the range
-        // is a guess, so it informs without occupying a row of its own.
+        // is a guess, so it informs without occupying a row of its own. Past the
+        // recommended end the fill goes full and turns amber: still perfectly buildable,
+        // just outside what the design was drawn around.
         const pct = max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0;
+        const beyond = v > max || v < min;
 
         return (
           <div
@@ -3971,7 +3978,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
               className="prow-name"
               title={`${k} — drag left/right to change, Shift for fine steps`}
               disabled={busy}
-              onPointerDown={(e) => scrub(e, k, v, { step, isInt, min, max })}
+              onPointerDown={(e) => scrub(e, k, v, { step, isInt, min: hard.min, max: hard.max })}
             >
               {/* One name, the readable one. The raw identifier lives in the tooltip —
                   showing both under each other doubled every row's height for a string
@@ -3988,10 +3995,10 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
               onPointerDown={(e) => {
                 const input = e.currentTarget.querySelector("input");
                 if (input && document.activeElement === input) return;
-                scrub(e, k, v, { step, isInt, min, max, onTap: () => { input?.focus(); input?.select(); } });
+                scrub(e, k, v, { step, isInt, min: hard.min, max: hard.max, onTap: () => { input?.focus(); input?.select(); } });
               }}
             >
-              <i className="pf-fill" style={{ width: `${pct}%` }} aria-hidden="true" />
+              <i className={`pf-fill${beyond ? " beyond" : ""}`} style={{ width: `${pct}%` }} aria-hidden="true" />
               <input
                 className="pf-input"
                 type="text"

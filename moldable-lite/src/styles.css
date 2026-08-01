@@ -875,7 +875,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* ---------- template gallery (photo cards → one-tap parametric parts) ---------- */
 .tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
 .tpl-card { display: block; width: 100%; text-align: left; background: var(--ctl); border: 1px solid transparent; border-radius: 12px; padding: 10px; cursor: pointer; transition: border-color .15s ease, box-shadow .16s ease, transform .16s cubic-bezier(.23,1,.32,1); }
-.tpl-card:hover { border-color: var(--bord); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+/* No lift on hover: moving the card out from under the pointer drops the hover, which
+   moves it back — the card oscillates for as long as you rest near its edge (reported
+   as the gallery "shaking"). Border + shadow read the same and never move the target. */
+.tpl-card:hover { border-color: var(--bord); box-shadow: var(--shadow-md); }
 .tpl-card:hover .tpl-name { color: var(--accent-d); }
 .tpl-card:disabled { opacity: .55; cursor: default; transform: none; box-shadow: none; }
 .tpl-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -1401,7 +1404,9 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    286px was right only for the default 262px panel. */
 /* Beside the Inspector card, and BELOW the head band — the tools pill now clusters left
    with the tab strip and can reach this far right, so the stats card ducks under it. */
-.viewer-body:has(.inspector-dock:not([style*="none"])) .right-dock { right: calc(var(--dock-w, 262px) + 24px); top: 56px; }
+/* Level with the Inspector card's top edge (12px), not below it: the 56px offset dated
+   from the retired tab strip, and left the stats card floating at no particular height. */
+.viewer-body:has(.inspector-dock:not([style*="none"])) .right-dock { right: calc(var(--dock-w, 262px) + 24px); top: 12px; }
 /* The head's pills stop where the Inspector card begins — the icon tabs made the row
    long enough to reach it. --dock-w inherits from the section, so a resized dock keeps
    pushing the boundary correctly. */
@@ -1834,14 +1839,19 @@ details.guide { margin-top: 10px; }
   margin-left: 0;
 }
 @media (hover: hover) and (pointer: fine) {
-  .canvas-rail:hover .rail-name { max-width: 110px; opacity: 1; margin-left: 8px; }
-  /* Buttons go from square icons to a labelled row; keep the icon column aligned. */
-  .canvas-rail:hover .ghost.sm.iconbtn { justify-content: flex-start; }
-  /* Breathing room for the slid-out names: at the rail's resting 5px side padding the
-     label text ended flush against the pill's rounded edge (a real report). */
-  .canvas-rail:hover { padding-right: 12px; }
-  .canvas-rail:hover .ghost.sm.iconbtn { padding-left: 8px; padding-right: 8px; }
+  /* Expanded rail: a FIXED width, so every row is the same width whatever its label —
+     hover backgrounds used to be as wide as each word ("Mark" tiny, "Measure" long),
+     which read as a ragged stack rather than one menu. The capsule also opens up to a
+     rounded rectangle: at 999px the top and bottom rows sat inside the curve and their
+     text crossed the edge. */
+  .canvas-rail:hover { width: 176px; padding: 8px; border-radius: 22px; }
+  .canvas-rail:hover > * { width: 100%; }
+  .canvas-rail:hover .ghost.sm.iconbtn { width: 100%; justify-content: flex-start; padding-left: 10px; padding-right: 10px; }
+  .canvas-rail:hover .rail-name { max-width: 110px; opacity: 1; margin-left: 10px; }
 }
+/* Width/shape are animated, so the rail grows into the menu instead of snapping. */
+.canvas-rail { transition: width .2s cubic-bezier(.22,1,.36,1), padding .2s cubic-bezier(.22,1,.36,1), border-radius .2s ease; }
+@media (prefers-reduced-motion: reduce) { .canvas-rail { transition: none; } }
 .canvas-rail .ghost.sm.iconbtn { justify-content: center; }
 @media (prefers-reduced-motion: reduce) { .canvas-rail .rail-name { transition: none; } }
 
@@ -1888,6 +1898,8 @@ details.guide { margin-top: 10px; }
 /* Position within the SOFT range, behind the number. Informs without a second row, and
    reads as an indicator rather than a control — because the bounds are inferred. */
 .pf-fill { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 20%, transparent); pointer-events: none; transition: width .12s ease; }
+/* Past the recommended span — buildable, just outside what the design assumed. */
+.pf-fill.beyond { background: color-mix(in srgb, var(--warn) 24%, transparent); }
 .pf-input {
   position: relative; flex: 1; min-width: 0; width: 100%; height: 100%;
   background: none; border: none; padding: 0 1px 0 7px;
@@ -1924,6 +1936,9 @@ details.guide { margin-top: 10px; }
   transition: background-color .14s ease, color .14s ease;
 }
 .panel-collapse:hover { background: var(--ctl-h); color: var(--ink); }
+/* The Inspector leaves to the RIGHT, so its chevron has to point right — a down
+   chevron read as "collapse this section", which is a different promise. */
+.inspector-dock .panel-collapse svg { transform: rotate(-90deg); }
 .panel-collapse.wide { font-size: 13px; font-weight: 500; gap: 4px; }
 .panel-collapse:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* The Inspector's resize handle: a grab strip down its left edge, exactly the chat's

@@ -31,6 +31,7 @@ type Vec3 = [number, number, number];
 export type WorkerOp =
   | { type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude"; at: Vec3; size: number }
   | { type: "hole"; at: Vec3; normal: Vec3; diameter: number; depth: number }
+  | { type: "screw"; at: Vec3; normal: Vec3; minor: number; major: number; pitch: number; depth: number; countersink: number }
   | { type: "translate"; delta: Vec3 }
   | { type: "rotate"; axis: Vec3; angleDeg: number; center: Vec3 }
   | { type: "scale"; factor: number; center: Vec3 }

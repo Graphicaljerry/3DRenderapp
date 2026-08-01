@@ -150,6 +150,58 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
       return attempt(op.size);
     }
+    if (op.type === "screw") {
+      // A screw hole is a bore plus, optionally, the spiral a screw bites into.
+      //
+      // There is no helix primitive in this kernel, so the thread is made the way the
+      // twisted pen pot is: a profile with one lobe, extruded WITH a twist. One turn of
+      // twist per pitch of length turns that lobe into a true helical rib; cutting the
+      // rib out of the wall leaves the matching groove. Built along +Z at the origin
+      // (the only axis an extrusion knows), then rotated onto the face normal.
+      // ONE revolved profile carries the whole feature: countersink cone, the ribbed
+      // bore a screw bites into, and the plain shank below it.
+      //
+      // The ribs are concentric, not a true helix. A real helical thread is a sweep
+      // along makeHelix, and it is genuinely correct — but measured against this kernel
+      // it cost 14 s for an M4 and blew the 60 s watchdog on an M3, which no hover-and-
+      // click tool can spend. A revolved sawtooth builds in ~0.1 s, prints the same way
+      // (a self-tapping screw cuts its own path through the ribs) and holds nearly as
+      // well in plastic, which is what these holes are actually for.
+      const n = op.normal;
+      const dir: [number, number, number] = [-n[0], -n[1], -n[2]];
+      const len = op.depth > 0 ? op.depth : 60;
+      const rMin = op.minor / 2;
+      const rMaj = Math.max(op.minor, op.major) / 2;
+      const threaded = op.major > op.minor + 0.05 && op.pitch > 0.05;
+      const csR = op.countersink > op.minor ? op.countersink / 2 : 0;
+      const csD = csR ? (csR - rMin) / Math.tan((41 * Math.PI) / 180) : 0; // ~82° included angle
+      // Profile in the XZ half-plane: x = radius, z runs INTO the part from the surface.
+      const pts: [number, number][] = [];
+      pts.push([csR || rMin, -0.5]); // 0.5 proud of the face for a clean entry
+      if (csR) pts.push([rMin, csD]);
+      let z = csD;
+      if (threaded) {
+        const turns = Math.min(40, Math.floor((len - csD) / op.pitch));
+        for (let i = 0; i < turns; i++) {
+          pts.push([rMaj, z + op.pitch * 0.5]);
+          pts.push([rMin, z + op.pitch]);
+          z += op.pitch;
+        }
+      }
+      if (z < len) pts.push([rMin, len]);
+      let prof = R.draw([0, -0.5]);
+      for (const [x, zz] of pts) prof = prof.lineTo([x, zz]);
+      prof = prof.lineTo([0, Math.max(len, z)]).close();
+      let cutter: any = prof.sketchOnPlane("XZ").revolve([0, 0, 1]);
+      // Aim the cutter's +Z down the drilling direction, then move it to the entry point.
+      const d = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+      const u: [number, number, number] = [dir[0] / d, dir[1] / d, dir[2] / d];
+      const axis: [number, number, number] = [-u[1], u[0], 0]; // z × u
+      const ang = (Math.acos(Math.max(-1, Math.min(1, u[2]))) * 180) / Math.PI;
+      if (Math.hypot(axis[0], axis[1], axis[2]) > 1e-6) cutter = cutter.rotate(ang, [0, 0, 0], axis);
+      else if (u[2] < 0) cutter = cutter.rotate(180, [0, 0, 0], [1, 0, 0]);
+      return shape.cut(cutter.translate(op.at));
+    }
     if (op.type === "hole") {
       // Drill along −normal from 1 mm proud of the face (clean entry). depth 0 = through:
       // longer than any printable part, so it exits the far side no matter the shape.
@@ -196,6 +248,7 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       case "chamferBottom": label = `Bottom-edge chamfer of ${op.size} mm`; break;
       case "extrude": label = `Extrude of ${op.size} mm`; break;
       case "hole": label = `⌀${op.diameter} mm hole`; break;
+      case "screw": label = `${op.major} mm screw hole${op.pitch > 0 ? " (threaded)" : ""}`; break;
       default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
     }
     // Sized op that OCCT rejected → find the real limit so the app can say it (and

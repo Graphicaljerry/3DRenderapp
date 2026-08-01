@@ -26,6 +26,19 @@ export interface HoleOp {
   diameter: number;
   depth: number;
 }
+/** A screw hole: pilot bore plus, optionally, a modelled helical thread and a
+ *  countersink. `major > minor` with a pitch cuts the spiral groove a screw bites
+ *  into; equal diameters leave a plain bore (clearance or self-tapping pilot). */
+export interface ScrewOp {
+  type: "screw";
+  at: Vec3;
+  normal: Vec3;
+  minor: number;  // bore diameter (tap-drill size for a threaded hole)
+  major: number;  // outer thread diameter — the screw's nominal size
+  pitch: number;  // mm of rise per turn; 0 = no thread
+  depth: number;  // 0 = through
+  countersink: number; // head diameter for a flush cone; 0 = none
+}
 /** Move the whole solid by a vector (engine coords; recenter-invariant). */
 export interface TranslateOp {
   type: "translate";
@@ -49,7 +62,7 @@ export interface ChamferBottomOp {
   type: "chamferBottom";
   size: number; // chamfer distance, mm (0.2–0.5 typical)
 }
-export type CadOp = PointOp | HoleOp | TranslateOp | RotateOp | ScaleOp | ChamferBottomOp;
+export type CadOp = PointOp | HoleOp | ScrewOp | TranslateOp | RotateOp | ScaleOp | ChamferBottomOp;
 
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.

@@ -178,6 +178,18 @@ interface Props {
 // pick a face / edge / corner. One tool, one segmented control.
 export type SelectKind = "face" | "edge" | "vertex" | "point";
 
+/** Cursor for the rotation rings. CSS has no rotate cursor, and `grab` reads as "pick
+ *  this up and move it" — the wrong promise on a ring that only ever spins the part. A
+ *  circular arrow says rotate outright; the heavy dark stroke underneath is a halo, so
+ *  the white glyph survives both a pale plate and a dark scene. */
+const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="26" viewBox="0 0 26 26">` +
+    `<g fill="none" stroke="#111" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round" opacity=".5">` +
+    `<path d="M21 13a8 8 0 1 1-2.4-5.7"/><path d="M21.5 5.5V12H15"/></g>` +
+    `<g fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">` +
+    `<path d="M21 13a8 8 0 1 1-2.4-5.7"/><path d="M21.5 5.5V12H15"/></g></svg>`,
+)}") 13 13, grab`;
+
 const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // grayscale display copies
 // Must match --canvas in styles.css: the scene IS the canvas card's surface, and any
 // difference shows as a colour seam inside the rounded corners.
@@ -470,7 +482,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // (see enterTransform) so rotation spins in place rather than swinging about the bed origin.
     const tc = new TransformControls(camera, renderer.domElement);
     tc.setSpace("world");
-    tc.setSize(0.9);
+    tc.setSize(0.85);
     tc.setRotationSnap(THREE.MathUtils.degToRad(15));
     tc.setScaleSnap(0.05);
     scene.add(tc.getHelper());
@@ -478,7 +490,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // and rotating never needs a mode switch (scale is the bounding-box anchors).
     const tcR = new TransformControls(camera, renderer.domElement);
     tcR.setSpace("world");
-    tcR.setSize(1.05);
+    tcR.setSize(0.88);
     tcR.setMode("rotate");
     tcR.setRotationSnap(THREE.MathUtils.degToRad(15));
     scene.add(tcR.getHelper());
@@ -565,11 +577,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const winner = s.tc.enabled ? s.tc : s.tcR;
       const axis: string | null = (winner as any).axis ?? null;
       if (!axis || !(winner as any).object) {
-        if (renderer.domElement.style.cursor === "grab" || renderer.domElement.style.cursor === "move")
-          renderer.domElement.style.cursor = "";
+        const c = renderer.domElement.style.cursor;
+        if (c === "grab" || c === "move" || c.startsWith("url(")) renderer.domElement.style.cursor = "";
         return;
       }
-      renderer.domElement.style.cursor = winner.getMode() === "rotate" ? "grab" : "move";
+      renderer.domElement.style.cursor = winner.getMode() === "rotate" ? ROTATE_CURSOR : "move";
     };
     renderer.domElement.addEventListener("pointermove", arbitrate, true);
     renderer.domElement.addEventListener("pointerdown", arbitrate, true);

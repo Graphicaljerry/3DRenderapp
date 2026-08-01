@@ -103,6 +103,10 @@ export type ChatMessage = {
   images?: string[]; // product photos a research lookup found (display-only <img> URLs)
   usage?: { inTok: number; outTok: number; usd: number | null; est: boolean }; // beta cost meter, summed over retries
   clarify?: ClarifyState; // a request too vague to build — the questions, in the chat
+  // Direct-edit receipt (magnet pockets, holes…). Repeating the same action rewrites
+  // THIS message with a running count instead of posting another identical bubble.
+  receipt?: string;
+  receiptCount?: number;
 };
 
 /** A question card sitting in the transcript. `answers` opens pre-filled with every
@@ -811,10 +815,32 @@ export default function App() {
     if (!seen) {
       explainedRef.current.add(key);
       try { localStorage.setItem("moldable_explained", JSON.stringify([...explainedRef.current])); } catch { /* private mode */ }
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: full }]);
+      appendMsg({ role: "assistant", text: full });
     } else if (brief) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: brief }]);
+      appendMsg({ role: "assistant", text: brief });
     }
+  }
+  /** Receipt for a repeatable direct edit. Doing the same thing again REWRITES the last
+   *  message with a running count rather than posting another identical bubble — nine
+   *  magnet pockets used to mean nine copies of the same sentence, which buries the
+   *  conversation the transcript is actually for. Any other message in between starts a
+   *  fresh receipt, so the count always describes one uninterrupted run. */
+  function appendMsg(msg: Omit<ChatMessage, "id">) {
+    setMessages((m) => {
+      const last = m[m.length - 1];
+      if (last && last.role === msg.role && last.text === msg.text && !!last.error === !!msg.error) return m;
+      return [...m, { id: mid(), ...msg }];
+    });
+  }
+  function postReceipt(key: string, render: (n: number) => string) {
+    setMessages((m) => {
+      const last = m[m.length - 1];
+      if (last && last.role === "assistant" && last.receipt === key) {
+        const n = (last.receiptCount ?? 1) + 1;
+        return [...m.slice(0, -1), { ...last, text: render(n), receiptCount: n }];
+      }
+      return [...m, { id: mid(), role: "assistant", text: render(1), receipt: key, receiptCount: 1 }];
+    });
   }
   const renameAttachment = (id: string, name: string) => {
     const v = name.trim();
@@ -2514,9 +2540,16 @@ export default function App() {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
       const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, hole ⌀${diameter} × ${depth} mm deep)${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
-      // Each placement gets a one-line receipt: a far-side pocket is invisible from
-      // this angle, and a skipped pair (thin wall) would otherwise fail silently.
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added a ${what}.` }]);
+      // One receipt for the whole run, counting up as you place: a far-side pocket is
+      // invisible from this angle and a skipped pair (thin wall) would fail silently, so
+      // the line has to exist — but it must not repeat itself nine times either. A note
+      // that DIFFERS (a declined pair) breaks the run and gets its own line, because
+      // that one is news.
+      const fitWord = t.fit === "press" ? "press-fit" : "glued in";
+      postReceipt(`magnet:${t.size.d}x${t.size.h}:${t.fit}:${pairNote}`, (n) =>
+        n === 1
+          ? `Added a ${what}.`
+          : `Added ${n} ${t.size.d}×${t.size.h} mm magnet pockets (${fitWord}, holes ⌀${diameter} × ${depth} mm deep)${pairNote}.`);
       setMagnetTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }, ...(ops.length > 1 && spot.back ? [{ at: spot.back.at, normal: spot.back.normal }] : [])] } : d));
       explainOnce("magnet", `Sunk a **magnet pocket** — free, no AI. The hole is cut a hair wider than the magnet so a drop of super glue holds it in flush, and it grips right through the plastic. Place another near this one and it snaps square with it — the dashed line shows what it lined up with. Want it exactly under the cursor instead? Set snapping to **Free** in the panel. Undo reverts it.`);
     } catch (err: any) {
@@ -3054,14 +3087,10 @@ export default function App() {
     setGuided(true);
     setMode("precise");
     setInput("");
-    setMessages((m) => [
-      ...m,
-      {
-        id: mid(),
-        role: "assistant",
-        text: "Let's recreate a part that fits. Upload a photo of the broken or original piece (the paperclip below), and tell me any measurements you know. No calipers? Put a coin or a credit card in the shot for scale and I'll work the sizes out. Then pick a Fit — snug is a good default.",
-      },
-    ]);
+    appendMsg({
+      role: "assistant",
+      text: "Let's recreate a part that fits. Upload a photo of the broken or original piece (the paperclip below), and tell me any measurements you know. No calipers? Put a coin or a credit card in the shot for scale and I'll work the sizes out. Then pick a Fit — snug is a good default.",
+    });
   }
 
   /** Change the FDM fit. If the current model already exposes a `clearance`

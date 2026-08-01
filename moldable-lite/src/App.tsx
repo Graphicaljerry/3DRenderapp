@@ -21,6 +21,7 @@ import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } from "./llm/clarify";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
+import { downscaleImage } from "./lib/downscale";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
@@ -966,9 +967,11 @@ export default function App() {
   // slots above stay for users who want to say which side is which; these don't ask.
   const [refs, setRefs] = useState<{ blob: Blob; url: string }[]>([]);
   function pickView(slot: ViewSlot, file: File) {
-    setViews((v) => {
-      v[slot] && URL.revokeObjectURL(v[slot]!.url);
-      return { ...v, [slot]: { blob: file, url: URL.createObjectURL(file) } };
+    void downscaleImage(file).then((eff) => {
+      setViews((v) => {
+        v[slot] && URL.revokeObjectURL(v[slot]!.url);
+        return { ...v, [slot]: { blob: eff, url: URL.createObjectURL(eff) } };
+      });
     });
   }
   function clearView(slot: ViewSlot) {
@@ -1495,8 +1498,14 @@ export default function App() {
       void importModelFile(file);
       return;
     }
-    if (image) URL.revokeObjectURL(image.url);
-    setImage({ blob: file, url: URL.createObjectURL(file) });
+    // Slimmed at attach time, so the preview, the chip and every request downstream all
+    // carry the same right-sized blob (see downscale.ts for the why and the ceilings).
+    void downscaleImage(file).then((eff) => {
+      setImage((prev) => {
+        if (prev) URL.revokeObjectURL(prev.url);
+        return { blob: eff, url: URL.createObjectURL(eff) };
+      });
+    });
     // In Precise mode with a working AI provider, a photo means "recreate this part
     // as exact CAD" (vision). Otherwise route to the free generative mesh path —
     // but never override the guided replacement flow, which is explicitly precise
@@ -1524,7 +1533,9 @@ export default function App() {
     if (!image) pickImage(rasters[0]);
     const extras = (image ? rasters : rasters.slice(1)).slice(0, 5 - refs.length);
     if (extras.length) {
-      setRefs((r) => [...r, ...extras.map((f) => ({ blob: f as Blob, url: URL.createObjectURL(f) }))]);
+      void Promise.all(extras.map((f) => downscaleImage(f))).then((slim) => {
+        setRefs((r) => [...r, ...slim.map((b) => ({ blob: b, url: URL.createObjectURL(b) }))]);
+      });
     }
   }
 

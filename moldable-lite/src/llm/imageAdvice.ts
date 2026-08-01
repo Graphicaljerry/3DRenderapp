@@ -15,7 +15,7 @@ export function imageAdvice(opts: { provider: string; mesh?: boolean }): string 
   }
   switch (opts.provider) {
     case "anthropic":
-      return `JPG, PNG or WebP up to ~1568 px on the long side — bigger is downscaled, not sharper. iPhone HEIC photos aren't readable: share or export as JPG first. Straight-on, even light; a ruler or coin in frame nails the scale. ${sketch}`;
+      return `JPG, PNG or WebP — oversized pictures are auto-resized to ~1568 px before upload, so any size is fine. iPhone HEIC photos aren't readable: share or export as JPG first. Straight-on, even light; a ruler or coin in frame nails the scale. ${sketch}`;
     case "gemini":
       return `JPG, PNG, WebP — and HEIC straight off an iPhone. ~768–2048 px works best. Straight-on, even light; a ruler or coin in frame nails the scale. ${sketch}`;
     case "openai":
@@ -24,6 +24,6 @@ export function imageAdvice(opts: { provider: string; mesh?: boolean }): string 
     case "local":
       return `Vision depends on the local model (llava / qwen-vl families see; plain coders don't). JPG or PNG around ~1024 px. ${sketch}`;
     default: // openrouter, house, groq, custom — the routed model varies
-      return `JPG, PNG or WebP, ~1024–1568 px on the long side (HEIC often isn't readable — share as JPG). Straight-on, even light; a ruler or coin in frame nails the scale. ${sketch}`;
+      return `JPG, PNG or WebP — oversized pictures are auto-resized before upload (HEIC often isn't readable — share as JPG). Straight-on, even light; a ruler or coin in frame nails the scale. ${sketch}`;
   }
 }

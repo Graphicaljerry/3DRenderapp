@@ -1922,3 +1922,69 @@ details.guide { margin-top: 10px; }
   .viewer-body:has(.inspector-dock:not([style*="none"])) .canvas-rail,
   .viewer-body:has(.inspector-dock:not([style*="none"])) .zoom-ctl { display: none; }
 }
+
+/* ---------- the phone shell (skills/mobile-ux) ----------
+   Below 760px the app is composed from phone parts, not squeezed desktop ones: the
+   stage runs edge to edge, the chat is a bottom sheet whose collapsed "peek" is just
+   the composer, the tool rail lies down along the bottom of the stage, and floating
+   chrome steps back while a finger is on the model. At the end of the file because
+   several rules override base rules of equal specificity. */
+@media (max-width: 760px) {
+  /* Full-bleed stage: the floating-card grammar is desktop's. Row 2 is the sheet and
+     sizes to its content — peek is small, open is capped by .messages below. */
+  .split { grid-template-rows: minmax(0, 1fr) auto; padding: 0; gap: 0; }
+  .split.chat-collapsed { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
+  .viewer-body { border-radius: 0; }
+  .statusbar { padding-left: 10px; padding-right: 10px; }
+
+  /* The chat sheet. Peek = grabber + composer, nothing else — the model keeps the
+     screen until the conversation is asked for. */
+  .chat.sheet { border-radius: 16px 16px 0 0; border-top: 1px solid var(--bord); box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.14); overflow: visible; }
+  .chat.sheet.peek .chat-bar, .chat.sheet.peek .messages, .chat.sheet.peek .modebar { display: none; }
+  .chat.sheet.open .messages { max-height: 44dvh; }
+  .chat.sheet .chat-hide { display: none; } /* the grabber owns collapse on the sheet */
+
+  /* The tool rail lies down: bottom-centre, capsule, flyouts open UPWARD. No app in
+     the researched set ships a left rail on a phone — the thumb arc owns the bottom. */
+  .canvas-rail { top: auto; bottom: 12px; left: 50%; transform: translateX(-50%); flex-direction: row; align-items: center; max-width: calc(100% - 16px); }
+  .canvas-rail .rail-sep { width: 1px; height: auto; align-self: stretch; margin: 4px 3px; }
+  /* Flyouts anchor to the RAIL, not their button: .rail-tool goes static so the rail
+     becomes the containing block, and a leftmost tool's flyout can no longer centre
+     itself off the screen edge. */
+  .canvas-rail > .rail-tool { position: static; }
+  .canvas-rail .rail-fly { left: 6px; right: auto; top: auto; bottom: calc(100% + 10px); transform: none; max-width: calc(100vw - 24px); flex-wrap: wrap; }
+  /* The view snaps shared that spot; orbit covers their job here. */
+  .view-snaps { display: none; }
+
+  /* A finger is on the model: floating chrome steps back (the video-player contract),
+     and returns on release. */
+  .viewer.stage-busy .tabs, .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
+  .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock {
+    opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+  }
+  .viewer .tabs, .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock { transition: opacity 0.2s ease; }
+}
+@media (max-width: 760px) and (prefers-reduced-motion: reduce) {
+  .viewer .tabs, .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock,
+  .viewer.stage-busy .tabs, .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
+  .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock { transition: none; }
+}
+
+/* The sheet grabber: phone-only handle for the chat sheet. */
+.sheet-grab { display: none; }
+@media (max-width: 760px) {
+  .sheet-grab {
+    display: flex; align-items: center; justify-content: center;
+    width: 100%; padding: 8px 0 4px; background: none; border: none; cursor: pointer;
+  }
+  .sheet-grab-pill { width: 42px; height: 5px; border-radius: 999px; background: var(--bord-strong); }
+  .sheet-grab:active .sheet-grab-pill { background: var(--mut); }
+}
+
+/* Fingers, not cursors: targets grow toward Apple's 44pt default — never shrink. */
+@media (pointer: coarse) and (max-width: 760px) {
+  .canvas-rail .ghost.sm.iconbtn { height: 40px; min-height: 40px; min-width: 40px; padding: 6px; }
+  .tabs button { padding: 8px 10px; }
+  .zoom-ctl button { width: 34px; height: 34px; }
+  .view-snaps button { padding: 8px 14px; }
+}

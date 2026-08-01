@@ -1149,6 +1149,20 @@ const CANVAS_TABS: ReadonlyArray<{ key: "3d" | "code" | "params" | "print" | "hi
   { key: "history", label: "History", icon: <IconHistory size={15} /> },
 ];
 
+/** Reactive media query — the phone shell is a different composition, not a squeezed
+ *  desktop, so components need to KNOW they are on a phone rather than only styling
+ *  around it (render conditions, sheet states, send-expands behaviour). */
+function useMediaQuery(q: string): boolean {
+  const [m, setM] = useState(() => typeof window !== "undefined" && window.matchMedia(q).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(q);
+    const on = () => setM(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [q]);
+  return m;
+}
+
 /** "July 31st, 2026" — the chat head's date, ordinal and all. */
 function chatDate(): string {
   const d = new Date();
@@ -1583,7 +1597,9 @@ export function Workspace(p: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [dragOverCanvas, setDragOverCanvas] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
-  const [chatOpen, setChatOpen] = useState(true);
+  // Open beside the stage on desktop; on a phone the sheet starts in PEEK, because the
+  // first thing a phone user should see is their model, not an empty transcript.
+  const [chatOpen, setChatOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 760);
   // Resizable chat column: drag the divider to trade chat width for 3D-viewer room
   // (most valuable on iPad-sized screens). Persisted; double-click resets.
   const CHAT_W_DEFAULT = 400;
@@ -1621,6 +1637,20 @@ export function Workspace(p: Props) {
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
   useEffect(() => { if (picked) { setDockPanel("selection"); setDockOpen(true); } }, [picked]);
   const dockLabel = DOCK_ITEMS.find((d) => d.key === dockPanel)?.label ?? "";
+  // The phone shell (skills/mobile-ux): chat becomes a bottom sheet whose collapsed
+  // "peek" is just the composer, and chatOpen flips peek <-> full instead of hiding
+  // the panel behind a side rail.
+  const phone = useMediaQuery("(max-width: 760px)");
+  // While a finger is on the model, floating chrome steps back — the video-player
+  // contract. Phone only: on desktop the pointer lives on the canvas half the time.
+  const [stageBusy, setStageBusy] = useState(false);
+  useEffect(() => {
+    if (!stageBusy) return;
+    const up = () => setStageBusy(false);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+    return () => { window.removeEventListener("pointerup", up); window.removeEventListener("pointercancel", up); };
+  }, [stageBusy]);
   void showLayers; void setShowLayers; // retained: context-menu Rename still drives this
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
@@ -1858,14 +1888,14 @@ export function Workspace(p: Props) {
       )}
 
       <main className={`split${chatOpen ? "" : " chat-collapsed"}`} style={{ "--chat-w": `${chatW}px` } as CSSProperties}>
-        {!chatOpen && (
+        {!chatOpen && !phone && (
           <button className="chat-rail" title="Show chat" aria-label="Show chat" onClick={() => setChatOpen(true)}>
             <span className="chat-rail-label">Chat ›</span>
           </button>
         )}
         <section
-          className={`chat ${dragOver ? "drop" : ""}`}
-          style={chatOpen ? undefined : { display: "none" }}
+          className={`chat ${dragOver ? "drop" : ""}${phone ? ` sheet ${chatOpen ? "open" : "peek"}` : ""}`}
+          style={chatOpen || phone ? undefined : { display: "none" }}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);
@@ -1873,6 +1903,12 @@ export function Workspace(p: Props) {
           onDragLeave={() => setDragOver(false)}
           onDrop={onDrop}
         >
+          {/* Phone only (CSS hides it wider): the sheet's handle. Tap toggles peek
+              (composer alone) and full (transcript + controls) — the model keeps the
+              screen until the conversation is asked for. */}
+          <button className="sheet-grab" aria-expanded={chatOpen} aria-label={chatOpen ? "Collapse chat" : "Expand chat"} onClick={() => setChatOpen(!chatOpen)}>
+            <span className="sheet-grab-pill" aria-hidden="true" />
+          </button>
           <div className="chat-bar">
             <span className="chat-title">Chat</span>
             {/* Today, in words — the transcript below is undated, so the head carries
@@ -1992,6 +2028,9 @@ export function Workspace(p: Props) {
               onSubmit={(e) => {
                 e.preventDefault();
                 p.onSend(p.input);
+                // Sending from the collapsed sheet opens it — the reply streams into
+                // the transcript, and a reply nobody can see reads as a hang.
+                if (phone && !chatOpen) setChatOpen(true);
               }}
             >
               <button
@@ -2103,7 +2142,7 @@ export function Workspace(p: Props) {
         )}
 
         <section
-          className={`viewer${p.tab === "params" ? " params-docked" : ""}${dragOverCanvas ? " drop" : ""}`}
+          className={`viewer${p.tab === "params" ? " params-docked" : ""}${dragOverCanvas ? " drop" : ""}${stageBusy ? " stage-busy" : ""}`}
           style={{ "--dock-w": `${dockOpen ? dockW : 0}px` } as CSSProperties}
           onDragOver={(e) => { e.preventDefault(); setDragOverCanvas(true); }}
           onDragLeave={() => setDragOverCanvas(false)}
@@ -2183,7 +2222,7 @@ export function Workspace(p: Props) {
 
           {/* --dock-w lives on the SECTION, not here: the head is a sibling of this div
               and needs the same number to keep its pills clear of the Inspector card. */}
-          <div className="viewer-body">
+          <div className="viewer-body" onPointerDown={phone ? (e) => { if ((e.target as HTMLElement).tagName === "CANVAS") setStageBusy(true); } : undefined}>
             {/* The stage is never hidden: every panel now docks beside it. */}
             <div style={{ display: "block", height: "100%" }}>
               <Viewer

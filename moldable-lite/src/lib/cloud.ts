@@ -280,7 +280,12 @@ function sanitizeProject(p: Project, lean = false): Project {
     importFile: undefined,
     thumb: img(p.thumb),
     chat: p.chat?.map((t) => (t.image ? { ...t, image: img(t.image) } : t)),
-    versions: p.versions.map((v) => ({ ...v, glb: undefined, importFile: undefined })),
+    // History thumbnails: recent ones ride along (small webp), older ones drop — a
+    // long project would otherwise inflate the single-row payload; `lean` drops all.
+    versions: p.versions.map((v, i, arr) => ({
+      ...v, glb: undefined, importFile: undefined,
+      thumb: !lean && v.thumb && v.thumb.length <= 24 * 1024 && i >= arr.length - 30 ? v.thumb : undefined,
+    })),
   };
 }
 

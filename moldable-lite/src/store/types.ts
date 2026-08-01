@@ -41,6 +41,7 @@ export interface Version {
   importFile?: Blob; // imported STEP/STL the code's `imported` argument refers to
   importKind?: "step" | "stl"; // how importFile parses — STL-as-CAD imports must NOT be re-read as STEP on undo/reopen
   genSource?: GenSource;
+  thumb?: string; // mini canvas capture (data URL) of the model as it looked when this version landed
 }
 
 export interface Project {

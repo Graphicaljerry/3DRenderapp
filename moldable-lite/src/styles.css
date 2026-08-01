@@ -558,6 +558,11 @@ button { font-family: inherit; cursor: pointer; }
 .prow .no { color: var(--danger); font-weight: 600; }
 .warns { margin: 12px 0; padding-left: 18px; color: var(--warn); font-size: 12.5px; }
 .vrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; background: var(--ctl); border: 1px solid transparent; border-radius: 10px; margin-bottom: 8px; }
+/* Mini canvas capture per version — the model as it looked (pose included) when that
+   change landed. Old versions without one keep a quiet placeholder so rows align. */
+.vthumb { flex: 0 0 auto; width: 42px; height: 42px; border-radius: 8px; border: 1px solid var(--bord); object-fit: cover; background: var(--canvas); }
+.vthumb-empty { display: inline-block; }
+.vrow .vbody { flex: 1 1 auto; min-width: 0; }
 .vrow.current { background: var(--accent-w); border-color: #cfe4e0; }
 .vsum { font-size: 13px; color: var(--ink2); }
 .vmeta { font-size: 11px; color: var(--subt); margin-top: 2px; }

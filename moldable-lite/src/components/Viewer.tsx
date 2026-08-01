@@ -56,6 +56,8 @@ export interface ViewerHandle {
   /** A large, clean render of the model alone (no grid/dims/pins) — the reference
    *  image for "refine this as a mesh": it feeds an image→3D generator. */
   captureModelShot: () => string | null;
+  /** Small square capture of the CURRENT canvas view (camera as-is) — history thumbnails. */
+  captureMini: (px?: number) => string | null;
   /** Project a display-space point to canvas-relative pixels, so UI can be anchored
    *  AT a selection instead of parked in a corner. `behind` is true when the point is
    *  on the far side of the camera (the caller should hide rather than mis-place).
@@ -2879,6 +2881,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     captureModelShot() {
       // Image→3D generators want a big, square, clutter-free subject shot.
       return st.current ? captureThumbnail(st.current, { W: 768, H: 768, png: true }) : null;
+    },
+    captureMini(px = 96) {
+      const s = st.current;
+      if (!s || !s.mesh) return null;
+      try {
+        s.renderer.render(s.scene, s.camera); // fresh buffer this tick — no preserveDrawingBuffer needed
+        const src = s.renderer.domElement;
+        const side = Math.min(src.width, src.height);
+        const c = document.createElement("canvas");
+        c.width = px;
+        c.height = px;
+        c.getContext("2d")!.drawImage(src, (src.width - side) / 2, (src.height - side) / 2, side, side, 0, 0, px, px);
+        return c.toDataURL("image/webp", 0.72);
+      } catch {
+        return null; // tainted/lost context — a version without a thumb is fine
+      }
     },
   }));
 

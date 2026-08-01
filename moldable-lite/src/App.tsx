@@ -1858,6 +1858,30 @@ export default function App() {
     // Chat is synced separately (continuous effect) — keep whatever is there.
     snap.chat = projectRef.current?.chat ?? base.chat;
     persist(snap);
+    stampHeadThumb();
+  }
+
+  // ---- History thumbnails: every version carries a mini capture of the canvas as it
+  // looked when the change landed (current camera, current pose). Deferred a beat so
+  // the new geometry has actually painted; ~3-6 KB webp each.
+  const thumbTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function stampHeadThumb(onlyIfMissing = false) {
+    if (thumbTimer.current) clearTimeout(thumbTimer.current);
+    thumbTimer.current = setTimeout(() => {
+      const p = projectRef.current;
+      if (!p) return;
+      const i = headIndex(p);
+      if (i < 0) return;
+      if (onlyIfMissing && p.versions[i].thumb) return;
+      const shot = viewer.current?.captureMini?.(96);
+      if (!shot || p.versions[i].thumb === shot) return;
+      const versions = [...p.versions];
+      versions[i] = { ...versions[i], thumb: shot };
+      const next = { ...p, versions };
+      projectRef.current = next;
+      setProject(next);
+      void putProject(next); // quiet save — the next real change carries it to the cloud
+    }, 400);
   }
 
   function applyResultNoCommit(res: EngineResult) {
@@ -1950,6 +1974,7 @@ export default function App() {
     const next = coalesce ? replaceHeadVersion(proj, snap) : appendVersion(proj, snap);
     next.chat = projectRef.current?.chat ?? proj.chat;
     persist(next);
+    stampHeadThumb();
   }
   async function applyParams(values: CadParams) {
     if (!sel || !result || result.source.kind !== "code") return;
@@ -2130,13 +2155,20 @@ export default function App() {
     if (!result || result.kind === "replicad" || status === "generating") return;
     try {
       const out = repairGeometry(result.geometry);
-      applyResultNoCommit({ ...result, geometry: out.geometry, dims: out.dims });
+      // A real version: the repaired bytes are re-serialized so undo/redo restores
+      // exactly this state (keeping the OLD blob would restore the broken mesh).
+      applyResult(
+        { ...result, geometry: out.geometry, dims: out.dims, glb: geometryToSTL(out.geometry), meshXform: undefined },
+        project?.name ?? "Model",
+        `Repaired the mesh — ${out.holesFilled} hole(s) filled, ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter} open edges`,
+        "repair mesh",
+      );
       setMessages((m) => [
         ...m,
         {
           id: mid(),
           role: "assistant",
-          text: `Repaired the mesh: ${out.holesFilled} hole(s) filled, ${out.degenerateRemoved} bad triangle(s) removed, open edges ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter}${out.flippedWinding ? ", surface flipped right-side-out" : ""}. Exports now use the repaired mesh.`,
+          text: `Repaired the mesh: ${out.holesFilled} hole(s) filled, ${out.degenerateRemoved} bad triangle(s) removed, open edges ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter}${out.flippedWinding ? ", surface flipped right-side-out" : ""}. Exports now use the repaired mesh. Undo reverts it.`,
         },
       ]);
     } catch (err: any) {
@@ -2152,13 +2184,18 @@ export default function App() {
     try {
       const { simplifyGeometry } = await import("./print/simplify"); // meshoptimizer loads on demand
       const out = await simplifyGeometry(result.geometry);
-      applyResultNoCommit({ ...result, geometry: out.geometry, dims: out.dims });
+      applyResult(
+        { ...result, geometry: out.geometry, dims: out.dims, glb: geometryToSTL(out.geometry), meshXform: undefined },
+        project?.name ?? "Model",
+        `Simplified — ${out.trianglesBefore.toLocaleString()} → ${out.trianglesAfter.toLocaleString()} triangles`,
+        "simplify mesh",
+      );
       setMessages((m) => [
         ...m,
         {
           id: mid(),
           role: "assistant",
-          text: `Simplified the model: ${out.trianglesBefore.toLocaleString()} → ${out.trianglesAfter.toLocaleString()} triangles (shape kept within ~1%). Exports use the simplified mesh — click again to halve it further.`,
+          text: `Simplified the model: ${out.trianglesBefore.toLocaleString()} → ${out.trianglesAfter.toLocaleString()} triangles (shape kept within ~1%). Exports use the simplified mesh — click again to halve it further. Undo reverts it.`,
         },
       ]);
     } catch (err: any) {
@@ -2182,14 +2219,22 @@ export default function App() {
       }
       // The split output is a plain mesh of parts — treat it as a generative result
       // so export writes exactly these arranged pieces (STEP no longer applies).
-      applyResultNoCommit({
-        kind: "generative",
-        geometry: out.geometry,
-        dims: out.dims,
-        source: { kind: "gen", provider: "split", model: "split-to-fit-bed", prompt: `split into ${out.parts} parts` },
-        supportsStep: false,
-        glb: geometryToSTL(out.geometry),
-      });
+      // A REAL version (not NoCommit): "Undo skipped straight past my split" was a
+      // real report — one Undo now returns to the un-split model, and Redo re-splits
+      // from the stored STL without re-running the CSG.
+      applyResult(
+        {
+          kind: "generative",
+          geometry: out.geometry,
+          dims: out.dims,
+          source: { kind: "gen", provider: "split", model: "split-to-fit-bed", prompt: `split into ${out.parts} parts` },
+          supportsStep: false,
+          glb: geometryToSTL(out.geometry),
+        },
+        project?.name ?? "Model",
+        `Split into ${out.parts} bed-sized pieces`,
+        "split to fit bed",
+      );
       setSplitPieces(out.pieces); // enables the colour-coded pieces list + per-piece / ZIP export
       setMessages((m) => [
         ...m,
@@ -2234,7 +2279,10 @@ export default function App() {
     if (!engine) return;
     try {
       const pf = preflightExport(result, printer);
-      if (pf.repaired) applyResultNoCommit(pf.result);
+      if (pf.repaired) {
+        const rr = pf.result.kind === "generative" ? { ...pf.result, glb: geometryToSTL(pf.result.geometry), meshXform: undefined } : pf.result;
+        applyResult(rr, project?.name ?? "Model", "Auto-repaired the mesh for export (watertight)", "auto-repair for export");
+      }
       const blob = await engine.export(pf.result, "3mf");
       const how = await openInSlicer(target, blob, safeFileName(exportBase(), "3mf"));
       setMessages((m) => [
@@ -4322,7 +4370,10 @@ export default function App() {
     try {
       // Print-ready by default: analyse, auto-repair meshes, sanity-check scale/bed.
       const pf = preflightExport(result, printer);
-      if (pf.repaired) applyResultNoCommit(pf.result); // viewer + report show exactly what was exported
+      if (pf.repaired) {
+        const rr = pf.result.kind === "generative" ? { ...pf.result, glb: geometryToSTL(pf.result.geometry), meshXform: undefined } : pf.result;
+        applyResult(rr, project?.name ?? "Model", "Auto-repaired the mesh for export (watertight)", "auto-repair for export");
+      } // viewer + report show exactly what was exported
       const blob = await engine.export(pf.result, format);
       downloadBlob(blob, safeFileName(exportBase(), format));
       // STEP is a CAD hand-off, not a print file — skip the print-readiness line.
@@ -4374,6 +4425,7 @@ export default function App() {
     persist(next);
     try {
       await rebuildHead(next);
+      stampHeadThumb();
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restored an earlier version." }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
@@ -4400,6 +4452,7 @@ export default function App() {
     setSelectedFeature(null);
     try {
       await rebuildHead(next);
+      stampHeadThumb(true); // older versions from before thumbnails existed fill in lazily
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: (dir < 0 ? "Undo" : "Redo") + " failed to rebuild: " + String(err?.message ?? err), error: true }]);
     } finally {

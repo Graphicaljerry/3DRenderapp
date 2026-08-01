@@ -3862,7 +3862,10 @@ function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestor
       <h3>Version history</h3>
       {list.map((v, i) => (
         <div key={v.id} className={`vrow ${i === 0 ? "current" : ""}`}>
-          <div>
+          {v.thumb
+            ? <img className="vthumb" src={v.thumb} alt="" aria-hidden />
+            : <span className="vthumb vthumb-empty" aria-hidden />}
+          <div className="vbody">
             <div className="vsum">{v.summary}</div>
             <div className="vmeta">
               {new Date(v.createdAt).toLocaleTimeString()} · {v.dims ? `${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : v.engine}

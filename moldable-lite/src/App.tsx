@@ -792,13 +792,35 @@ export default function App() {
       applyingPending.current = false;
     }
     setPending(null);
+    pendingRef.current = null; // eager: same-tick callers (retry, promote-on-type) must see it gone
   }
   function discardPending(silent = false) {
     const pc = pendingRef.current;
     if (!pc) return;
     setPending(null);
+    pendingRef.current = null;
     setGeometry(pc.prevGeometry);
     if (!silent) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Discarded — the model is unchanged. (The proposal is gone; re-ask any time.)" }]);
+  }
+  // A follow-up ask that involves the held proposal can't run in the same tick — the
+  // send path closes over `result`/`geometry` state, which only reflect the promote
+  // (or discard) after a render. Queue the ask; the effect re-enters send() next
+  // render, when its closures see the right base model.
+  type QueuedAsk = { promptText: string; forceMode?: Mode; override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean } };
+  const [queuedAsk, setQueuedAsk] = useState<QueuedAsk | null>(null);
+  useEffect(() => {
+    if (!queuedAsk || pending) return;
+    const q = queuedAsk;
+    setQueuedAsk(null);
+    void send(q.promptText, q.forceMode, q.override);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queuedAsk, pending]);
+  /** Preview bar's "Try again": drop this iteration and rebuild the same ask fresh. */
+  function retryPending() {
+    const pc = pendingRef.current;
+    if (!pc) return;
+    discardPending(true);
+    setQueuedAsk({ promptText: pc.promptText });
   }
 
   const attachSelected = selAttachIds.length > 0;
@@ -1676,9 +1698,11 @@ export default function App() {
   }
 
   /** Apply the suggested print orientation: CAD models get a parametric rotate op
-   *  (History/Undo, sliders and export all follow); meshes get the rotation baked in. */
-  async function applyOrientation() {
-    const s = orientSug;
+   *  (History/Undo, sliders and export all follow); meshes get the rotation baked in.
+   *  Either path ends resting on the plate — CAD display/export re-ground to z=0,
+   *  bakeMeshTransform settles meshes there itself. */
+  async function applyOrientation(sug?: OrientSuggestion) {
+    const s = sug ?? orientSug;
     if (!s?.improved || !geometry || !result) return;
     if (result.source.kind === "code" && activeKind === "replicad") {
       geometry.computeBoundingBox();
@@ -1705,9 +1729,23 @@ export default function App() {
     setOrientSug(null);
     explainOnce(
       "orient",
-      `Rotated the part to its best printing orientation — ${s.reason} Less support means faster prints, less filament and cleaner surfaces. Undo reverts it.`,
+      `Rotated the part to its best printing orientation and dropped it flat onto the plate — ${s.reason} Less support means faster prints, less filament and cleaner surfaces. Undo reverts it.`,
       `Auto-oriented: ${s.reason}`,
     );
+  }
+
+  /** One click: find the best print orientation and rest the part flat on the plate. */
+  async function autoOrientDrop() {
+    if (!geometry || status === "generating") return;
+    let s: OrientSuggestion | null = null;
+    try { s = suggestOrientation(geometry, printer.overhangThresholdDeg); } catch { /* degenerate geometry — nothing to say */ }
+    if (!s) return;
+    setOrientSug(s); // Printability panel shows the numbers either way
+    if (!s.improved) {
+      appendMsg({ role: "assistant", text: `Left as is — ${s.reason} It's already resting flat on the plate.` });
+      return;
+    }
+    await applyOrientation(s);
   }
 
   /** Elephant-foot guard: chamfer every bed-plane edge of the CAD solid. */
@@ -2122,7 +2160,7 @@ export default function App() {
         {
           id: mid(),
           role: "assistant",
-          text: `Split into ${out.parts} colour-coded pieces — each fits your ${bed.x} × ${bed.y} mm bed. Export them all as separate STLs/3MFs (or one file), print, and glue or pin them together. (This replaces the single model; use Undo or History to go back.)`,
+          text: `Split into ${out.parts} colour-coded pieces — each fits your ${bed.x} × ${bed.y} × ${bed.z} mm build volume. Export them all as separate STLs/3MFs (or one file), print, and glue or pin them together. (This replaces the single model; use Undo or History to go back.)`,
         },
       ]);
     } catch (err: any) {
@@ -3177,13 +3215,13 @@ export default function App() {
     if (!result) return;
     const f = fitToBedFactor(result.dims, printer.bed);
     if (f >= 1) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Already fits — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm on a ${printer.bed.x} × ${printer.bed.y} mm plate.` }]);
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Already fits — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm in a ${printer.bed.x} × ${printer.bed.y} × ${printer.bed.z} mm build volume.` }]);
       return;
     }
     await resizeModel([f, f, f]);
     explainOnce(
       "fitplate",
-      `Scaled the model to ${Math.round(f * 100)}% so it fits your ${printer.bed.x} × ${printer.bed.y} mm plate. Undo reverts it; the Resize panel (Transform → Resize) sets any exact size.`,
+      `Scaled the model to ${Math.round(f * 100)}% so it fits your ${printer.bed.x} × ${printer.bed.y} × ${printer.bed.z} mm build volume. Undo reverts it; the Resize panel (Transform → Resize) sets any exact size.`,
       `Fit to plate: scaled to ${Math.round(f * 100)}%.`,
     );
   }
@@ -3261,6 +3299,20 @@ export default function App() {
   const sendingRef = useRef(false);
   async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean }) {
     if (sendingRef.current) return;
+    // Typing while an AI proposal is on canvas BUILDS ON the proposal instead of
+    // silently throwing it away: the previewed change is kept as its own version
+    // (Undo/History step back through it) and the ask re-runs next render, when the
+    // send path's closures see the promoted model as the base.
+    if (pendingRef.current) {
+      applyPending();
+      explainOnce(
+        "refine-preview",
+        "You typed while a preview was on the canvas, so I kept that change as the base for this request — it's saved as a version and **Undo** steps back to before it. To throw a proposal away instead, hit **Discard** on the preview bar before typing.",
+      );
+      setInput("");
+      setQueuedAsk({ promptText, forceMode, override });
+      return;
+    }
     sendingRef.current = true;
     setImproveBefore(null); // the composer is being emptied; there is nothing left to revert
     setImproveNote(null);
@@ -3329,7 +3381,7 @@ export default function App() {
   }
 
   async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean }) {
-    if (pendingRef.current) discardPending(true); // a new ask supersedes the held proposal
+    if (pendingRef.current) discardPending(true); // safety net — send() promotes a held proposal before ever reaching here
     const p = promptText.trim();
     if (status === "generating") return;
     if (forceMode && forceMode !== mode) setMode(forceMode); // keep the UI switch in sync
@@ -3591,7 +3643,7 @@ export default function App() {
         if (ff < 1) {
           const baked = bakeMeshTransform(res.geometry, scaleAboutBase(res.geometry, [ff, ff, ff]));
           res = { ...res, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(res.meshXform, baked.applied) };
-          fitNote = ` — scaled to fit your ${printer.bed.x}×${printer.bed.y} mm plate (AI meshes have no real size; use Resize to make it any size)`;
+          fitNote = ` — scaled to fit your ${printer.bed.x}×${printer.bed.y}×${printer.bed.z} mm build volume (AI meshes have no real size; use Resize to make it any size)`;
         }
         const name = deriveName(p || "Photo model");
         const usd = costUsd(provId, modelId) ?? 0;
@@ -4468,6 +4520,7 @@ export default function App() {
           hasDiff: !!pending?.diff,
           apply: applyPending,
           discard: () => discardPending(),
+          retry: retryPending,
           mode: aiApply,
           setMode: setAiApply,
         }}
@@ -4537,7 +4590,7 @@ export default function App() {
           overhangOn: overhangView,
           toggleOverhang: () => { setOverhangView((v) => !v); setThinShow(false); },
           thin: { report: thinReport, busy: thinBusy, run: runThinWalls, shown: thinShow, toggleShown: () => setThinShow((v) => !v) },
-          orient: { suggestion: orientSug, run: runOrientSuggest, apply: () => void applyOrientation() },
+          orient: { suggestion: orientSug, run: runOrientSuggest, apply: () => void applyOrientation(), auto: () => void autoOrientDrop() },
           chamfer: { can: activeKind === "replicad" && result?.source.kind === "code", apply: (size) => void applyChamferBottom(size) },
         }}
         modelSelected={(modelSelected || transformMode !== "off") && !attachSelected}

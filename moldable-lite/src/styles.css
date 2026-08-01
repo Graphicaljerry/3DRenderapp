@@ -481,7 +481,7 @@ button { font-family: inherit; cursor: pointer; }
   /* Give a cramped canvas its space back: a compact rail and a bounded dock, so the
      overlays never take more than they need. (The rail can't scroll or wrap to fit —
      either would clip or displace its flyouts.) */
-  .canvas-rail { gap: 0; padding: 3px; }
+  .canvas-rail { gap: 0; padding: 3px; --rail-w: 33px; }
   .canvas-rail .ghost.sm.iconbtn { height: 30px; min-height: 30px; padding: 4px; }
   .canvas-rail .rail-sep { margin: 2px 4px; }
   /* The Objects panel would otherwise take most of a narrow canvas. */
@@ -685,6 +685,8 @@ button { font-family: inherit; cursor: pointer; }
 .ai-preview-bar { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); z-index: var(--z-transient); display: flex; align-items: center; gap: 8px; padding: 7px 8px 7px 14px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--accent); border-radius: 12px; box-shadow: var(--shadow-md); }
 .apb-text { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink); white-space: nowrap; }
 .apb-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mut); }
+.apb-hint { font-size: 11px; color: var(--mut); }
+@media (max-width: 900px) { .apb-hint { display: none; } }
 .apb-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 .apb-add { background: #22c55e; opacity: .75; }
 .apb-rem { background: #ef4444; opacity: .75; }
@@ -1841,30 +1843,35 @@ details.guide { margin-top: 10px; }
    at once, so you learn the whole toolbar in one pass instead of hunting tooltips one
    button at a time. Only the seven top-level tools get names — the Face/Edge/Corner
    flyout is a sub-mode of Select and already carries its own labels, and naming those
-   here would teach the wrong vocabulary. Width is the only animated property and the
-   rail is absolutely positioned over the canvas, so nothing else reflows. */
+   here would teach the wrong vocabulary.
+
+   Motion contract, learned the hard way: the ONLY thing that moves is the rail's
+   width (and its corner radius). A width transition can't start FROM auto, so the
+   old auto-width capsule snapped open while the label max-widths were still
+   animating — text and icons crossed the pill edge mid-flight. Now the collapsed
+   width is explicit, every row clips its own overflow, the icon never changes
+   position (same padding + flex-start in both states), and the label just fades in
+   behind the advancing edge. */
 .canvas-rail .rail-name {
-  display: block; max-width: 0; overflow: hidden; white-space: nowrap;
+  display: block; max-width: 110px; overflow: hidden; white-space: nowrap;
   font-size: 12px; font-weight: 500; line-height: 1;
-  opacity: 0; transition: max-width .22s cubic-bezier(.22,1,.36,1), opacity .16s ease, margin-left .22s cubic-bezier(.22,1,.36,1);
-  margin-left: 0;
+  margin-left: 10px;
+  opacity: 0; transform: translateX(-6px);
+  transition: opacity .1s ease, transform .1s ease; /* exit: quick, no delay */
 }
+.canvas-rail .ghost.sm.iconbtn { justify-content: center; } /* touch: icon-only rows stay centred */
 @media (hover: hover) and (pointer: fine) {
-  /* Expanded rail: a FIXED width, so every row is the same width whatever its label —
-     hover backgrounds used to be as wide as each word ("Mark" tiny, "Measure" long),
-     which read as a ragged stack rather than one menu. The capsule also opens up to a
-     rounded rectangle: at 999px the top and bottom rows sat inside the curve and their
-     text crossed the edge. */
-  .canvas-rail:hover { width: 176px; padding: 8px; border-radius: 22px; }
-  .canvas-rail:hover > * { width: 100%; }
-  .canvas-rail:hover .ghost.sm.iconbtn { width: 100%; justify-content: flex-start; padding-left: 10px; padding-right: 10px; }
-  .canvas-rail:hover .rail-name { max-width: 110px; opacity: 1; margin-left: 10px; }
+  .canvas-rail { width: var(--rail-w, 47px); }
+  .canvas-rail > * { width: 100%; }
+  .canvas-rail > .rail-sep { width: auto; } /* margins position it; 100% would poke past the padding */
+  .canvas-rail .ghost.sm.iconbtn { width: 100%; justify-content: flex-start; overflow: hidden; }
+  /* Fixed expanded width, so every row is the same width whatever its label; the
+     capsule opens to a rounded rectangle so the end rows' text clears the curve. */
+  .canvas-rail:hover { width: 176px; border-radius: 22px; }
+  .canvas-rail:hover .rail-name { opacity: 1; transform: none; transition: opacity .16s ease .07s, transform .2s cubic-bezier(.22,1,.36,1) .07s; }
 }
-/* Width/shape are animated, so the rail grows into the menu instead of snapping. */
-.canvas-rail { transition: width .2s cubic-bezier(.22,1,.36,1), padding .2s cubic-bezier(.22,1,.36,1), border-radius .2s ease; }
-@media (prefers-reduced-motion: reduce) { .canvas-rail { transition: none; } }
-.canvas-rail .ghost.sm.iconbtn { justify-content: center; }
-@media (prefers-reduced-motion: reduce) { .canvas-rail .rail-name { transition: none; } }
+.canvas-rail { transition: width .22s cubic-bezier(.22,1,.36,1), border-radius .22s ease; }
+@media (prefers-reduced-motion: reduce) { .canvas-rail, .canvas-rail .rail-name { transition: none; } }
 
 /* ---------- composer chrome: one row, not four ----------
    Mode, model, web search and part fit are all "how the next build runs", so they
@@ -2049,6 +2056,13 @@ details.guide { margin-top: 10px; }
   /* The tool rail lies down: bottom-centre, capsule, flyouts open UPWARD. No app in
      the researched set ships a left rail on a phone — the thumb arc owns the bottom. */
   .canvas-rail { top: auto; bottom: 12px; left: 50%; transform: translateX(-50%); flex-direction: row; align-items: center; max-width: calc(100% - 16px); }
+  /* Horizontal rail: the desktop hover-expansion contract (fixed width, full-width
+     rows, name labels) makes no sense lying down — undo it even on hover-capable
+     narrow windows. */
+  .canvas-rail, .canvas-rail:hover { width: auto; border-radius: 999px; }
+  .canvas-rail > *, .canvas-rail .ghost.sm.iconbtn { width: auto; }
+  .canvas-rail .ghost.sm.iconbtn { justify-content: center; }
+  .canvas-rail .rail-name { display: none; }
   .canvas-rail .rail-sep { width: 1px; height: auto; align-self: stretch; margin: 4px 3px; }
   /* Flyouts anchor to the RAIL, not their button: .rail-tool goes static so the rail
      becomes the containing block, and a leftmost tool's flyout can no longer centre

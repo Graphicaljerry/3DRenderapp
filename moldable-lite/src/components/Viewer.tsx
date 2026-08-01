@@ -132,7 +132,7 @@ interface Props {
   onPaintStroke?: (triColor: Uint8Array) => void; // a stroke committed — App persists it
   texture: THREE.Texture | null; // baked color map (AI meshes) — display only
   clay: boolean; // View > Grayscale: studio clay presentation (smooth display normals + neutral material)
-  bed: { x: number; y: number }; // printer plate size (mm) — drives the solid build plate
+  bed: { x: number; y: number; z: number }; // printer build volume (mm) — plate slab + height cage
   showPlate: boolean; // View > Build plate
   plateColor: string | null; // user plate colour (Settings > Appearance); null = theme slate
   gridOpacity: number; // 0.15..1 (Settings > Appearance)
@@ -200,7 +200,7 @@ const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // 
 const THEME_SCENE = { light: "#d5d6d7", dark: "#17181a" } as const; // dark: neutral, no blue cast
 // Solid build plate (Bambu/Orca-style): a slab sized to the printer bed so models
 // stand off the background instead of floating on gridlines.
-function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
+function buildPlate(bed: { x: number; y: number; z?: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
   const g = new THREE.Group();
   // Dark slate in BOTH themes, like a real textured print plate (Bambu/Orca) —
   // unless the user picked their own plate colour in Settings > Appearance.
@@ -222,6 +222,23 @@ function buildPlate(bed: { x: number; y: number }, theme: "light" | "dark", colo
   );
   border.position.z = 0.02;
   g.add(border);
+  // Build-VOLUME cage, slicer-style: faint corner posts up to the printer's max
+  // height plus a top rim, so "too tall" is visible the same way "too wide" is.
+  if (bed.z && bed.z > 0) {
+    const hx = bed.x / 2, hy = bed.y / 2, hz = bed.z;
+    const pts: number[] = [];
+    for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]] as const) {
+      pts.push(sx * hx, sy * hy, 0, sx * hx, sy * hy, hz); // corner post
+    }
+    pts.push(-hx, -hy, hz, hx, -hy, hz, hx, -hy, hz, hx, hy, hz,
+      hx, hy, hz, -hx, hy, hz, -hx, hy, hz, -hx, -hy, hz); // top rim
+    const cage = new THREE.BufferGeometry();
+    cage.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+    g.add(new THREE.LineSegments(
+      cage,
+      new THREE.LineBasicMaterial({ color: c.edge, transparent: true, opacity: 0.3 }),
+    ));
+  }
   return g;
 }
 const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x4b4e53, 0x2b2d31] };
@@ -2216,7 +2233,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.plate = buildPlate(bed, theme, plateColor);
     s.plate.visible = showPlate && !showcase;
     s.scene.add(s.plate);
-  }, [bed.x, bed.y, theme, showPlate, showcase, plateColor]);
+  }, [bed.x, bed.y, bed.z, theme, showPlate, showcase, plateColor]);
 
   // Grid line opacity (Settings > Appearance) — re-applied after theme rebuilds too.
   useEffect(() => {

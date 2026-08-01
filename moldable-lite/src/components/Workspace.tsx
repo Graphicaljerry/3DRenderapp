@@ -16,7 +16,7 @@ export interface PrintPrepCtl {
   overhangOn: boolean;
   toggleOverhang: () => void;
   thin: { report: ThinWallReport | null; busy: boolean; run: () => void; shown: boolean; toggleShown: () => void };
-  orient: { suggestion: OrientSuggestion | null; run: () => void; apply: () => void };
+  orient: { suggestion: OrientSuggestion | null; run: () => void; apply: () => void; auto: () => void };
   chamfer: { can: boolean; apply: (size: number) => void };
 }
 import type { Version } from "../store/types";
@@ -815,7 +815,7 @@ function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
             )}
           </div>
           <div className="snap-row rz-actions">
-            <button className="ghost sm" disabled={ctl.fits || ctl.busy} title={ctl.fits ? "Already fits the plate" : `Shrink to fit your ${ctl.bed.x} × ${ctl.bed.y} mm plate`} onClick={() => { ctl.fitToPlate(); setOpen(false); }}>
+            <button className="ghost sm" disabled={ctl.fits || ctl.busy} title={ctl.fits ? "Already fits the build volume" : `Shrink to fit your ${ctl.bed.x} × ${ctl.bed.y} × ${ctl.bed.z} mm build volume`} onClick={() => { ctl.fitToPlate(); setOpen(false); }}>
               Scale to fit bed
             </button>
             <button className="primary sm" disabled={ctl.busy} onClick={apply}>Apply</button>
@@ -968,7 +968,7 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
       ) : (
         <>
           <Check ok={tight} label="Watertight" detail={tight ? undefined : `${r.manifold.boundaryEdges} open edges`} />
-          <Check ok={fits} label="Fits your bed" detail={`${p.printer.bed.x}×${p.printer.bed.y} mm`} />
+          <Check ok={fits} label="Fits your bed" detail={`${p.printer.bed.x}×${p.printer.bed.y}×${p.printer.bed.z} mm`} />
           <Check ok={sane} label="Scale looks right" detail={maxDim ? `${Math.round(maxDim)} mm` : undefined} />
           <Check ok={heavy === null ? null : !heavy} label="Slicer-friendly" detail={r.triangleCount >= 1000 ? `${Math.round(r.triangleCount / 1000)}k tris` : `${r.triangleCount} tris`} />
         </>
@@ -1336,6 +1336,7 @@ interface Props {
     hasDiff: boolean; // green/red change overlays are showing
     apply: () => void;
     discard: () => void;
+    retry: () => void; // rebuild the same ask fresh — a different take on the same words
     mode: "ask" | "auto";
     setMode: (m: "ask" | "auto") => void;
   };
@@ -2282,7 +2283,7 @@ export function Workspace(p: Props) {
                 analysisOverlay={p.analysisOverlay}
                 wireframe={p.wireframe}
                 clay={p.gray}
-                bed={{ x: p.printer.bed.x, y: p.printer.bed.y }}
+                bed={{ x: p.printer.bed.x, y: p.printer.bed.y, z: p.printer.bed.z }}
                 showPlate={p.showPlate}
                 plateColor={p.plateColor}
                 gridOpacity={p.gridOpacity}
@@ -2358,8 +2359,10 @@ export function Workspace(p: Props) {
                     {p.aiPreview.hasDiff && (
                       <span className="apb-legend"><i className="apb-add" /> added <i className="apb-rem" /> removed</span>
                     )}
+                    <span className="apb-hint">like it but not done? just type the next change</span>
                   </span>
                   <button className="primary sm" onClick={p.aiPreview.apply} title="Keep this change (saved as a version — Undo still works)">Apply</button>
+                  <button className="ghost sm" onClick={p.aiPreview.retry} title="Not what you pictured? Rebuild this same request from scratch for a different take">Try again</button>
                   <button className="ghost sm" onClick={p.aiPreview.discard} title="Throw the proposal away — the model stays exactly as it was">Discard</button>
                   <button
                     className="apb-mode"
@@ -2416,6 +2419,7 @@ export function Workspace(p: Props) {
                         ) : p.partCount > 1 ? (
                           <Item label={`Separate ${p.partCount} parts`} hint="Move each solid on its own" onClick={p.onSeparateParts} />
                         ) : null}
+                        <Item label="Lay flat for printing" hint="Best orientation, resting on the plate" onClick={() => p.printPrep.orient.auto()} />
                         {plateItems("model")}
                         <div className="pmenu-sep" />
                         <Item label="Frame model" onClick={() => p.viewerRef.current?.resetView()} />
@@ -2993,7 +2997,7 @@ export function Workspace(p: Props) {
             >
               <IconPrinter size={13} />
               {p.printer.name && <span className="bedchip-name">{p.printer.name}</span>}
-              <span>{p.printer.bed.x}×{p.printer.bed.y} mm</span>
+              <span>{p.printer.bed.x}×{p.printer.bed.y}×{p.printer.bed.z} mm</span>
             </button>
             <PathToPrint hasModel={!!p.geometry} report={p.report} onOpenCheck={() => { setDockPanel("print"); setDockOpen(true); }} />
             {p.status === "generating" && <GenTimer />}
@@ -3718,8 +3722,8 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
         <button className="ghost sm" onClick={prep.toggleOverhang} title="Paint every face steeper than the printer's overhang limit — amber at the limit, red for ceilings that definitely need support">
           {prep.overhangOn ? "✓ Overhang heatmap" : "Overhang heatmap"}
         </button>
-        <button className="ghost sm" disabled={busy} onClick={prep.orient.run} title="Try laying each big face on the bed and score support needs — suggests the best rotation">
-          Suggest orientation
+        <button className="ghost sm" disabled={busy} onClick={prep.orient.auto} title="Score every big face as a base, rotate the part to the one needing the least support, and rest it flat on the plate — one click, undoable">
+          Lay flat — best orientation
         </button>
         <button className="ghost sm" disabled={busy || prep.thin.busy} onClick={prep.thin.run} title={`Sample the surface and measure wall thickness by ray-casting — flags walls under ${Math.round(nozzleMM * 2 * 100) / 100} mm (2 perimeters at your ${nozzleMM} mm nozzle)`}>
           {prep.thin.busy ? "Checking walls…" : "Check wall thickness"}

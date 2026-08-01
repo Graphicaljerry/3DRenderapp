@@ -1779,13 +1779,39 @@ export default function App() {
     setParamValues(values);
     setStatus("generating");
     try {
-      const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values });
+      // ops MUST ride along: drilled holes and magnet pockets live in the op chain, and
+      // rebuilding from code+params alone silently erased every one of them.
+      const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values, ops: result.source.ops });
       applyResultNoCommit(res);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Those values don't build: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
+  }
+  // Mid-scrub live preview. Differs from applyParams on purpose: it never flips global
+  // status (which disables the very rows being dragged — the old "params feel broken"
+  // report), never posts error bubbles (transient mid-drag values legitimately fail to
+  // build; release commits through applyParams, which does report), and it queues
+  // trailing-latest so a slow kernel rebuild coalesces the stream of drag values
+  // instead of piling them up.
+  const liveParamRun = useRef<{ running: boolean; next: CadParams | null }>({ running: false, next: null });
+  async function applyParamsLive(values: CadParams) {
+    if (!sel || !result || result.source.kind !== "code") return;
+    setParamValues(values);
+    if (liveParamRun.current.running) { liveParamRun.current.next = values; return; }
+    liveParamRun.current.running = true;
+    const src = result.source;
+    let v: CadParams | null = values;
+    while (v) {
+      try {
+        const res = await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops });
+        applyResultNoCommit(res);
+      } catch { /* transient drag value — the release commit surfaces real errors */ }
+      v = liveParamRun.current.next;
+      liveParamRun.current.next = null;
+    }
+    liveParamRun.current.running = false;
   }
 
   // ---- Parameter peek -----------------------------------------------------------
@@ -4271,6 +4297,7 @@ export default function App() {
         cadDefaults={cadDefaults}
         paramValues={paramValues}
         onApplyParams={applyParams}
+        onLiveParams={(v) => void applyParamsLive(v)}
         onSaveParams={saveParamsVersion}
         onOpenSlicer={busyExport(openSlicer)}
         onRepair={repairMesh}

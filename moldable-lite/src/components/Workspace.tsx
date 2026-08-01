@@ -29,7 +29,7 @@ import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type Upda
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1129,25 +1129,18 @@ function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]
 }
 
 type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
-const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string }> = [
-  { key: "selection", label: "Selection" },
-  { key: "objects", label: "Objects" },
-  { key: "params", label: "Parameters" },
-  { key: "print", label: "Printability" },
-  { key: "code", label: "Source" },
-  { key: "history", label: "History" },
-  { key: "export", label: "Export" },
-];
-/* The canvas tab strip (Figma "Viewer head"). The non-3d keys ARE DockPanel values, so
-   a tab click is nothing more than setDockPanel(key). Each tab carries an icon so the
-   strip can shed its labels in a narrow viewer column (container query on .btn-label)
-   instead of wrapping to a second row on a phone. */
-const CANVAS_TABS: ReadonlyArray<{ key: "3d" | "code" | "params" | "print" | "history"; label: string; icon: JSX.Element }> = [
-  { key: "3d", label: "3D View", icon: <IconCube size={15} /> },
-  { key: "code", label: "Source", icon: <IconCode size={15} /> },
-  { key: "params", label: "Params", icon: <IconSliders size={15} /> },
-  { key: "print", label: "Printability", icon: <IconPrinter size={15} /> },
-  { key: "history", label: "History", icon: <IconHistory size={15} /> },
+// Icons ride the Inspector rows themselves — the old canvas tab strip duplicated this
+// list (every tab was just setDockPanel), so the strip is gone and its icons moved here.
+// "Adjust", not "Parameters": the row is free no-AI dimension tweaking, and "Parameters"
+// sent people to the chatbot to pay tokens for what this panel does for free.
+const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string; icon: JSX.Element }> = [
+  { key: "selection", label: "Selection", icon: <IconPointer size={14} /> },
+  { key: "objects", label: "Objects", icon: <IconLayers size={14} /> },
+  { key: "params", label: "Adjust", icon: <IconSliders size={14} /> },
+  { key: "print", label: "Printability", icon: <IconPrinter size={14} /> },
+  { key: "code", label: "Source", icon: <IconCode size={14} /> },
+  { key: "history", label: "History", icon: <IconHistory size={14} /> },
+  { key: "export", label: "Export", icon: <IconExport size={14} /> },
 ];
 
 /** Reactive media query — the phone shell is a different composition, not a squeezed
@@ -1508,6 +1501,7 @@ interface Props {
   cadDefaults: CadParams | null;
   paramValues: CadParams;
   onApplyParams: (values: CadParams) => void;
+  onLiveParams: (values: CadParams) => void; // mid-scrub rebuilds — no status flip, no error bubbles
   onSaveParams: () => void;
   onOpenSlicer: (t: SlicerTarget) => void;
   onRepair: () => void;
@@ -1611,8 +1605,9 @@ export function Workspace(p: Props) {
     if (!el) return;
     // Empty box stays one line tall: scrollHeight of an EMPTY textarea includes the
     // WRAPPED placeholder at narrow widths, which ballooned the box (real report).
+    // 34px = the textarea inside the field pill (field padding brings it to 40).
     if (!el.value) {
-      el.style.height = "40px";
+      el.style.height = "34px";
       return;
     }
     el.style.height = "auto";
@@ -1989,6 +1984,10 @@ export function Workspace(p: Props) {
                     <span className="web-state">{p.webMode === "auto" ? "Auto" : p.webMode === "on" ? "On" : "Off"}</span>
                   </button>
                 )}
+                {/* Fit rides HERE, not under the mode seg: measured, that row overflows
+                    by ~30px and pushed fit onto a line of its own, while this row has
+                    ~136px spare. Same family anyway — both are "how the next build runs". */}
+                {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
               </div>
               <div className="modebar-row">
                 <div className="seg">
@@ -1997,7 +1996,6 @@ export function Workspace(p: Props) {
                   <button className={p.modePref === "generative" ? "on" : ""} title="Generative (AI mesh) — organic / sculptural shapes from text or a photo" onClick={() => p.pickMode("generative")}>Generative (AI mesh)</button>
                 </div>
                 <Hint text="How the shape gets made. Precise builds exact, editable millimetre parts you can export as STEP — brackets, cases, adapters. Generative builds an organic AI mesh — figurines, sculpted shapes — which cannot be dimensioned. Auto reads your description and picks for you." />
-                {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
               </div>
               {/* This line renders ONLY when it says something you could not already
                   read off the controls. It used to restate the mode on every idle
@@ -2070,67 +2068,72 @@ export function Workspace(p: Props) {
                 if (phone && !chatOpen) setChatOpen(true);
               }}
             >
-              <button
-                type="button"
-                className="attach"
-                title={`Upload photos or sketches → 3D. ${p.photoAdvice}`}
-                aria-label="Upload photos or sketches to turn into a 3D model"
-                onClick={() => fileRef.current?.click()}
-              >
-                <IconPaperclip />
-              </button>
-              <input
-                ref={fileRef}
-                type="file"
-                accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
-                multiple
-                hidden
-                onChange={(e) => {
-                  const fs = Array.from(e.target.files ?? []);
-                  if (fs.length) p.onPickImages(fs);
-                  e.currentTarget.value = "";
-                }}
-              />
-              <textarea
-                ref={composerRef}
-                rows={1}
-                value={p.input}
-                onChange={(e) => p.setInput(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter sends (Shift+Enter = new line), like every chat app.
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    e.currentTarget.form?.requestSubmit();
+              {/* One field, everything inside it (the launchpad's pattern): clip on the
+                  left where every chat app keeps it, actions on the right. The textarea
+                  ends BEFORE the send button, so its scrollbar no longer hides under it. */}
+              <div className="compose-field">
+                <button
+                  type="button"
+                  className="attach"
+                  title={`Upload photos or sketches → 3D. ${p.photoAdvice}`}
+                  aria-label="Upload photos or sketches to turn into a 3D model"
+                  onClick={() => fileRef.current?.click()}
+                >
+                  <IconPaperclip />
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
+                  multiple
+                  hidden
+                  onChange={(e) => {
+                    const fs = Array.from(e.target.files ?? []);
+                    if (fs.length) p.onPickImages(fs);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <textarea
+                  ref={composerRef}
+                  rows={1}
+                  value={p.input}
+                  onChange={(e) => p.setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter sends (Shift+Enter = new line), like every chat app.
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      e.currentTarget.form?.requestSubmit();
+                    }
+                  }}
+                  placeholder={
+                    p.mode === "generative"
+                      ? "Describe it, or upload / paste a photo…"
+                      : p.imageUrl
+                        ? p.imageMarkup
+                          ? "What should change in the circled region? (e.g. flatten this, make it 3 mm thicker)…"
+                          : "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
+                        : p.guided
+                          ? "Upload a photo of the part, or describe it with any measurements…"
+                          : "What would you like to build?"
                   }
-                }}
-                placeholder={
-                  p.mode === "generative"
-                    ? "Describe it, or upload / paste a photo…"
-                    : p.imageUrl
-                      ? p.imageMarkup
-                        ? "What should change in the circled region? (e.g. flatten this, make it 3 mm thicker)…"
-                        : "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
-                      : p.guided
-                        ? "Upload a photo of the part, or describe it with any measurements…"
-                        : "What would you like to build?"
-                }
-              />
-              {/* A button, not an always-on pass. Rewriting what someone typed on their
-                  behalf, silently, is the one thing this app should never do to a
-                  description that becomes a physical object — so the rewrite is asked
-                  for, shown in the box, and revertible before it is ever sent. */}
-              <button
-                type="button"
-                className={`improve${p.improveCtl.busy ? " busy" : ""}`}
-                title="Improve this description — fills in the measurements and details a buildable request needs. Uses your reference photo too."
-                aria-label="Improve this description"
-                disabled={!p.improveCtl.can || p.improveCtl.busy || p.status === "generating"}
-                onClick={p.improveCtl.run}
-              >
-                {p.improveCtl.busy ? <span className="spinner sm" /> : <IconSparkle size={15} />}
-              </button>
-              <MicButton value={p.input} onChange={p.setInput} />
-              <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
+                />
+                {/* A button, not an always-on pass. Rewriting what someone typed on their
+                    behalf, silently, is the one thing this app should never do to a
+                    description that becomes a physical object — so the rewrite is asked
+                    for, shown in the box, and revertible before it is ever sent. */}
+                <button
+                  type="button"
+                  className={`improve${p.improveCtl.busy ? " busy" : ""}`}
+                  title="Improve this description — fills in the measurements and details a buildable request needs. Uses your reference photo too."
+                  aria-label="Improve this description"
+                  disabled={!p.improveCtl.can || p.improveCtl.busy || p.status === "generating"}
+                  onClick={p.improveCtl.run}
+                >
+                  {p.improveCtl.busy ? <span className="spinner sm" /> : <IconSparkle size={15} />}
+                </button>
+                <MicButton value={p.input} onChange={p.setInput} />
+                <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
+              </div>
             </form>
 
             {(p.improveCtl.before !== null || p.improveCtl.note) && (
@@ -2187,36 +2190,10 @@ export function Workspace(p: Props) {
           onDrop={onDrop}
         >
           <div className="viewer-head">
-              {/* Figma's "Viewer head" tab strip. NOT a second panel system: each tab is
-                  a shortcut into the Inspector section of the same name (dockPanel is
-                  the single source of truth), and 3D View hands focus back to the stage
-                  by returning the Inspector to Selection. The active pill mirrors
-                  whichever deep section is open, so strip and Inspector can't disagree. */}
-              <div className="tabs" role="tablist" aria-label="Workspace views">
-                {CANVAS_TABS.map(({ key, label, icon }) => {
-                  // 3D View is home base: active whenever no strip section is open in
-                  // the Inspector — Selection/Objects/Export still count as "viewing".
-                  const deep = dockOpen && (dockPanel === "code" || dockPanel === "params" || dockPanel === "print" || dockPanel === "history");
-                  const on = key === "3d" ? !deep : dockOpen && dockPanel === key;
-                  return (
-                    <button
-                      key={key}
-                      role="tab"
-                      aria-selected={on}
-                      className={on ? "on" : ""}
-                      title={label}
-                      aria-label={label}
-                      onClick={() => {
-                        if (key === "3d") setDockPanel("selection");
-                        else { setDockPanel(key); setDockOpen(true); }
-                      }}
-                    >
-                      {icon}
-                      <span className="btn-label">{label}</span>
-                    </button>
-                  );
-                })}
-              </div>
+              {/* One pill, top-left. The tab strip that used to sit here duplicated the
+                  Inspector's section list one-for-one (every tab was setDockPanel), so
+                  it's gone — the sections' icons moved onto the Inspector rows, and the
+                  editing toolbar takes the corner the tabs occupied. */}
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="viewer-tools">
                   <div className="seg sm">
@@ -2823,8 +2800,9 @@ export function Workspace(p: Props) {
                   at a time — `dockPanel` and everything that drives it (a pick, the
                   Export button, Path to print, the canvas tab strip) are unchanged. */}
               <div className="dock-list">
-                {DOCK_ITEMS.map(({ key, label }) => (
+                {DOCK_ITEMS.map(({ key, label, icon }) => (
                   <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key} onClick={() => setDockPanel(key)}>
+                    <span className="dock-ico" aria-hidden>{icon}</span>
                     {label}
                   </button>
                 ))}
@@ -2848,7 +2826,7 @@ export function Workspace(p: Props) {
                 )}
                 {dockPanel === "objects" && objectsPanel}
                 {dockPanel === "params" && (
-                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
+                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onLive={p.onLiveParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
                 )}
                 {dockPanel === "print" && (
                   <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
@@ -3041,29 +3019,22 @@ const FIT_OPTS: { id: FitId; label: string; plain: string }[] = [
   { id: "press", label: "Press", plain: "Needs a firm push, holds without glue" },
 ];
 function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
+  // One compact chip that CYCLES (the web-toggle's pattern), not a labelled
+  // three-way seg: fit is a set-and-forget preference, and its dedicated row was
+  // the most crowded-looking thing above the composer for the least-touched control.
   const calibrated = fitCalibration() != null;
+  const cur = FIT_OPTS.find((o) => o.id === fit) ?? FIT_OPTS[1];
+  const next = FIT_OPTS[(FIT_OPTS.findIndex((o) => o.id === fit) + 1) % FIT_OPTS.length];
   return (
-    <div className="fitbar" role="group" aria-label="Fit tolerance">
-      {/* "Fit" alone read as "does it fit the bed?" — which is a DIFFERENT check, shown
-          on the model as "Fits bed". Naming what it fits removes the collision without
-          needing the hover. */}
-      <span className="fit-label">Part fit</span>
-      <Hint text={FIT_WHAT} />
-      <div className="fit-seg">
-        {FIT_OPTS.map((o) => (
-          <button
-            key={o.id}
-            type="button"
-            className={fit === o.id ? "on" : ""}
-            title={`${o.plain} — ${fitClearance(o.id)} mm gap${calibrated ? ", measured on your printer" : " (typical FDM estimate)"}`}
-            onClick={() => onFit(o.id)}
-          >
-            {o.label}
-          </button>
-        ))}
-      </div>
-      <span className="fit-mm">{fitClearance(fit)} mm{calibrated ? "" : " · typical"}</span>
-    </div>
+    <button
+      type="button"
+      className="fit-chip"
+      aria-label={`Part fit: ${cur.label}`}
+      title={`Part fit — ${cur.plain} (${fitClearance(fit)} mm gap${calibrated ? ", measured on your printer" : ", typical FDM"}). Click for ${next.label}. ${FIT_WHAT}`}
+      onClick={() => onFit(next.id)}
+    >
+      Fit · <b>{cur.label}</b>
+    </button>
   );
 }
 
@@ -3808,7 +3779,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
   );
 }
 
-function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
+function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onLive: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
   const [local, setLocal] = useState<CadParams>(values);
   const [editing, setEditing] = useState<Record<string, string>>({});
   // The scrub's pointermove/pointerup handlers outlive the render that attached them,
@@ -3817,12 +3788,53 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
   const localRef = useRef(local);
   localRef.current = local;
   useEffect(() => setLocal(values), [values]);
+  // One scrub, two surfaces (the name AND the whole value meter): pointer capture keeps
+  // the drag alive however far the cursor travels, the model rebuilds LIVE (throttled —
+  // the live path never flips global status, so rows stay enabled mid-drag), and a tap
+  // that never moved falls through to `onTap` (focus the number for typing).
+  const scrub = (
+    e: React.PointerEvent<HTMLElement>,
+    k: string,
+    v0: number,
+    o: { step: number; isInt: boolean; min: number; max: number; onTap?: () => void },
+  ) => {
+    if (busy) return;
+    const el = e.currentTarget;
+    el.setPointerCapture(e.pointerId);
+    e.preventDefault(); // keeps the input from grabbing focus until we know it's a tap
+    const x0 = e.clientX;
+    let latest = v0;
+    let moved = false;
+    let lastLive = 0;
+    const move = (ev: PointerEvent) => {
+      const dx = ev.clientX - x0;
+      if (Math.abs(dx) < 3 && !moved) return;
+      moved = true;
+      // Fine scrub while Shift is held, as every 3D tool does.
+      const scale = (ev.shiftKey ? 0.25 : 1) * o.step;
+      const raw = Math.min(o.max, Math.max(o.min, v0 + dx * scale * 0.5));
+      latest = o.isInt ? Math.round(raw) : +(Math.round(raw / o.step) * o.step).toFixed(4);
+      if ((localRef.current[k] ?? v0) === latest) return;
+      setLocal((prev) => ({ ...prev, [k]: latest }));
+      const now = performance.now();
+      if (now - lastLive > 150) { lastLive = now; onLive({ ...localRef.current, [k]: latest }); }
+    };
+    const up = () => {
+      el.releasePointerCapture(e.pointerId);
+      el.removeEventListener("pointermove", move);
+      el.removeEventListener("pointerup", up);
+      if (moved) commit({ ...localRef.current, [k]: latest });
+      else o.onTap?.();
+    };
+    el.addEventListener("pointermove", move);
+    el.addEventListener("pointerup", up);
+  };
   if (!isCad || !defaults) {
     return (
       <div className="panel muted">
         {isCad
-          ? "No adjustable parameters in this design yet — ask for a change and the AI will define them."
-          : "Parameter sliders work on Precise (CAD) models — generative meshes don't have editable dimensions."}
+          ? "Nothing adjustable in this design yet — ask for a change and the AI will define the sizes you can tweak here."
+          : "Adjust works on Precise (CAD) models — generative meshes don't have editable dimensions."}
       </div>
     );
   }
@@ -3833,8 +3845,8 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
   return (
     <div className="panel params">
       <p className="fine params-lede">
-        Hover a row to see the part it moves. Drag the name to scrub, or type a value —
-        <b> +5</b>, <b>*2</b> and <b>(30/2)+4</b> all work.
+        Free tweaks — no AI, no tokens. Drag anywhere on a value to scrub it (the model
+        follows live; Shift = fine), or click and type — <b>+5</b>, <b>*2</b> and <b>(30/2)+4</b> all work.
       </p>
       {groupParams(defaults, local).map((grp) => (
       <section className="pgroup" key={grp.title || "all"}>
@@ -3873,34 +3885,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
               className="prow-name"
               title={`${k} — drag left/right to change, Shift for fine steps`}
               disabled={busy}
-              onPointerDown={(e) => {
-                if (busy) return;
-                const el = e.currentTarget;
-                el.setPointerCapture(e.pointerId);
-                e.preventDefault();
-                const x0 = e.clientX;
-                const v0 = v;
-                let latest = v0;
-                let moved = false;
-                const move = (ev: PointerEvent) => {
-                  const dx = ev.clientX - x0;
-                  if (Math.abs(dx) < 3 && !moved) return;
-                  moved = true;
-                  // Fine scrub while Shift is held, as every 3D tool does.
-                  const scale = (ev.shiftKey ? 0.25 : 1) * step;
-                  const raw = Math.min(max, Math.max(min, v0 + dx * scale * 0.5));
-                  latest = isInt ? Math.round(raw) : +(Math.round(raw / step) * step).toFixed(4);
-                  setLocal((prev) => ({ ...prev, [k]: latest }));
-                };
-                const up = () => {
-                  el.releasePointerCapture(e.pointerId);
-                  el.removeEventListener("pointermove", move);
-                  el.removeEventListener("pointerup", up);
-                  if (moved) commit({ ...localRef.current, [k]: latest });
-                };
-                el.addEventListener("pointermove", move);
-                el.addEventListener("pointerup", up);
-              }}
+              onPointerDown={(e) => scrub(e, k, v, { step, isInt, min, max })}
             >
               {/* One name, the readable one. The raw identifier lives in the tooltip —
                   showing both under each other doubled every row's height for a string
@@ -3908,7 +3893,18 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onSave, onPeek, o
               <span className="pn-human">{humanizeParam(k)}</span>
             </button>
 
-            <span className="prow-field">
+            {/* The WHOLE meter scrubs, not just the label: press anywhere in it and drag
+                (ew-resize cursor throughout, pointer capture keeps it), a still tap
+                focuses the number for typing. Skip when already typing in it — dragging
+                then selects text as normal. */}
+            <span
+              className="prow-field"
+              onPointerDown={(e) => {
+                const input = e.currentTarget.querySelector("input");
+                if (input && document.activeElement === input) return;
+                scrub(e, k, v, { step, isInt, min, max, onTap: () => { input?.focus(); input?.select(); } });
+              }}
+            >
               <i className="pf-fill" style={{ width: `${pct}%` }} aria-hidden="true" />
               <input
                 className="pf-input"

@@ -20,6 +20,13 @@ export const IconArrowUp = () => (
     <path d="M12 19V5M5 12l7-7 7 7" />
   </svg>
 );
+/* Export: an arrow leaving an open tray. */
+export const IconExport = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 14v4a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-4" />
+    <path d="M12 15V4M8 8l4-4 4 4" />
+  </svg>
+);
 export const IconUser = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" {...base}>
     <circle cx="12" cy="12" r="10" />

@@ -144,13 +144,12 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
 [data-theme="dark"] .banner { background: #33290f; color: #e3b568; border-bottom-color: #443a22; }
 [data-theme="dark"] .code { background: #16191d; color: #cfd4da; }
 [data-theme="dark"] .prow, [data-theme="dark"] .param-row { border-bottom-color: #27282b; }
-[data-theme="dark"] .tabs button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; }
 [data-theme="dark"] .sync-status { border-color: var(--bord-strong); }
 [data-theme="dark"] .sync-status.err { background: #392629; color: #ff9ba0; border-color: #553338; }
 [data-theme="dark"] .pill-warn { background: #33290f; }
 [data-theme="dark"] .chip { background: #22262c; }
-[data-theme="dark"] .composer textarea { background: var(--ctl); color: var(--ink); }
-[data-theme="dark"] .composer textarea:focus-visible { background: var(--bg); }
+[data-theme="dark"] .compose-field { background: var(--ctl); }
+[data-theme="dark"] .compose-field:focus-within { background: var(--bg); }
 [data-theme="dark"] .pnum { background: var(--bg); color: var(--ink); }
 [data-theme="dark"] .imgchip { background: #22262c; }
 
@@ -184,13 +183,13 @@ button { font-family: inherit; cursor: pointer; }
 ::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :where(button, a, input, select, textarea):focus { outline: none; } /* rely on :focus-visible */
-.primary, .ghost, .chip, .send, .cta, .seg button, .fit-seg button, .x, .link, .mp-trigger, .lib-open { transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1); }
-.primary:active, .ghost:active, .chip:active, .send:active, .cta:active, .x:active, .seg button:active, .fit-seg button:active { transform: scale(.97); }
+.primary, .ghost, .chip, .send, .cta, .seg button, .x, .link, .mp-trigger, .lib-open { transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1); }
+.primary:active, .ghost:active, .chip:active, .send:active, .cta:active, .x:active, .seg button:active, .fit-chip:active { transform: scale(.97); }
 /* Hover affordance on every interactive control, so nothing feels inert. */
 .ghost:hover { background: var(--ctl-h); color: var(--ink); }
 .ghost.danger:hover { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .send:hover:not(:disabled) { background: var(--accent-d); }
-.seg button:hover:not(.on), .fit-seg button:hover:not(.on) { color: var(--ink2); }
+.seg button:hover:not(.on) { color: var(--ink2); }
 .x:hover { color: var(--ink); }
 .link:hover { color: var(--accent); text-decoration: underline; }
 .profile:hover .avatar { filter: brightness(1.06); }
@@ -360,29 +359,21 @@ button { font-family: inherit; cursor: pointer; }
 .msg.assistant .bubble { background: var(--bubble-a); }
 .msg.err .bubble { background: #fbeaea; color: #a23a3a; }
 .bubble.muted { color: var(--mut); }
-.composer { display: flex; align-items: flex-end; gap: 6px; padding: 12px 14px; border-top: 1px solid var(--bord); min-width: 0; }
-/* min-width:0 lets the input shrink below its intrinsic width — without it the Send
-   button gets pushed out of the panel on narrow chat widths. Buttons never shrink. */
+.composer { display: flex; align-items: flex-end; padding: 12px 14px; border-top: 1px solid var(--bord); min-width: 0; }
+/* ONE pill, everything inside it: [clip] [text] [✨] [mic] [send]. The old layout
+   tucked Send over the textarea's right edge with a negative margin, which parked
+   it exactly on top of the textarea's SCROLLBAR (a real report). Now the textarea
+   ends before the buttons, so its scrollbar always has its own column. Filled, not
+   outlined — the border exists only as the focus signal. */
+.compose-field { flex: 1; min-width: 0; display: flex; align-items: flex-end; gap: 1px; padding: 3px 3px 3px 4px; background: var(--ctl); border: 1px solid transparent; border-radius: 20px; }
+.compose-field:focus-within { border-color: var(--accent); background: var(--bg); }
+.compose-field > button { flex: 0 0 auto; }
 /* Auto-growing message box: wraps long requests instead of scrolling them off-screen. */
-/* Filled, not outlined — a grey well in the card, per the mock. The border exists only
-   as the focus signal, so it's transparent at rest rather than removed. */
-.composer textarea { flex: 1; min-width: 0; height: 40px; min-height: 40px; max-height: 132px; padding: 10.5px 46px 10.5px 14px; border: 1px solid transparent; border-radius: 20px; font: inherit; font-size: 12.5px; line-height: 1.4; resize: none; overflow-y: auto; background: var(--ctl); color: var(--ink); }
-.composer textarea:focus-visible { outline: none; border-color: var(--accent); background: var(--bg); }
-.composer > button { flex: 0 0 auto; }
-/* Send rides inside the field's right edge (negative margin, textarea keeps the
-   matching right padding) so the composer reads as one pill, not three controls.
-   flex `order` puts it there without re-ordering the DOM, which would move it in
-   the tab sequence away from the field it submits. */
-.send { order: 1; position: relative; z-index: 1; margin-left: -40px; margin-bottom: 4px; width: 32px; height: 32px; border: none; border-radius: 999px; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
-.composer .attach { order: 2; }
-/* Sits with attach and the mic — the three controls that act on what you are about to
-   send, rather than on the app. Must carry an explicit order: Send is order 1 with a
-   -40px margin that tucks it inside the field, so anything left at the default order 0
-   lands underneath it and swallows the clicks. */
-.composer .improve { order: 3; }
-.composer .mic { order: 4; }
+.compose-field textarea { flex: 1; min-width: 0; height: 34px; min-height: 34px; max-height: 132px; padding: 8px 6px; border: none; background: none; font: inherit; font-size: 12.5px; line-height: 1.4; resize: none; overflow-y: auto; color: var(--ink); }
+.compose-field textarea:focus-visible { outline: none; }
+.send { flex: 0 0 auto; width: 32px; height: 32px; border: none; border-radius: 999px; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 600; }
 /* Dictation mic — quiet next to Send; pulses while listening. */
-.mic { width: 34px; height: 34px; margin-bottom: 3px; border: none; border-radius: 9px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
+.mic { width: 32px; height: 32px; border: none; border-radius: 999px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
 .mic:hover { color: var(--ink); background: var(--surf); }
 .mic.on { background: var(--accent); border-color: var(--accent); color: #fff; animation: mic-pulse 1.6s ease-in-out infinite; }
 @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
@@ -415,19 +406,13 @@ button { font-family: inherit; cursor: pointer; }
    of sliding under it. */
 /* Narrow-column repositioning lives at the END of the file: these fight the components'
    own base rules at equal specificity, so source order is the tiebreak. */
-/* The tab pill NEVER wraps internally (a lone icon on a second row inside the pill
-   read as a broken overlay at iPad widths) — when the head runs out of room the
-   whole tools cluster drops to its own row instead (see the 680px tier). */
-.tabs { display: flex; gap: 2px; flex-wrap: nowrap; flex: 0 0 auto; background: var(--bg); padding: 3px; border-radius: 9px; box-shadow: 0 2px 9.3px rgba(0,0,0,.05); }
-/* Right cluster rides at the tabs pill's exact height for one clean optical row. */
+/* The editing toolbar (undo/redo · Set size · snap · View · help) owns the head's
+   top-left corner. The tab strip that used to sit there duplicated the Inspector's
+   section list, so it's gone — one pill, one row. */
 .viewer-head .viewer-tools { align-items: stretch; }
 .viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 32px; box-sizing: border-box; }
 .viewer-head .viewer-tools .seg.sm { align-items: stretch; }
 .viewer-head .viewer-tools .seg.sm .iconbtn { height: 100%; }
-.tabs button { display: inline-flex; align-items: center; gap: 6px; border: 1px solid transparent; background: transparent; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 500; color: var(--mut); }
-.tabs button svg { flex: 0 0 auto; }
-.tabs button:hover:not(.on) { color: var(--ink2); }
-.tabs button.on { background: var(--ink-invert); color: var(--on-invert); box-shadow: none; }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
 /* The head cluster reads as one raised object, like the tab strip opposite it. */
 .viewer-head .viewer-tools { background: var(--bg); border-radius: 11px; box-shadow: 0 2px 9.3px rgba(0,0,0,.05); padding: 3px; gap: 2px; flex-wrap: nowrap; }
@@ -449,14 +434,10 @@ button { font-family: inherit; cursor: pointer; }
 @container (max-width: 900px) {
   .viewer-head .btn-label { display: none; } /* View/Objects give up words first */
 }
-@container (max-width: 720px) {
-  .tabs .btn-label { display: none; }
-}
 @container (max-width: 1180px) {
   .viewer-tools { gap: 5px; }
   .viewer-tools .ghost.sm { padding: 5px 8px; }
   .viewer-tools .seg button { padding: 5px 8px; }
-  .tabs button { padding: 5px 8px; font-size: 12px; }
 }
 /* Narrow viewer columns (iPad landscape beside the chat, portrait phones): tighten
    paddings, and let the head wrap as CLEAN ROWS — tabs stay one unit, the tools
@@ -468,7 +449,7 @@ button { font-family: inherit; cursor: pointer; }
      under the right-hand dock. */
   .viewer-tools { gap: 3px; flex: 0 0 auto; }
   .viewer-tools .ghost.sm { padding: 5px 6px; }
-  .viewer-tools .seg button, .tabs button { padding: 5px 6px; }
+  .viewer-tools .seg button { padding: 5px 6px; }
   /* Give a cramped canvas its space back: a compact rail and a bounded dock, so the
      overlays never take more than they need. (The rail can't scroll or wrap to fit —
      either would clip or displace its flyouts.) */
@@ -655,6 +636,11 @@ button { font-family: inherit; cursor: pointer; }
 .zoom-ctl { position: absolute; right: 10px; bottom: 112px; z-index: 6; display: flex; flex-direction: column; gap: 2px; padding: 3px; background: var(--bg); border: 1px solid var(--bord); border-radius: 999px; box-shadow: var(--shadow-sm); }
 /* The collapsed-inspector rail is flush to the right edge — step just clear of it. */
 .viewer-body:has(.dock-rail) .zoom-ctl { right: 52px; }
+/* Open Inspector: the corner belongs to the card (a tall panel — Adjust with a dozen
+   rows — reached straight down over the buttons). The cluster takes the corner of the
+   FREE canvas instead: left of the card, and all the way down, because the orientation
+   gizmo it normally clears is behind the card there. */
+.viewer-body:has(.inspector-dock:not([style*="none"])) .zoom-ctl { right: calc(var(--dock-w, 262px) + 24px); bottom: 12px; }
 .zoom-ctl button { display: grid; place-items: center; width: 26px; height: 26px; border: none; background: none; border-radius: 50%; font-size: 15px; font-weight: 600; color: var(--mut); }
 .zoom-ctl button:hover { background: var(--surf); color: var(--ink); }
 /* hole tool panel */
@@ -934,12 +920,12 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .or-rec.on { border-color: var(--accent); background: var(--accent-w); color: var(--accent-d); }
 .or-think { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--live); border: 1px solid color-mix(in srgb, var(--live) 45%, transparent); border-radius: var(--r-xs); padding: 0 4px; line-height: 1.5; }
 /* Fit tolerance — quiet segmented control, shown only in the guided flow. */
-.fitbar { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
-.fit-label { font-size: 11px; font-weight: 600; color: var(--subt); }
-.fit-seg { display: inline-flex; background: var(--ctl); border-radius: 9px; padding: 2px; }
-.fit-seg button { border: none; background: none; border-radius: 7px; padding: 4px 12px; font-size: 12px; font-weight: 500; color: var(--mut); }
-.fit-seg button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
-.fit-mm { font-size: 11px; color: var(--mut); font-variant-numeric: tabular-nums; }
+/* Part fit, consolidated: one chip that cycles Loose → Snug → Press (the web-toggle's
+   pattern). The labelled three-way seg + mm readout crowded the composer stack for a
+   control most people set once; the tooltip carries the full story. */
+.fit-chip { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--mut); font-size: 12px; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
+.fit-chip b { font-weight: 600; color: var(--ink2); }
+.fit-chip:hover { border-color: var(--bord-strong); color: var(--ink2); }
 /* ---------- model picker (compact custom dropdown; replaces native select) ---------- */
 .modelpick2 { position: relative; }
 .mp-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 200px; padding: 0 8px 0 11px; border: 1px solid transparent; border-radius: 8px; background: var(--ctl); color: var(--ink2); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease, transform .16s ease-out; }
@@ -994,7 +980,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .mv-x { position: absolute; top: 2px; right: 2px; z-index: 2; width: 16px; height: 16px; display: inline-flex; align-items: center; justify-content: center; border: none; border-radius: 50%; background: rgba(0,0,0,.6); color: #fff; padding: 0; }
 .mv-hint { font-size: 11px; color: var(--subt); margin: 6px 0 0; line-height: 1.4; }
 .composer { border-top: none; }
-.attach { width: 34px; height: 34px; margin-bottom: 3px; border: none; border-radius: 9px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
+.attach { width: 32px; height: 32px; border: none; border-radius: 999px; background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
 .attach:hover { background: var(--surf); color: var(--ink2); }
 .chat.drop { outline: 2px dashed var(--accent); outline-offset: -6px; }
 .empty-sub { font-size: 12px; color: var(--subt); margin: -6px 0 14px; }
@@ -1199,8 +1185,8 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* Same box as the mic beside it, so the row reads as one set of three. */
 .improve {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 34px; height: 34px; flex: 0 0 auto; margin-bottom: 3px;
-  border: none; border-radius: 9px; background: transparent; color: var(--mut); cursor: pointer;
+  width: 32px; height: 32px; flex: 0 0 auto;
+  border: none; border-radius: 999px; background: transparent; color: var(--mut); cursor: pointer;
 }
 .improve:hover:not(:disabled) { background: var(--surf); color: var(--accent-d); }
 .improve:disabled { opacity: .4; cursor: default; }
@@ -1335,7 +1321,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .dock-item {
   flex: 0 0 auto; width: 100%; text-align: left; padding: 9px 12px; border-radius: 8px;
   border: 1px solid transparent; background: none; font-size: 13px; color: var(--ink2);
+  display: flex; align-items: center; gap: 9px;
 }
+/* Section icons (inherited from the retired canvas tab strip) — quiet until active. */
+.dock-ico { display: inline-flex; flex: 0 0 auto; color: var(--subt); }
+.dock-item.on .dock-ico { color: var(--accent-d); }
 .dock-item:hover:not(.on) { background: var(--surf); }
 /* Active = the accent-outlined row of the mock: open border, no fill. */
 .dock-item.on { border-color: var(--accent); color: var(--accent-d); font-weight: 500; }
@@ -1813,6 +1803,10 @@ details.guide { margin-top: 10px; }
   .canvas-rail:hover .rail-name { max-width: 110px; opacity: 1; margin-left: 8px; }
   /* Buttons go from square icons to a labelled row; keep the icon column aligned. */
   .canvas-rail:hover .ghost.sm.iconbtn { justify-content: flex-start; }
+  /* Breathing room for the slid-out names: at the rail's resting 5px side padding the
+     label text ended flush against the pill's rounded edge (a real report). */
+  .canvas-rail:hover { padding-right: 12px; }
+  .canvas-rail:hover .ghost.sm.iconbtn { padding-left: 8px; padding-right: 8px; }
 }
 .canvas-rail .ghost.sm.iconbtn { justify-content: center; }
 @media (prefers-reduced-motion: reduce) { .canvas-rail .rail-name { transition: none; } }
@@ -1824,13 +1818,6 @@ details.guide { margin-top: 10px; }
 .modebar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; row-gap: 6px; }
 .modebar-gen:empty { display: none; }
 .modebar-gen { margin-top: 6px; }
-/* The fit control rides in the same row; a separator marks it as a different concern
-   from the engine controls to its left without adding another band. */
-.modebar-row .fitbar {
-  display: inline-flex; align-items: center; gap: 6px; margin: 0;
-  padding-left: 9px; border-left: 1px solid var(--bord-subtle);
-}
-.fit-label { font-size: 12px; color: var(--mut); white-space: nowrap; }
 .modehint { display: block; margin: 7px 0 0; font-size: 11.5px; line-height: 1.35; color: var(--subt); }
 
 /* ---------- parameters ----------
@@ -1859,7 +1846,11 @@ details.guide { margin-top: 10px; }
 .pn-human { font-size: 13px; color: var(--ink2); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .prow:hover .pn-human { color: var(--ink); }
 
-.prow-field { position: relative; display: flex; align-items: center; height: 30px; border-radius: 7px; background: var(--ctl); overflow: hidden; }
+/* The WHOLE meter is a scrub surface (press anywhere and drag; a still tap focuses
+   the number). ew-resize everywhere in it — including over the input until it's
+   focused for typing — so the affordance is visible on hover, and pointer capture
+   keeps that cursor for the whole drag however far it travels. */
+.prow-field { position: relative; display: flex; align-items: center; height: 30px; border-radius: 7px; background: var(--ctl); overflow: hidden; cursor: ew-resize; touch-action: none; }
 /* Position within the SOFT range, behind the number. Informs without a second row, and
    reads as an indicator rather than a control — because the bounds are inferred. */
 .pf-fill { position: absolute; left: 0; top: 0; bottom: 0; background: color-mix(in srgb, var(--accent) 20%, transparent); pointer-events: none; transition: width .12s ease; }
@@ -1867,9 +1858,10 @@ details.guide { margin-top: 10px; }
   position: relative; flex: 1; min-width: 0; width: 100%; height: 100%;
   background: none; border: none; padding: 0 1px 0 7px;
   font: inherit; font-family: var(--font-mono); font-size: 12.5px; color: var(--ink);
+  cursor: ew-resize;
   font-variant-numeric: tabular-nums;
 }
-.pf-input:focus { outline: none; }
+.pf-input:focus { outline: none; cursor: text; }
 .prow-field:focus-within { box-shadow: inset 0 0 0 1px var(--accent); }
 .pf-unit { position: relative; padding-right: 6px; font-size: 10.5px; color: var(--subt); }
 
@@ -2008,15 +2000,15 @@ details.guide { margin-top: 10px; }
 
   /* A finger is on the model: floating chrome steps back (the video-player contract),
      and returns on release. */
-  .viewer.stage-busy .tabs, .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
+  .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
   .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock {
     opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
   }
-  .viewer .tabs, .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock { transition: opacity 0.2s ease; }
+  .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock { transition: opacity 0.2s ease; }
 }
 @media (max-width: 760px) and (prefers-reduced-motion: reduce) {
-  .viewer .tabs, .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock,
-  .viewer.stage-busy .tabs, .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
+  .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock,
+  .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
   .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock { transition: none; }
 }
 
@@ -2034,7 +2026,6 @@ details.guide { margin-top: 10px; }
 /* Fingers, not cursors: targets grow toward Apple's 44pt default — never shrink. */
 @media (pointer: coarse) and (max-width: 760px) {
   .canvas-rail .ghost.sm.iconbtn { height: 40px; min-height: 40px; min-width: 40px; padding: 6px; }
-  .tabs button { padding: 8px 10px; }
   .zoom-ctl button { width: 34px; height: 34px; }
   .view-snaps button { padding: 8px 14px; }
 }

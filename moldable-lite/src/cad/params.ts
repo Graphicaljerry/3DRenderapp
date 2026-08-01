@@ -7,9 +7,16 @@ export function extractParams(code: string): CadParams | null {
   const m = code.match(/const\s+defaultParams\s*=\s*\{([\s\S]*?)\}/);
   if (!m) return null;
   const out: CadParams = {};
-  const re = /(\w+)\s*:\s*(-?\d+(?:\.\d+)?)/g;
+  // Full JS number syntax. The old pattern stopped at the mantissa, so `tolerance: 1e-3`
+  // was read as 1 — a thousandfold error that then rode along on every later adjustment
+  // (a commit sends the WHOLE map), silently reshaping the part. A leading-dot literal
+  // (`.5`) was skipped entirely and the row never appeared.
+  const re = /(\w+)\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)/g;
   let mm: RegExpExecArray | null;
-  while ((mm = re.exec(m[1]))) out[mm[1]] = parseFloat(mm[2]);
+  while ((mm = re.exec(m[1]))) {
+    const n = parseFloat(mm[2]);
+    if (Number.isFinite(n)) out[mm[1]] = n;
+  }
   return Object.keys(out).length ? out : null;
 }
 
@@ -33,7 +40,10 @@ export function paramRange(v: number): { min: number; max: number; step: number 
  *  Matched on the identifier because that is all we have — deliberately narrow, so a
  *  miss falls back to a normal decimal rather than silently rounding a real dimension. */
 export function isCountParam(name: string): boolean {
-  return /(^|[^a-z])(count|num|qty|segments|sides|teeth|rows|cols|columns|holes|slots|ribs|layers)([^a-z]|$)/i.test(name);
+  // The boundary is a word break, NOT any non-letter: `[^a-z]` let `slots_depth` and
+  // `holes_dia` through, and force-rounding a snake_case DEPTH to an integer is exactly
+  // the silent-wrong-dimension case this narrowness exists to avoid.
+  return /(^|[^a-z])(count|num|qty|segments|sides|teeth|rows|cols|columns|holes|slots|ribs|layers)($|[^a-z_])/i.test(name);
 }
 
 /** Decimals actually present in the default, so the step matches how the value was
@@ -51,14 +61,27 @@ export function paramStep(v: number): number {
 
 /** SOFT limits — what a drag is bounded by. Typed input is NOT bound by these (see
  *  Blender's soft/hard split): 0.25x-3x around the AI's value is a guess, and refusing
- *  a number the user typed because our guess disagrees is the wrong side to err on. */
-export function paramSoftRange(v: number): { min: number; max: number; step: number } {
+ *  a number the user typed because our guess disagrees is the wrong side to err on.
+ *
+ *  Two things the range has to respect, both learned from real breakage:
+ *   - NEGATIVE parameters exist (offsets, insets). Ranging on |v| put a −5 parameter
+ *     inside [1, 15], so the first pixel of a drag flipped it to +1 and it could never
+ *     be dragged back. Negative values get a negative range.
+ *   - `cur` is the value the row is actually AT. Without it, typing 100 into a row whose
+ *     default is 10 and then nudging collapsed it to the guessed max of 30 and trapped
+ *     it there — the drag bound must always contain where the user already is. */
+export function paramSoftRange(v: number, cur = v): { min: number; max: number; step: number } {
   const step = paramStep(v);
-  if (v === 0) return { min: 0, max: 10, step };
+  const grow = (min: number, max: number) => ({
+    min: Number.isFinite(cur) ? Math.min(min, cur) : min,
+    max: Number.isFinite(cur) ? Math.max(max, cur) : max,
+    step,
+  });
+  if (v === 0) return grow(-10, 10);
   const mag = Math.abs(v);
-  const min = Math.max(0, Math.floor((mag * 0.25) / step) * step);
-  const max = Math.ceil((mag * 3) / step) * step;
-  return { min, max, step };
+  const lo = Math.floor((mag * 0.25) / step) * step;
+  const hi = Math.ceil((mag * 3) / step) * step;
+  return v < 0 ? grow(-hi, Math.min(0, -lo)) : grow(Math.max(0, lo), hi);
 }
 
 const ABBREV: Record<string, string> = {

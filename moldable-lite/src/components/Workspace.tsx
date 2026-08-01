@@ -3787,7 +3787,14 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
   // value from drag-start and the number snapped back on release.
   const localRef = useRef(local);
   localRef.current = local;
-  useEffect(() => setLocal(values), [values]);
+  // A drag is the authority on its own row. Live rebuilds echo back the params the
+  // BUILD used, which lag the cursor by the throttle plus kernel time — syncing those
+  // in mid-drag snapped the number backwards, and the next move pushed it forward
+  // again, so the readout and meter jittered between two values the whole way.
+  const draggingRef = useRef(false);
+  // Set by Escape, read by the onBlur it triggers synchronously in the same turn.
+  const cancelRef = useRef<string | null>(null);
+  useEffect(() => { if (!draggingRef.current) setLocal(values); }, [values]);
   // One scrub, two surfaces (the name AND the whole value meter): pointer capture keeps
   // the drag alive however far the cursor travels, the model rebuilds LIVE (throttled —
   // the live path never flips global status, so rows stay enabled mid-drag), and a tap
@@ -3799,14 +3806,18 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
     o: { step: number; isInt: boolean; min: number; max: number; onTap?: () => void },
   ) => {
     if (busy) return;
+    onPeekEnd(); // a press cancels the hover-intent probe — it must not build mid-drag
     const el = e.currentTarget;
-    el.setPointerCapture(e.pointerId);
+    const id = e.pointerId;
+    el.setPointerCapture(id);
     e.preventDefault(); // keeps the input from grabbing focus until we know it's a tap
+    draggingRef.current = true;
     const x0 = e.clientX;
     let latest = v0;
     let moved = false;
     let lastLive = 0;
     const move = (ev: PointerEvent) => {
+      if (ev.pointerId !== id) return; // a second finger must not drive this drag
       const dx = ev.clientX - x0;
       if (Math.abs(dx) < 3 && !moved) return;
       // A drag supersedes any half-typed draft — the input renders `editing[k] ?? value`,
@@ -3822,15 +3833,30 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
       const now = performance.now();
       if (now - lastLive > 150) { lastLive = now; onLive({ ...localRef.current, [k]: latest }); }
     };
-    const up = () => {
-      el.releasePointerCapture(e.pointerId);
+    // ONE teardown for every way a drag can end. Without a pointercancel path, an
+    // aborted drag (element unmounted, window blurred, context menu, palm rejection)
+    // left `move` attached for good — after which merely HOVERING the row changed the
+    // value, because move never checks whether a button is still down.
+    const done = (tapCounts: boolean) => (ev?: PointerEvent) => {
+      if (ev && ev.pointerId !== id) return;
+      try { el.releasePointerCapture(id); } catch { /* the cancel already released it */ }
       el.removeEventListener("pointermove", move);
-      el.removeEventListener("pointerup", up);
+      el.removeEventListener("pointerup", finish);
+      el.removeEventListener("pointercancel", abort);
+      el.removeEventListener("lostpointercapture", abort);
+      draggingRef.current = false;
+      // Whatever was dragged is committed either way — it's real work the user did.
+      // Only the no-movement case differs: a real release is a tap (focus the number),
+      // an interrupted drag is not.
       if (moved) commit({ ...localRef.current, [k]: latest });
-      else o.onTap?.();
+      else if (tapCounts) o.onTap?.();
     };
+    const finish = done(true);
+    const abort = done(false);
     el.addEventListener("pointermove", move);
-    el.addEventListener("pointerup", up);
+    el.addEventListener("pointerup", finish);
+    el.addEventListener("pointercancel", abort);
+    el.addEventListener("lostpointercapture", abort);
   };
   if (!isCad || !defaults) {
     return (
@@ -3858,17 +3884,14 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
         const def = defaults[k];
         const v = local[k] ?? def;
         const isInt = isCountParam(k);
-        const { min, max, step: soft } = paramSoftRange(def);
+        // Range from the AI's value, stretched to include wherever the row is NOW —
+        // a typed value outside the guess must stay draggable, not snap back into it.
+        const { min, max, step: soft } = paramSoftRange(def, v);
         const step = isInt ? 1 : soft;
         const dirty = v !== def;
         // Position within the SOFT range, drawn as a fill behind the number — the range
         // is a guess, so it informs without occupying a row of its own.
         const pct = max > min ? Math.min(100, Math.max(0, ((v - min) / (max - min)) * 100)) : 0;
-
-        const setVal = (raw: number) => {
-          const q = isInt ? Math.round(raw) : Math.round(raw / step) * step;
-          setLocal({ ...local, [k]: +q.toFixed(4) });
-        };
 
         return (
           <div
@@ -3914,18 +3937,34 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
                 type="text"
                 inputMode="decimal"
                 value={editing[k] ?? String(v)}
-                disabled={busy}
+                /* NOT disabled while a build runs: `disabled` makes the browser blur the
+                   field, which fired onBlur → another commit and stole focus after every
+                   single arrow press. Commits are queued in App instead, so nothing is
+                   lost by leaving the field live. */
                 aria-label={`${humanizeParam(k)} in millimetres`}
                 onChange={(e) => setEditing({ ...editing, [k]: e.target.value })}
                 onFocus={() => setEditing({ ...editing, [k]: String(v) })}
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") { const n = { ...editing }; delete n[k]; setEditing(n); (e.target as HTMLInputElement).blur(); return; }
+                  if (e.key === "Escape") {
+                    // blur() dispatches synchronously, inside this handler — the onBlur
+                    // that runs still closes over the OLD `editing`, so clearing state
+                    // here didn't stop it committing the abandoned text (typing 999 and
+                    // pressing Escape rebuilt the model at 999). The ref is read by
+                    // onBlur in the same turn, so it actually lands.
+                    cancelRef.current = k;
+                    const n = { ...editing }; delete n[k]; setEditing(n);
+                    (e.target as HTMLInputElement).blur();
+                    return;
+                  }
                   if (e.key === "Enter") { (e.target as HTMLInputElement).blur(); return; }
                   // Arrows nudge by one step, x10 with Shift — keyboard parity with the scrub.
                   if (e.key === "ArrowUp" || e.key === "ArrowDown") {
                     e.preventDefault();
                     const d = (e.key === "ArrowUp" ? 1 : -1) * step * (e.shiftKey ? 10 : 1);
-                    const nv = +( (parseFloat(editing[k] ?? String(v)) || v) + d ).toFixed(4);
+                    // Number(), not `parseFloat(...) || v`: a typed 0 is falsy, so the
+                    // nudge was applied to the OLD value (0 then ArrowUp gave 5.5, not 0.5).
+                    const typed = parseFloat(editing[k] ?? String(v));
+                    const nv = +((Number.isFinite(typed) ? typed : v) + d).toFixed(4);
                     setEditing({ ...editing, [k]: String(nv) });
                     const next = { ...local, [k]: isInt ? Math.round(nv) : nv };
                     setLocal(next); commit(next);
@@ -3934,6 +3973,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
                 onBlur={() => {
                   const raw = editing[k];
                   const n = { ...editing }; delete n[k]; setEditing(n);
+                  if (cancelRef.current === k) { cancelRef.current = null; return; } // Escape: discard
                   if (raw === undefined) return;
                   const parsed = evalParamInput(raw, v);
                   if (parsed === null) return;              // unparseable → keep the old value

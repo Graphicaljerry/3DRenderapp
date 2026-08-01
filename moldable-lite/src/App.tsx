@@ -33,7 +33,7 @@ import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, 
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
-import { extractParams, type CadParams } from "./cad/params";
+import { extractParams, humanizeParam, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
@@ -1766,10 +1766,15 @@ export default function App() {
     if (res.source.kind === "code") {
       const defs = extractParams(res.source.code);
       setCadDefaults(defs);
-      setParamValues(defs ? { ...defs, ...(res.source.params ?? {}) } : {});
+      const merged = defs ? { ...defs, ...(res.source.params ?? {}) } : {};
+      setParamValues(merged);
+      // Whatever just rendered is, by definition, a set that builds — so it's the
+      // rollback target if the next adjustment doesn't.
+      lastGoodParams.current = merged;
     } else {
       setCadDefaults(null);
       setParamValues({});
+      lastGoodParams.current = null;
     }
   }
 
@@ -1779,8 +1784,17 @@ export default function App() {
   // the release commit can't repaint the model with the stale mid-drag value (measured:
   // released at 20 mm, model settled at 17.5 mm).
   const paramGen = useRef(0);
+  // `status` in this closure is the render's value, and setStatus is async — two commits
+  // dispatched in one event turn (blur-then-click on a row's revert) both read "idle" and
+  // both build. The ref is the truth; a commit arriving mid-build is REMEMBERED, not
+  // dropped, so a fast second keystroke or click can't be silently lost.
+  const paramBusy = useRef(false);
+  const paramPending = useRef<CadParams | null>(null);
+  const lastGoodParams = useRef<CadParams | null>(null);
   async function applyParams(values: CadParams) {
-    if (!sel || !result || result.source.kind !== "code" || status === "generating") return;
+    if (!sel || !result || result.source.kind !== "code") return;
+    if (paramBusy.current) { paramPending.current = values; return; }
+    paramBusy.current = true;
     const gen = ++paramGen.current;
     // The commit supersedes the drag: drop what's queued AND stop the live loop from
     // starting another iteration. Clearing `next` alone left a window — the loop could
@@ -1788,17 +1802,36 @@ export default function App() {
     // the commit's, so a stale mid-drag value won the race (measured 17.5 vs 20).
     liveParamRun.current.next = null;
     liveParamRun.current.stop = true;
+    // Rollback target = the last map that actually BUILT, held in a ref: a queued commit
+    // re-enters this function through the same render closure, where `paramValues` is
+    // whatever it was at render time.
+    const prevValues = lastGoodParams.current ?? paramValues;
     setParamValues(values);
     setStatus("generating");
     try {
       // ops MUST ride along: drilled holes and magnet pockets live in the op chain, and
       // rebuilding from code+params alone silently erased every one of them.
       const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values, ops: result.source.ops });
+      lastGoodParams.current = values;
       if (paramGen.current === gen) applyResultNoCommit(res);
     } catch (err: any) {
-      if (paramGen.current === gen) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Those values don't build: " + String(err?.message ?? err), error: true }]);
+      if (paramGen.current === gen) {
+        // Un-buildable values must NOT stick. Every commit sends the whole map, so a
+        // value left in place after a failure rode along on every later adjustment and
+        // failed them all — the panel became permanently stuck with no way back but
+        // guessing which row was at fault. Roll back and name the culprit.
+        setParamValues(prevValues);
+        const bad = Object.keys(values).filter((k) => values[k] !== prevValues[k]).map(humanizeParam);
+        const which = bad.length ? `${bad.join(", ")} ` : "";
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${which}won't build at that value — kept the last one that worked. (${String(err?.message ?? err)})`, error: true }]);
+      }
     } finally {
       setStatus("idle");
+      paramBusy.current = false;
+      // A commit that arrived mid-build is applied now, so nothing is silently dropped.
+      const queued = paramPending.current;
+      paramPending.current = null;
+      if (queued) void applyParams(queued);
     }
   }
   // Mid-scrub live preview. Differs from applyParams on purpose: it never flips global
@@ -1820,7 +1853,10 @@ export default function App() {
       if (liveParamRun.current.stop) break; // a commit landed — it owns the model now
       const gen = ++paramGen.current;
       try {
-        const res = await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops });
+        // preview: coarse mesh, and no limit-probing — an op that stops fitting at a
+        // mid-drag value otherwise costs up to eight extra bisection rebuilds per tick
+        // to produce an error this loop then throws away.
+        const res = await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops, preview: true });
         if (paramGen.current === gen) applyResultNoCommit(res);
       } catch { /* transient drag value — the release commit surfaces real errors */ }
       v = liveParamRun.current.next;
@@ -1845,14 +1881,22 @@ export default function App() {
   // whole set. A probe is a full OCCT rebuild plus a BVH pass; paying that twice for the
   // same question is the difference between the panel feeling live and feeling laggy.
   const peekCache = useRef(new Map<string, Float32Array | null>());
+  // Hash the CODE, not its length: an AI edit that preserves length (`wall = 2` →
+  // `wall = 3`) with the same defaultParams was a cache HIT, so the overlay showed the
+  // previous model's highlight.
+  const hashStr = (s: string) => { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0; return h.toString(36); };
   const peekKeyBase = (code: string, vals: CadParams) =>
-    `${code.length}:${Object.keys(vals).sort().map((k) => `${k}=${vals[k]}`).join(",")}`;
+    `${hashStr(code)}:${Object.keys(vals).sort().map((k) => `${k}=${vals[k]}`).join(",")}`;
 
   function endParamPeek() {
     peekSeq.current++;                       // invalidates any build still in flight
     if (peekTimer.current) { clearTimeout(peekTimer.current); peekTimer.current = null; }
     setParamPeek(null);
   }
+  // The overlay is parented to the model's vertices, so it goes stale the moment the
+  // model rebuilds — and nothing cleared it: leaving the Adjust panel unmounts the rows
+  // without a pointerleave, so a highlight could sit on the canvas indefinitely.
+  useEffect(() => { endParamPeek(); }, [geometry, cadDefaults]);
 
   function peekParam(key: string) {
     if (peekTimer.current) clearTimeout(peekTimer.current);
@@ -1864,6 +1908,11 @@ export default function App() {
   async function runParamPeek(key: string) {
     const src = result?.source;
     if (!sel || !result || src?.kind !== "code" || status === "generating") return;
+    // A scrub that starts inside the hover-intent window must cancel the probe: the live
+    // path deliberately leaves `status` idle, so nothing else stops a full extra OCCT
+    // build landing mid-drag — which also evicts the kernel's single-entry base cache
+    // and makes every following drag tick recompile from scratch.
+    if (liveParamRun.current.running || paramBusy.current) return;
     const seq = ++peekSeq.current;
     const base = { ...(src.params ?? {}), ...paramValues };
     const v = base[key];
@@ -1897,6 +1946,13 @@ export default function App() {
       summary: `Adjusted parameters — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm`,
       code: result.source.code,
       params: result.source.params,
+      // appendVersion spreads the snapshot onto the PROJECT ROOT, so anything omitted
+      // here is erased from the live project too: without these three, saving after an
+      // adjustment wiped every drilled hole and pocket (and the imported STEP solid,
+      // leaving the next open to rebuild empty) — from a button that says it keeps them.
+      ops: result.source.ops,
+      importFile: importFileRef.current ?? undefined,
+      importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: result.dims,
     });
     persist(next);
@@ -3620,7 +3676,18 @@ export default function App() {
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {
           pushStep("Applying the edit and rebuilding the solid in the CAD kernel…");
-          const editParams = result?.source.kind === "code" ? result.source.params : undefined;
+          // Carry the user's adjustments forward — but NOT over a value the AI just
+          // changed. A committed params map holds every key, and it overrides
+          // defaultParams inside main(); so after any adjustment, "make the walls 4 mm"
+          // rebuilt with the old 2.5 and reported success on unchanged geometry.
+          // A key survives only if the edit left its default alone.
+          const prevDefs = cadDefaults ?? {};
+          const newDefs = extractParams(newCode) ?? {};
+          const kept: CadParams = {};
+          for (const [k, v] of Object.entries(result?.source.kind === "code" ? result.source.params ?? {} : {})) {
+            if (k in newDefs && newDefs[k] === prevDefs[k]) kept[k] = v;
+          }
+          const editParams = Object.keys(kept).length ? kept : undefined;
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
           const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);

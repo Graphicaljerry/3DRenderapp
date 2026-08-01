@@ -2080,12 +2080,15 @@ export default function App() {
     const base = { ...(src.params ?? {}), ...paramValues };
     const v = base[key];
     if (typeof v !== "number") return;
-    const ck = `${peekKeyBase(src.code, base)}|${key}`;
+    // ops in the key AND the build: rotations (gizmo, lay-flat) and drilled/magnet/screw
+    // pockets live in the op chain — probing without them diffed the displayed (rotated)
+    // model against an unrotated probe, so the highlight drew the part's OLD pose.
+    const ck = `${peekKeyBase(src.code, base)}:${hashStr(JSON.stringify(src.ops ?? []))}|${key}`;
     if (peekCache.current.has(ck)) { setParamPeek(peekCache.current.get(ck) ?? null); return; }
     // Big enough to be visible at a glance, small enough that the shape stays itself.
     const bump = Math.max(Math.abs(v) * 0.18, 1.5);
     try {
-      const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, preview: true });
+      const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, ops: src.ops, preview: true });
       if (seq !== peekSeq.current) return;   // pointer moved on — drop the stale result
       const { affectedFaces } = await import("./print/affected");
       // display = engine - recenter, so probe -> base frame is +rcProbe - rcBase.
@@ -4821,6 +4824,10 @@ export default function App() {
           // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
           setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
+          rotateBy: (axis, deg) => {
+            const a: [number, number, number] = axis === "x" ? [1, 0, 0] : axis === "y" ? [0, 1, 0] : [0, 0, 1];
+            void rotateOntoPlate(a, deg, `Rotated ${deg}° about ${axis.toUpperCase()}`);
+          },
           busy: status === "generating",
         }}
         resizeCtl={{

@@ -1128,6 +1128,33 @@ function DockAsk({ ask }: { ask: NonNullable<Parameters<typeof DockSelection>[0]
   );
 }
 
+/** Exact typed rotation in the Move flyout's Rotate mode: pick an axis, type degrees,
+ *  go. Complements the rings (freehand) and Shift (90° steps) with "I know the number". */
+function RotateByRow({ busy, onGo }: { busy: boolean; onGo: (axis: "x" | "y" | "z", deg: number) => void }) {
+  const [axis, setAxis] = useState<"x" | "y" | "z">("z");
+  const [deg, setDeg] = useState("90");
+  const go = () => {
+    const d = parseFloat(deg);
+    if (!Number.isFinite(d) || d === 0) return;
+    onGo(axis, d);
+  };
+  return (
+    <>
+      <div className="seg sm" role="radiogroup" aria-label="Rotation axis">
+        {(["x", "y", "z"] as const).map((a) => (
+          <button key={a} role="radio" aria-checked={axis === a} className={axis === a ? "on" : ""} title={`Rotate about the ${a.toUpperCase()} axis`} onClick={() => setAxis(a)}>{a.toUpperCase()}</button>
+        ))}
+      </div>
+      <input
+        className="rotate-deg" type="number" step={15} value={deg} aria-label="Degrees"
+        onChange={(e) => setDeg(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && go()}
+      />
+      <button className="ghost sm" disabled={busy} title="Rotate by exactly this many degrees (negative = the other way), resting back on the plate — undoable" onClick={go}>Rotate</button>
+    </>
+  );
+}
+
 // Structural twin of lib/screws.ts ScrewSize — Workspace stays decoupled from the lib.
 type ScrewSizeLike = { id: string; label: string; d: number; pitch: number; clearance: number; bite: number; head: number; insertBore?: number; insertLen?: number; note?: string };
 type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
@@ -1590,6 +1617,7 @@ interface Props {
     mode: TransformMode;
     setMode: (m: TransformMode) => void;
     commit: (c: TransformCommit) => void;
+    rotateBy: (axis: "x" | "y" | "z", deg: number) => void; // exact typed rotation, rested on the plate
     busy: boolean;
   };
   resizeCtl: {
@@ -2506,9 +2534,12 @@ export function Workspace(p: Props) {
                       <div className="rail-fly">
                         <div className="seg sm mode-seg">
                           <button className={`iconbtn${p.transformCtl.mode === "move" ? " on" : ""}`} aria-label="Move" title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}><IconTransform /><span className="btn-label">Move</span></button>
-                          <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
+                          <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings — hold Shift for 90° steps)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
                           <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
                         </div>
+                        {p.transformCtl.mode === "rotate" && (
+                          <RotateByRow busy={p.transformCtl.busy} onGo={p.transformCtl.rotateBy} />
+                        )}
                       </div>
                     )}
                   </div>
@@ -2880,7 +2911,7 @@ export function Workspace(p: Props) {
               )}
               {p.measureCtl.mode && !p.measureCtl.draft && (
                 <div className="box-hint">
-                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points, or press and drag a tape line — ends snap to corners and edges. Tap a label to delete that measure."}
+                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points, or press and drag a tape line — ends snap to corners, edges, hole centres and rims. Click a circular rim once for its true diameter; hole-to-hole clicks measure centre to centre. Tap a label to delete that measure."}
                 </div>
               )}
               {p.measureCtl.mode && p.measureCtl.draft && (() => {

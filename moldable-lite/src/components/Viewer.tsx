@@ -324,8 +324,8 @@ interface Internals {
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -483,6 +483,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
 
     const measures = new THREE.Group(); // point-to-point measurement annotations
     scene.add(measures);
+    // Measure-mode hover dot: shows WHERE a click would land after snapping — teal on a
+    // real feature (centre/rim/vertex), gray when free — so anchors stop being guesswork.
+    const measHoverDot = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 12, 8),
+      new THREE.MeshBasicMaterial({ color: 0x0d9488, depthTest: false, transparent: true, opacity: 0.95 }),
+    );
+    measHoverDot.visible = false;
+    measHoverDot.renderOrder = 6;
+    measHoverDot.raycast = () => {};
+    scene.add(measHoverDot);
 
     // Push-pull handle: an arrow (shaft + cone) drawn along a selected flat face's normal;
     // drag it to extrude the face. Local +Y is the normal; oriented/positioned per prop.
@@ -953,40 +963,104 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const at: [number, number, number] = [+w.x.toFixed(3), +w.y.toFixed(3), +w.z.toFixed(3)];
       return { at, normal: [wn.x, wn.y, wn.z], alignedTo };
     };
-    // ---- Measure snapping: pull a clicked/dragged point onto the nearest tessellation
-    // VERTEX (then the nearest triangle edge) of the hit face, with screen-constant
-    // radii — so hole rims and part corners measure exactly, not "wherever the pixel
-    // landed". Curved surfaces tessellate with their vertices ON the true surface,
-    // which is what makes a rim-to-rim hole measurement come out at the real ⌀. ----
-    const snapMeasure = (hit: THREE.Intersection): [number, number, number] => {
+    // ---- Measure snapping: pull a clicked/dragged point onto the nearest REAL feature
+    // with screen-constant magnet radii — circle CENTRES first (hole-to-hole spacing
+    // measures exactly centre to centre), then circle RIMS (the true ⌀, never a chord),
+    // then tessellation vertices and triangle edges. Curved surfaces tessellate with
+    // their vertices ON the true surface, so everything here is exact, not "wherever
+    // the pixel landed". ----
+    type MeasureSnap = { p: [number, number, number]; kind: "center" | "rim" | "vertex" | "edge" | "free"; circle?: EdgeCircle | null };
+    const snapMeasure2 = (hit: THREE.Intersection): MeasureSnap => {
       const s2 = st.current;
       const p = hit.point;
       const mesh = s2?.mesh;
-      if (!s2 || !mesh || !hit.face) return [p.x, p.y, p.z];
+      if (!s2 || !mesh || !hit.face) return { p: [p.x, p.y, p.z], kind: "free" };
       const pos = mesh.geometry.getAttribute("position") as THREE.BufferAttribute;
       const vs = [hit.face.a, hit.face.b, hit.face.c].map((i) => new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(mesh.matrixWorld));
       const dCam = camera.position.distanceTo(p);
       const worldPerPx = (2 * dCam * Math.tan((camera.fov * Math.PI) / 360)) / (el.clientHeight || 1);
+      const circles = ensureTri(s2) && s2.tri ? circlesOf(s2.tri) : [];
+      const cw = new THREE.Vector3();
+      // Circle magnets are judged in SCREEN pixels, not 3D: with the camera at an angle,
+      // the ray through "the middle of the hole" dives past the top face and hits the
+      // pocket WALL — metres of 3D error while the cursor sits dead on the centre
+      // visually. What the user is pointing at is the 2D thing.
+      const toPx = (w: THREE.Vector3): [number, number] => {
+        const v = w.clone().project(camera);
+        return [((v.x + 1) / 2) * (el.clientWidth || 1), ((1 - v.y) / 2) * (el.clientHeight || 1)];
+      };
+      const hitPx = toPx(p);
+      // 1. Circle CENTRE magnet — anywhere in the middle ~55% of a hole reads as "the
+      //    centre" (capped at 40 px so huge bores don't hijack clicks, floored at 12 px
+      //    so tiny holes still snap).
+      let bestC: { q: THREE.Vector3; circle: EdgeCircle } | null = null;
+      let bestCD = Infinity;
+      for (const c of circles) {
+        cw.set(c.cx, c.cy, c.cz).applyMatrix4(mesh.matrixWorld);
+        if (cw.distanceTo(p) > Math.max(2.5 * c.r, 12)) continue; // a different hole entirely (e.g. through the part)
+        const cPx = toPx(cw);
+        const dpx = Math.hypot(cPx[0] - hitPx[0], cPx[1] - hitPx[1]);
+        const rPx = c.r / worldPerPx; // apparent radius (at the hit's depth — close enough)
+        const grab = Math.max(12, Math.min(0.55 * rPx, 40));
+        if (dpx < grab && dpx < rPx * 0.8 && dpx < bestCD) { bestCD = dpx; bestC = { q: cw.clone(), circle: c }; }
+      }
+      if (bestC) return { p: [bestC.q.x, bestC.q.y, bestC.q.z], kind: "center", circle: bestC.circle };
+      // 2. Circle RIM magnet (~12 px on screen): the nearest true point OF the circle.
+      //    Runs before the vertex magnet — rim tessellation vertices sit on the circle
+      //    anyway, and landing here is what arms the one-click diameter.
+      let bestR: { q: THREE.Vector3; circle: EdgeCircle } | null = null;
+      let bestRD = 12;
+      const nrm = new THREE.Vector3(), radial = new THREE.Vector3();
+      for (const c of circles) {
+        cw.set(c.cx, c.cy, c.cz).applyMatrix4(mesh.matrixWorld);
+        nrm.set(c.nx, c.ny, c.nz).applyMatrix3(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)).normalize();
+        radial.copy(p).sub(cw);
+        radial.addScaledVector(nrm, -radial.dot(nrm)); // project into the circle's plane
+        if (radial.lengthSq() < 1e-8) continue;
+        const q = cw.clone().addScaledVector(radial.normalize(), c.r);
+        if (q.distanceTo(p) > Math.max(c.r, 8)) continue; // a rim elsewhere on the model
+        const qPx = toPx(q);
+        const dpx = Math.hypot(qPx[0] - hitPx[0], qPx[1] - hitPx[1]);
+        if (dpx < bestRD) { bestRD = dpx; bestR = { q, circle: c }; }
+      }
+      if (bestR) return { p: [bestR.q.x, bestR.q.y, bestR.q.z], kind: "rim", circle: bestR.circle };
+      // 3. Vertex magnet (~14 px) — part corners measure exactly.
       let best: THREE.Vector3 | null = null;
-      let bestD = 14 * worldPerPx; // vertex magnet: ~14 px
+      let bestD = 14 * worldPerPx;
       for (const v of vs) {
         const d = v.distanceTo(p);
         if (d < bestD) { bestD = d; best = v; }
       }
-      if (!best) {
-        // No corner nearby — try the triangle's edges (~9 px) so straight rims still snap.
-        const seg = new THREE.Line3();
-        const q = new THREE.Vector3();
-        let eD = 9 * worldPerPx;
-        for (let i = 0; i < 3; i++) {
-          seg.set(vs[i], vs[(i + 1) % 3]);
-          seg.closestPointToPoint(p, true, q);
-          const d = q.distanceTo(p);
-          if (d < eD) { eD = d; best = q.clone(); }
-        }
+      if (best) return { p: [best.x, best.y, best.z], kind: "vertex" };
+      // 4. Triangle edges (~9 px) so straight rims still snap.
+      const seg = new THREE.Line3();
+      const q2 = new THREE.Vector3();
+      let eD = 9 * worldPerPx;
+      let eBest: THREE.Vector3 | null = null;
+      for (let i = 0; i < 3; i++) {
+        seg.set(vs[i], vs[(i + 1) % 3]);
+        seg.closestPointToPoint(p, true, q2);
+        const d = q2.distanceTo(p);
+        if (d < eD) { eD = d; eBest = q2.clone(); }
       }
-      const out = best ?? p;
-      return [out.x, out.y, out.z];
+      if (eBest) return { p: [eBest.x, eBest.y, eBest.z], kind: "edge" };
+      return { p: [p.x, p.y, p.z], kind: "free" };
+    };
+    const snapMeasure = (hit: THREE.Intersection): [number, number, number] => snapMeasure2(hit).p;
+    /** A measure CLICK landed (either path: tap, or press-without-drag). One click on a
+     *  hole/boss rim with no measurement in progress reads the TRUE diameter — the
+     *  segment runs rim-to-rim straight through the centre, so a slightly-off click can
+     *  never turn a 6 mm bore into a 5.4 mm chord. Everything else is a normal point. */
+    const measureCommitPoint = (snap: MeasureSnap) => {
+      const s2 = st.current;
+      if (snap.kind === "rim" && snap.circle && !cb.current.measurePending && s2?.mesh) {
+        const c = new THREE.Vector3(snap.circle.cx, snap.circle.cy, snap.circle.cz).applyMatrix4(s2.mesh.matrixWorld);
+        const a = new THREE.Vector3(snap.p[0], snap.p[1], snap.p[2]);
+        const b = c.multiplyScalar(2).sub(a); // the diametrically opposite rim point
+        cb.current.onMeasureSegment([a.x, a.y, a.z], [b.x, b.y, b.z]);
+        return;
+      }
+      cb.current.onMeasurePoint(snap.p);
     };
     const handleTap = (e: { clientX: number; clientY: number; shiftKey?: boolean }) => {
       const s2 = st.current;
@@ -1106,7 +1180,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (!s2.mesh) return;
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (!hit) return;
-        cb.current.onMeasurePoint(snapMeasure(hit));
+        measureCommitPoint(snapMeasure2(hit));
         return;
       }
       // No tool active → a tap on the part selects the WHOLE model (bounding box);
@@ -1197,6 +1271,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     let measDrag: {
       pointerId: number; sx: number; sy: number; moved: boolean;
       a: [number, number, number]; b: [number, number, number] | null;
+      snap: MeasureSnap; // the down-press's full snap — the no-drag fallback needs the kind
       line: THREE.Line | null; label: THREE.Sprite | null; lastText: string; baseH: number;
     } | null = null;
     const clearMeasDrag = () => {
@@ -1259,7 +1334,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           s2.mesh.geometry.computeBoundingBox();
           const sz = s2.mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
           modelSize = Math.max(sz.x, sz.y, sz.z) || 40;
-          measDrag = { pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, a: snapMeasure(hit), b: null, line: null, label: null, lastText: "", baseH: modelSize * 0.05 };
+          const downSnap = snapMeasure2(hit);
+          measDrag = { pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, a: downSnap.p, snap: downSnap, b: null, line: null, label: null, lastText: "", baseH: modelSize * 0.05 };
           controls.enabled = false;
           e.preventDefault();
           try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
@@ -1377,7 +1453,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         controls.enabled = true;
         try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
         if (md.moved && md.b) cb.current.onMeasureSegment(md.a, md.b);
-        else cb.current.onMeasurePoint(md.a); // no drag → classic first/second click
+        else measureCommitPoint(md.snap); // no drag → classic first/second click (or one-click ⌀)
         return;
       }
       if (anchorDrag) {
@@ -1664,12 +1740,27 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (hp) { setHover(String(hp.object.userData.pinId)); return; }
       }
       setHover(null);
-      // Measure mode: crosshair over the model says "you can click or drag here".
+      // Measure mode: crosshair over the model says "you can click or drag here", and
+      // the hover dot previews the SNAPPED landing spot of a click.
       if (cb.current.measureMode && s2.mesh) {
         const mh = rc.intersectObject(s2.mesh, false)[0];
         renderer.domElement.style.cursor = mh ? "crosshair" : "";
+        if (mh) {
+          const snap = snapMeasure2(mh);
+          const snapped = snap.kind === "center" || snap.kind === "rim" || snap.kind === "vertex";
+          measHoverDot.visible = true;
+          measHoverDot.position.set(snap.p[0], snap.p[1], snap.p[2]);
+          const wpp = (2 * camera.position.distanceTo(measHoverDot.position) * Math.tan((camera.fov * Math.PI) / 360)) / (el.clientHeight || 1);
+          measHoverDot.scale.setScalar((snapped ? 4.5 : 3) * wpp);
+          const mat = measHoverDot.material as THREE.MeshBasicMaterial;
+          mat.color.set(snapped ? 0x0d9488 : 0x9aa0a6);
+          mat.opacity = snapped ? 0.95 : 0.55;
+        } else {
+          measHoverDot.visible = false;
+        }
         return;
       }
+      if (measHoverDot.visible) measHoverDot.visible = false; // left measure mode
       if (!cb.current.selectMode || !s2.mesh) return;
       // Point mode: just a crosshair over the model (click to drop a marker).
       if (cb.current.selectKind === "point") {
@@ -1693,6 +1784,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
     };
     const onLeave = () => {
+      measHoverDot.visible = false;
       setHover(null);
       // Cursor left mid-hover: park the drill ghost back on the draft's committed spot.
       const g = holeIx.current.ghost;
@@ -2089,19 +2181,32 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (!measurements.length && !measurePending) return;
     let modelSize = 40;
     if (s.mesh) { s.mesh.geometry.computeBoundingBox(); const sz = s.mesh.geometry.boundingBox!.getSize(new THREE.Vector3()); modelSize = Math.max(sz.x, sz.y, sz.z) || 40; }
-    const markR = Math.max(0.4, modelSize * 0.012);
+    // Anchors: small teal dots on a white halo — visible on any surface without
+    // covering the very feature being measured (they used to be 50% bigger).
+    const markR = Math.max(0.28, modelSize * 0.008);
     const lineMat = new THREE.LineBasicMaterial({ color: 0x0d9488, transparent: true, opacity: 0.95, depthTest: false });
     const dotMat = new THREE.MeshBasicMaterial({ color: 0x0d9488, depthTest: false, transparent: true });
+    const haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.85 });
     const addDot = (p: [number, number, number]) => {
+      const h = new THREE.Mesh(new THREE.SphereGeometry(markR * 1.6, 12, 8), haloMat);
+      h.position.set(p[0], p[1], p[2]); h.renderOrder = 4; h.raycast = () => {}; s.measures.add(h);
       const m = new THREE.Mesh(new THREE.SphereGeometry(markR, 12, 8), dotMat);
-      m.position.set(p[0], p[1], p[2]); m.renderOrder = 5; s.measures.add(m);
+      m.position.set(p[0], p[1], p[2]); m.renderOrder = 5; m.raycast = () => {}; s.measures.add(m);
     };
+    // Bare number in the current units (no suffix) — for the axis-delta breakdown.
+    const bare = (mm: number) => (units === "in" ? (mm / 25.4).toFixed(2) : String(Math.round(mm * 10) / 10));
     for (const meas of measurements) {
       const a = new THREE.Vector3(...meas.a), b = new THREE.Vector3(...meas.b);
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), lineMat);
       line.renderOrder = 5; s.measures.add(line);
       addDot(meas.a); addDot(meas.b);
-      const label = makeLabel(fmtDist(a.distanceTo(b), units), { fg: "#0f766e", bg: "rgba(255,255,255,0.94)", border: "#0d9488" });
+      // Off-axis lines get their straight-across components spelled out: a slightly
+      // diagonal line across a 6 mm square reads "6.05 mm (x 6 · y 0.8)" instead of
+      // silently looking like the square is the wrong size.
+      const deltas: [string, number][] = [["x", Math.abs(a.x - b.x)], ["y", Math.abs(a.y - b.y)], ["z", Math.abs(a.z - b.z)]];
+      const sig = deltas.filter(([, v]) => v > 0.08);
+      const sub = sig.length >= 2 ? `  (${sig.map(([k, v]) => `${k} ${bare(v)}`).join(" · ")})` : "";
+      const label = makeLabel(fmtDist(a.distanceTo(b), units) + sub, { fg: "#0f766e", bg: "rgba(255,255,255,0.94)", border: "#0d9488" });
       label.position.copy(a.clone().add(b).multiplyScalar(0.5));
       label.userData.dimLabel = true; label.userData.baseH = modelSize * 0.05;
       label.userData.measureId = meas.id; // tap-to-delete raycasts for this
@@ -2540,12 +2645,25 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   }, [magnetPlace?.diameter, magnetPlace?.depth, !!magnetPlace]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
+  // Holding SHIFT overrides rotation to right-angle steps (90/180/270/360) for the
+  // duration of the hold — the near-universal CAD/slicer convention.
   useEffect(() => {
+    const applyRot = (shift: boolean) => {
+      const s = st.current;
+      if (!s) return;
+      const deg = shift ? 90 : snap.rotate;
+      const rad = deg > 0 ? THREE.MathUtils.degToRad(deg) : null;
+      s.tc.setRotationSnap(rad);
+      s.tcR.setRotationSnap(rad);
+    };
     const s = st.current;
-    if (!s) return;
-    s.tc.setTranslationSnap(snap.move > 0 ? snap.move : null);
-    s.tc.setRotationSnap(snap.rotate > 0 ? THREE.MathUtils.degToRad(snap.rotate) : null);
-    s.tcR.setRotationSnap(snap.rotate > 0 ? THREE.MathUtils.degToRad(snap.rotate) : null);
+    if (s) s.tc.setTranslationSnap(snap.move > 0 ? snap.move : null);
+    applyRot(false);
+    const kd = (e: KeyboardEvent) => { if (e.key === "Shift") applyRot(true); };
+    const ku = (e: KeyboardEvent) => { if (e.key === "Shift") applyRot(false); };
+    window.addEventListener("keydown", kd);
+    window.addEventListener("keyup", ku);
+    return () => { window.removeEventListener("keydown", kd); window.removeEventListener("keyup", ku); };
   }, [snap.move, snap.rotate]);
 
   // Catch-all for render-on-demand: this component only re-renders when something
@@ -3090,6 +3208,74 @@ function buildTriData(geo: THREE.BufferGeometry): TriData {
   }
 
   return { normals, d, degen, count, pos, idx, adj, vpos: new Float32Array(vpos), nUnique, edges, edgeCount, edgeChainId, chains, faceId };
+}
+
+/** A circle recovered from a closed sharp-edge chain — a hole rim, boss rim or pocket
+    rim. Geometry space; callers transform by the mesh's matrixWorld. */
+interface EdgeCircle { cx: number; cy: number; cz: number; r: number; nx: number; ny: number; nz: number }
+const circleCache = new WeakMap<TriData, EdgeCircle[]>();
+/** Fit every closed chain as a circle (least-squares/Kasa in its own plane) and keep
+    the ones that actually ARE circles — rounded rectangles and freeform loops fail the
+    radius-deviation test. This is what lets the measure tool read true diameters and
+    snap to exact hole centres (magnet pockets and screw bores included). */
+function circlesOf(tri: TriData): EdgeCircle[] {
+  const hit = circleCache.get(tri);
+  if (hit) return hit;
+  const out: EdgeCircle[] = [];
+  for (const ch of tri.chains) {
+    if (!ch.closed || ch.segs.length < 8) continue;
+    const pts: THREE.Vector3[] = ch.segs.map((si) => new THREE.Vector3(tri.edges[si * 6], tri.edges[si * 6 + 1], tri.edges[si * 6 + 2]));
+    // Plane from three well-spread rim points (any 3 points on a circle define its
+    // plane — chain order doesn't matter): far point, then farthest-from-that-line.
+    const p0 = pts[0];
+    let pf = pts[1], dMax = 0;
+    for (const q of pts) { const d = q.distanceToSquared(p0); if (d > dMax) { dMax = d; pf = q; } }
+    const axis = pf.clone().sub(p0);
+    if (axis.lengthSq() < 1e-8) continue;
+    let pm = pts[1]; dMax = 0;
+    const tmp = new THREE.Vector3();
+    for (const q of pts) {
+      tmp.copy(q).sub(p0);
+      const d = tmp.clone().cross(axis).lengthSq();
+      if (d > dMax) { dMax = d; pm = q; }
+    }
+    const n = axis.clone().cross(pm.clone().sub(p0));
+    if (n.lengthSq() < 1e-10) continue;
+    n.normalize();
+    // Least-squares circle (Kasa) in the plane's 2D basis about the centroid.
+    const g = new THREE.Vector3();
+    for (const q of pts) g.add(q);
+    g.multiplyScalar(1 / pts.length);
+    const u = axis.normalize();
+    const v = n.clone().cross(u);
+    let sxx = 0, sxy = 0, syy = 0, sxz = 0, syz = 0, planeDev = 0;
+    const rel = new THREE.Vector3();
+    const xs: number[] = [], ys: number[] = [];
+    for (const q of pts) {
+      rel.copy(q).sub(g);
+      const x = rel.dot(u), y = rel.dot(v), z2 = x * x + y * y;
+      planeDev = Math.max(planeDev, Math.abs(rel.dot(n)));
+      xs.push(x); ys.push(y);
+      sxx += x * x; sxy += x * y; syy += y * y;
+      sxz += x * z2; syz += y * z2;
+    }
+    const det = sxx * syy - sxy * sxy;
+    if (Math.abs(det) < 1e-9) continue;
+    const cx2 = (syy * sxz - sxy * syz) / (2 * det);
+    const cy2 = (sxx * syz - sxy * sxz) / (2 * det);
+    let r = 0;
+    for (let i = 0; i < xs.length; i++) r += Math.hypot(xs[i] - cx2, ys[i] - cy2);
+    r /= xs.length;
+    if (r < 0.2) continue;
+    let devR = 0;
+    for (let i = 0; i < xs.length; i++) devR = Math.max(devR, Math.abs(Math.hypot(xs[i] - cx2, ys[i] - cy2) - r));
+    const tol = Math.max(0.03 * r, 0.06);
+    if (devR > tol || planeDev > tol) continue; // a loop, but not a circle
+    const c = g.clone().addScaledVector(u, cx2).addScaledVector(v, cy2);
+    out.push({ cx: c.x, cy: c.y, cz: c.z, r, nx: n.x, ny: n.y, nz: n.z });
+  }
+  circleCache.set(tri, out);
+  return out;
 }
 
 /** Flood-fill the connected smooth region (flat OR curved) around a triangle,

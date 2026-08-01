@@ -687,6 +687,9 @@ button { font-family: inherit; cursor: pointer; }
 .apb-legend { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--mut); }
 .apb-hint { font-size: 11px; color: var(--mut); }
 @media (max-width: 900px) { .apb-hint { display: none; } }
+
+/* Typed-degrees rotate in the Move flyout */
+.rotate-deg { width: 58px; padding: 5px 6px; font: inherit; font-size: 12.5px; background: var(--bg); color: var(--ink); border: 1px solid var(--bord-strong); border-radius: 8px; }
 .apb-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; }
 .apb-add { background: #22c55e; opacity: .75; }
 .apb-rem { background: #ef4444; opacity: .75; }

@@ -133,7 +133,11 @@ export function traceBitmap(img: ImageData, opts: { tolerance?: number } = {}): 
   const at = (x: number, y: number) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : ink[y * w + x]);
   const seen = new Uint8Array((w + 1) * (h + 1));
   const outlines: TracedOutline[] = [];
-  const tol = opts.tolerance ?? 0.15;
+  // 0.9 px, not a fraction of one: a 45° edge comes out of marching squares as a
+  // staircase that deviates half a pixel from the true line, so a tighter tolerance
+  // keeps every single step (measured: 821 points for a ten-pointed star). At a typical
+  // 30 mm print off a 400 px source this is ~0.07 mm — a fifth of a nozzle width.
+  const tol = opts.tolerance ?? 0.9;
   let truncated = false;
 
   // Step budgets, not just a loop guard. A noisy image yields hundreds of contours and a

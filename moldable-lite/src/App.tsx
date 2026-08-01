@@ -33,7 +33,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube } from "./components/icons";
+import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe } from "./components/icons";
 import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
@@ -91,6 +91,7 @@ export type ChatMessage = {
   model?: string; // which AI produced this reply (shown small under the bubble)
   thinking?: string; // the model's reasoning stream, kept collapsed for the curious
   sources?: { url: string; title?: string }[]; // web pages a research lookup used
+  images?: string[]; // product photos a research lookup found (display-only <img> URLs)
   clarify?: ClarifyState; // a request too vague to build — the questions, in the chat
 };
 
@@ -957,6 +958,9 @@ export default function App() {
   // Extra reference angles for multi-view mesh generation (front is `image`).
   type ViewSlot = "left" | "back" | "right";
   const [views, setViews] = useState<Partial<Record<ViewSlot, { blob: Blob; url: string }>>>({});
+  // UNLABELLED extra reference photos — what a multi-file drop attaches. The named view
+  // slots above stay for users who want to say which side is which; these don't ask.
+  const [refs, setRefs] = useState<{ blob: Blob; url: string }[]>([]);
   function pickView(slot: ViewSlot, file: File) {
     setViews((v) => {
       v[slot] && URL.revokeObjectURL(v[slot]!.url);
@@ -1485,12 +1489,30 @@ export default function App() {
     if (image) URL.revokeObjectURL(image.url);
     setImage(null);
     clearAllViews(); // extra angles are meaningless without a front image
+    for (const r of refs) URL.revokeObjectURL(r.url);
+    setRefs([]);
+  }
+
+  /** A multi-file attach (drop, paste, picker): first raster becomes THE reference,
+   *  the rest ride along as unlabelled extra references — nobody is made to say which
+   *  photo is the front. Non-rasters (SVG, 3D files) keep their special handling via
+   *  pickImage, one at a time. */
+  function pickImages(files: File[]) {
+    const rasters = files.filter((f) => f.type.startsWith("image/") && f.type !== "image/svg+xml");
+    const rest = files.filter((f) => !rasters.includes(f));
+    if (rest.length) pickImage(rest[0]); // svg/3d: single-file semantics, unchanged
+    if (!rasters.length) return;
+    if (!image) pickImage(rasters[0]);
+    const extras = (image ? rasters : rasters.slice(1)).slice(0, 5 - refs.length);
+    if (extras.length) {
+      setRefs((r) => [...r, ...extras.map((f) => ({ blob: f as Blob, url: URL.createObjectURL(f) }))]);
+    }
   }
 
   // Paste an image straight from the clipboard (screenshot, copied file) anywhere
-  // in the app — routes exactly like an upload.
+  // in the app — INCLUDING the Launchpad, where it lands in the launch composer's
+  // attachment chip. The old `entered` gate made paste dead on the front door.
   useEffect(() => {
-    if (!entered) return;
     const onPaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
@@ -2766,7 +2788,7 @@ export default function App() {
   // "Thinking…" bubbles side by side, two API calls, and the loser of the race
   // surfacing as a network error. A ref flips the instant the first call enters.
   const sendingRef = useRef(false);
-  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean }) {
+  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean }) {
     if (sendingRef.current) return;
     sendingRef.current = true;
     setImproveBefore(null); // the composer is being emptied; there is nothing left to revert
@@ -2834,7 +2856,7 @@ export default function App() {
     }
   }
 
-  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean }) {
+  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean }) {
     if (pendingRef.current) discardPending(true); // a new ask supersedes the held proposal
     const p = promptText.trim();
     if (status === "generating") return;
@@ -2857,7 +2879,9 @@ export default function App() {
     const brainKeys = { anthropic: key, ...llmKeys };
     let routedMode: Mode | null = null;
     let refineRoute = false; // routed to mesh specifically to refine the CURRENT model
-    if (!forceMode && !result && modePref === "auto" && (p || (image && !image.markup))) {
+    // `routeAuto` forces routing regardless of the pref STATE: the Launchpad resets the
+    // pref to Auto and sends in the same tick, so this closure still sees the old value.
+    if (!forceMode && !result && (modePref === "auto" || override?.routeAuto) && (p || (image && !image.markup))) {
       const organic = ORGANIC_RE.test(p) && !CADISH_RE.test(p);
       const cadish = CADISH_RE.test(p) && !ORGANIC_RE.test(p);
       if (mode === "precise" && organic) routedMode = "generative";
@@ -2991,7 +3015,7 @@ export default function App() {
             const rr = await researchDimensions(p, rk, genCtx);
             if (rr) {
               genPrompt = `${genPrompt}\n\nReal product measurements (researched online, mm):\n${rr.text}`;
-              setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Measurements found online:\n${rr.text}`, sources: rr.sources }]);
+              setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Measurements found online:\n${rr.text}`, sources: rr.sources, images: rr.images }]);
             }
           } catch { /* research is best-effort */ }
         }
@@ -3148,6 +3172,7 @@ export default function App() {
 
     const kind = sel.kind;
     const visionImage = image; // capture before we clear it
+    const visionRefs = refs;   // the unlabelled extras ride with it
     const visionThumb = visionImage ? await blobToDataURL(visionImage.blob) : undefined;
     // "Circle it and ask": a marked screenshot of the CURRENT model edits the existing
     // program (the marker is a pointer), unlike a photo which rebuilds from scratch.
@@ -3200,6 +3225,7 @@ export default function App() {
     // Gemini's free search grounding or Claude's web-search tool; best-effort —
     // if neither key is set or the lookup fails, generation continues as before.
     let researched: string | null = null;
+    let researchImages: string[] = [];
     let researchSources: { url: string; title?: string }[] = [];
     // Web research is gated by the composer's Web toggle:
     //   On   → always look up the web before building
@@ -3237,12 +3263,14 @@ export default function App() {
       const rr = await researchDimensions(p, researchKeys, partContext);
       researched = rr?.text ?? null;
       researchSources = rr?.sources ?? [];
+      researchImages = rr?.images ?? [];
       if (researched) {
         // Show the found measurements as their own note, above the working placeholder —
-        // with the pages the lookup actually used, so the numbers can be checked.
+        // with the pages the lookup actually used, so the numbers can be checked, and
+        // any product photos it found, so the product can be eyeballed.
         setMessages((m) => {
           const idx = m.findIndex((x) => x.id === placeholderId);
-          const note = { id: mid(), role: "assistant" as const, text: `Measurements found online:\n${researched}`, sources: researchSources };
+          const note = { id: mid(), role: "assistant" as const, text: `Measurements found online:\n${researched}`, sources: researchSources, images: researchImages };
           return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
         });
       }
@@ -3281,8 +3309,29 @@ export default function App() {
         { type: "image" as const, mediaType: v.blob.type || "image/png", dataBase64: b64 },
       ];
     }))).flat();
-    if (extraViews.length) {
-      pushStep(`Reading ${extraViews.length + 1} reference photos (front, ${extraViews.map((v) => v.label).join(", ")})`);
+    // Unlabelled extras from a multi-photo drop — same object, angle unstated. The model
+    // is told exactly that, so it treats them as additional observations rather than
+    // inventing a side for each.
+    const refParts = (await Promise.all((markupEdit ? [] : visionRefs).map(async (r) => {
+      const b64 = (await blobToDataURL(r.blob)).split(",")[1];
+      return [
+        { type: "text" as const, text: "Additional reference photo of the same object (angle unspecified):" },
+        { type: "image" as const, mediaType: r.blob.type || "image/png", dataBase64: b64 },
+      ];
+    }))).flat();
+    // Product photos the research found, by URL — the PROVIDER fetches them, the only
+    // route a browser app has to third-party images. Gated to APIs that accept URL
+    // image parts; everyone else still gets the researched TEXT and the chat thumbnails.
+    const urlImagesOk = ["anthropic", "openai", "openrouter", "house", "custom"].includes(effLlm.provider);
+    const webRefParts = researchImages.length && urlImagesOk && !markupEdit
+      ? [
+          { type: "text" as const, text: "Product photos found online (visual reference for proportions and features):" },
+          ...researchImages.slice(0, 2).map((u) => ({ type: "image_url" as const, url: u })),
+        ]
+      : [];
+    const extraCount = extraViews.length + (markupEdit ? 0 : visionRefs.length);
+    if (extraCount) {
+      pushStep(`Reading ${extraCount + 1} reference photos${extraViews.length ? ` (front, ${extraViews.map((v) => v.label).join(", ")})` : ""}`);
     }
     const userMsg: ApiMsg = visionImage
       ? {
@@ -3290,6 +3339,8 @@ export default function App() {
           content: [
             { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
             ...extraViewParts,
+            ...refParts,
+            ...webRefParts,
             {
               type: "text",
               text: markupEdit
@@ -3298,7 +3349,11 @@ export default function App() {
             },
           ],
         }
-      : { role: "user", content: pWithFacts };
+      : webRefParts.length
+        // Text-only ask, but the research found product photos: attach them anyway —
+        // "a stand for an iPhone 17" built while LOOKING at the phone beats memory.
+        ? { role: "user", content: [...webRefParts, { type: "text", text: pWithFacts }] }
+        : { role: "user", content: pWithFacts };
     // Cap the rolling context so long sessions don't slow down / blow the window.
     let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
     let finalRaw = "";
@@ -3775,7 +3830,16 @@ export default function App() {
         onAllProjects={() => { setEntered(true); setShowLibrary(true); }}
         accountEmail={accountEmail}
         onFree={enterFree}
-        onSubmit={(text) => { setEntered(true); void send(text); }}
+        // A launchpad ask always routes: the front door has no engine switch, so a pref
+        // pinned in some earlier session must not silently steer this build. Auto is
+        // re-assertable in one tap from the workspace seg once inside.
+        onSubmit={(text) => { pickMode("auto"); setEntered(true); void send(text, undefined, { routeAuto: true }); }}
+        imageUrl={image && !image.markup ? image.url : null}
+        refsCount={refs.length}
+        onPickFiles={pickImages}
+        onClearImage={clearImage}
+        webMode={webMode}
+        onCycleWeb={cycleWeb}
         animateIn={!beenHome}
       />
     );
@@ -3833,6 +3897,8 @@ export default function App() {
         imageMarkup={!!image?.markup}
         imageNote={image?.region ? `covers ≈ ${Math.max(0.1, Math.round((image.region.max[0] - image.region.min[0]) * 10) / 10)} × ${Math.max(0.1, Math.round((image.region.max[1] - image.region.min[1]) * 10) / 10)} × ${Math.max(0.1, Math.round((image.region.max[2] - image.region.min[2]) * 10) / 10)} mm` : null}
         onPickImage={pickImage}
+        onPickImages={pickImages}
+        refsCount={refs.length}
         onMarkup={attachMarkup}
         onClearImage={clearImage}
         aiPreview={{
@@ -4760,7 +4826,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -4772,6 +4838,12 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onSkip: () => void;
   onFree: () => void;
   onSubmit: (text: string) => void;
+  imageUrl: string | null;
+  refsCount: number;
+  onPickFiles: (fs: File[]) => void;
+  onClearImage: () => void;
+  webMode: "auto" | "on" | "off";
+  onCycleWeb: () => void;
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
   recent?: { id: string; name: string; engine: string; thumb?: string }[];
@@ -4822,9 +4894,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
     }
   }
 
+  const [dragOver, setDragOver] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const submit = () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text && !imageUrl) return; // a photo alone is a valid ask ("recreate this")
     onSubmit(text); // straight into send() — never re-typed into the workspace composer
   };
 
@@ -4863,7 +4937,25 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         <h1 className="launch-h1">What do you want to make?</h1>
         <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
 
-        <form className="launch-composer" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <form
+          className={`launch-composer${dragOver ? " drop" : ""}`}
+          onSubmit={(e) => { e.preventDefault(); submit(); }}
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={(e) => {
+            e.preventDefault();
+            setDragOver(false);
+            const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
+            if (fs.length) onPickFiles(fs);
+          }}
+        >
+          {imageUrl && (
+            <div className="launch-imgchip">
+              <img src={imageUrl} alt="reference" />
+              <span>{refsCount > 0 ? `${refsCount + 1} reference photos` : "reference photo"}</span>
+              <button type="button" aria-label="Remove reference photos" onClick={onClearImage}><IconX /></button>
+            </div>
+          )}
           <textarea
             autoFocus
             rows={1}
@@ -4882,12 +4974,35 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
           />
           <div className="launch-composer-foot">
-            {/* Real path, not decoration: this is the guided photo flow the app already has. */}
-            <button type="button" className="launch-attach" onClick={onGuided}>
-              <IconPaperclip /> Start from a photo
+            {/* Attaches, like every chat app's clip — drop and paste land in the same
+                place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}
+            <button type="button" className="launch-attach" onClick={() => fileRef.current?.click()}>
+              <IconPaperclip /> Add photos
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
+              multiple
+              hidden
+              onChange={(e) => {
+                const fs = Array.from(e.target.files ?? []);
+                if (fs.length) onPickFiles(fs);
+                e.currentTarget.value = "";
+              }}
+            />
+            <button
+              type="button"
+              className={`web-toggle web-${webMode}`}
+              onClick={onCycleWeb}
+              aria-label={`Web search: ${webMode}`}
+              title="Web search for real dimensions (and product photos) before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
+            >
+              <IconGlobe size={13} />
+              <span className="web-state">{webMode === "auto" ? "Auto" : webMode === "on" ? "On" : "Off"}</span>
             </button>
           </div>
-          <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim()}><IconArrowUp /></button>
+          <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>
         </form>
         <p className="launch-fine">Sizes are AI-generated. Check the fit before a long print.</p>
 

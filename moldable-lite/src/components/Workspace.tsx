@@ -1366,6 +1366,8 @@ interface Props {
     apply: () => void;
   };
   onPickImage: (f: File) => void;
+  onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
+  refsCount: number; // extra unlabelled reference photos riding with the composer image
   onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
   views: Partial<Record<"left" | "back" | "right", string>>;
@@ -1697,8 +1699,9 @@ export function Workspace(p: Props) {
     e.preventDefault();
     setDragOver(false);
     setDragOverCanvas(false);
-    const f = Array.from(e.dataTransfer.files).find((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
-    if (f) p.onPickImage(f);
+    // ALL usable files, not the first: extra photos become unlabelled references.
+    const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
+    if (fs.length) p.onPickImages(fs);
   }
 
   const objectsPanel = (
@@ -2008,7 +2011,7 @@ export function Workspace(p: Props) {
             {p.imageUrl && (
               <div className="imgchip">
                 <img src={p.imageUrl} alt={p.imageMarkup ? "marked screenshot" : "reference"} />
-                <span>{p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : "reference image"}</span>
+                <span>{p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : p.refsCount > 0 ? `${p.refsCount + 1} reference photos` : "reference image"}</span>
                 {p.mode === "precise" && !p.imageMarkup && (
                   <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
                 )}
@@ -2046,10 +2049,11 @@ export function Workspace(p: Props) {
                 ref={fileRef}
                 type="file"
                 accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
+                multiple
                 hidden
                 onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) p.onPickImage(f);
+                  const fs = Array.from(e.target.files ?? []);
+                  if (fs.length) p.onPickImages(fs);
                   e.currentTarget.value = "";
                 }}
               />
@@ -3258,6 +3262,18 @@ const MessageRow = memo(function MessageRow({ m, editing, editText, thinking, bu
                   <summary>Thought process</summary>
                   <div className="think-body">{m.thinking}</div>
                 </details>
+              )}
+              {/* Product photos the research found — display-only <img>s (the browser may
+                  fetch them; reading their BYTES is what CORS forbids). A URL that 404s
+                  or blocks hotlinking hides itself rather than showing a broken glyph. */}
+              {!!m.images?.length && (
+                <div className="ref-strip">
+                  {m.images.map((u, i) => (
+                    <a key={i} href={u} target="_blank" rel="noopener noreferrer" title="Product photo found online — open full size">
+                      <img src={u} alt="Product photo found online" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }} />
+                    </a>
+                  ))}
+                </div>
               )}
               {!!m.sources?.length && (
                 <div className="src-row">

@@ -15,7 +15,11 @@ export const MODELS = [
 
 export type MsgPart =
   | { type: "text"; text: string }
-  | { type: "image"; mediaType: string; dataBase64: string };
+  | { type: "image"; mediaType: string; dataBase64: string }
+  /** A web image by URL — the PROVIDER fetches it, which is the only route a browser
+   *  app has to third-party images (CORS forbids reading the bytes client-side). Only
+   *  attach these for providers whose APIs accept URL images. */
+  | { type: "image_url"; url: string };
 
 export interface ApiMsg {
   role: "user" | "assistant";
@@ -27,7 +31,9 @@ function toAnthropicContent(c: string | MsgPart[]): unknown {
   return c.map((p) =>
     p.type === "text"
       ? { type: "text", text: p.text }
-      : { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.dataBase64 } },
+      : p.type === "image_url"
+        ? { type: "image", source: { type: "url", url: p.url } }
+        : { type: "image", source: { type: "base64", media_type: p.mediaType, data: p.dataBase64 } },
   );
 }
 

@@ -44,6 +44,7 @@ function researchPrompt(request: string, context?: string): string {
     `   • Mating tolerances: note typical FDM clearance (~0.2–0.4 mm) for any snug/press fit surface.`,
     ``,
     `Output: a compact spec sheet in MILLIMETRES, one fact per line as "label: value (source)". Group under the product name. State the product variant you assumed. Flag any figure you're unsure of with "≈". Convert all units to mm.`,
+    `After the spec sheet, if the pages you used carry official or retailer PHOTOS of the exact product, add a final block starting with the exact line "IMAGES:" followed by up to 3 DIRECT image URLs (https, ending .jpg/.jpeg/.png/.webp), one per line — direct image files, never page URLs. Omit the block when unsure.`,
     `If the request involves no specific real-world product, reply with exactly: NONE`,
     `NEVER reply with questions for the user — you have no way to receive answers. If you can't identify a concrete product or standard to research, reply NONE and the build continues without web facts.`,
     `No markdown headers, no preamble, keep it under 220 words.`,
@@ -62,7 +63,20 @@ function timeoutSignal(ms: number): AbortSignal {
   return c.signal;
 }
 
-export interface ResearchResult { text: string; sources: { url: string; title?: string }[] }
+export interface ResearchResult { text: string; sources: { url: string; title?: string }[]; images: string[] }
+
+/** Peel the trailing IMAGES: block off a spec sheet. Strict about what counts — only
+ *  https URLs that END as image files, because these go straight into <img> tags and
+ *  provider-side fetches, where a page URL fails silently or noisily. */
+function splitImages(t: string): { text: string; images: string[] } {
+  const m = t.match(/\nIMAGES:\s*\n?([\s\S]*)$/i);
+  if (!m) return { text: t, images: [] };
+  const images = m[1]
+    .split(/\s+/)
+    .filter((u) => /^https:\/\/\S+\.(?:jpe?g|png|webp)(?:\?\S*)?$/i.test(u))
+    .slice(0, 3);
+  return { text: t.slice(0, m.index).trim(), images };
+}
 
 function dedupeSources(list: { url: string; title?: string }[]): { url: string; title?: string }[] {
   const seen = new Set<string>();
@@ -93,7 +107,8 @@ async function viaGemini(prompt: string, apiKey: string, preferred: string): Pro
   // Gemini grounding metadata carries the pages the answer actually used.
   const chunks: any[] = j?.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
   const sources = dedupeSources(chunks.map((c) => ({ url: c?.web?.uri ?? "", title: c?.web?.title })));
-  return { text: t, sources };
+  const { text: spec, images } = splitImages(t);
+  return { text: spec, sources, images };
 }
 
 async function viaAnthropic(prompt: string, apiKey: string): Promise<ResearchResult | null> {
@@ -126,7 +141,8 @@ async function viaAnthropic(prompt: string, apiKey: string): Promise<ResearchRes
       .flatMap((b) => (Array.isArray(b.content) ? b.content : []))
       .map((r: any) => ({ url: r?.url ?? "", title: r?.title })),
   );
-  return { text: t, sources };
+  const { text: spec, images } = splitImages(t);
+  return { text: spec, sources, images };
 }
 
 // OpenRouter's built-in web plugin — lets OpenRouter users (one key, many models)
@@ -156,7 +172,8 @@ async function viaOpenRouter(prompt: string, apiKey: string, model: string): Pro
   // The web plugin annotates citations OpenAI-style.
   const anns: any[] = Array.isArray(msg?.annotations) ? msg.annotations : [];
   const sources = dedupeSources(anns.map((a) => ({ url: a?.url_citation?.url ?? "", title: a?.url_citation?.title })));
-  return { text: t, sources };
+  const { text: spec, images } = splitImages(t);
+  return { text: spec, sources, images };
 }
 
 export interface ResearchKeys {

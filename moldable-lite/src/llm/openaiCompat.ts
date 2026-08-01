@@ -24,7 +24,9 @@ function toCompatContent(c: import("./anthropic").ApiMsg["content"]): unknown {
   return c.map((p) =>
     p.type === "text"
       ? { type: "text", text: p.text }
-      : { type: "image_url", image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` } },
+      : p.type === "image_url"
+        ? { type: "image_url", image_url: { url: p.url } }
+        : { type: "image_url", image_url: { url: `data:${p.mediaType};base64,${p.dataBase64}` } },
   );
 }
 

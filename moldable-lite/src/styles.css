@@ -1988,3 +1988,18 @@ details.guide { margin-top: 10px; }
   .zoom-ctl button { width: 34px; height: 34px; }
   .view-snaps button { padding: 8px 14px; }
 }
+
+/* ---------- launchpad attachments + research photo strip ---------- */
+.launch-composer.drop textarea { border-style: dashed; border-color: var(--accent); }
+.launch-imgchip {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px;
+  border: 1px solid var(--bord); border-radius: 10px; background: var(--chrome);
+}
+.launch-imgchip img { width: 40px; height: 40px; object-fit: cover; border-radius: 6px; }
+.launch-imgchip span { flex: 1; font-size: 12.5px; color: var(--ink2); }
+.launch-imgchip button { border: none; background: none; color: var(--subt); cursor: pointer; padding: 2px 6px; }
+.launch-imgchip button:hover { color: var(--ink); }
+/* Product photos a research lookup found, shown on its note in the chat. */
+.ref-strip { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.ref-strip a { display: block; border: 1px solid var(--bord); border-radius: 8px; overflow: hidden; background: var(--surf); }
+.ref-strip img { display: block; width: 74px; height: 74px; object-fit: cover; }

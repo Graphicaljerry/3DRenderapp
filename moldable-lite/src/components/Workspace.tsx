@@ -2338,6 +2338,7 @@ export function Workspace(p: Props) {
                 holePlace={p.holeCtl.draft && !p.holeCtl.draft.picking
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
                   : null}
+                onModelDblClick={() => { setDockPanel("params"); setDockOpen(true); }}
                 magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
                   ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, snap: p.magnetCtl.tool.snap, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
                   : p.screwCtl.tool && p.screwCtl.cut
@@ -2410,6 +2411,8 @@ export function Workspace(p: Props) {
                   <AnchoredMenu anchor={anchor} onClose={close} width={200}>
                     {t.kind === "model" && p.geometry && (
                       <>
+                        <Item label="Adjust size & shape" hint="Free sliders — every dimension, no AI" onClick={() => { setDockPanel("params"); setDockOpen(true); }} />
+                        <div className="pmenu-sep" />
                         <Item label="Rename" onClick={() => { setShowLayers(true); setRenaming("model"); }} />
                         <Item label="Duplicate" hint="A movable copy beside it" onClick={() => p.clipboardCtl.duplicate({ kind: "model" })} />
                         <Item label="Copy" onClick={() => p.clipboardCtl.copy({ kind: "model" })} />

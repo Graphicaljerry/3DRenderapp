@@ -111,6 +111,7 @@ interface Props {
   pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round
   modelSelected: boolean; // draw a bounding box around the whole part
   onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
+  onModelDblClick?: () => void; // idle-mode double-click on the part (App opens Adjust)
   attachments: { id: string; geometry: THREE.BufferGeometry; tint?: string }[]; // free-floating objects
   selAttachIds: string[]; // which of them are selected (>1 → group transform)
   onAttachSelect: (id: string | null, additive?: boolean) => void;
@@ -320,11 +321,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, measureMode, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -433,6 +434,38 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     renderer.domElement.addEventListener("pointerdown", onCtxDown);
     renderer.domElement.addEventListener("contextmenu", onCtxMenu);
+
+    // Double-click the part → the app opens Adjust. Allowed in idle AND Select mode
+    // (the default tool — a dblclick just re-picks the same feature first, harmless).
+    // Deliberately NOT in paint/measure/transform modes, where a fast pair of clicks
+    // is real work (brush dabs, measure points) and a panel jump would steal it.
+    // Detected from pointerup pairs, NOT the native dblclick event: the pointer
+    // handlers preventDefault(), which suppresses every synthesized mouse event.
+    let lastTap = { t: 0, x: 0, y: 0 };
+    const onDblPtr = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const now = performance.now();
+      const isDbl = now - lastTap.t < 350 && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < 6;
+      lastTap = { t: now, x: e.clientX, y: e.clientY };
+      if (!isDbl) return;
+      lastTap.t = 0; // a triple-click is not two doubles
+      const s2 = st.current;
+      if (!s2 || !s2.mesh || !s2.mesh.visible) return;
+      // Paint/measure own fast click pairs (brush dabs, measure points); an in-flight
+      // gizmo drag owns its pointerup. The gizmo being merely ARMED (transformMode
+      // "move" is the app default) is fine — a tap there only retargets selection.
+      // Paint/measure own fast click pairs (brush dabs, measure points). The gizmo is
+      // NOT a blocker: it's armed by default and parks at the model's centre, so the
+      // second tap often lands "on" it — but a real drag moves the pointer and the
+      // ≤6px stationary window above already rejects drags.
+      if (cb.current.paintMode || cb.current.measureMode) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      const rcD = new THREE.Raycaster();
+      rcD.setFromCamera(new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+      if (rcD.intersectObjects([...s2.attachMap.values()], false)[0]) return; // floating objects: dblclick means nothing (yet)
+      if (rcD.intersectObject(s2.mesh, false)[0]) cb.current.onModelDblClick?.();
+    };
+    renderer.domElement.addEventListener("pointerup", onDblPtr);
 
     scene.add(new THREE.HemisphereLight(0xffffff, 0x9aa0a8, 1.05));
     const dir = new THREE.DirectionalLight(0xffffff, 1.4);
@@ -1737,6 +1770,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       ro.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onCtxDown);
       renderer.domElement.removeEventListener("contextmenu", onCtxMenu);
+      renderer.domElement.removeEventListener("pointerup", onDblPtr);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);
       renderer.domElement.removeEventListener("pointermove", onMove);

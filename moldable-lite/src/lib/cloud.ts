@@ -104,6 +104,13 @@ async function probeReachable(): Promise<boolean> {
   }
 }
 
+/** Public probe for UI that wants to warn BEFORE a sign-in attempt fails — the
+    sign-in dialog shows the blocked-network explanation up front instead of as
+    the aftermath of a dead OAuth hop. */
+export function cloudReachable(): Promise<boolean> {
+  return probeReachable();
+}
+
 /** OAuth navigates the whole tab to the service's URL — when supabase.co is blocked
     (DNS filter, VPN, ad-block shields, some ISP resolvers), that lands the user on a
     dead browser error page (ERR_ADDRESS_UNREACHABLE — a real report). Check first

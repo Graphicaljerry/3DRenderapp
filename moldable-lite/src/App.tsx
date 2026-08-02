@@ -57,7 +57,7 @@ import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { IS_DESKTOP } from "./lib/desktopUpdate";
-import { DEFAULT_RELAY, cloudSessionState, isNetworkError, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { DEFAULT_RELAY, cloudSessionState, cloudReachable, isNetworkError, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 // On-demand UI (code-split): the SVG modal's svg/extrude graph carries
 // three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
@@ -1469,6 +1469,17 @@ export default function App() {
   // messages.length > 0, which unmounts the empty state (template strip, guided CTA,
   // suggestion chips) — so every OAuth user landed on a blank chat with nothing to do.
   const [authNotice, setAuthNotice] = useState<string | null>(null);
+  // The sign-in POPUP (SignInModal). Opens on demand from any Sign in affordance,
+  // and ONCE per device on the first character a signed-out user types — the
+  // moment they start making something worth keeping. Dismissing it is remembered
+  // (device-local), so it never turns into a nag.
+  const [showSignInModal, setShowSignInModal] = useState(false);
+  function maybePromptSignIn() {
+    if (accountEmailRef.current) return;
+    if (localStorage.getItem("moldable_signin_prompted")) return;
+    try { localStorage.setItem("moldable_signin_prompted", "1"); } catch { /* private mode */ }
+    setShowSignInModal(true);
+  }
   // The provider wall, kept as state rather than a dead-end chat line: the sentence the
   // user typed is preserved and offered two live exits (a free key, or build it as a
   // mesh right now). Every branch still ends in geometry.
@@ -4852,6 +4863,7 @@ export default function App() {
 
   if (!entered) {
     return (
+      <>
       <Launchpad
         model={model}
         theme={theme}
@@ -4869,6 +4881,8 @@ export default function App() {
         onAllProjects={() => { setEntered(true); setShowLibrary(true); }}
         accountEmail={accountEmail}
         cloudOffline={cloudOffline}
+        onSignIn={() => setShowSignInModal(true)}
+        onFirstInput={maybePromptSignIn}
         onFree={enterFree}
         // A launchpad ask always routes: the front door has no engine switch, so a pref
         // pinned in some earlier session must not silently steer this build. Auto is
@@ -4889,6 +4903,8 @@ export default function App() {
         photoAdvice={imageAdvice({ provider: llm.provider, mesh: modePref === "generative" })}
         animateIn={!beenHome}
       />
+      {showSignInModal && !accountEmail && <SignInModal cloudOffline={cloudOffline} onClose={() => setShowSignInModal(false)} />}
+      </>
     );
   }
 
@@ -4927,9 +4943,16 @@ export default function App() {
         theme={theme}
         onToggleTheme={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
         onOpenProfile={() => {
+          // Signed out, the avatar's job is getting signed IN — the popup, not a
+          // settings pane. Signed in, "Account & sync" still opens the full pane.
+          if (!accountEmailRef.current) {
+            setShowSignInModal(true);
+            return;
+          }
           setSettingsPane("sync");
           setShowSettings(true);
         }}
+        onComposerFocus={maybePromptSignIn}
         onSignOut={() => {
           void cloudSignOut().finally(() => {
             setAccountEmail(null);
@@ -5330,6 +5353,7 @@ export default function App() {
         />
       )}
       {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} refreshTick={libTick} onMutated={scheduleSync} />}
+      {showSignInModal && !accountEmail && <SignInModal cloudOffline={cloudOffline} onClose={() => setShowSignInModal(false)} />}
       {showTemplates && <TemplatesModal onPick={(t) => void loadTemplate(t)} onClose={() => setShowTemplates(false)} busy={status === "generating"} />}
       {showMeasure && image && (
         <MeasureModal
@@ -6026,7 +6050,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -6052,51 +6076,13 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onAllProjects?: () => void;
   accountEmail?: string | null;
   cloudOffline?: boolean;
+  onSignIn: () => void;
+  onFirstInput?: () => void;
   animateIn?: boolean;
 }) {
   const [draft, setDraft] = useState("");
-  const [showSignIn, setShowSignIn] = useState(false);
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
-  const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState(false);
-
-  async function auth(op: "github" | "google" | "magic" | "signup" | "signin" | "reset") {
-    setBusy(true);
-    setErr(false);
-    setMsg(
-      op === "magic" ? "Sending your login link…"
-      : op === "reset" ? "Sending your reset link…"
-      : op === "signup" ? "Creating your account…"
-      : op === "signin" ? "Signing in…"
-      : `Taking you to ${op === "github" ? "GitHub" : "Google"}…`,
-    );
-    try {
-      if (op === "magic") setMsg(await cloudMagicLink(email.trim()));
-      else if (op === "reset") setMsg(await cloudResetPassword(email.trim()));
-      else if (op === "signup") setMsg(await cloudSignUp(email.trim(), pw));
-      else if (op === "signin") {
-        await cloudSignIn(email.trim(), pw);
-        setMsg("Signed in — loading your projects…");
-      } else await cloudOAuth(op); // navigates away on success
-    } catch (e: any) {
-      setErr(true);
-      const raw = String(e?.message ?? e);
-      setMsg(
-        /provider is not enabled|unsupported provider|validation_failed/i.test(raw)
-          ? "This provider isn't switched on yet (one-time setup in docs/SOCIAL_LOGIN.md) — use the email login link or a password instead."
-          : /email not confirmed/i.test(raw) ? "Almost there — open the confirmation email (check spam) and click the link, then Sign in."
-          : /already registered/i.test(raw) ? "This email already has an account — press Sign in."
-          : /invalid login credentials/i.test(raw) ? "Wrong email or password."
-          : raw,
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
 
   const [dragOver, setDragOver] = useState(false);
   // What kind of thing is being built — asked UP FRONT, because the two engines have
@@ -6132,7 +6118,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? "☀" : "☾"}</button>
           {accountEmail
             ? <span className="launch-account" title={cloudOffline ? `Signed in as ${accountEmail} — the sync service isn't reachable from this network right now; changes stay on this device until it is` : `Signed in as ${accountEmail}`}>Signed in · {accountEmail}{cloudOffline ? " · offline" : ""}</span>
-            : <button className="ghost sm" aria-expanded={showSignIn} onClick={() => setShowSignIn((v) => !v)}>Sign in</button>}
+            : <button className="ghost sm" onClick={onSignIn}>Sign in</button>}
         </div>
       </header>
 
@@ -6174,6 +6160,10 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             rows={1}
             value={draft}
             onChange={(e) => {
+              // The very first character someone types is the "they're really using
+              // this" moment — the one-time sign-in nudge hangs off it (App decides
+              // whether it fires; autoFocus makes a focus trigger fire at page load).
+              if (!draft && e.target.value) onFirstInput?.();
               setDraft(e.target.value);
               // Grow with the text up to the CSS max-height; the scrollbar exists only
               // beyond that. Without this the box was fixed-height with overflow:auto,
@@ -6282,32 +6272,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           </button>
         </section>
 
-        {showSignIn && !accountEmail && (
+        {/* Sign-in itself lives in the SignInModal popup now (one dialog serves every
+            entry point). What stays inline are the non-account extras that used to
+            hide behind the Sign in toggle — collapsed, so the page stays calm. */}
+        {!accountEmail && (
         <div className="launch-signin">
-        <div className="sect-label">Sign in — sync your projects &amp; keys across devices</div>
-        {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
-        <div className="social-col">
-          <button className="ghost block social" disabled={busy} onClick={() => auth("github")}>
-            <IconGitHub /> Continue with GitHub
-          </button>
-          <button className="ghost block social" disabled={busy} onClick={() => auth("google")}>
-            <IconGoogle /> Continue with Google
-          </button>
-        </div>
-        <div className="magicrow">
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-          <button className="ghost" disabled={busy || !email.includes("@")} onClick={() => auth("magic")}>Email me a login link</button>
-        </div>
-        <details className="adv">
-          <summary>Or use a password</summary>
-          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
-          <div className="param-actions">
-            <button className="primary sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signup")}>Create account</button>
-            <button className="ghost sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signin")}>Sign in</button>
-            <button className="link" disabled={busy || !email.includes("@")} onClick={() => auth("reset")}>Forgot password?</button>
-          </div>
-        </details>
-
         <details className="adv">
           <summary>Advanced — add an Anthropic key now (best CAD quality)</summary>
           <label>Anthropic API key — exact parts, editable STEP export</label>
@@ -6332,7 +6301,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
                 actionable. Signed out it is a real offer, so that half stays. */}
             {!accountEmail && (
               <>{" "}Runs in your browser; designs and keys stay on this device.{" "}
-                <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button></>
+                <button className="link" onClick={onSignIn}>Sign in to sync</button></>
             )}
           </span>
           <span className="launch-actions">
@@ -6343,6 +6312,105 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         </footer>
        </div>
       </main>
+    </div>
+  );
+}
+
+/** The sign-in POPUP. Sign-in used to be an inline section at the bottom of the
+    launchpad — easy to scroll past, and on a blocked network its explanation only
+    appeared AFTER a failed provider click. One dialog now serves every entry point
+    (the Sign in button, the footer link, the first character typed by a signed-out
+    user, the workspace avatar), and it probes whether the sync service is even
+    reachable the moment it opens — so "your network blocks supabase.co" is the
+    first thing on screen, not the aftermath of a dead OAuth hop. */
+function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose: () => void }) {
+  const [email, setEmail] = useState("");
+  const [pw, setPw] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState(false);
+  const [reach, setReach] = useState<boolean | null>(null); // null = still probing
+  const probe = () => {
+    setReach(null);
+    void cloudReachable().then(setReach).catch(() => setReach(false));
+  };
+  useEffect(probe, []);
+  const blocked = reach === false || cloudOffline;
+
+  async function auth(op: "github" | "google" | "magic" | "signup" | "signin" | "reset") {
+    setBusy(true);
+    setErr(false);
+    setMsg(
+      op === "magic" ? "Sending your login link…"
+      : op === "reset" ? "Sending your reset link…"
+      : op === "signup" ? "Creating your account…"
+      : op === "signin" ? "Signing in…"
+      : `Taking you to ${op === "github" ? "GitHub" : "Google"}…`,
+    );
+    try {
+      if (op === "magic") setMsg(await cloudMagicLink(email.trim()));
+      else if (op === "reset") setMsg(await cloudResetPassword(email.trim()));
+      else if (op === "signup") setMsg(await cloudSignUp(email.trim(), pw));
+      else if (op === "signin") {
+        await cloudSignIn(email.trim(), pw);
+        setMsg("Signed in — loading your projects…");
+      } else await cloudOAuth(op); // navigates away on success
+    } catch (e: any) {
+      setErr(true);
+      const raw = String(e?.message ?? e);
+      setMsg(
+        /provider is not enabled|unsupported provider|validation_failed/i.test(raw)
+          ? "This provider isn't switched on yet (one-time setup in docs/SOCIAL_LOGIN.md) — use the email login link or a password instead."
+          : /email not confirmed/i.test(raw) ? "Almost there — open the confirmation email (check spam) and click the link, then Sign in."
+          : /already registered/i.test(raw) ? "This email already has an account — press Sign in."
+          : /invalid login credentials/i.test(raw) ? "Wrong email or password."
+          : raw,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="card signin-card" onClick={(e) => e.stopPropagation()}>
+        <div className="card-head">
+          <h2>Save &amp; sync your work</h2>
+          <button className="x" aria-label="Close" onClick={onClose}><IconX size={16} /></button>
+        </div>
+        <p className="fine">One free account keeps your projects, chats and keys on every device — encrypted in your browser before anything uploads. Skip it and everything still saves on this device.</p>
+        {blocked && (
+          <div className="sync-status err" role="status">
+            Before you pick a provider: this network can't reach the sync service (supabase.co looks blocked — a DNS filter, VPN, or browser shields are the usual culprits), so sign-in can't complete from here. Try another network, or set this device's DNS to 1.1.1.1, then{" "}
+            <button className="link" onClick={probe}>check again</button>.
+          </div>
+        )}
+        {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
+        <div className="social-col">
+          <button className="ghost block social" disabled={busy} onClick={() => auth("github")}>
+            <IconGitHub /> Continue with GitHub
+          </button>
+          <button className="ghost block social" disabled={busy} onClick={() => auth("google")}>
+            <IconGoogle /> Continue with Google
+          </button>
+        </div>
+        <div className="magicrow">
+          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+          <button className="ghost" disabled={busy || !email.includes("@")} onClick={() => auth("magic")}>Email me a login link</button>
+        </div>
+        <details className="adv">
+          <summary>Or use a password</summary>
+          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
+          <div className="param-actions">
+            <button className="primary sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signup")}>Create account</button>
+            <button className="ghost sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signin")}>Sign in</button>
+            <button className="link" disabled={busy || !email.includes("@")} onClick={() => auth("reset")}>Forgot password?</button>
+          </div>
+        </details>
+        <div className="modal-actions">
+          <button className="ghost" onClick={onClose}>Not now — keep it on this device</button>
+        </div>
+      </div>
     </div>
   );
 }

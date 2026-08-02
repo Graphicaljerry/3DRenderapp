@@ -1335,6 +1335,8 @@ interface Props {
   booting: boolean;
   accountEmail: string | null;
   onOpenProfile: () => void;
+  /** First focus of the chat composer — App uses it for the one-time sign-in nudge. */
+  onComposerFocus?: () => void;
   onSignOut: () => void;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -2171,6 +2173,7 @@ export function Workspace(p: Props) {
                   ref={composerRef}
                   rows={1}
                   value={p.input}
+                  onFocus={() => p.onComposerFocus?.()}
                   onChange={(e) => p.setInput(e.target.value)}
                   onKeyDown={(e) => {
                     // Enter sends (Shift+Enter = new line), like every chat app.

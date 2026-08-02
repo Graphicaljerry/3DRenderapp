@@ -1,6 +1,7 @@
 import { IconX } from "./icons";
 import { useEffect, useMemo, useState } from "react";
 import { listProjects, deleteProject, duplicateProject, putProject } from "../store/projects";
+import { recordTombstone } from "../lib/cloud";
 import type { Project } from "../store/types";
 
 type SortId = "recent" | "oldest" | "name" | "versions";
@@ -10,7 +11,7 @@ function haystack(p: Project): string {
   return [p.name, p.genSource?.prompt ?? "", ...p.versions.map((v) => v.summary)].join(" ").toLowerCase();
 }
 
-export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOpen: (p: Project) => void; onClose: () => void; currentId?: string; refreshTick?: number }) {
+export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutated }: { onOpen: (p: Project) => void; onClose: () => void; currentId?: string; refreshTick?: number; onMutated?: () => void }) {
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");
@@ -61,6 +62,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
     }
     await putProject({ ...p, folder: name, updatedAt: Date.now() }); // updatedAt so it syncs across devices
     void refresh();
+    onMutated?.();
   }
 
   const folderCount = (f: string | null) =>
@@ -81,9 +83,13 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
   async function deleteSelected() {
     if (!selIds.size) return;
     if (!confirm(`Delete ${selIds.size} model${selIds.size === 1 ? "" : "s"}? This can't be undone.`)) return;
-    for (const id of selIds) await deleteProject(id);
+    for (const id of selIds) {
+      await deleteProject(id);
+      recordTombstone(id); // sync merges — without this the account copy rides right back in
+    }
     exitSelect();
     void refresh();
+    onMutated?.();
   }
   /** Bulk move: same semantics as the per-card select ("" unfiles, "__new__" prompts once). */
   async function moveSelected(dest: string) {
@@ -100,6 +106,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
     }
     exitSelect();
     void refresh();
+    onMutated?.();
   }
 
   return (
@@ -223,6 +230,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
                           onClick={async () => {
                             await duplicateProject(p.id);
                             void refresh();
+                            onMutated?.();
                           }}
                         >
                           Duplicate
@@ -245,7 +253,9 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick }: { onOp
                           onClick={async () => {
                             if (confirm(`Delete “${p.name}”? This can't be undone.`)) {
                               await deleteProject(p.id);
+                              recordTombstone(p.id); // sync merges — the account copy must not ride back in
                               void refresh();
+                              onMutated?.();
                             }
                           }}
                         >

@@ -57,7 +57,7 @@ import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { IS_DESKTOP } from "./lib/desktopUpdate";
-import { DEFAULT_RELAY, cloudUser, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { DEFAULT_RELAY, cloudSessionState, isNetworkError, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 // On-demand UI (code-split): the SVG modal's svg/extrude graph carries
 // three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
@@ -304,25 +304,49 @@ export default function App() {
     const v = localStorage.getItem("moldable_last_sync");
     return v ? Number(v) : null;
   });
+  const lastSyncRef = useRef<number | null>(null);
   const markSynced = () => {
     const t = Date.now();
     localStorage.setItem("moldable_last_sync", String(t));
+    lastSyncRef.current = t;
     setLastSyncAt(t);
     setSyncState("synced");
   };
+  // "Signed in but the sync service is unreachable from here" — a real state (blocked
+  // network, captive portal, sleep) that used to render as plain "signed out" while
+  // the cached models stayed visible. Kept separate so the UI can say the truth and
+  // the reconnect loop below knows to keep trying.
+  const [cloudOffline, setCloudOffline] = useState(false);
+  const cloudOfflineRef = useRef(false);
+  cloudOfflineRef.current = cloudOffline;
 
-  // Debounced auto-push: any local change (project or settings) uploads shortly
-  // after, but only while signed in.
+  // Debounced auto-sync: any local change (project or settings) runs a full two-way
+  // cycle shortly after, but only while signed in.
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** One two-way cycle: merge the account's changes in, push this device's out.
+      A network failure flips the honest offline flag instead of pretending idle. */
+  const runSync = async () => {
+    if (!accountEmailRef.current) return;
+    setSyncState("syncing");
+    try {
+      const r = await cloudSyncPush();
+      if (!r) { setSyncState("idle"); return; } // no live session (offline boot) — the reconnect loop owns recovery
+      markSynced();
+      setCloudOffline(false);
+      if (r.adopted.length || r.deleted.length) onRemoteProjects(r.adopted, r.deleted);
+    } catch (e) {
+      setSyncState("idle");
+      if (isNetworkError(e)) setCloudOffline(true);
+    }
+  };
+  // Timers and [] effects below would otherwise capture their first render — route
+  // through a ref so every cycle runs with the CURRENT closures (engine, project…).
+  const runSyncRef = useRef(runSync);
+  runSyncRef.current = runSync;
   const scheduleSync = () => {
     if (!accountEmailRef.current) return;
     if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(() => {
-      setSyncState("syncing");
-      void cloudSyncPush()
-        .then(() => markSynced())
-        .catch(() => setSyncState("idle"));
-    }, 2500);
+    syncTimer.current = setTimeout(() => void runSyncRef.current(), 2500);
   };
   const accountEmailRef = useRef<string | null>(null);
   accountEmailRef.current = accountEmail;
@@ -356,27 +380,79 @@ export default function App() {
   }
 
   useEffect(() => {
-    void cloudUser().then((u) => {
-      setAccountEmail(u?.email ?? null);
-      if (u) void pullOnSignIn();
+    void cloudSessionState().then((s) => {
+      setAccountEmail(s.email);
+      setCloudOffline(s.offline);
+      if (s.email && !s.offline) void pullOnSignIn();
     }).catch(() => {});
     let unsub: (() => void) | undefined;
     void onAuthChange((em) => {
-      setAccountEmail(em);
-      if (em) void pullOnSignIn();
-      else pulledRef.current = false;
+      if (em) {
+        setAccountEmail(em);
+        setCloudOffline(false);
+        void pullOnSignIn();
+      } else if (!cloudOfflineRef.current) {
+        // A null session while cut off is the NETWORK talking, not the user — the
+        // remembered account stays until a reachable server actually refuses it.
+        setAccountEmail(null);
+        pulledRef.current = false;
+      }
     }).then((u) => (unsub = u)).catch(() => {});
     return () => unsub?.();
   }, []);
 
-  // Periodic safety-net autosync: push everything (API keys, settings, chats,
-  // model alterations) to the account on a timer, so nothing depends on a single
-  // change path remembering to sync. No-op while signed out.
+  // Periodic safety-net autosync: a full two-way cycle (their changes in, ours out)
+  // on a timer, so nothing depends on a single change path remembering to sync —
+  // and so a device left open adopts what other devices push. No-op while signed out.
   useEffect(() => {
-    const id = setInterval(() => {
-      if (accountEmailRef.current) void cloudSyncPush().then(() => markSynced()).catch(() => {});
-    }, 45_000);
+    const id = setInterval(() => void runSyncRef.current(), 45_000);
     return () => clearInterval(id);
+  }, []);
+
+  // The way back online: a device that lost the sync service re-checks on every
+  // "maybe it's back" signal — the browser regaining network, waking to the tab, or
+  // a slow timer — and picks its session and library straight back up. Nobody
+  // should ever have to sign in again because of wifi.
+  const reconnectBusy = useRef(false);
+  async function tryReconnect() {
+    if (reconnectBusy.current || !cloudOfflineRef.current) return;
+    reconnectBusy.current = true;
+    try {
+      const s = await cloudSessionState();
+      if (s.email && !s.offline) {
+        setAccountEmail(s.email);
+        setCloudOffline(false);
+        pulledRef.current = false; // full pull again — the account may have moved on
+        await pullOnSignIn();
+      } else if (!s.email) {
+        // Reachable server, no recoverable session: the sign-in genuinely ended.
+        setAccountEmail(null);
+        setCloudOffline(false);
+        setAuthNotice("Your sign-in expired while this device was offline — sign in again in Settings → Sync to keep syncing.");
+      }
+    } finally {
+      reconnectBusy.current = false;
+    }
+  }
+  const tryReconnectRef = useRef(tryReconnect);
+  tryReconnectRef.current = tryReconnect;
+  useEffect(() => {
+    const onOnline = () => void tryReconnectRef.current();
+    const onVis = () => {
+      if (document.visibilityState !== "visible") return;
+      void tryReconnectRef.current();
+      // Returning to the tab also freshens a healthy session — another device may
+      // have pushed while this one slept.
+      if (accountEmailRef.current && !cloudOfflineRef.current && Date.now() - (lastSyncRef.current ?? 0) > 30_000) void runSyncRef.current();
+    };
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVis);
+    const id = setInterval(() => void tryReconnectRef.current(), 60_000);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      document.removeEventListener("visibilitychange", onVis);
+      clearInterval(id);
+    };
   }, []);
 
   const [sel, setSel] = useState<EngineSelection | null>(null);
@@ -441,6 +517,8 @@ export default function App() {
   const [splitPieces, setSplitPieces] = useState<(SplitPiece & { plate?: number })[] | null>(null);
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
+  const geometryRef = useRef<THREE.BufferGeometry | null>(null);
+  geometryRef.current = geometry;
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
   const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string; tint?: string }[]>([]); // free-floating objects (logos, badges, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
@@ -1508,9 +1586,9 @@ export default function App() {
       const next = { ...pr, name: clean, updatedAt: Date.now() };
       projectRef.current = next;
       persist(next);
-      // A rename is a deliberate "save this" moment — push the cloud sync NOW
-      // instead of waiting out the debounce (felt like it hadn't saved).
-      if (accountEmailRef.current) void cloudSyncPush().then(() => markSynced()).catch(() => {});
+      // A rename is a deliberate "save this" moment — sync NOW instead of waiting
+      // out the debounce (felt like it hadn't saved).
+      void runSync();
     } else {
       const chat = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
       const shell = { ...newProject(clean, "replicad"), chat, pins };
@@ -4650,6 +4728,29 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [canUndo, canRedo, hIdx, navBusy, project, selectMode, transformMode, paintMode, paintSteps]);
 
+  /** A sync cycle adopted or deleted projects that changed on ANOTHER device. Most
+      of the time the merged copies just sit in the store (the Library re-lists on
+      open) — but the OPEN project deserves words, and the missing-mesh case loads
+      the bytes that just arrived instead of leaving the red explainer up. */
+  function onRemoteProjects(adopted: string[], deleted: string[]) {
+    setLibTick((t) => t + 1);
+    const open = projectRef.current?.id;
+    if (open && deleted.includes(open)) {
+      setAuthNotice("Heads up — this project was deleted on another device. It's still open here; any new change saves it again.");
+    } else if (open && adopted.includes(open)) {
+      if (!geometryRef.current) {
+        void getProject(open).then((fresh) => {
+          if (fresh && (fresh.glb || fresh.importFile)) {
+            setProject(fresh);
+            void rebuildHead(fresh).catch(() => {});
+          }
+        });
+      } else {
+        setAuthNotice("This project changed on another device — reopen it from the Library to load the latest.");
+      }
+    }
+  }
+
   async function openProjectById(p: Project) {
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
@@ -4767,6 +4868,7 @@ export default function App() {
         onOpenRecent={(id) => { void getProject(id).then((pr) => { if (pr) { setEntered(true); void openProjectById(pr); } }); }}
         onAllProjects={() => { setEntered(true); setShowLibrary(true); }}
         accountEmail={accountEmail}
+        cloudOffline={cloudOffline}
         onFree={enterFree}
         // A launchpad ask always routes: the front door has no engine switch, so a pref
         // pinned in some earlier session must not silently steer this build. Auto is
@@ -4831,6 +4933,7 @@ export default function App() {
         onSignOut={() => {
           void cloudSignOut().finally(() => {
             setAccountEmail(null);
+            setCloudOffline(false);
             pulledRef.current = false;
             setMessages((mm) => [...mm, { id: mid(), role: "assistant", text: "Signed out. This device keeps its own copy; sign in anywhere to sync again." }]);
           });
@@ -5216,10 +5319,17 @@ export default function App() {
           onGridOpacity={setGridOpacity}
           lastSyncAt={lastSyncAt}
           onSynced={markSynced}
+          accountEmail={accountEmail}
+          cloudOffline={cloudOffline}
+          onAccountChange={(em, off) => {
+            setAccountEmail(em);
+            setCloudOffline(off);
+            if (em && !off) void pullOnSignIn();
+          }}
           onClose={() => setShowSettings(false)}
         />
       )}
-      {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} refreshTick={libTick} />}
+      {showLibrary && <LibraryModal onOpen={openProjectById} onClose={() => setShowLibrary(false)} currentId={project?.id} refreshTick={libTick} onMutated={scheduleSync} />}
       {showTemplates && <TemplatesModal onPick={(t) => void loadTemplate(t)} onClose={() => setShowTemplates(false)} busy={status === "generating"} />}
       {showMeasure && image && (
         <MeasureModal
@@ -5916,7 +6026,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -5941,6 +6051,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onOpenRecent?: (id: string) => void;
   onAllProjects?: () => void;
   accountEmail?: string | null;
+  cloudOffline?: boolean;
   animateIn?: boolean;
 }) {
   const [draft, setDraft] = useState("");
@@ -6020,7 +6131,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         <div className="launch-top-right">
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? "☀" : "☾"}</button>
           {accountEmail
-            ? <span className="launch-account" title={`Signed in as ${accountEmail}`}>Signed in · {accountEmail}</span>
+            ? <span className="launch-account" title={cloudOffline ? `Signed in as ${accountEmail} — the sync service isn't reachable from this network right now; changes stay on this device until it is` : `Signed in as ${accountEmail}`}>Signed in · {accountEmail}{cloudOffline ? " · offline" : ""}</span>
             : <button className="ghost sm" aria-expanded={showSignIn} onClick={() => setShowSignIn((v) => !v)}>Sign in</button>}
         </div>
       </header>
@@ -6336,6 +6447,9 @@ function SettingsModal({
   onGridOpacity,
   lastSyncAt,
   onSynced,
+  accountEmail,
+  cloudOffline,
+  onAccountChange,
   clarifyOn,
   onSetClarify,
   onClose,
@@ -6372,6 +6486,9 @@ function SettingsModal({
   onGridOpacity: (v: number) => void;
   lastSyncAt: number | null;
   onSynced: () => void;
+  accountEmail: string | null;
+  cloudOffline: boolean;
+  onAccountChange: (email: string | null, offline: boolean) => void;
   clarifyOn: boolean;
   onSetClarify: (v: boolean) => void;
   onClose: () => void;
@@ -6381,18 +6498,14 @@ function SettingsModal({
   const [syncMsg, setSyncMsg] = useState("");
   const importRef = useRef<HTMLInputElement>(null);
 
-  // Cloud account (email + password; sync payloads are client-side encrypted)
+  // Cloud account (email + password; sync payloads are client-side encrypted).
+  // Signed-in state lives in App (accountEmail/cloudOffline props) — one source of
+  // truth for the modal, the launchpad chip and the sync loops alike.
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [cloudEmail, setCloudEmail] = useState<string | null>(null);
+  const cloudEmail = accountEmail;
   const [cloudBusy, setCloudBusy] = useState(false);
   const [syncErr, setSyncErr] = useState(false);
-  useEffect(() => {
-    void cloudUser().then((u) => setCloudEmail(u?.email ?? null)).catch(() => {});
-    let unsub: (() => void) | undefined;
-    void onAuthChange((em) => setCloudEmail(em)).then((u) => (unsub = u)).catch(() => {});
-    return () => unsub?.();
-  }, []);
   function friendlyAuthError(raw: string): string {
     if (/provider is not enabled|unsupported provider|validation_failed/i.test(raw))
       return "This login provider needs a one-time enable in the Supabase dashboard (2 minutes) — steps are in docs/SOCIAL_LOGIN.md on GitHub. Until then, use “Email me a login link” below.";
@@ -6431,14 +6544,15 @@ function SettingsModal({
         setSyncMsg("Signed out. This device keeps its own copy.");
       }
       if (op === "sync") {
-        await cloudSyncPush();
+        const pushed = await cloudSyncPush();
+        if (!pushed) throw new Error("Still can't reach the sync service — your changes are safe on this device and upload the moment the connection returns.");
         const r = await cloudSyncPull();
         onSynced();
         setSyncMsg("Synced.");
         if (r && (r.settings > 0 || r.projects > 0)) setTimeout(() => window.location.reload(), 600);
       }
-      const u = await cloudUser();
-      setCloudEmail(u?.email ?? null);
+      const s = await cloudSessionState();
+      onAccountChange(s.email, s.offline);
     } catch (e: any) {
       setSyncErr(true);
       setSyncMsg(friendlyAuthError(String(e?.message ?? e)));
@@ -6967,14 +7081,19 @@ function SettingsModal({
             {syncMsg && <div className={`sync-status${syncErr ? " err" : ""}`} role="status">{syncMsg}</div>}
             {cloudEmail ? (
               <>
-                <p className="fine">Signed in as <b>{cloudEmail}</b> — everything syncs automatically.</p>
+                {cloudOffline && (
+                  <div className="sync-status err" role="status">
+                    You're still signed in as <b>{cloudEmail}</b>, but this network can't reach the sync service right now (supabase.co looks blocked — a DNS filter, VPN or browser shields are the usual culprits). Everything keeps saving on this device and syncs itself the moment the connection returns.
+                  </div>
+                )}
+                <p className="fine">Signed in as <b>{cloudEmail}</b> — {cloudOffline ? "changes wait on this device until the sync service is reachable." : "everything syncs automatically."}</p>
                 <p className="fine sync-when">
                   {lastSyncAt
                     ? <>Last synced: <b>{new Date(lastSyncAt).toLocaleString()}</b></>
                     : "Not synced yet — it'll sync automatically after your next change."}
                 </p>
                 <div className="param-actions">
-                  <button className="primary sm" disabled={cloudBusy} onClick={() => doCloud("sync")}>Sync now</button>
+                  <button className="primary sm" disabled={cloudBusy} onClick={() => doCloud("sync")}>{cloudOffline ? "Retry connection" : "Sync now"}</button>
                   <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>
                 </div>
                 <details className="adv">

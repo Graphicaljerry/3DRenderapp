@@ -14,7 +14,7 @@
 //   Tripo/Meshy/fal on the hosted site (DEFAULT_RELAY).
 
 import { encryptPayload, decryptPayload, encryptBytes, decryptBytes, gatherSettings, isLocalOnlyKey } from "./backup";
-import { listProjects, getProject, putProject } from "../store/projects";
+import { listProjects, getProject, putProject, deleteProject } from "../store/projects";
 import type { Project } from "../store/types";
 import { IS_DESKTOP } from "./desktopUpdate";
 
@@ -90,22 +90,84 @@ export async function completeAuthReturn(): Promise<{ email: string } | null> {
   return u;
 }
 
-/** Can THIS machine reach the sync service? OAuth navigates the whole tab to the
-    service's URL — when supabase.co is blocked (DNS filter, VPN, ad-block shields,
-    some ISP resolvers), that lands the user on a dead browser error page
-    (ERR_ADDRESS_UNREACHABLE — a real report). Check first and fail with words. */
-async function ensureReachable(): Promise<void> {
+/** One cheap probe against the auth health endpoint (5 s cap): can THIS machine
+    reach the sync service right now? */
+async function probeReachable(): Promise<boolean> {
   try {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), 5000);
     const r = await fetch(`${SUPA_URL}/auth/v1/health`, { signal: ctl.signal, headers: { apikey: SUPA_KEY } });
     clearTimeout(t);
-    if (!r.ok && r.status !== 401) throw new Error(String(r.status));
+    return r.ok || r.status === 401;
   } catch {
-    throw new Error(
-      "Your network can't reach the sync service (supabase.co looks blocked or unreachable from here — the service itself is up). Common culprits: DNS filtering, a VPN, or browser shields. Try another network or DNS (e.g. 1.1.1.1), or allow supabase.co, then try again.",
-    );
+    return false;
   }
+}
+
+/** OAuth navigates the whole tab to the service's URL — when supabase.co is blocked
+    (DNS filter, VPN, ad-block shields, some ISP resolvers), that lands the user on a
+    dead browser error page (ERR_ADDRESS_UNREACHABLE — a real report). Check first
+    and fail with words. */
+async function ensureReachable(): Promise<void> {
+  if (await probeReachable()) return;
+  throw new Error(
+    "Your network can't reach the sync service (supabase.co looks blocked or unreachable from here — the service itself is up). Common culprits: DNS filtering, a VPN, or browser shields. Try another network or DNS (e.g. 1.1.1.1), or allow supabase.co, then try again.",
+  );
+}
+
+/** A failure that means "the wire", not "the account" — callers should keep treating
+    the user as signed in and retry later, never present them as signed out. */
+export function isNetworkError(e: unknown): boolean {
+  return /failed to fetch|fetch failed|load failed|networkerror|network request|abort|timed? ?out|unreachable/i.test(String((e as any)?.message ?? e));
+}
+
+/** Device-local memory of who was signed in HERE (never synced). The Supabase session
+    can only refresh by reaching the server, so on a network that blocks supabase.co
+    the app used to boot as "signed out" even though the user never signed out — while
+    their cached models stayed visible (the iPad report). This marker lets the app tell
+    "signed out" apart from "signed in, but cut off" and say so honestly. It is cleared
+    only by an explicit sign-out or by a REACHABLE server refusing the session. */
+const LAST_EMAIL = "moldable_cloud_last_email";
+
+export type CloudSessionState = { email: string | null; offline: boolean };
+
+/** The truth about this device's account, network included:
+    - live session               → { email, offline: false }
+    - no session, none remembered → { null, offline: false }
+    - no session, remembered:
+        server unreachable       → { email, offline: true }  (keep everything, retry later)
+        server reachable         → one live refresh attempt; still nothing means the
+                                   sign-in genuinely ended → marker cleared, signed out. */
+export async function cloudSessionState(): Promise<CloudSessionState> {
+  const c = await supa();
+  const { data } = await c.auth.getSession();
+  const live = data?.session?.user?.email ?? null;
+  if (live) {
+    try { localStorage.setItem(LAST_EMAIL, live); } catch { /* private mode */ }
+    return { email: live, offline: false };
+  }
+  const remembered = localStorage.getItem(LAST_EMAIL);
+  if (!remembered) return { email: null, offline: false };
+  if (!(await probeReachable())) return { email: remembered, offline: true };
+  try {
+    const { data: r, error } = await c.auth.refreshSession();
+    const em = r?.session?.user?.email ?? null;
+    if (em) {
+      localStorage.setItem(LAST_EMAIL, em);
+      return { email: em, offline: false };
+    }
+    // The auth client caches a failed refresh for a ~60 s cooldown (and a fetch that
+    // died mid-flight reports the same way) — neither is the server's verdict on the
+    // ACCOUNT. Stay offline-signed-in; the retry loop wins once the cooldown clears.
+    if (error && (error.name === "AuthRetryableFetchError" || isNetworkError(error))) {
+      return { email: remembered, offline: true };
+    }
+  } catch (e) {
+    if (isNetworkError(e)) return { email: remembered, offline: true };
+  }
+  // Only a REACHABLE server with a definitive "no" lands here: the sign-in ended.
+  try { localStorage.removeItem(LAST_EMAIL); } catch { /* private mode */ }
+  return { email: null, offline: false };
 }
 
 export async function cloudOAuth(provider: "github" | "google"): Promise<void> {
@@ -139,7 +201,11 @@ export async function cloudResetPassword(email: string): Promise<string> {
 /** Subscribe to sign-in/out; returns an unsubscribe function. */
 export async function onAuthChange(cb: (email: string | null) => void): Promise<() => void> {
   const c = await supa();
-  const { data } = c.auth.onAuthStateChange((_e: string, session: any) => cb(session?.user?.email ?? null));
+  const { data } = c.auth.onAuthStateChange((_e: string, session: any) => {
+    const em = session?.user?.email ?? null;
+    if (em) try { localStorage.setItem(LAST_EMAIL, em); } catch { /* private mode */ }
+    cb(em);
+  });
   return () => data.subscription.unsubscribe();
 }
 
@@ -170,28 +236,89 @@ export async function cloudSignIn(email: string, password: string): Promise<void
 export async function cloudSignOut(): Promise<void> {
   const c = await supa();
   await c.auth.signOut();
+  try { localStorage.removeItem(LAST_EMAIL); } catch { /* private mode */ }
 }
 
-async function pushBlob(kind: "settings" | "projects", payload: string): Promise<void> {
-  const c = await supa();
-  const { data } = await c.auth.getSession();
-  const uid = data?.session?.user?.id;
-  if (!uid) throw new Error("Sign in first.");
-  const { error } = await c.from("sync_blobs").upsert({ user_id: uid, kind, payload, updated_at: new Date().toISOString() });
+type BlobKind = "settings" | "projects" | "tombstones";
+
+/** Device-local record of the sync_blobs `updated_at` this device last wrote or
+    merged, per kind. Every cycle asks the server for the stamps alone (one tiny
+    SELECT) and only downloads a payload whose stamp it hasn't seen — without this,
+    continuous two-way sync would re-download the whole library every 45 s. */
+const SEEN_KEY = "moldable_sync_stamp";
+function seenStamps(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(SEEN_KEY) ?? "{}") ?? {}; } catch { return {}; }
+}
+function stampSeen(kind: BlobKind, v: string | null): void {
+  const s = seenStamps();
+  if (v == null) delete s[kind];
+  else s[kind] = v;
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(s)); } catch { /* private mode */ }
+}
+/** timestamptz round-trips with different text (Z vs +00:00, µs padding) — compare instants. */
+const sameStamp = (a?: string, b?: string) => !!a && !!b && Date.parse(a) === Date.parse(b);
+
+async function fetchStamps(c: any): Promise<Partial<Record<BlobKind, string>>> {
+  const { data, error } = await c.from("sync_blobs").select("kind, updated_at");
   if (error) throw new Error(error.message);
+  const out: Partial<Record<BlobKind, string>> = {};
+  for (const r of data ?? []) out[r.kind as BlobKind] = r.updated_at;
+  return out;
 }
 
-async function pullBlob(kind: "settings" | "projects"): Promise<string | null> {
-  const c = await supa();
+async function pushBlob(c: any, uid: string, kind: BlobKind, payload: string): Promise<void> {
+  const updated_at = new Date().toISOString();
+  const { error } = await c.from("sync_blobs").upsert({ user_id: uid, kind, payload, updated_at });
+  if (error) throw new Error(error.message);
+  stampSeen(kind, updated_at);
+}
+
+async function pullBlob(c: any, kind: BlobKind): Promise<string | null> {
   const { data, error } = await c.from("sync_blobs").select("payload").eq("kind", kind).maybeSingle();
   if (error) throw new Error(error.message);
   return data?.payload ?? null;
 }
 
+const dec = async (uid: string, blob: string | null) => {
+  if (!blob) return null;
+  try {
+    return await decryptPayload(uid, blob);
+  } catch {
+    return null; // wrong/legacy key — treat as no cloud data
+  }
+};
+
 async function currentUid(): Promise<string | null> {
   const c = await supa();
   const { data } = await c.auth.getSession();
   return data?.session?.user?.id ?? null;
+}
+
+// ---- Deletion tombstones ----
+// Sync is a MERGE now (reconcileRemote): without a record of deletions, a project
+// deleted here would ride straight back in from the account blob on the next cycle,
+// and one deleted elsewhere would never leave this device. Deleting writes a
+// tombstone; tombstones sync as their own tiny blob so every device applies the
+// deletion; an edit made AFTER the deletion wins over it.
+const TOMB_KEY = "moldable_tombstones_v1";
+const TOMB_TTL = 120 * 24 * 3600 * 1000; // after ~4 months every live device has long since applied it
+type TombMap = Record<string, number>; // project id → deletedAt (ms)
+function loadTombs(): TombMap {
+  try {
+    const m = JSON.parse(localStorage.getItem(TOMB_KEY) ?? "{}");
+    return m && typeof m === "object" ? m : {};
+  } catch {
+    return {};
+  }
+}
+function saveTombs(m: TombMap): void {
+  try { localStorage.setItem(TOMB_KEY, JSON.stringify(m)); } catch { /* private mode */ }
+}
+/** Call at the moment a project is deleted locally. */
+export function recordTombstone(id: string): void {
+  const m = loadTombs();
+  m[id] = Date.now();
+  saveTombs(m);
 }
 
 // ---- Mesh blob sync (Storage bucket) ----
@@ -289,48 +416,161 @@ function sanitizeProject(p: Project, lean = false): Project {
   };
 }
 
-/** Upload settings (incl. keys) + projects to the account. No-op when signed out. */
-export async function cloudSyncPush(): Promise<{ projects: number; meshes: number } | null> {
+/** Two-way reconcile with the account: adopt remote tombstones (applying deletions
+    locally), then adopt any remote project newer than this device's copy — meshes
+    included. Cheap when nothing changed remotely (one stamp SELECT, no payloads);
+    `force` downloads regardless (the sign-in pull). Returns what changed on THIS
+    device so the UI can react, plus the merged tombstone map for the push. */
+async function reconcileRemote(c: any, uid: string, force = false): Promise<{ adopted: string[]; deleted: string[]; meshes: number; tombs: TombMap }> {
+  const stamps = await fetchStamps(c);
+  const seen = seenStamps();
+  const need = (k: BlobKind) => force || !sameStamp(stamps[k], seen[k]);
+
+  // Tombstones: union by newest deletedAt, then apply. An edit made after the
+  // deletion wins — the tombstone drops so the edited copy can sync back everywhere.
+  const tombs = loadTombs();
+  if (need("tombstones")) {
+    const tJson = await dec(uid, await pullBlob(c, "tombstones"));
+    if (tJson) {
+      try {
+        for (const [id, at] of Object.entries(JSON.parse(tJson) as TombMap)) {
+          const n = Number(at) || 0;
+          if (n > (tombs[id] ?? 0)) tombs[id] = n;
+        }
+      } catch { /* unreadable remote tombstones — keep local */ }
+    }
+    stampSeen("tombstones", stamps.tombstones ?? null);
+  }
+  const now = Date.now();
+  for (const [id, at] of Object.entries(tombs)) if (now - at > TOMB_TTL) delete tombs[id];
+  const deleted: string[] = [];
+  for (const [id, at] of Object.entries(tombs)) {
+    const local = await getProject(id);
+    if (!local) continue;
+    if (local.updatedAt > at) delete tombs[id];
+    else {
+      await deleteProject(id);
+      try { localStorage.removeItem(meshMark(id)); } catch { /* private mode */ }
+      deleted.push(id);
+    }
+  }
+  saveTombs(tombs);
+
+  // Projects: merge by updatedAt — the same rules as the sign-in pull, every cycle.
+  const adopted: string[] = [];
+  let meshes = 0;
+  if (need("projects")) {
+    const pJson = await dec(uid, await pullBlob(c, "projects"));
+    if (pJson) {
+      let remote: Project[] = [];
+      try {
+        const parsed = JSON.parse(pJson);
+        if (Array.isArray(parsed)) remote = parsed;
+      } catch { /* unreadable remote blob — nothing to adopt */ }
+      for (const r of remote) {
+        if ((tombs[r.id] ?? 0) >= r.updatedAt) continue; // deleted somewhere — don't resurrect
+        const local = await getProject(r.id);
+        if (local && local.updatedAt >= r.updatedAt) {
+          // Local wins on content — but a mesh the bucket holds and this device lacks
+          // still restores (the "synced project opens empty on another device" fix).
+          if (!local.glb && !local.importFile && r.cloudMesh) {
+            const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
+            if (m) {
+              await putProject(r.cloudMesh.src === "glb" ? { ...local, glb: m, cloudMesh: r.cloudMesh } : { ...local, importFile: m, cloudMesh: r.cloudMesh });
+              meshes++;
+              adopted.push(r.id);
+            }
+          }
+          continue;
+        }
+        const merged: Project = {
+          ...r,
+          glb: local?.glb,
+          importFile: local?.importFile,
+          versions: r.versions.map((v) => {
+            const lv = local?.versions.find((x) => x.id === v.id);
+            return { ...v, glb: lv?.glb, importFile: lv?.importFile };
+          }),
+        };
+        // Adopting the remote project: fetch its mesh unless this device already holds
+        // exactly those bytes (marker matches AND a blob is actually present).
+        if (r.cloudMesh && !(localStorage.getItem(meshMark(r.id)) === r.cloudMesh.hash && (merged.glb || merged.importFile))) {
+          const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
+          if (m) {
+            if (r.cloudMesh.src === "glb") merged.glb = m;
+            else merged.importFile = m;
+            meshes++;
+          }
+        }
+        await putProject(merged);
+        adopted.push(r.id);
+      }
+    }
+    stampSeen("projects", stamps.projects ?? null);
+  }
+  return { adopted, deleted, meshes, tombs };
+}
+
+/** One sync cycle at a time per device. A boot pull racing a change-triggered push
+    interleaves blob writes: the slower (pre-change) cycle lands last and clobbers
+    what the newer one uploaded — the probe caught it wiping a fresh deletion
+    tombstone with pre-delete state. Cycles queue behind whatever is in flight. */
+let syncChain: Promise<unknown> = Promise.resolve();
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const run = syncChain.then(fn, fn);
+  syncChain = run.catch(() => {});
+  return run;
+}
+
+/** One full two-way sync cycle: merge the account's changes IN, then upload this
+    device's state. Merging first matters — the projects blob is whole-list, so a
+    device pushing without merging replaced the account's library with its own stale
+    view, and new projects from other devices vanished until they happened to push
+    again ("it's not updated or synced to the latest library", a real report).
+    No-op (null) when signed out. */
+export function cloudSyncPush(): Promise<{ projects: number; meshes: number; adopted: string[]; deleted: string[] } | null> {
+  return serialized(() => cloudSyncPushInner());
+}
+async function cloudSyncPushInner(): Promise<{ projects: number; meshes: number; adopted: string[]; deleted: string[] } | null> {
   const uid = await currentUid();
   if (!uid) return null;
-  await pushBlob("settings", await encryptPayload(uid, JSON.stringify(gatherSettings())));
-  const all = await listProjects();
+  const c = await supa();
+  await pushBlob(c, uid, "settings", await encryptPayload(uid, JSON.stringify(gatherSettings())));
+  const rec = await reconcileRemote(c, uid);
+  const all = (await listProjects()).filter((p) => (rec.tombs[p.id] ?? 0) < p.updatedAt);
   // Meshes go FIRST so the JSON that other devices merge already points at blobs
   // that exist in the bucket (never the other way round).
-  const { meta, uploaded } = await pushMeshes(await supa(), uid, all);
+  const { meta, uploaded } = await pushMeshes(c, uid, all);
   const attempt = async (lean: boolean) => {
     const projects = all.map((p) => ({ ...sanitizeProject(p, lean), cloudMesh: meta.get(p.id) }));
-    await pushBlob("projects", await encryptPayload(uid, JSON.stringify(projects)));
+    await pushBlob(c, uid, "projects", await encryptPayload(uid, JSON.stringify(projects)));
     return projects.length;
   };
+  let projects: number;
   try {
-    return { projects: await attempt(false), meshes: uploaded };
+    projects = await attempt(false);
   } catch (e: any) {
     // The server kills oversized upserts mid-statement — retry once without any
     // inline images rather than failing the whole sync.
     if (!/statement timeout|57014/i.test(String(e?.message ?? e))) throw e;
-    return { projects: await attempt(true), meshes: uploaded };
+    projects = await attempt(true);
   }
+  await pushBlob(c, uid, "tombstones", await encryptPayload(uid, JSON.stringify(rec.tombs)));
+  return { projects, meshes: uploaded, adopted: rec.adopted, deleted: rec.deleted };
 }
 
 /** Pull the account's data into this device (idempotent — merges projects by
  *  updatedAt, only adopts settings that differ). Returns counts of what changed;
  *  null when signed out. */
-export async function cloudSyncPull(): Promise<{ settings: number; projects: number; meshes: number } | null> {
+export function cloudSyncPull(): Promise<{ settings: number; projects: number; meshes: number } | null> {
+  return serialized(() => cloudSyncPullInner());
+}
+async function cloudSyncPullInner(): Promise<{ settings: number; projects: number; meshes: number } | null> {
   const uid = await currentUid();
   if (!uid) return null;
+  const c = await supa();
   let settings = 0;
-  let projects = 0;
-  let meshes = 0;
-  const dec = async (blob: string | null) => {
-    if (!blob) return null;
-    try {
-      return await decryptPayload(uid, blob);
-    } catch {
-      return null; // wrong/legacy key — treat as no cloud data
-    }
-  };
-  const sJson = await dec(await pullBlob("settings"));
+  const sJson = await dec(uid, await pullBlob(c, "settings"));
   if (sJson) {
     const data = JSON.parse(sJson) as Record<string, string>;
     for (const [k, v] of Object.entries(data)) {
@@ -343,46 +583,6 @@ export async function cloudSyncPull(): Promise<{ settings: number; projects: num
       }
     }
   }
-  const pJson = await dec(await pullBlob("projects"));
-  if (pJson) {
-    const c = await supa();
-    const remote = JSON.parse(pJson) as Project[];
-    for (const r of remote) {
-      const local = await getProject(r.id);
-      if (local && local.updatedAt >= r.updatedAt) {
-        // Local wins on content — but a mesh the bucket holds and this device lacks
-        // still restores (the "synced project opens empty on another device" fix).
-        if (!local.glb && !local.importFile && r.cloudMesh) {
-          const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
-          if (m) {
-            await putProject(r.cloudMesh.src === "glb" ? { ...local, glb: m, cloudMesh: r.cloudMesh } : { ...local, importFile: m, cloudMesh: r.cloudMesh });
-            meshes++;
-          }
-        }
-        continue;
-      }
-      const merged: Project = {
-        ...r,
-        glb: local?.glb,
-        importFile: local?.importFile,
-        versions: r.versions.map((v) => {
-          const lv = local?.versions.find((x) => x.id === v.id);
-          return { ...v, glb: lv?.glb, importFile: lv?.importFile };
-        }),
-      };
-      // Adopting the remote project: fetch its mesh unless this device already holds
-      // exactly those bytes (marker matches AND a blob is actually present).
-      if (r.cloudMesh && !(localStorage.getItem(meshMark(r.id)) === r.cloudMesh.hash && (merged.glb || merged.importFile))) {
-        const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
-        if (m) {
-          if (r.cloudMesh.src === "glb") merged.glb = m;
-          else merged.importFile = m;
-          meshes++;
-        }
-      }
-      await putProject(merged);
-      projects++;
-    }
-  }
-  return { settings, projects, meshes };
+  const r = await reconcileRemote(c, uid, true);
+  return { settings, projects: r.adopted.length, meshes: r.meshes };
 }

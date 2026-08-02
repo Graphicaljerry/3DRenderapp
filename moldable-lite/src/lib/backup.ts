@@ -35,11 +35,15 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
 export const LOCAL_ONLY_KEYS = new Set([
   "moldable_last_sync", // written after every push — always differs
   "moldable_last_project", // which project THIS device last had open
+  "moldable_entered", // whether THIS device is past the launchpad — navigation, not a setting
   "moldable_openrouter_models_v2", // timestamped catalogue cache, refetched per device
   "moldable_gemini_model", // model id resolved against this device's key at runtime
   "moldable_local_ready", // whether THIS device downloaded the 0.9 GB on-device model
   "moldable_house_url", // developer relay override for this device
   "moldable_spend_v1", // per-device spend estimates, appended on every paid run
+  "moldable_cloud_last_email", // who was signed in on THIS device (offline-vs-signed-out marker)
+  "moldable_sync_stamp", // which sync_blobs updated_at THIS device last saw — changes every cycle
+  "moldable_tombstones_v1", // deletions sync through their own blob with real merge rules, not settings
 ]);
 
 /** Device-local key test: the exact names above plus per-project prefixes. The mesh

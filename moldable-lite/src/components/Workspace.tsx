@@ -1574,7 +1574,9 @@ interface Props {
   onSplit: () => void;
   onFitToPlate: () => void;
   splitCtl: {
-    pieces: SplitPiece[] | null;
+    pieces: (SplitPiece & { plate?: number })[] | null;
+    toPlates: () => void; // every piece to its own build plate (exports honour it)
+    plated: boolean;
     exportPiece: (index: number, format: "stl" | "3mf") => void;
     exportAll: (format: "stl" | "3mf") => void;
     clear: () => void;
@@ -4064,11 +4066,22 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
         <button className="x" aria-label="Hide pieces list" onClick={splitCtl.clear}><IconX /></button>
       </div>
       <p className="fine">Export them from the <b>Export</b> panel — one zip, or per piece.</p>
+      {!splitCtl.plated ? (
+        <button
+          className="ghost sm"
+          title="Assign every piece its own build plate — Export → Project 3MF then opens in Bambu/Orca with one plate per piece (centred), and One-file-per-plate writes a 3MF each"
+          onClick={splitCtl.toPlates}
+        >
+          Each piece → its own plate
+        </button>
+      ) : (
+        <p className="fine">On separate plates — <b>Export → Project 3MF</b> (or one file per plate) writes them that way.</p>
+      )}
       <div className="split-list">
         {pieces.map((pc, i) => (
           <div className="split-row" key={i}>
             <span className="split-swatch" style={{ background: pc.color }} />
-            <span className="split-label">Part {i + 1}<span className="fine"> · {pc.dims.x} × {pc.dims.y} × {pc.dims.z} mm</span></span>
+            <span className="split-label">Part {i + 1}<span className="fine"> · {pc.dims.x} × {pc.dims.y} × {pc.dims.z} mm{pc.plate != null ? ` · Plate ${pc.plate}` : ""}</span></span>
             <button className="ghost sm" title={`Download part ${i + 1} as ${format.toUpperCase()}`} onClick={() => splitCtl.exportPiece(i, format)}>{format.toUpperCase()}</button>
           </div>
         ))}

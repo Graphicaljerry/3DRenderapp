@@ -438,7 +438,7 @@ export default function App() {
    *  had the second drop the first from the version it recorded. */
   const resultRef = useRef<EngineResult | null>(null);
   resultRef.current = result;
-  const [splitPieces, setSplitPieces] = useState<SplitPiece[] | null>(null);
+  const [splitPieces, setSplitPieces] = useState<(SplitPiece & { plate?: number })[] | null>(null);
   const [autoPick, setAutoPick] = useState(""); // "Auto → <model> (<why>)" note when OpenRouter Auto picks a model
   const [geometry, setGeometry] = useState<THREE.BufferGeometry | null>(null);
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
@@ -505,7 +505,18 @@ export default function App() {
     // (a CAD edit reshuffles triangles → drop the stale paint rather than mispaint).
     const triCount = geometry.index ? geometry.index.count / 3 : geometry.getAttribute("position").count / 3;
     const modelPaint = facePaint && facePaint.length === triCount ? facePaint : undefined;
-    const parts = [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model"), paint: modelPaint, paintPalette: modelPaint ? FILAMENT_SWATCHES : undefined }];
+    // Split pieces sent to their own plates replace the single model entry: each is
+    // re-CENTRED on its plate (the tiled layout was for showing them together).
+    const plated = splitPieces?.length && splitPieces.some((pc) => pc.plate != null) ? splitPieces : null;
+    const parts = plated
+      ? plated.map((pc, i) => {
+          const g = pc.geometry.clone();
+          g.computeBoundingBox();
+          const bb = g.boundingBox!;
+          g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);
+          return { geometry: g, name: `Part ${i + 1}`, plate: pc.plate ?? 1, color: pc.color, paint: undefined as Uint8Array | undefined, paintPalette: undefined as string[] | undefined };
+        })
+      : [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model"), paint: modelPaint, paintPalette: modelPaint ? FILAMENT_SWATCHES : undefined }];
     for (const a of attachments) {
       const baked = viewer.current?.bakeAttachment(a.id);
       if (!baked) continue;
@@ -2258,6 +2269,34 @@ export default function App() {
     }
   }
 
+  /** Send every split piece to its own build plate. The canvas keeps showing them
+   *  laid out together — the plates take effect in the EXPORTS (project 3MF opens in
+   *  Bambu/Orca with one plate per piece, "One file per plate" writes a 3MF each).
+   *  The assignment rides the head version's split metadata, so undo/redo/reopen
+   *  keep it. */
+  function assignPiecePlates() {
+    const pieces = splitPieces;
+    if (!pieces?.length) return;
+    const n = pieces.length;
+    setPlateCount((c) => Math.max(c, n));
+    setSplitPieces(pieces.map((pc, i) => ({ ...pc, plate: i + 1 })));
+    const pr = projectRef.current;
+    if (pr) {
+      const i = headIndex(pr);
+      const hv = i >= 0 ? pr.versions[i] : null;
+      if (hv?.splitPieces?.length === n) {
+        const versions = [...pr.versions];
+        versions[i] = { ...hv, splitPieces: hv.splitPieces.map((m, k) => ({ ...m, plate: k + 1 })) };
+        persist({ ...pr, versions });
+      }
+    }
+    explainOnce(
+      "piece-plates",
+      `Each of the ${n} pieces now has its own build plate. Exports honour it: **Export → Project 3MF** opens in Bambu Studio / OrcaSlicer with one plate per piece (centred), and **One file per plate** writes a separate 3MF each. The canvas keeps showing the pieces laid out together — the plates take effect in the export.`,
+      `Each of the ${n} pieces is on its own plate — export as Project 3MF or one file per plate.`,
+    );
+  }
+
   const pieceBlob = async (g: THREE.BufferGeometry, format: "stl" | "3mf") =>
     format === "stl" ? geometryToSTL(g) : (await import("./print/exportClient")).geometryTo3MF(g);
   async function exportPiece(index: number, format: "stl" | "3mf") {
@@ -2340,18 +2379,18 @@ export default function App() {
   /** Rebuild the split-pieces export list from a restored merged mesh: the merge
    *  concatenated the pieces in order, so slicing by stored vertex counts recovers
    *  each printable island exactly — no CSG re-run. */
-  function reviveSplitPieces(g: THREE.BufferGeometry, meta: NonNullable<Version["splitPieces"]>): SplitPiece[] | null {
+  function reviveSplitPieces(g: THREE.BufferGeometry, meta: NonNullable<Version["splitPieces"]>): (SplitPiece & { plate?: number })[] | null {
     const pos = g.index ? g.toNonIndexed().getAttribute("position") : g.getAttribute("position");
     const total = meta.reduce((a, m) => a + m.n, 0);
     if (!pos || pos.count !== total) return null; // bytes don't match the metadata — don't fake a list
     const arr = pos.array as Float32Array;
     let off = 0;
-    const out: SplitPiece[] = [];
+    const out: (SplitPiece & { plate?: number })[] = [];
     for (const m of meta) {
       const pg = new THREE.BufferGeometry();
       pg.setAttribute("position", new THREE.BufferAttribute(arr.slice(off * 3, (off + m.n) * 3), 3));
       pg.computeVertexNormals();
-      out.push({ geometry: pg, color: m.color, dims: m.dims });
+      out.push({ geometry: pg, color: m.color, dims: m.dims, plate: m.plate });
       off += m.n;
     }
     return out;
@@ -4457,7 +4496,11 @@ export default function App() {
       const hv = next.versions[headIndex(next)];
       if (hv?.splitPieces?.length) {
         const pieces = reviveSplitPieces(g, hv.splitPieces);
-        if (pieces) setSplitPieces(pieces);
+        if (pieces) {
+          setSplitPieces(pieces);
+          const maxPlate = Math.max(...pieces.map((pc) => pc.plate ?? 1));
+          if (maxPlate > 1) setPlateCount((c) => Math.max(c, maxPlate));
+        }
       }
     } else if (next.engine === "generative") {
       // No mesh bytes on THIS device (falling through would "build" empty code and
@@ -5016,7 +5059,7 @@ export default function App() {
         onSimplify={simplifyMesh}
         onSplit={splitMesh}
         onFitToPlate={() => void fitModelToPlate()}
-        splitCtl={{ pieces: splitPieces, exportPiece: busyExport(exportPiece), exportAll: busyExport(exportAllPieces), clear: () => setSplitPieces(null) }}
+        splitCtl={{ pieces: splitPieces, exportPiece: busyExport(exportPiece), exportAll: busyExport(exportAllPieces), clear: () => setSplitPieces(null), toPlates: assignPiecePlates, plated: !!splitPieces?.some((pc) => pc.plate != null) }}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy }}

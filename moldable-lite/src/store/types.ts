@@ -45,7 +45,7 @@ export interface Version {
   /** Split-to-fit-bed metadata: the merged mesh concatenates the pieces in order, so
    *  [vertex count, colour, dims] per piece is enough to reconstruct the per-piece
    *  export list after undo/redo/reopen without re-running the CSG. */
-  splitPieces?: { n: number; color: string; dims: { x: number; y: number; z: number } }[];
+  splitPieces?: { n: number; color: string; dims: { x: number; y: number; z: number }; plate?: number }[];
 }
 
 export interface Project {

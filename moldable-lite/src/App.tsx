@@ -6074,56 +6074,59 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             <button key={v} type="button" role="radio" aria-checked={engine === v} className={`lp-eng${engine === v ? " on" : ""}`} title={hint} onClick={() => setEngine(v)}>{label}</button>
           ))}
           <span className="lp-eng-hint">
-            {engine === "auto" ? "the app picks — and asks before anything paid runs"
+            {engine === "auto" ? "picks per request · asks before anything paid runs"
               : engine === "precise" ? "exact mm · free with your AI key"
               : "organic detail · paid engine, ~$0.10–0.40 per run"}
           </span>
         </div>
-        <p className="launch-fine">Sizes are AI-generated. Check the fit before a long print.</p>
-
-        {resume && (
-          <button className="launch-resume" onClick={onResume}>
-            Continue where you left off: <b>{resume.name}</b>
-          </button>
-        )}
 
         {/* Your own work outranks the samples, so it sits above them. Shown whenever
             projects EXIST rather than only when signed in — they are stored locally
-            either way, and hiding a signed-out user's own parts would be a lie. */}
+            either way, and hiding a signed-out user's own parts would be a lie.
+            The old standalone "Continue where you left off" pill duplicated the first
+            recent card — the card itself now carries the continue treatment instead. */}
         {!!recent?.length && (
-          <>
-            <p className="launch-label">Pick up a recent project</p>
-            <div className="launch-recents">
-              {recent.map((r) => (
-                <button key={r.id} className="launch-recent" onClick={() => onOpenRecent?.(r.id)} title={`Open ${r.name}`}>
-                  <span className="lr-thumb">
-                    {r.thumb ? <img src={r.thumb} alt="" aria-hidden="true" /> : <IconCube />}
-                  </span>
-                  <span className="lr-meta">
-                    <b>{r.name}</b>
-                    <em>{r.engine === "replicad" ? "Precise CAD" : r.engine === "generative" ? "AI mesh" : "Part"}</em>
-                  </span>
-                </button>
-              ))}
-              <button className="launch-chip subtle" onClick={onAllProjects}>All projects →</button>
+          <section className="launch-sect">
+            <div className="launch-label-row">
+              <p className="launch-label">Recent projects</p>
+              <button className="launch-more" onClick={onAllProjects}>All projects →</button>
             </div>
-          </>
+            <div className="launch-recents">
+              {recent.map((r, i) => {
+                const cont = !!resume && (resume.id === r.id || (i === 0 && !recent.some((x) => x.id === resume.id)));
+                return (
+                  <button key={r.id} className={`launch-recent${cont ? " continue" : ""}`} onClick={() => (cont ? onResume?.() : onOpenRecent?.(r.id))} title={cont ? `Continue ${r.name}` : `Open ${r.name}`}>
+                    <span className="lr-thumb">
+                      {r.thumb ? <img src={r.thumb} alt="" aria-hidden="true" /> : <IconCube />}
+                    </span>
+                    <span className="lr-meta">
+                      <b>{r.name}</b>
+                      <em>{cont ? "Continue where you left off" : r.engine === "replicad" ? "Precise CAD" : r.engine === "generative" ? "AI mesh" : "Part"}</em>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         )}
 
-        <p className="launch-label">{recent?.length ? "Or start from a template" : "Start from a template"}</p>
-        <div className="launch-chips">
-          {TEMPLATES.filter((t) => t.kind === "cad").slice(0, 4).map((t) => (
-            <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>
-              {templateThumb(t.id) && <img src={templateThumb(t.id)} alt="" aria-hidden="true" />}
-              {t.name}
-            </button>
-          ))}
-          <button className="launch-chip subtle" onClick={onAllTemplates}>All {TEMPLATES.length} templates →</button>
-        </div>
-
-        <button className="launch-guided" onClick={onGuided}>
-          Fix a broken part: photo in, replacement out <span className="gc-go">→</span>
-        </button>
+        <section className="launch-sect">
+          <div className="launch-label-row">
+            <p className="launch-label">Start from a template</p>
+            <button className="launch-more" onClick={onAllTemplates}>All {TEMPLATES.length} →</button>
+          </div>
+          <div className="launch-chips">
+            {TEMPLATES.filter((t) => t.kind === "cad").slice(0, 4).map((t) => (
+              <button key={t.id} className="launch-chip" onClick={() => onTemplate(t)}>
+                {templateThumb(t.id) && <img src={templateThumb(t.id)} alt="" aria-hidden="true" />}
+                {t.name}
+              </button>
+            ))}
+          </div>
+          <button className="launch-guided" onClick={onGuided}>
+            Fix a broken part: photo in, replacement out <span className="gc-go">→</span>
+          </button>
+        </section>
 
         {showSignIn && !accountEmail && (
         <div className="launch-signin">
@@ -6170,13 +6173,13 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
 
         <footer className="launch-foot">
           <span>
-            {/* Signed in, the old copy here restated the account chip in the header and
-                talked about key storage — nothing you can act on. Signed out it is a
-                real offer, so that half stays. */}
-            {accountEmail
-              ? null
-              : <>Runs in your browser. Your designs and keys stay on this device.{" "}
-                  <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button></>}
+            Sizes are AI-generated — check the fit before a long print.
+            {/* Signed in, the rest restated the account chip in the header — nothing
+                actionable. Signed out it is a real offer, so that half stays. */}
+            {!accountEmail && (
+              <>{" "}Runs in your browser; designs and keys stay on this device.{" "}
+                <button className="link" onClick={() => setShowSignIn(true)}>Sign in to sync</button></>
+            )}
           </span>
           <span className="launch-actions">
             <button className="launch-free" onClick={onFree}>Start free in generative mode</button>

@@ -1170,10 +1170,20 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .launch-composer .send { position: absolute; right: 12px; bottom: 12px; width: 34px; height: 34px; border: none; border-radius: 999px; background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
 .launch-composer .send:disabled { opacity: .45; }
 .launch-fine { margin: 0; font-size: 11.5px; color: var(--mut); }
-.launch-label { margin: 10px 0 0; font-size: 13px; font-weight: 400; color: var(--mut); }
+/* One breathing rhythm for the zones below the composer: 26px between zones, 10px
+   inside them — the create zone keeps its dominance and everything under it reads
+   as reference material rather than competing calls to action. */
+.launch-sect { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+.launch-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.launch-label-row .launch-label { margin: 0; }
+.launch-more { border: none; background: none; padding: 0; font: inherit; font-size: 12px; color: var(--mut); }
+.launch-more:hover { color: var(--accent-d); }
+.launch-label { margin: 10px 0 0; font-size: 12px; font-weight: 500; letter-spacing: 0.01em; color: var(--mut); }
 .launch-chips { display: flex; flex-wrap: wrap; gap: 7px; }
-.launch-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 13px; border-radius: var(--r-sm); border: 1px solid transparent; background: var(--ctl); color: var(--ink2); font-size: 13px; }
-.launch-chip:hover { background: var(--ctl-h); color: var(--ink); }
+/* Hairline chips instead of solid grey slabs — four grey masses stacked (engine
+   chips, recents, templates, resume pill) were most of the crowding. */
+.launch-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--r-sm); border: 1px solid var(--bord); background: transparent; color: var(--ink2); font-size: 13px; transition: border-color .15s ease, background-color .15s ease, color .15s ease; }
+.launch-chip:hover { background: var(--ctl); border-color: var(--bord-strong); color: var(--ink); }
 .launch-chip img { width: 20px; height: 20px; border-radius: 4px; object-fit: cover; }
 .launch-chip.subtle { color: var(--mut); }
 .launch-chip.subtle:hover { color: var(--ink2); }
@@ -1187,13 +1197,17 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    thumbnail so you recognise the part rather than reading its name. */
 .launch-recents { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; }
 .launch-recent {
-  display: inline-flex; align-items: center; gap: 11px; padding: 7px 15px 7px 7px;
-  border: 1px solid transparent; border-radius: var(--r-sm); background: var(--ctl);
+  display: inline-flex; align-items: center; gap: 10px; padding: 5px 13px 5px 5px;
+  border: 1px solid var(--bord); border-radius: var(--r-sm); background: transparent;
   color: var(--ink2); font: inherit; font-size: 13px; text-align: left;
-  transition: background-color .15s ease, color .15s ease;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease, transform .15s ease;
 }
-.launch-recent:hover { background: var(--ctl-h); color: var(--ink); }
-.lr-thumb { width: 52px; height: 52px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 7px; overflow: hidden; background: var(--bg); color: var(--subt); }
+.launch-recent:hover { background: var(--ctl); border-color: var(--bord-strong); color: var(--ink); transform: translateY(-1px); }
+/* The most recent project carries the continue treatment — the accent ring replaces
+   the separate "Continue where you left off" pill that used to duplicate it. */
+.launch-recent.continue { border-color: var(--accent); }
+.launch-recent.continue .lr-meta em { color: var(--accent-d); }
+.lr-thumb { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 7px; overflow: hidden; background: var(--ctl); color: var(--subt); }
 .lr-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .lr-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .lr-meta b { font-weight: 500; font-size: 13.5px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; }

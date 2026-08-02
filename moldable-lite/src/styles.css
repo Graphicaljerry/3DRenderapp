@@ -1891,7 +1891,12 @@ details.guide { margin-top: 10px; }
    position (same padding + flex-start in both states), and the label just fades in
    behind the advancing edge. */
 .canvas-rail .rail-name {
-  display: block; max-width: 110px; overflow: hidden; white-space: nowrap;
+  /* display NONE in the base: an invisible (opacity 0) label still occupies its
+     110px of layout, so on touch devices — where the hover media below never
+     applies — every button widened by a hidden label and the pill ballooned into a
+     blob at iPad widths (a real report). Hover-capable devices re-enable it below;
+     the reveal is opacity-only, so nothing reflows. */
+  display: none; max-width: 110px; overflow: hidden; white-space: nowrap;
   font-size: 12px; font-weight: 500; line-height: 1;
   margin-left: 10px;
   opacity: 0; transform: translateX(-6px);
@@ -1899,6 +1904,7 @@ details.guide { margin-top: 10px; }
 }
 .canvas-rail .ghost.sm.iconbtn { justify-content: center; } /* touch: icon-only rows stay centred */
 @media (hover: hover) and (pointer: fine) {
+  .canvas-rail .rail-name { display: block; }
   .canvas-rail { width: var(--rail-w, 47px); }
   .canvas-rail > * { width: 100%; }
   .canvas-rail > .rail-sep { width: auto; } /* margins position it; 100% would poke past the padding */

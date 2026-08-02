@@ -4,6 +4,7 @@ import { uid } from "../lib/id";
 
 export interface Snapshot {
   engine: StoredEngineKind;
+  splitPieces?: Version["splitPieces"];
   summary: string;
   code?: string;
   params?: Record<string, number>;
@@ -37,6 +38,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     glb: snap.glb,
     meshXform: snap.meshXform,
     genSource: snap.genSource,
+    splitPieces: snap.splitPieces,
   };
   const kept = project.versions.slice(0, headIndex(project) + 1); // drop any redo branch past HEAD
   return {
@@ -78,6 +80,7 @@ export function replaceHeadVersion(project: Project, snap: Snapshot): Project {
     glb: snap.glb,
     meshXform: snap.meshXform,
     genSource: snap.genSource,
+    splitPieces: snap.splitPieces,
   };
   const versions = [...project.versions];
   versions[i] = v;
@@ -118,6 +121,7 @@ export function restoreVersion(project: Project, versionId: string): Project {
     glb: t.glb,
     meshXform: t.meshXform,
     genSource: t.genSource,
+    splitPieces: t.splitPieces,
   };
   return {
     ...project,

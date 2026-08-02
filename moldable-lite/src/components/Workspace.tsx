@@ -1459,6 +1459,7 @@ interface Props {
     note: string | null; dismissNote: () => void;
   };
   /** Question cards living in the transcript: pick an answer, or build from one. */
+  confirmCtl: { choose: (msgId: string, yes: boolean) => void };
   clarifyCtl: {
     answer: (msgId: string, qid: string, value: string) => void;
     build: (msgId: string, withAnswers: boolean) => void;
@@ -2017,7 +2018,7 @@ export function Workspace(p: Props) {
             <button className="chat-hide" title="Hide chat" onClick={() => setChatOpen(false)}>Hide</button>
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} />
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} />
 
           {p.providerWall && (
           <div className="wall-card" role="status">
@@ -3335,11 +3336,12 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
   clarifyCtl: Props["clarifyCtl"];
+  confirmCtl: Props["confirmCtl"];
 }) {
   const endRef = useRef<HTMLDivElement>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -3363,8 +3365,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
   // (a changing function prop would defeat the memo for every row).
-  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl });
-  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl };
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl };
   const rowApi = useMemo(() => ({
     startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
@@ -3376,6 +3378,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     hasGenKey: (p: string) => rowCb.current.hasGenKey(p),
     clarifyAnswer: (msgId: string, qid: string, v: string) => rowCb.current.clarifyCtl.answer(msgId, qid, v),
     clarifyBuild: (msgId: string, withAnswers: boolean) => rowCb.current.clarifyCtl.build(msgId, withAnswers),
+    confirmChoose: (msgId: string, yes: boolean) => rowCb.current.confirmCtl.choose(msgId, yes),
   }), []);
 
   // How many messages were already on screen when this list first mounted.
@@ -3525,6 +3528,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
     hasBrainKey: (p: LlmProviderId) => boolean; hasGenKey: (p: string) => boolean;
     clarifyAnswer: (msgId: string, qid: string, v: string) => void;
     clarifyBuild: (msgId: string, withAnswers: boolean) => void;
+    confirmChoose: (msgId: string, yes: boolean) => void;
   };
 }) {
   const setEditingId = api.cancelEdit;
@@ -3540,6 +3544,18 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
           {m.clarify ? (
             <ClarifyCard msgId={m.id} c={m.clarify} busy={busy} api={api} />
+          ) : m.confirm ? (
+            <div className="bubble confirm-card">
+              <p className="cc-text">{m.confirm.text}</p>
+              {m.confirm.done ? (
+                <p className="fine">{m.confirm.chose === "mesh" ? "→ generating the mesh" : "→ building it as a free CAD part"}</p>
+              ) : (
+                <div className="edit-actions">
+                  <button className="primary sm" disabled={busy} onClick={() => api.confirmChoose(m.id, true)}>{m.confirm.yes}</button>
+                  <button className="ghost sm" disabled={busy} onClick={() => api.confirmChoose(m.id, false)}>{m.confirm.no}</button>
+                </div>
+              )}
+            </div>
           ) : editing ? (
             <div className="bubble-edit">
               <textarea

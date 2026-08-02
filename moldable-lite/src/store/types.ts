@@ -42,6 +42,10 @@ export interface Version {
   importKind?: "step" | "stl"; // how importFile parses — STL-as-CAD imports must NOT be re-read as STEP on undo/reopen
   genSource?: GenSource;
   thumb?: string; // mini canvas capture (data URL) of the model as it looked when this version landed
+  /** Split-to-fit-bed metadata: the merged mesh concatenates the pieces in order, so
+   *  [vertex count, colour, dims] per piece is enough to reconstruct the per-piece
+   *  export list after undo/redo/reopen without re-running the CSG. */
+  splitPieces?: { n: number; color: string; dims: { x: number; y: number; z: number } }[];
 }
 
 export interface Project {

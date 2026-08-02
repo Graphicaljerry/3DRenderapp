@@ -51,7 +51,7 @@ import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
-import type { Project, Pin } from "./store/types";
+import type { Project, Pin, Version } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
 import { downloadBlob, safeFileName } from "./lib/download";
@@ -104,6 +104,9 @@ export type ChatMessage = {
   images?: string[]; // product photos a research lookup found (display-only <img> URLs)
   usage?: { inTok: number; outTok: number; usd: number | null; est: boolean }; // beta cost meter, summed over retries
   clarify?: ClarifyState; // a request too vague to build — the questions, in the chat
+  /** A paid mesh generation waiting on one tap — price on the button, free CAD as the
+   *  other exit. `done` freezes the card as a record of what was chosen. */
+  confirm?: { text: string; yes: string; no: string; prompt: string; done?: boolean; chose?: "mesh" | "cad" };
   // Direct-edit receipt (magnet pockets, holes…). Repeating the same action rewrites
   // THIS message with a running count instead of posting another identical bubble.
   receipt?: string;
@@ -1831,7 +1834,7 @@ export default function App() {
     }
   }
 
-  function applyResult(res: EngineResult, name: string, summary: string, promptText: string) {
+  function applyResult(res: EngineResult, name: string, summary: string, promptText: string, extras?: { splitPieces?: Version["splitPieces"] }) {
     dissolveSeparation(); // a committed result replaces the model — the dry-fit sandbox's floating parts must not linger
     clearPaintHistory(); // strokes are keyed to the old triangle list; they can't replay onto new geometry
     applyResultNoCommit(res);
@@ -1854,6 +1857,7 @@ export default function App() {
       glb: res.glb,
       meshXform: res.meshXform,
       genSource: res.source.kind === "gen" ? { provider: res.source.provider, model: res.source.model, prompt: res.source.prompt } : undefined,
+      splitPieces: extras?.splitPieces,
     });
     // Chat is synced separately (continuous effect) — keep whatever is there.
     snap.chat = projectRef.current?.chat ?? base.chat;
@@ -2234,6 +2238,9 @@ export default function App() {
         project?.name ?? "Model",
         `Split into ${out.parts} bed-sized pieces`,
         "split to fit bed",
+        // The merged mesh concatenates pieces in order, so vertex counts + colours are
+        // enough to rebuild the per-piece export list after undo/redo/reopen.
+        { splitPieces: out.pieces.map((pc) => ({ n: (pc.geometry.index ? pc.geometry.toNonIndexed() : pc.geometry).getAttribute("position").count, color: pc.color, dims: pc.dims })) },
       );
       setSplitPieces(out.pieces); // enables the colour-coded pieces list + per-piece / ZIP export
       setMessages((m) => [
@@ -2322,11 +2329,32 @@ export default function App() {
     }
   }
 
-  async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>, meshXform?: number[]) {
+  async function showFromGlb(glb: Blob, source: Extract<BuildInput, { kind: "gen" }>, meshXform?: number[]): Promise<THREE.BufferGeometry> {
     const { geometry: g, dims: d, texture } = await loadAnyMesh(glb);
     // Replay any baked transform (resize / rotate / fit-to-plate) recorded over this glb.
     const dd = applyStoredMeshXform(g, meshXform) ?? d;
     applyResultNoCommit({ kind: "generative", geometry: g, dims: dd, source, supportsStep: false, glb, texture, meshXform });
+    return g;
+  }
+
+  /** Rebuild the split-pieces export list from a restored merged mesh: the merge
+   *  concatenated the pieces in order, so slicing by stored vertex counts recovers
+   *  each printable island exactly — no CSG re-run. */
+  function reviveSplitPieces(g: THREE.BufferGeometry, meta: NonNullable<Version["splitPieces"]>): SplitPiece[] | null {
+    const pos = g.index ? g.toNonIndexed().getAttribute("position") : g.getAttribute("position");
+    const total = meta.reduce((a, m) => a + m.n, 0);
+    if (!pos || pos.count !== total) return null; // bytes don't match the metadata — don't fake a list
+    const arr = pos.array as Float32Array;
+    let off = 0;
+    const out: SplitPiece[] = [];
+    for (const m of meta) {
+      const pg = new THREE.BufferGeometry();
+      pg.setAttribute("position", new THREE.BufferAttribute(arr.slice(off * 3, (off + m.n) * 3), 3));
+      pg.computeVertexNormals();
+      out.push({ geometry: pg, color: m.color, dims: m.dims });
+      off += m.n;
+    }
+    return out;
   }
 
   /** Turn the dropped SVG into a solid — extrude, revolve, or emboss. Persisted
@@ -3547,6 +3575,22 @@ export default function App() {
     }
   }
 
+  // One tap approves paid mesh runs for the REST of the session — the gate informs,
+  // it doesn't nag.
+  const meshSpendOk = useRef(false);
+  function confirmChoose(msgId: string, yes: boolean) {
+    const c = messages.find((x) => x.id === msgId)?.confirm;
+    if (!c || c.done) return;
+    setMessages((m) => m.map((x) => (x.id === msgId && x.confirm ? { ...x, confirm: { ...x.confirm, done: true, chose: yes ? "mesh" : "cad" } } : x)));
+    if (yes) {
+      meshSpendOk.current = true;
+      void send(c.prompt, "generative", { skipClarify: true });
+    } else {
+      pickMode("precise");
+      void send(c.prompt, "precise", { skipClarify: true });
+    }
+  }
+
   /** A chip picked, or a measurement typed, on a question card in the transcript. */
   function answerClarify(msgId: string, qid: string, value: string) {
     setMessages((m) => m.map((x) => (
@@ -3838,6 +3882,22 @@ export default function App() {
           "Refining your current model as a **mesh**: I snapshotted it and I'm feeding that picture to the image→3D engine along with your words. The trade: the result is a sculpted mesh (STL/OBJ/3MF — prints great, opens in Nomad Sculpt), not parametric CAD, so STEP export and dimension-exact edits don't apply to it. Your CAD version stays safe in **History** — restore it any time.",
           "Refining the current model as a mesh (snapshot → image→3D). The CAD version stays in History.",
         );
+      }
+      // A PAID mesh generation never starts silently: the first one each session stops
+      // for one tap with the price on the button — and offers the free CAD path, since
+      // many people don't know mesh engines bill per run and CAD doesn't.
+      const estUsd = costUsd(ge.provider, genModel) ?? 0;
+      if (estUsd > 0 && !meshSpendOk.current) {
+        setMessages((m) => m.map((x) => (x.id === placeholderId ? {
+          ...x, streaming: false, text: "",
+          confirm: {
+            text: `This looks like a job for the ${prov?.label ?? ge.provider} mesh engine — sculpted, organic detail, billed per run (about ${costLabel(ge.provider, genModel) || `$${estUsd.toFixed(2)}`} each). A functional part with exact millimetres builds FREE with your AI key instead.`,
+            yes: `Generate the mesh (~$${estUsd.toFixed(2)})`,
+            no: "Free CAD part instead",
+            prompt: p || "(image upload)",
+          },
+        } : x)));
+        return;
       }
       // Price BEFORE anything runs — the answer to "which platform is going to bill
       // me, and how much?" belongs in the very first line, not on the invoice. The user
@@ -4391,7 +4451,14 @@ export default function App() {
     seedHistory(next.engine, next.code, next.spec);
     clearImage();
     if (next.engine === "generative" && next.glb) {
-      await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
+      const g = await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
+      // A split version carries its piece layout — revive the per-piece export list
+      // (undo/redo/reopen land here) instead of losing it until the next re-split.
+      const hv = next.versions[headIndex(next)];
+      if (hv?.splitPieces?.length) {
+        const pieces = reviveSplitPieces(g, hv.splitPieces);
+        if (pieces) setSplitPieces(pieces);
+      }
     } else if (next.engine === "generative") {
       // No mesh bytes on THIS device (falling through would "build" empty code and
       // fail with a bare kernel error). Meshes sync through the account's Storage
@@ -4661,7 +4728,13 @@ export default function App() {
         // A launchpad ask always routes: the front door has no engine switch, so a pref
         // pinned in some earlier session must not silently steer this build. Auto is
         // re-assertable in one tap from the workspace seg once inside.
-        onSubmit={(text) => { pickMode("auto"); setEntered(true); void send(text, undefined, { routeAuto: true }); }}
+        onSubmit={(text, engine) => {
+          pickMode(engine);
+          setEntered(true);
+          // A chosen engine is an instruction; only Auto routes (and the paid-mesh
+          // confirm still guards anything that bills).
+          void send(text, engine === "auto" ? undefined : engine, engine === "auto" ? { routeAuto: true } : undefined);
+        }}
         imageUrl={image && !image.markup ? image.url : null}
         refsCount={refs.length}
         onPickFiles={pickImages}
@@ -4820,6 +4893,7 @@ export default function App() {
           dismissNote: () => setImproveNote(null),
         }}
         clarifyCtl={{ answer: answerClarify, build: buildFromClarify }}
+        confirmCtl={{ choose: confirmChoose }}
         onRetryModel={retryWithModel}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}
@@ -5729,7 +5803,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onGuided: () => void;
   onSkip: () => void;
   onFree: () => void;
-  onSubmit: (text: string) => void;
+  onSubmit: (text: string, engine: ModePref) => void;
   imageUrl: string | null;
   refsCount: number;
   onPickFiles: (fs: File[]) => void;
@@ -5790,11 +5864,15 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   }
 
   const [dragOver, setDragOver] = useState(false);
+  // What kind of thing is being built — asked UP FRONT, because the two engines have
+  // very different bills: CAD parts build free with the user's AI key, mesh engines
+  // charge per generation. Auto still routes for people who don't care.
+  const [engine, setEngine] = useState<ModePref>("auto");
   const fileRef = useRef<HTMLInputElement>(null);
   const submit = () => {
     const text = draft.trim();
     if (!text && !imageUrl) return; // a photo alone is a valid ask ("recreate this")
-    onSubmit(text); // straight into send() — never re-typed into the workspace composer
+    onSubmit(text, engine); // straight into send() — never re-typed into the workspace composer
   };
 
   return (
@@ -5873,6 +5951,20 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
             placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
           />
+          <div className="launch-engines" role="radiogroup" aria-label="How to build it">
+            {([
+              ["auto", "Auto", "The app reads your request and picks the right engine — it tells you before anything paid runs."],
+              ["precise", "Functional part", "Exact millimetres, editable dimensions, STEP export — built free with your AI key."],
+              ["generative", "Sculpted model", "Organic, high-detail mesh from a paid 3D engine — typically $0.10–$0.40 per generation."],
+            ] as const).map(([v, label, hint]) => (
+              <button key={v} type="button" role="radio" aria-checked={engine === v} className={`lp-eng${engine === v ? " on" : ""}`} title={hint} onClick={() => setEngine(v)}>{label}</button>
+            ))}
+            <span className="lp-eng-hint">
+              {engine === "auto" ? "the app picks — and asks before anything paid runs"
+                : engine === "precise" ? "exact mm · free with your AI key"
+                : "organic detail · paid engine, ~$0.10–0.40 per run"}
+            </span>
+          </div>
           <div className="launch-composer-foot">
             {/* Attaches, like every chat app's clip — drop and paste land in the same
                 place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}

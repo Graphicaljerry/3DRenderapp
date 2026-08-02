@@ -693,6 +693,14 @@ button { font-family: inherit; cursor: pointer; }
 .apb-hint { font-size: 11px; color: var(--mut); }
 @media (max-width: 900px) { .apb-hint { display: none; } }
 
+/* Launchpad engine chooser — the cost question answered before the first build */
+.launch-engines { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+.lp-eng { font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--bord-strong); background: var(--bg); color: var(--ink2); }
+.lp-eng.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
+.lp-eng-hint { font-size: 11.5px; color: var(--mut); margin-left: 2px; }
+/* Paid-mesh confirm card */
+.confirm-card .cc-text { margin: 0 0 8px; }
+
 /* Hole editing (magnet/screw flyouts) */
 .hole-edit-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .hole-edit-actions .ghost.sm.on { border-color: var(--accent); color: var(--accent-d); }

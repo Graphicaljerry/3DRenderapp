@@ -5454,6 +5454,7 @@ function LaunchBackdrop() {
       }
       drawnLayers = 0;
       trace = null;
+      letterTrace = null;
       measurePart();
     };
 
@@ -5484,8 +5485,8 @@ function LaunchBackdrop() {
       };
       g.lineJoin = "round";
       g.lineCap = "round";
-      const wallW = Math.max(1.2, view.w * 0.0075);
-      const innerW = Math.max(1, view.w * 0.0035);
+      const wallW = Math.max(1, view.w * 0.0052);
+      const innerW = Math.max(0.75, view.w * 0.0024);
       /* Body: the tint, translucent at the base and firming up as the part rises, so the
          layer lines below still read through the lower half and the top half is a surface.
          Layers land in ascending z, so a higher one paints over the one below and the stack
@@ -5578,7 +5579,7 @@ function LaunchBackdrop() {
       };
       g.lineJoin = "round";
       g.lineCap = "round";
-      const wallW = Math.max(1.2, view.w * 0.0075), innerW = Math.max(1, view.w * 0.0035);
+      const wallW = Math.max(1, view.w * 0.0052), innerW = Math.max(0.75, view.w * 0.0024);
       const solidTo = Math.min(whole, tr.fill);
       if (solidTo > 0) {
         g.fillStyle = t.body;
@@ -5624,6 +5625,70 @@ function LaunchBackdrop() {
       return head;
     };
 
+    /* The raised lettering ("JERRY" on the name tag), traced by the SAME nozzle that
+       laid the part — it used to just appear once the part topped out, which broke the
+       fiction that everything on the bed was printed. Projected once per part. */
+    let letterTrace: { part: number; pts: [number, number][][]; cum: number[][]; ends: number[]; total: number } | null = null;
+    const letterTraceFor = () => {
+      const { solid } = SOLIDS[part];
+      if (!solid.topLoops || !view) return null;
+      if (letterTrace && letterTrace.part === part) return letterTrace;
+      const pts: [number, number][][] = [], cum: number[][] = [], ends: number[] = [];
+      let total = 0;
+      for (const loop of solid.topLoops) {
+        const q = loop.map(([x, y]) => iso(view!, x, y, solid.height));
+        const c = [0];
+        for (let i = 1; i <= q.length; i++) {
+          const a = q[i - 1], b = q[i % q.length];
+          c.push(c[i - 1] + Math.hypot(b[0] - a[0], b[1] - a[1]));
+        }
+        total += c[q.length];
+        pts.push(q); cum.push(c); ends.push(total);
+      }
+      letterTrace = { part, pts, cum, ends, total };
+      return letterTrace;
+    };
+
+    /** Lay down `frac` of the lettering; returns the nozzle-head position. */
+    const paintLetters = (g: CanvasRenderingContext2D, frac: number, t: ReturnType<typeof tokens>): [number, number] | null => {
+      const tr = letterTraceFor();
+      if (!tr || !(tr.total > 0) || !view) return null;
+      const dist = Math.max(0, Math.min(1, frac)) * tr.total;
+      let whole = 0;
+      while (whole < tr.ends.length && tr.ends[whole] <= dist) whole++;
+      g.strokeStyle = t.accent;
+      g.lineJoin = "round";
+      g.lineCap = "round";
+      g.lineWidth = Math.max(0.9, view.w * 0.004);
+      g.globalAlpha = 1;
+      if (whole > 0) {
+        g.beginPath();
+        for (let i = 0; i < whole; i++) {
+          tr.pts[i].forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y)));
+          g.closePath();
+        }
+        g.stroke();
+      }
+      let head: [number, number] | null = whole > 0 ? tr.pts[whole - 1][0] : null;
+      if (whole < tr.pts.length) {
+        const q = tr.pts[whole], c = tr.cum[whole];
+        const along = dist - (whole ? tr.ends[whole - 1] : 0);
+        let seg = 0;
+        while (seg + 1 < c.length && c[seg + 1] < along) seg++;
+        const span = c[seg + 1] - c[seg];
+        const u = span > 1e-6 ? (along - c[seg]) / span : 0;
+        const a = q[seg], b = q[(seg + 1) % q.length];
+        head = [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u];
+        g.beginPath();
+        g.moveTo(q[0][0], q[0][1]);
+        for (let k = 1; k <= seg; k++) g.lineTo(q[k][0], q[k][1]);
+        g.lineTo(head[0], head[1]);
+        g.stroke();
+      }
+      g.globalAlpha = 1;
+      return head;
+    };
+
     /** Commit every COMPLETED layer up to `upto` onto the cached bitmap. Only new layers are
      *  painted, so a frame is O(layers added this frame) — normally one, often zero —
      *  rather than O(all layers so far). The layer in progress is not committed: it is
@@ -5641,7 +5706,7 @@ function LaunchBackdrop() {
       const { solid } = SOLIDS[part];
       if (!solid.topLoops || !view) return;
       const t = tokens();
-      g.lineWidth = Math.max(1, view.w * 0.005);
+      g.lineWidth = Math.max(0.9, view.w * 0.004);
       g.beginPath();
       for (const loop of solid.topLoops) {
         loop.forEach(([x, y], i) => {
@@ -5667,9 +5732,10 @@ function LaunchBackdrop() {
     };
 
     const PRINT = 8200;   // laying the part up
+    const ENGRAVE = 1600; // the nozzle traces any raised lettering (skipped when none)
     const HOLD = 2400;    // finished part on the bed
     const CLEAR = 900;    // bed clears
-    const CYCLE = PRINT + HOLD + CLEAR;
+    const CYCLE = PRINT + ENGRAVE + HOLD + CLEAR;
     let t0 = 0, lastPaint = 0, cycleIx = 0, toppedOut = false;
 
     const frame = (now: number) => {
@@ -5692,6 +5758,7 @@ function LaunchBackdrop() {
       const p = elapsed % CYCLE;
       const { solid, name } = SOLIDS[part];
       const printing = p < PRINT;
+      const engraving = !printing && !!solid.topLoops && p < PRINT + ENGRAVE;
       // Ease-out so the first layers land briskly and the top settles — a linear stack
       // reads as a progress bar.
       const prog = printing ? 1 - Math.pow(1 - p / PRINT, 1.6) : 1;
@@ -5701,8 +5768,9 @@ function LaunchBackdrop() {
       // it looks laid down rather than switched on.
       const t = tokens();
       commitTo(printing ? upto - 1 : solid.layers, t);
-      if (!printing && !toppedOut && partCtx) { drawTopLoops(partCtx); toppedOut = true; }
-      const fadeA = p < PRINT + HOLD ? 1 : 1 - (p - PRINT - HOLD) / CLEAR;
+      // Lettering commits only after the nozzle has finished tracing it.
+      if (!printing && !engraving && !toppedOut && partCtx) { drawTopLoops(partCtx); toppedOut = true; }
+      const fadeA = p < PRINT + ENGRAVE + HOLD ? 1 : 1 - (p - PRINT - ENGRAVE - HOLD) / CLEAR;
 
       const blit = (src: HTMLCanvasElement) =>
         ctx.drawImage(src, box.x * dpr, box.y * dpr, box.w * dpr, box.h * dpr, box.x, box.y, box.w, box.h);
@@ -5716,7 +5784,20 @@ function LaunchBackdrop() {
         // stack read as PRINTING rather than fading in.
         const head = paintLive(ctx, solid, upto, exact - upto, t);
         if (head) {
-          const r = Math.max(2.2, view.w * 0.012);
+          const r = Math.max(1.8, view.w * 0.009);
+          ctx.fillStyle = t.accent;
+          ctx.globalAlpha = 0.95;
+          ctx.beginPath(); ctx.arc(head[0], head[1], r, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 0.16;
+          ctx.beginPath(); ctx.arc(head[0], head[1], r * 2.6, 0, Math.PI * 2); ctx.fill();
+          ctx.globalAlpha = 1;
+        }
+      } else if (engraving) {
+        // The nozzle stays on the job: it traces the name/lettering bead by bead.
+        const et = Math.min(1, (p - PRINT) / ENGRAVE);
+        const head = paintLetters(ctx, 1 - Math.pow(1 - et, 1.5), t);
+        if (head) {
+          const r = Math.max(1.8, view.w * 0.009);
           ctx.fillStyle = t.accent;
           ctx.globalAlpha = 0.95;
           ctx.beginPath(); ctx.arc(head[0], head[1], r, 0, Math.PI * 2); ctx.fill();
@@ -5736,7 +5817,7 @@ function LaunchBackdrop() {
         ctx.textAlign = "center"; ctx.textBaseline = "bottom";
         const label = printing
           ? `${name} · layer ${Math.min(upto + 1, solid.layers)}/${solid.layers} · ${pct}%`
-          : `${name} · done`;
+          : engraving ? `${name} · lettering` : `${name} · done`;
         // Above the part itself, and never lower than just over the bed's back corner.
         ctx.fillText(label, view.cx, Math.min(anchor[1] - view.w * 0.12, partTopY - 16));
         ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
@@ -5951,20 +6032,6 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); } }}
             placeholder="A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…"
           />
-          <div className="launch-engines" role="radiogroup" aria-label="How to build it">
-            {([
-              ["auto", "Auto", "The app reads your request and picks the right engine — it tells you before anything paid runs."],
-              ["precise", "Functional part", "Exact millimetres, editable dimensions, STEP export — built free with your AI key."],
-              ["generative", "Sculpted model", "Organic, high-detail mesh from a paid 3D engine — typically $0.10–$0.40 per generation."],
-            ] as const).map(([v, label, hint]) => (
-              <button key={v} type="button" role="radio" aria-checked={engine === v} className={`lp-eng${engine === v ? " on" : ""}`} title={hint} onClick={() => setEngine(v)}>{label}</button>
-            ))}
-            <span className="lp-eng-hint">
-              {engine === "auto" ? "the app picks — and asks before anything paid runs"
-                : engine === "precise" ? "exact mm · free with your AI key"
-                : "organic detail · paid engine, ~$0.10–0.40 per run"}
-            </span>
-          </div>
           <div className="launch-composer-foot">
             {/* Attaches, like every chat app's clip — drop and paste land in the same
                 place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}
@@ -5996,6 +6063,22 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           </div>
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>
         </form>
+        {/* Below the card, not inside it: the composer's foot row is absolutely
+            positioned, and anything in flow down there lands on top of it. */}
+        <div className="launch-engines" role="radiogroup" aria-label="How to build it">
+          {([
+            ["auto", "Auto", "The app reads your request and picks the right engine — it tells you before anything paid runs."],
+            ["precise", "Functional part", "Exact millimetres, editable dimensions, STEP export — built free with your AI key."],
+            ["generative", "Sculpted model", "Organic, high-detail mesh from a paid 3D engine — typically $0.10–$0.40 per generation."],
+          ] as const).map(([v, label, hint]) => (
+            <button key={v} type="button" role="radio" aria-checked={engine === v} className={`lp-eng${engine === v ? " on" : ""}`} title={hint} onClick={() => setEngine(v)}>{label}</button>
+          ))}
+          <span className="lp-eng-hint">
+            {engine === "auto" ? "the app picks — and asks before anything paid runs"
+              : engine === "precise" ? "exact mm · free with your AI key"
+              : "organic detail · paid engine, ~$0.10–0.40 per run"}
+          </span>
+        </div>
         <p className="launch-fine">Sizes are AI-generated. Check the fit before a long print.</p>
 
         {resume && (

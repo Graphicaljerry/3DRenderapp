@@ -293,7 +293,10 @@ button { font-family: inherit; cursor: pointer; }
 .msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
 .msg.user { align-self: flex-end; align-items: flex-end; }
 .who { font-size: 11px; font-weight: 500; color: var(--ink2); }
-.bubble { font-size: 12.5px; line-height: 1.45; color: var(--bubble-a-ink); background: var(--bubble-a); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; }
+/* overflow-wrap: long unbreakable strings (chunk URLs in error messages, pasted
+   links) used to run straight through the bubble's edge. */
+.bubble { font-size: 12.5px; line-height: 1.45; color: var(--bubble-a-ink); background: var(--bubble-a); border-radius: 10px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.bubble-open { overflow-wrap: anywhere; min-width: 0; }
 /* ---- assistant markdown, live thinking, sources, model attribution ---- */
 .md p { margin: 0 0 8px; } .md p:last-child { margin-bottom: 0; }
 .md .md-h { margin: 10px 0 6px; font-size: 13.5px; font-weight: 700; color: var(--ink); }
@@ -694,7 +697,7 @@ button { font-family: inherit; cursor: pointer; }
 @media (max-width: 900px) { .apb-hint { display: none; } }
 
 /* Launchpad engine chooser — the cost question answered before the first build */
-.launch-engines { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px 0; }
+.launch-engines { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .lp-eng { font: inherit; font-size: 12.5px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--bord-strong); background: var(--bg); color: var(--ink2); }
 .lp-eng.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
 .lp-eng-hint { font-size: 11.5px; color: var(--mut); margin-left: 2px; }

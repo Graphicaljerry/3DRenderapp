@@ -10,6 +10,21 @@ import "./styles.css";
 const appPromise = import("./App");
 const App = React.lazy(() => appPromise);
 
+// A deploy replaces the hashed chunk files; a tab that loaded index.html BEFORE the
+// deploy then 404s on any code-split feature it touches afterwards ("Split failed:
+// Failed to fetch dynamically imported module …" — a real report). Vite raises
+// vite:preloadError for exactly this: reload once to pick up the new index. The
+// sessionStorage guard stops a reload loop when the network is genuinely down —
+// the second failure surfaces as the feature's own error message instead.
+window.addEventListener("vite:preloadError", (e) => {
+  if (sessionStorage.getItem("moldable_chunk_reload") === "1") return;
+  sessionStorage.setItem("moldable_chunk_reload", "1");
+  e.preventDefault();
+  location.reload();
+});
+// A load that stays healthy for a while re-arms the auto-reload for the NEXT deploy.
+setTimeout(() => sessionStorage.removeItem("moldable_chunk_reload"), 20_000);
+
 // Shown while the app chunk loads. Invisible for the first ~250 ms (CSS delay), so
 // fast/cached loads never flash it; on slow networks it replaces a blank screen.
 // Theme comes from the index.html pre-paint script (data-theme + backdrop).

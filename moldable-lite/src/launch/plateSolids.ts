@@ -477,7 +477,7 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
   {
     name: "vase",
     // Circular from above (which is the honest top view) and unmistakably a vase in iso.
-    solid: revolve([[0, 0.15], [0.10, 0.17], [0.42, 0.25], [0.66, 0.19], [0.86, 0.13], [0.95, 0.16], [1, 0.165]], 22, 0.60, 30),
+    solid: revolve([[0, 0.15], [0.10, 0.17], [0.42, 0.25], [0.66, 0.19], [0.86, 0.13], [0.95, 0.16], [1, 0.165]], 22, 0.60, 46),
   },
   {
     name: "rocket",
@@ -494,7 +494,7 @@ export const SOLIDS: { name: string; solid: Solid }[] = [
           { z: 0.19, loops: [body(0.085)] }, { z: 0.60, loops: [body(0.085)] },
           { z: 0.78, loops: [body(0.062)] }, { z: 1, loops: [body(0.006)] },
         ],
-        height: 0.62, layers: 30,
+        height: 0.62, layers: 46,
       };
     })(),
   },

@@ -870,6 +870,48 @@ image fill via the Figma MCP `upload_assets` → `imageHash` on the canvas frame
   = 230×7 px at 1366×1024 only. Verified present on clean HEAD before #150. Cosmetic —
   the menu is z-80 over a z-0 header, so nothing is obscured or unclickable.
 
+### Model → slicer hand-off (v331–v333)
+
+The audit's top three findings, all "connect what already exists":
+
+- **v331 — one source of truth for printer fit** (`src/lib/fit.ts`). The Tolerance
+  coupon measurement used to drive only the AI's `clearance` parameter; the screw
+  tool, magnet tool, fastener presets and cut-piece sockets all carried their own
+  hardcoded numbers. `fit.ts` now separates the two ideas that kept getting confused:
+  `fitClearance(fit)` is the gap you WANT between mating parts, `boreAllowance()` is
+  how far this machine drifts from the charts (measurement minus the 0.2 average) and
+  applies to every hole, chart-sized or not. Deliberately untouched: the rib crest on
+  a bite hole (nominal, or the screw stops biting), pocket depth (Z is layer-accurate),
+  and the cut kerf (a glue line, not a fit). Preset labels are generated from the size
+  that will really be drilled, so they can't drift from it.
+- **v332 — the desktop slicer hand-off works.** It was gated on `import.meta.env.DEV`
+  and the packaged app runs `npm run build`, so the one place it was meant to work was
+  the one place it couldn't. A Rust command (`stage_for_slicer`) writes the 3MF to
+  `<app data>/handoff/<name>.3mf` and the OS opens it with whatever owns .3mf — no deep
+  link, no trusted-site prompt, no guessing app names (the opener plugin spawns
+  detached, so a wrong name fails silently and can't be detected). The path is stable
+  per project, which buys the v2 loop: re-send after an edit → "reload from disk" in
+  the slicer keeps supports and print settings. PrusaSlicer is NOT a deep-link target:
+  its `prusaslicer://open?file=` handler rejects anything that isn't printables.com.
+  Bytes cross IPC as a raw body with the name in an ASCII header. **Unverified here:**
+  the packaged app's own click-through (no display in CI); `cargo test` + a browser run
+  against a `TAURI_ENV_PLATFORM` build with stubbed IPC is what was actually exercised.
+- **v333 — one 3MF writer** (`write3MF()`). The rich writer was reachable only through
+  the plate menu; everything else got an unnamed bare mesh, so painting a model and
+  hitting Export silently dropped the paint. Every path now emits both dialects (core
+  basematerials for Prusa/Cura, the Bambu/Orca project config for slots and
+  `paint_color`). `preflightExport` went from 1 of 5 export paths to all 5. Paint a
+  format can't carry is now stated on EVERY export, not once — the second silent STL is
+  the one that gets printed in one colour.
+
+Still open from the audit, in the order it ranked them: inch rescue on STL import
+(`loadMesh.ts` has no units check); offer the already-computed orientation as a one-tap
+chip (and teach `orient.ts` about the bed, so it can't suggest a rotation that leaves
+the build volume); thin walls into the export gate with an honest confidence line
+(`thinwalls.ts` caps at 800 samples then says "Walls look healthy"); a bottom-edge
+chamfer default for elephant's foot. Plus a naming problem: Plates / Pieces /
+Attachments / Objects are four words for containers, and users can't tell which is which.
+
 ## Conventions
 
 - Ship each feature as its own PR to `main` (squash-merge; Pages auto-deploys ~2 min).

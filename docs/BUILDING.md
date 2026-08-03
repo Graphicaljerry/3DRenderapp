@@ -17,7 +17,9 @@ comes from. Details live in the code and in `moldable-lite/README.md`.
 | Mesh engines | Text/photo → mesh via provider APIs (see keys below); cleaned with meshoptimizer. |
 | Storage | Browser-local: IndexedDB (`idb`) for projects, localStorage for settings. No server required to run. |
 | Cloud sync (optional) | **Supabase** project `prtpakaxzdmrehpndimy` — auth (GitHub/Google/magic link/password), one `sync_blobs` table (settings + projects + deletion tombstones, AES-GCM encrypted in the browser before upload), a private `mesh-sync` storage bucket, and the `relay` edge function that fronts paid mesh engines for the hosted site. Client config in `src/lib/cloud.ts` (the publishable key there is safe by design). Manage it at supabase.com; social-login setup steps: `docs/SOCIAL_LOGIN.md`. |
-| Desktop app | Tauri 2 wrapper in `moldable-lite/src-tauri/` (`npm run tauri dev`); release builds via `.github/workflows/build-desktop.yml`. |
+| Desktop app | Tauri 2 wrapper in `moldable-lite/src-tauri/` (`npm run tauri dev`); release builds via `.github/workflows/build-desktop.yml`. The only Rust logic is `stage_for_slicer` in `src-tauri/src/lib.rs` — it writes the export to `<app data>/handoff/<name>.3mf` and the frontend asks the OS to open it. Rust tests: `cd src-tauri && cargo test`. |
+| Export | One writer, `write3MF()` in `src/print/exportClient.ts` — every 3MF the app produces (model, plates, pieces, slicer hand-off) goes through it, carrying object names, part colours and per-face paint in both the core-3MF and Bambu/Orca dialects. |
+| Printer fit | One source of truth, `src/lib/fit.ts` — the Tolerance test coupon measurement sets both the loose/snug/press gap and the bore allowance applied to every hole the app drills. |
 
 ## Build, run, deploy
 

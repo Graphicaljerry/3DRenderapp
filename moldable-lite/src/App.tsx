@@ -2617,7 +2617,7 @@ export default function App() {
     }
   }
 
-  /** Export a 3MF and hand it to a desktop slicer (deep link locally; download on hosted). */
+  /** Export a 3MF and get it into a slicer — see lib/slicer.ts for the three routes. */
   async function openSlicer(target: SlicerTarget) {
     if (!result) return;
     const engine = result.kind === "generative" ? await getGenEngine() : sel?.engine;
@@ -2629,19 +2629,17 @@ export default function App() {
         applyResult(rr, project?.name ?? "Model", "Auto-repaired the mesh for export (watertight)", "auto-repair for export");
       }
       const blob = await engine.export(pf.result, "3mf");
-      const how = await openInSlicer(target, blob, safeFileName(exportBase(), "3mf"));
-      setMessages((m) => [
-        ...m,
-        {
-          id: mid(),
-          role: "assistant",
-          text:
-            (how === "deeplink"
-              ? `Sent to ${target === "bambu" ? "Bambu Studio" : "OrcaSlicer"}. ${target === "bambu" ? "Bambu may ask “not from a trusted site — open anyway?” — that's expected for non-MakerWorld files; click yes." : ""} If nothing opened, the app may not be installed — a download works too.`
-              : "Downloaded the 3MF — double-click it and it opens in your default slicer. (One-click send works when running locally with npm run dev.)") +
-            " " + preflightSummary(pf),
-        },
-      ]);
+      const hand = await openInSlicer(target, blob, safeFileName(exportBase(), "3mf"));
+      const app = target === "bambu" ? "Bambu Studio" : "OrcaSlicer";
+      const said =
+        hand.how === "desktop"
+          ? hand.opened
+            ? `Opened in whichever slicer owns .3mf on this machine. The file is saved at \`${hand.path}\`, and it keeps that name — so after your next edit, hit **Open in slicer** again and then **right-click the object → Reload from disk** in the slicer. Your supports, plate layout and print profile survive; only the shape updates.`
+            : `Saved the 3MF at \`${hand.path}\` and opened the folder — nothing on this machine is currently set to open .3mf files. Install a slicer (or open the file with one once, and the OS will remember).`
+          : hand.how === "deeplink"
+            ? `Sent to ${app}.${target === "bambu" ? " Bambu may ask “not from a trusted site — open anyway?” — that's expected for a file that didn't come from MakerWorld; click yes." : ""} If nothing opened, ${app} may not be installed — the download button works too.`
+            : "Downloaded the 3MF — double-click it and it opens in your default slicer. The desktop app opens it directly, and remembers the file so you can reload it there after an edit.";
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: said + " " + preflightSummary(pf) }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't prepare the file: " + String(err?.message ?? err), error: true }]);
     }

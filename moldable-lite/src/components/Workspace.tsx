@@ -27,6 +27,7 @@ import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamI
 import { fmtTok, fmtUSD } from "../llm/pricing";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
+import { IS_DESKTOP } from "../lib/desktopUpdate";
 import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type UpdateState } from "../lib/desktopUpdate";
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
@@ -1106,9 +1107,21 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
       )}
 
       <p className="dock-sub">Hand off</p>
-      <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("bambu")}>Open in Bambu Studio</button>
-      <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("orca")}>Open in OrcaSlicer</button>
-      <p className="fine">Sends the 3MF of the model. The one-click hand-off needs the desktop build; on the web this downloads the file instead.</p>
+      {/* The desktop app opens the file through the OS, so it reaches whichever slicer
+          owns .3mf — naming a specific one would be a guess. The browser can only deep-
+          link, and a deep link IS per-slicer, so the web build asks which. */}
+      {IS_DESKTOP ? (
+        <>
+          <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("orca")}>Open in slicer</button>
+          <p className="fine">Saves the 3MF and opens it in your default slicer — Orca, Bambu, Prusa, whichever owns .3mf. The file keeps its name, so after an edit you can send it again and use <b>Reload from disk</b> in the slicer instead of starting the print setup over.</p>
+        </>
+      ) : (
+        <>
+          <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("bambu")}>Open in Bambu Studio</button>
+          <button className="ghost sm" disabled={gated || busy} onClick={() => p.onOpenSlicer("orca")}>Open in OrcaSlicer</button>
+          <p className="fine">Sends the 3MF straight to the slicer when Moldable is running on your own machine; on the hosted site it downloads instead, and double-clicking the file opens your slicer. PrusaSlicer only accepts links from printables.com, so it takes the download route either way.</p>
+        </>
+      )}
       {busy && <p className="dock-note">Preparing the file…</p>}
     </div>
   );

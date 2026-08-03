@@ -2319,6 +2319,84 @@ export default function App() {
     }
   }
 
+  // ---- Cutting: bed split, freehand pen cut, and the pins that hold parts together --
+  /** Pen-cut tool. `pendingCut` is a drawn-but-unapplied stroke — it stays on screen
+   *  while the pin settings are chosen and the view is orbited to check the line. */
+  const [cutMode, setCutModeState] = useState(false);
+  const [pendingCut, setPendingCut] = useState<{ pts: [number, number, number][]; viewDir: [number, number, number] } | null>(null);
+  /** Registration pins, and how big. Persisted: a printer's parts want the same fit
+   *  every time, and re-picking 5 mm on every cut is a tax. */
+  const [connectorsOn, setConnectorsOn] = useState(() => localStorage.getItem("moldable_connectors") !== "off");
+  const [pinSize, setPinSize] = useState(() => Number(localStorage.getItem("moldable_pin_mm")) || 5);
+  const setConnectors = (v: boolean) => { setConnectorsOn(v); try { localStorage.setItem("moldable_connectors", v ? "on" : "off"); } catch { /* private mode */ } };
+  const setPin = (v: number) => { setPinSize(v); try { localStorage.setItem("moldable_pin_mm", String(v)); } catch { /* private mode */ } };
+  const setCutMode = (v: boolean) => {
+    setCutModeState(v);
+    if (!v) setPendingCut(null);
+    if (v) { setPaintModeState(false); setMeasureMode(false); setSelectMode(false); }
+  };
+  const connectorOpts = () => (connectorsOn ? { diameter: pinSize, depth: Math.max(2.5, pinSize * 0.8), clearance: 0.2, maxPerFace: 3 } : null);
+
+  /** Apply the drawn stroke: slice the model along it, pin the halves together. */
+  async function applyPenCut() {
+    if (!result || !pendingCut || status === "generating") return;
+    setStatus("generating");
+    try {
+      const { penCut, strokeSites, addConnectors, repack } = await import("./print/cut");
+      const out = penCut(result.geometry, pendingCut, { kerf: 0.2 });
+      if (!out) {
+        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "That line didn't separate the model — draw all the way across it (start and finish outside the part) and try again.", error: true }]);
+        return;
+      }
+      let pieces = out.pieces;
+      let merged = out.geometry;
+      let dims = out.dims;
+      let pinned = 0;
+      let pinMm = 0; // what actually fitted — a thin part gets a smaller pin, not none
+      const opts = connectorOpts();
+      if (opts && pieces.length === 2) {
+        const box = new THREE.Box3().setFromBufferAttribute(result.geometry.getAttribute("position") as THREE.BufferAttribute);
+        const sites = strokeSites(pendingCut, box, Math.max(6, pinSize * 1.6));
+        const con = addConnectors(pieces.map((p) => p.geometry), result.geometry, sites, opts);
+        pinned = con.added;
+        pinMm = con.diameter;
+        if (pinned) {
+          const packed = repack(con.pieces);
+          pieces = packed.pieces;
+          merged = packed.geometry;
+          dims = packed.dims;
+        }
+      }
+      applyResult(
+        {
+          kind: "generative",
+          geometry: merged,
+          dims,
+          source: { kind: "gen", provider: "cut", model: "pen-cut", prompt: `cut into ${pieces.length} parts` },
+          supportsStep: false,
+          glb: geometryToSTL(merged),
+        },
+        project?.name ?? "Model",
+        `Cut into ${pieces.length} parts${pinned ? ` with ${pinned} pin${pinned === 1 ? "" : "s"}` : ""}`,
+        "pen cut",
+        { splitPieces: pieces.map((pc) => ({ n: (pc.geometry.index ? pc.geometry.toNonIndexed() : pc.geometry).getAttribute("position").count, color: pc.color, dims: pc.dims })) },
+      );
+      setSplitPieces(pieces);
+      setPendingCut(null);
+      setCutModeState(false);
+      setMessages((m) => [...m, {
+        id: mid(), role: "assistant",
+        text: pieces.length === 2 && pinned
+          ? `Cut along your line into ${pieces.length} parts, with ${pinned} registration pin${pinned === 1 ? "" : "s"} (${Math.round(pinMm * 10) / 10} mm) — one side has the peg, the other the matching socket with 0.2 mm print clearance, so they only go together one way. Export each piece separately from the pieces list, or send them to their own plates.`
+          : `Cut along your line into ${pieces.length} parts.${opts && pieces.length > 2 ? " Pins are only fitted when the line makes exactly two pieces — this one made more." : opts ? " There was nowhere thick enough for a pin even at the smallest size, so the faces are plain." : ""}`,
+      }]);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Cut failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   /** Cut a too-big model into bed-sized parts, laid out on the plate to print + assemble. */
   async function splitMesh() {
     if (!result || status === "generating" || !report) return;
@@ -2326,7 +2404,7 @@ export default function App() {
     setStatus("generating");
     try {
       const { splitToFitBed } = await import("./print/split"); // CSG splitter loads on demand
-      const out = splitToFitBed(result.geometry, bed);
+      const out = splitToFitBed(result.geometry, bed, 5, connectorOpts());
       if (out.parts <= 1) {
         setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model already fits the bed — no split needed." }]);
         return;
@@ -2346,7 +2424,7 @@ export default function App() {
           glb: geometryToSTL(out.geometry),
         },
         project?.name ?? "Model",
-        `Split into ${out.parts} bed-sized pieces`,
+        `Split into ${out.parts} bed-sized pieces${out.pinned ? ` + ${out.pinned} pins` : ""}`,
         "split to fit bed",
         // The merged mesh concatenates pieces in order, so vertex counts + colours are
         // enough to rebuild the per-piece export list after undo/redo/reopen.
@@ -2358,7 +2436,7 @@ export default function App() {
         {
           id: mid(),
           role: "assistant",
-          text: `Split into ${out.parts} colour-coded pieces — each fits your ${bed.x} × ${bed.y} × ${bed.z} mm build volume. Export them all as separate STLs/3MFs (or one file), print, and glue or pin them together. (This replaces the single model; use Undo or History to go back.)`,
+          text: `Split into ${out.parts} colour-coded pieces — each fits your ${bed.x} × ${bed.y} × ${bed.z} mm build volume.${out.pinned ? ` Every cut carries registration pins (${out.pinned} in total, ${pinSize} mm): a peg on one side, a matching socket with 0.2 mm print clearance on the other, so the parts locate themselves instead of being lined up by eye.` : connectorsOn ? " No face had enough material for a pin, so the joints are plain." : ""} Export them as separate STLs/3MFs (or one file), print and assemble. (This replaces the single model; use Undo or History to go back.)`,
         },
       ]);
     } catch (err: any) {
@@ -5310,6 +5388,20 @@ export default function App() {
           fitToPlate: () => void fitModelToPlate(),
         }}
         genTexCtl={{ on: genTexture === "on", toggle: toggleGenTexture }}
+        cutCtl={{
+          mode: cutMode,
+          toggle: () => setCutMode(!cutMode),
+          pending: !!pendingCut,
+          onStroke: setPendingCut,
+          stroke: pendingCut,
+          apply: () => void applyPenCut(),
+          clear: () => setPendingCut(null),
+          busy: status === "generating",
+          connectors: connectorsOn,
+          setConnectors,
+          pinSize,
+          setPinSize: setPin,
+        }}
         measureCtl={{
           mode: measureMode,
           toggle: toggleMeasureTool,

@@ -107,6 +107,13 @@ interface Props {
   selectKind: SelectKind;
   boxSelectionActive: boolean; // App still holds a box-selected face set → keep the overlay
   transformMode: TransformMode; // whole-body gizmo: off / rotate / scale
+  /** Pen-cut tool: drag across the part to draw the line it gets sliced along. The
+   *  stroke is captured on a plane facing the camera and handed back in world space. */
+  cutMode?: boolean;
+  onCutStroke?: (stroke: { pts: [number, number, number][]; viewDir: [number, number, number] }) => void;
+  /** The committed stroke to keep drawn (null clears it) — App owns it so the line
+   *  survives while the cut is being confirmed and disappears when it is applied. */
+  cutStroke?: { pts: [number, number, number][] } | null;
   measureMode: boolean; // click two points to measure the distance between them
   measurePending: [number, number, number] | null; // the first clicked point, awaiting the second
   measurements: Measurement[]; // committed point-to-point measurements to render
@@ -309,6 +316,7 @@ interface Internals {
   pivot: THREE.Group | null; // when transforming: a group at the model centre the gizmo drives
   transforming: boolean; // a gizmo drag is in progress (freezes orbit + select picking)
   measures: THREE.Group; // point-to-point measurement lines + labels
+  cutLine?: THREE.Line; // the pen-cut stroke drawn over the scene
   pushArrow: THREE.Group; // drag-to-extrude handle on a selected flat face (shaft + cone + grab)
   pushGrab: THREE.Mesh; // invisible fat cylinder used to raycast/grab the arrow
   ghost: THREE.Mesh; // translucent live preview of the extruded volume during a push-pull drag
@@ -323,11 +331,11 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
-  const cb = useRef({ selectMode, selectKind, transformMode, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -343,6 +351,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   const hoveredRef = useRef<string | null>(null);
   // Set by the mount effect: "the scene changed, draw again" (see render-on-demand).
   const invalidateRef = useRef<(frames?: number) => void>(() => {});
+  // Set by the scene effect; lets the cutStroke prop redraw the line without a rebuild.
+  const cutLineRef = useRef<(pts: THREE.Vector3[]) => void>(() => {});
 
   useEffect(() => {
     const el = mount.current!;
@@ -1237,6 +1247,49 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s2.box = null;
     };
     let downAt: { x: number; y: number } | null = null;
+    // ---- Pen cut: draw the line the part gets sliced along ----------------------
+    // The stroke is collected on the plane through the model's centre facing the
+    // camera, so "where I drew it" and "where it cuts" are the same thing from this
+    // viewpoint — orbit afterwards and the cut is still where the drawing was.
+    let cutDrag: number | null = null;
+    let cutPts: THREE.Vector3[] = [];
+    const cutPlanePoint = () => {
+      const s2 = st.current;
+      const b = s2?.mesh?.geometry?.boundingBox;
+      if (b) return b.getCenter(new THREE.Vector3()).applyMatrix4(s2!.mesh!.matrixWorld);
+      return new THREE.Vector3();
+    };
+    /** Screen point → world point on that camera-facing plane. */
+    const cutPointAt = (clientX: number, clientY: number): THREE.Vector3 | null => {
+      const rect0 = canvasRect();
+      const ndc = new THREE.Vector2(((clientX - rect0.left) / rect0.width) * 2 - 1, -((clientY - rect0.top) / rect0.height) * 2 + 1);
+      rc.setFromCamera(ndc, camera);
+      const n = camera.getWorldDirection(new THREE.Vector3());
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(n, cutPlanePoint());
+      const hit = rc.ray.intersectPlane(plane, new THREE.Vector3());
+      return hit ?? null;
+    };
+    const drawCutLine = (pts: THREE.Vector3[]) => {
+      const s2 = st.current;
+      if (!s2) return;
+      if (!s2.cutLine) {
+        const g = new THREE.BufferGeometry();
+        // depthTest off + a high renderOrder: the line is an instruction ON the view,
+        // not an object in the scene, so it must stay visible over the part it crosses.
+        const mat = new THREE.LineBasicMaterial({ color: 0x498a6f, depthTest: false, transparent: true, opacity: 0.95 });
+        s2.cutLine = new THREE.Line(g, mat);
+        s2.cutLine.renderOrder = 998;
+        s2.cutLine.frustumCulled = false;
+        scene.add(s2.cutLine);
+      }
+      const arr = new Float32Array(pts.length * 3);
+      pts.forEach((p, i) => { arr[i * 3] = p.x; arr[i * 3 + 1] = p.y; arr[i * 3 + 2] = p.z; });
+      s2.cutLine.geometry.dispose();
+      s2.cutLine.geometry = new THREE.BufferGeometry().setAttribute("position", new THREE.BufferAttribute(arr, 3));
+      s2.cutLine.visible = pts.length > 1;
+      invalidate(2);
+    };
+    cutLineRef.current = drawCutLine;
     // Brush paint: a left-press-drag in Paint/Brush mode paints a circular dab under the
     // cursor along the whole drag (owns the pointer so orbit can't fight it).
     let paintDrag: number | null = null; // active pointerId, or null
@@ -1300,6 +1353,21 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // pointer's down so an iPad palm can't start or hijack a competing drag mid-gesture.
       if (s2 && (s2.pushDrag || s2.box || s2.transforming)) return;
       if (axDrag || anchorDrag || measDrag || paintDrag !== null) return;
+      // Pen cut: a left press anywhere on the canvas starts drawing the cut line. It
+      // deliberately does NOT require starting on the model — a cut usually begins
+      // outside the silhouette and travels across it.
+      if (cb.current.cutMode && e.button === 0 && !inAxes(e)) {
+        const p0 = cutPointAt(e.clientX, e.clientY);
+        if (p0) {
+          cutDrag = e.pointerId;
+          cutPts = [p0];
+          controls.enabled = false;
+          e.preventDefault();
+          try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
+          drawCutLine(cutPts);
+          return;
+        }
+      }
       // Paint/Brush mode: a left press ON the model arms a paint drag (paints along the
       // whole stroke, owns the pointer). Off the model, orbit proceeds as usual.
       if (s2 && cb.current.paintMode && cb.current.paintTool === "brush" && s2.mesh && e.button === 0 && !inAxes(e)) {
@@ -1425,6 +1493,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onUp = (e: PointerEvent) => {
       const s2 = st.current;
+      if (cutDrag !== null) {
+        if (e.pointerId !== cutDrag) return;
+        cutDrag = null;
+        controls.enabled = true;
+        try { renderer.domElement.releasePointerCapture?.(e.pointerId); } catch { /* lost */ }
+        // A tap is not a cut. Two points that are basically the same point aren't either.
+        if (cutPts.length >= 2 && cutPts[0].distanceTo(cutPts[cutPts.length - 1]) > 0.5) {
+          const dir = camera.getWorldDirection(new THREE.Vector3());
+          cb.current.onCutStroke?.({
+            pts: cutPts.map((p) => [p.x, p.y, p.z] as [number, number, number]),
+            viewDir: [dir.x, dir.y, dir.z],
+          });
+        } else {
+          cutPts = [];
+          drawCutLine([]);
+        }
+        return;
+      }
       if (axDrag) {
         if (e.pointerId !== axDrag.pointerId) return;
         const wasClick = !axDrag.moved;
@@ -1524,6 +1610,18 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     };
     const onMove = (e: PointerEvent) => {
       const s2 = st.current;
+      // Pen-cut drag: extend the drawn line. Points closer than ~1.5 px add nothing a
+      // person can see and only make the simplifier work harder later.
+      if (cutDrag !== null) {
+        if (e.pointerId !== cutDrag) return;
+        e.preventDefault();
+        const p = cutPointAt(e.clientX, e.clientY);
+        if (p && (!cutPts.length || p.distanceTo(cutPts[cutPts.length - 1]) > 0.2)) {
+          cutPts.push(p);
+          drawCutLine(cutPts);
+        }
+        return;
+      }
       // Brush paint drag: paint a dab under the cursor for the whole stroke — one dab
       // per rendered frame (the stroke can't appear any faster; WebKit sends more).
       if (paintDrag !== null) {
@@ -2056,6 +2154,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.triColor = fp && fp.length === s.tri.count ? fp.slice() : new Uint8Array(s.tri.count);
     rebuildPaintMesh(s, paintPalette ?? []);
   }, [geometry, paintMode, paintPalette]);
+
+  // App owns the committed stroke: it stays drawn while the cut is being confirmed
+  // (adjust the pin size, look at it from another angle) and clears when applied or
+  // discarded. Leaving the tool also clears it — a stale line over a part that is no
+  // longer about to be cut is just a mystery.
+  useEffect(() => {
+    if (!cutMode || !cutStroke) { cutLineRef.current([]); return; }
+    cutLineRef.current(cutStroke.pts.map((p) => new THREE.Vector3(...p)));
+  }, [cutMode, cutStroke]);
 
   // Toggle the transform gizmo on/off, switch rotate↔scale, and retarget to the attachment.
   useEffect(() => {

@@ -368,6 +368,13 @@ button { font-family: inherit; cursor: pointer; }
 .src-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .src-chip { font-size: 11px; padding: 2.5px 9px; border-radius: var(--r-full); color: var(--mut); text-decoration: none; background: var(--ctl); }
 .src-chip:hover { color: var(--accent-d); border-color: var(--accent); }
+/* Pen-cut flyout: the confirm step for a drawn cut — what it will do, the pin
+   settings, and the two ways out. Wider than the other flyouts because the pin
+   sizes are a row of chips. */
+.cut-fly { width: 232px; }
+.cut-fly .fine { margin: 0 0 7px; }
+.cut-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; font-size: 12px; color: var(--ink2); }
+.cut-actions { display: flex; gap: 6px; }
 /* Live web lookup — its own block under the step timeline, the way the reasoning
    panel is. The globe orbits while the request is in flight and settles when it
    lands, so "looking online" is a state you can watch rather than infer. */

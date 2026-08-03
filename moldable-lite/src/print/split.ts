@@ -6,6 +6,8 @@
 import * as THREE from "three";
 import { Evaluator, Brush, INTERSECTION } from "three-bvh-csg";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+// cut.ts only takes a TYPE from here, so this pairing is a one-way runtime import.
+import { addConnectors, planeSites, type ConnectorOpts } from "./cut";
 
 export interface SplitPiece {
   geometry: THREE.BufferGeometry; // laid-out, position-only — one printable island
@@ -15,6 +17,7 @@ export interface SplitPiece {
 
 export interface SplitResult {
   parts: number;
+  pinned?: number; // registration pins added across the cuts (0 when not asked for / nowhere to fit)
   geometry: THREE.BufferGeometry; // all pieces merged, with a per-piece vertex "color" for display
   pieces: SplitPiece[]; // each piece on its own, for separate STL/3MF export
   dims: { x: number; y: number; z: number };
@@ -46,7 +49,16 @@ export function partsNeeded(size: { x: number; y: number; z: number }, bed: { x:
   };
 }
 
-export function splitToFitBed(geometry: THREE.BufferGeometry, bed: { x: number; y: number; z: number }, marginMm = 5): SplitResult {
+export function splitToFitBed(
+  geometry: THREE.BufferGeometry,
+  bed: { x: number; y: number; z: number },
+  marginMm = 5,
+  /** Registration pins across each internal cut, so the printed parts locate
+      themselves instead of being aligned by eye and glued crooked. Added while the
+      pieces are still IN PLACE — once they're tiled across the plate their original
+      adjacency is gone and there is no shared face left to pin. */
+  connectors?: ConnectorOpts | null,
+): SplitResult {
   geometry.computeBoundingBox();
   const box = geometry.boundingBox!.clone();
   const size = new THREE.Vector3();
@@ -86,6 +98,26 @@ export function splitToFitBed(geometry: THREE.BufferGeometry, bed: { x: number; 
   }
   if (parts.length <= 1) {
     return { parts: parts.length || 1, geometry, pieces: [], dims: { x: r1(size.x), y: r1(size.y), z: r1(size.z) } };
+  }
+
+  // Pins go on now, while the grid still describes where the pieces met. One pass per
+  // internal plane so every cut face gets its own set rather than the model getting a
+  // handful of pins wherever they happened to fit first.
+  let pinned = 0;
+  if (connectors) {
+    const step = Math.max(6, (connectors.diameter ?? 5) * 1.6);
+    const planes: { point: THREE.Vector3; normal: THREE.Vector3 }[] = [];
+    for (let i = 1; i < nx; i++) planes.push({ point: new THREE.Vector3(box.min.x + i * cx, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2), normal: new THREE.Vector3(1, 0, 0) });
+    for (let j = 1; j < ny; j++) planes.push({ point: new THREE.Vector3((box.min.x + box.max.x) / 2, box.min.y + j * cy, (box.min.z + box.max.z) / 2), normal: new THREE.Vector3(0, 1, 0) });
+    for (let k = 1; k < nz; k++) planes.push({ point: new THREE.Vector3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z + k * cz), normal: new THREE.Vector3(0, 0, 1) });
+    let current = parts;
+    for (const pl of planes) {
+      const r = addConnectors(current, geometry, planeSites(pl, box, step), connectors);
+      current = r.pieces;
+      pinned += r.added;
+    }
+    parts.length = 0;
+    parts.push(...current);
   }
 
   // Recenter each part (centered in X/Y, resting on Z=0), track its own size and
@@ -139,5 +171,5 @@ export function splitToFitBed(geometry: THREE.BufferGeometry, bed: { x: number; 
   merged.computeBoundingBox();
   const ms = new THREE.Vector3();
   merged.boundingBox!.getSize(ms);
-  return { parts: parts.length, geometry: merged, pieces, dims: { x: r1(ms.x), y: r1(ms.y), z: r1(ms.z) } };
+  return { parts: parts.length, pinned, geometry: merged, pieces, dims: { x: r1(ms.x), y: r1(ms.y), z: r1(ms.z) } };
 }

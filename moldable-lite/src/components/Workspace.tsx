@@ -29,7 +29,7 @@ import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type Upda
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint, IconCut } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1649,6 +1649,21 @@ interface Props {
     fitToPlate: () => void;
   };
   genTexCtl: { on: boolean; toggle: () => void };
+  /** Pen cut: draw a line across the part and slice along it, with optional pins. */
+  cutCtl: {
+    mode: boolean;
+    toggle: () => void;
+    pending: boolean;       // a stroke is drawn and waiting to be applied
+    onStroke: (s: { pts: [number, number, number][]; viewDir: [number, number, number] }) => void;
+    stroke: { pts: [number, number, number][] } | null;
+    apply: () => void;
+    clear: () => void;      // throw the stroke away and draw again
+    busy: boolean;
+    connectors: boolean;
+    setConnectors: (v: boolean) => void;
+    pinSize: number;
+    setPinSize: (v: number) => void;
+  };
   measureCtl: {
     mode: boolean;
     toggle: () => void;
@@ -1750,7 +1765,7 @@ export function Workspace(p: Props) {
   // kept them mutually exclusive — Mark and Measure could both render as armed at once.
   // One direction is this effect (another tool wins → Mark stands down); the other is in
   // Mark's own onClick, which disarms the rest before arming itself.
-  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool || !!p.screwCtl.tool;
+  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.cutCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool || !!p.screwCtl.tool;
   useEffect(() => { if (otherToolOn) setMarkMode(false); }, [otherToolOn]);
 
   // Paste a reference image from the clipboard anywhere in the app.
@@ -2354,6 +2369,9 @@ export function Workspace(p: Props) {
                 snap={p.snap}
                 appearance={p.appearance}
                 partColors={p.partColors}
+                cutMode={p.cutCtl.mode}
+                onCutStroke={p.cutCtl.onStroke}
+                cutStroke={p.cutCtl.stroke}
                 paintMode={p.paintCtl.mode}
                 paintTool={p.paintCtl.tool}
                 paintMirror={p.paintCtl.mirror}
@@ -2577,6 +2595,54 @@ export function Workspace(p: Props) {
                     {p.measureCtl.mode && p.measureCtl.items.length > 0 && (
                       <div className="rail-fly">
                         <button className="ghost sm" title="Clear all measurements" onClick={p.measureCtl.clear}>Clear ({p.measureCtl.items.length})</button>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rail-tool">
+                    {/* Pen cut: draw the split line yourself instead of taking the
+                        bed-sized grid. The flyout is the confirm step — the stroke
+                        stays on screen so it can be checked from another angle. */}
+                    <button
+                      className={`ghost sm iconbtn${p.cutCtl.mode ? " on" : ""}`}
+                      aria-pressed={p.cutCtl.mode}
+                      aria-label="Cut"
+                      title="Cut tool: draw a line across the part and it splits along it"
+                      onClick={p.cutCtl.toggle}
+                    >
+                      <IconCut />
+                    <span className="rail-name">Cut</span>
+                    </button>
+                    {p.cutCtl.mode && (
+                      <div className="rail-fly cut-fly">
+                        <p className="fine">
+                          {p.cutCtl.pending
+                            ? "Cut along this line? Orbit to check it first — the line stays put."
+                            : "Drag across the part to draw the cut. Start and finish outside it."}
+                        </p>
+                        <label className="cut-row">
+                          <input type="checkbox" checked={p.cutCtl.connectors} onChange={(e) => p.cutCtl.setConnectors(e.target.checked)} />
+                          Connecting pins
+                        </label>
+                        {p.cutCtl.connectors && (
+                          <div className="cut-row">
+                            <span className="fine">Pin size</span>
+                            {[4, 5, 6, 8].map((d) => (
+                              <button
+                                key={d}
+                                className={`chip sm${p.cutCtl.pinSize === d ? " on" : ""}`}
+                                onClick={() => p.cutCtl.setPinSize(d)}
+                              >
+                                {d} mm
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        <div className="cut-actions">
+                          <button className="primary sm" disabled={!p.cutCtl.pending || p.cutCtl.busy} onClick={p.cutCtl.apply}>
+                            {p.cutCtl.busy ? "Cutting…" : "Cut here"}
+                          </button>
+                          <button className="ghost sm" disabled={!p.cutCtl.pending} onClick={p.cutCtl.clear}>Redraw</button>
+                        </div>
                       </div>
                     )}
                   </div>

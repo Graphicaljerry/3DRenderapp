@@ -308,3 +308,10 @@ export const IconGoogle = () => (
     <path fill="#EA4335" d="M12 4.76c1.76 0 3.34.6 4.58 1.79l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.29 6.61l4 3.1C6.23 6.87 8.88 4.76 12 4.76Z" />
   </svg>
 );
+/** Pen cut — a blade drawing its own line across the part. */
+export const IconCut = () => (
+  <svg width="17" height="17" viewBox="0 0 24 24" {...base}>
+    <path d="M3 18c3.5 0 5-9 9-9s5.5 5 9 5" strokeDasharray="3 2.6" />
+    <path d="M15.5 3.5 20 8l-8.2 8.2-5.2.9.9-5.2Z" />
+  </svg>
+);

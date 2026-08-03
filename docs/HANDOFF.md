@@ -1,5 +1,9 @@
 # Session handoff — state & roadmap
 
+> **Rebuilding or running the app? [`docs/BUILDING.md`](BUILDING.md) is the concise
+> survival sheet** — stack, build/deploy, and where every API key comes from.
+> Keep it updated whenever a feature changes setup, keys, or architecture.
+
 *Updated 2026-07-23 (PRs #43–#123 merged; latest code: snap-in-flyout / "Set
 size…". Design file rebuilt + consolidated in Figma — see "Figma design file"
 below). New

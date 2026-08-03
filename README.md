@@ -38,6 +38,7 @@ can dream up freeform shapes.
 
 ## Quick links
 
+- 🔧 [**How to build & run this app — keys, stack, deploy**](docs/BUILDING.md) — start here to rebuild from scratch
 - 📋 [Project plan, goals & roadmap](docs/PLAN.md)
 - 🧭 [**UX workflow & navigation redesign**](docs/UX_WORKFLOW.md) — the current design direction
 - 📐 [**Wireframe sheet v2**](docs/wireframes/ux-v2-wireframes.html) — every screen, drawn

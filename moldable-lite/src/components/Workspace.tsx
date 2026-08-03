@@ -3606,6 +3606,29 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                     ? <Reveal text={m.text} animate={fresh} />
                     : <span>{m.text}</span>)
                 )}
+                {/* A web lookup, said out loud. The globe spins while the request is
+                    actually in flight and the pages it used arrive as chips — the
+                    difference between "the app is online for me" and "the app hung". */}
+                {m.web && (
+                  <div className={`web-live${m.web.done ? " done" : ""}`}>
+                    <span className="web-live-head">
+                      <span className="web-live-globe"><IconGlobe size={13} /></span>
+                      {m.web.done
+                        ? m.web.found
+                          ? `Searched the web · ${m.web.sources?.length ?? 0} source${m.web.sources?.length === 1 ? "" : "s"}`
+                          : "Searched the web · nothing solid found"
+                        : "Searching the web…"}
+                    </span>
+                    <span className="web-live-q">{m.web.query}</span>
+                    {!!m.web.sources?.length && (
+                      <span className="web-live-src">
+                        {m.web.sources.map((sc, i) => (
+                          <a key={i} className="src-chip" href={sc.url} target="_blank" rel="noopener noreferrer" title={sc.title ?? sc.url}>{hostOf(sc.url)}</a>
+                        ))}
+                      </span>
+                    )}
+                  </div>
+                )}
                 {/* The model's own reasoning, streaming under the timeline. */}
                 {m.streaming && thinking && (
                   <div className="think-live">

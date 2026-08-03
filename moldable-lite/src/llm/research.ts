@@ -20,6 +20,24 @@ export function detectProductQuery(prompt: string): boolean {
   return EXPLICIT.test(prompt) || PRODUCTS.test(prompt);
 }
 
+/** Sculpting a real thing needs pictures of it far more than it needs millimetres —
+    the mesh engines can't hold a dimension anyway. Visual mode swaps the spec sheet
+    for a look-and-shape brief and insists on reference photos. */
+function visualPrompt(request: string, context?: string): string {
+  return [
+    `You are a visual-reference researcher for a 3D-modelling app. The user wants to sculpt:`,
+    `"${request}"`,
+    ...(context ? [``, `Context — they are working on ${context}.`] : []),
+    ``,
+    `1. Identify the exact real-world subject (make, model, generation, variant) if the request names one.`,
+    `2. Search the web for what it actually looks like, and for photographs of it.`,
+    `3. Reply with a short shape brief a sculptor could work from: overall silhouette and stance, proportions (state ratios or rough mm), the handful of features that make it recognisable, and any surface/texture notes. Under 140 words, no markdown headers.`,
+    `4. Then add the exact line "IMAGES:" followed by up to 4 DIRECT image URLs (https, path ending .jpg/.jpeg/.png/.webp/.avif — a query string after it is fine), one per line. These must be direct image files, never page or search-result URLs. Prefer clean side/front/three-quarter views of the real subject. Include this block whenever you saw any usable photo.`,
+    `If the request names nothing real to look up (a generic shape, an invented character), reply with exactly: NONE`,
+    `NEVER ask the user questions — you have no way to receive answers.`,
+  ].join("\n");
+}
+
 function researchPrompt(request: string, context?: string): string {
   return [
     `You are a dimensioning researcher for a 3D-printing CAD app. A user wants a part that must physically fit or mate with a real-world product. Request:`,
@@ -73,8 +91,11 @@ function splitImages(t: string): { text: string; images: string[] } {
   if (!m) return { text: t, images: [] };
   const images = m[1]
     .split(/\s+/)
-    .filter((u) => /^https:\/\/\S+\.(?:jpe?g|png|webp)(?:\?\S*)?$/i.test(u))
-    .slice(0, 3);
+    // Strip the markdown/bullet wrapping models like to add around a bare URL.
+    .map((s) => s.replace(/^[-*•\d.\s]+/, "").replace(/[)\],.]+$/, ""))
+    .filter((u) => /^https:\/\/\S+\.(?:jpe?g|png|webp|avif)(?:\?\S*)?$/i.test(u))
+    .filter((u, i, a) => a.indexOf(u) === i)
+    .slice(0, 4);
   return { text: t.slice(0, m.index).trim(), images };
 }
 
@@ -191,8 +212,13 @@ export function canResearch(keys: ResearchKeys): boolean {
 
 /** Look up the product's real dimensions online. Spec sheet + the pages used, or null.
     `context` describes the part already on canvas so the researcher never asks what it is. */
-export async function researchDimensions(request: string, keys: ResearchKeys, context?: string): Promise<ResearchResult | null> {
-  const prompt = researchPrompt(request, context);
+export async function researchDimensions(
+  request: string,
+  keys: ResearchKeys,
+  context?: string,
+  opts?: { visual?: boolean },
+): Promise<ResearchResult | null> {
+  const prompt = opts?.visual ? visualPrompt(request, context) : researchPrompt(request, context);
   if (keys.geminiKey) {
     try {
       const r = await viaGemini(prompt, keys.geminiKey, keys.geminiModel ?? "");

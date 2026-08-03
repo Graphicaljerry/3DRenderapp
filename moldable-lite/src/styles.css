@@ -368,6 +368,18 @@ button { font-family: inherit; cursor: pointer; }
 .src-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .src-chip { font-size: 11px; padding: 2.5px 9px; border-radius: var(--r-full); color: var(--mut); text-decoration: none; background: var(--ctl); }
 .src-chip:hover { color: var(--accent-d); border-color: var(--accent); }
+/* Live web lookup — its own block under the step timeline, the way the reasoning
+   panel is. The globe orbits while the request is in flight and settles when it
+   lands, so "looking online" is a state you can watch rather than infer. */
+.web-live { display: flex; flex-direction: column; gap: 3px; margin-top: 7px; padding: 7px 9px; border-radius: var(--r-md); background: color-mix(in srgb, var(--accent) 9%, transparent); }
+.web-live-head { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 500; color: var(--accent-d); }
+.web-live-globe { display: inline-flex; color: var(--accent-d); animation: web-spin 2.4s linear infinite; }
+.web-live.done .web-live-globe { animation: none; opacity: .75; }
+.web-live-q { font-size: 11px; color: var(--mut); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.web-live-src { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.web-live-src .src-chip { background: var(--bg); }
+@keyframes web-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .web-live-globe { animation: none; } }
 .msg-model { display: block; margin-top: 3px; font-size: 10.5px; color: var(--subt); }
 
 /* The user's own messages get a slight green tint so they read as "yours". */
@@ -1230,6 +1242,8 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .signin-card .modal-actions { margin-top: 14px; }
 .launch-foot { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--bord); display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: 11.5px; color: var(--mut); }
 .launch-foot .launch-actions { display: flex; align-items: baseline; gap: 14px; margin-left: auto; }
+/* Returning user: one link, no rule above it — the section has nothing to separate. */
+.launch-foot.lean { border-top: none; padding-top: 4px; }
 .launch-free { border: none; background: none; color: var(--mut); font-size: 11.5px; text-decoration: underline; padding: 0; }
 .launch-free:hover { color: var(--ink2); }
 @media (max-width: 560px) {

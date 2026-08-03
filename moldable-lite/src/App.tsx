@@ -107,6 +107,12 @@ export type ChatMessage = {
   /** A paid mesh generation waiting on one tap — price on the button, free CAD as the
    *  other exit. `done` freezes the card as a record of what was chosen. */
   confirm?: { text: string; yes: string; no: string; prompt: string; done?: boolean; chose?: "mesh" | "cad" };
+  /** A live web lookup. The step timeline said "Searching the web…" in the same grey
+   *  as every other stage, so a lookup that takes 20 s read as the app hanging — and
+   *  with the globe deliberately switched ON, nothing confirmed it was actually
+   *  online. This gets its own block under the timeline (like the reasoning panel):
+   *  a pulsing globe while it runs, then what it came back with. */
+  web?: { query: string; done?: boolean; found?: boolean; sources?: { url: string; title?: string }[] };
   // Direct-edit receipt (magnet pockets, holes…). Repeating the same action rewrites
   // THIS message with a running count instead of posting another identical bubble.
   receipt?: string;
@@ -930,6 +936,10 @@ export default function App() {
   const explainedRef = useRef<Set<string>>((() => {
     try { return new Set<string>(JSON.parse(localStorage.getItem("moldable_explained") ?? "[]")); } catch { return new Set<string>(); }
   })());
+  /** Attach/refresh the live web-lookup block on a message (see ChatMessage.web). */
+  function setWebState(msgId: string, web: NonNullable<ChatMessage["web"]>) {
+    setMessages((m) => m.map((x) => (x.id === msgId ? { ...x, web } : x)));
+  }
   function explainOnce(key: string, full: string, brief?: string) {
     const seen = explainedRef.current.has(key);
     if (!seen) {
@@ -3960,15 +3970,20 @@ export default function App() {
           );
         }
       }
-      if (p && !genImage && detectProductQuery(p)) {
+      // The globe toggle applies here too. A sculpt of something real ("a Lamborghini
+      // Gallardo") is exactly when reference PHOTOS matter more than millimetres, so
+      // the lookup runs in visual mode and the pictures it finds land in the chat.
+      if (p && !genImage && (webMode === "on" || detectProductQuery(p))) {
         const rk = { geminiKey: llmKeys["gemini"], geminiModel: llm.provider === "gemini" ? llm.model : "", anthropicKey: key, openrouterKey: llmKeys["openrouter"], openrouterModel: llm.provider === "openrouter" && llm.model !== AUTO_MODEL ? llm.model : "" };
         if (canResearch(rk)) {
           try {
             const genCtx = result && project ? `the part "${project.name}"` : undefined;
-            const rr = await researchDimensions(p, rk, genCtx);
+            setWebState(placeholderId, { query: p.slice(0, 90) });
+            const rr = await researchDimensions(p, rk, genCtx, { visual: true });
+            setWebState(placeholderId, { query: p.slice(0, 90), done: true, found: !!rr, sources: rr?.sources ?? [] });
             if (rr) {
-              genPrompt = `${genPrompt}\n\nReal product measurements (researched online, mm):\n${rr.text}`;
-              setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Measurements found online:\n${rr.text}`, sources: rr.sources, images: rr.images }]);
+              genPrompt = `${genPrompt}\n\nReal-world reference (researched online):\n${rr.text}`;
+              setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Found online:\n${rr.text}`, sources: rr.sources, images: rr.images }]);
             }
           } catch { /* research is best-effort */ }
         }
@@ -4230,10 +4245,14 @@ export default function App() {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
     } else if (wantWeb) {
       pushStep("Searching the web for the product's real dimensions…");
+      // …and say so in its own right: the globe block below the timeline pulses for
+      // as long as the lookup runs, so an online step never looks like a stall.
+      setWebState(placeholderId, { query: p.slice(0, 90) });
       const rr = await researchDimensions(p, researchKeys, partContext);
       researched = rr?.text ?? null;
       researchSources = rr?.sources ?? [];
       researchImages = rr?.images ?? [];
+      setWebState(placeholderId, { query: p.slice(0, 90), done: true, found: !!researched, sources: researchSources });
       if (researched) {
         // Show the found measurements as their own note, above the working placeholder —
         // with the pages the lookup actually used, so the numbers can be checked, and
@@ -6083,6 +6102,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   const [draft, setDraft] = useState("");
   const [k, setK] = useState("");
   const [m, setM] = useState(model);
+  /** Past the first-run tour: signed in, or enough projects behind them that the
+      teaching scaffolding is just furniture between them and the composer. */
+  const veteran = !!accountEmail || (recent?.length ?? 0) >= 2;
 
   const [dragOver, setDragOver] = useState(false);
   // What kind of thing is being built — asked UP FRONT, because the two engines have
@@ -6254,6 +6276,12 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           </section>
         )}
 
+        {/* Templates and the guided-repair door are ONBOARDING: they teach a first-time
+            visitor what the app can do. Someone signed in — or with a few projects
+            behind them — already knows, and for them this is the crowding Jerry marked
+            up. Both live one click inside the workspace (Templates in the topbar, the
+            guided card in the empty chat), so hiding them here costs nothing. */}
+        {!veteran && (
         <section className="launch-sect">
           <div className="launch-label-row">
             <p className="launch-label">Start from a template</p>
@@ -6271,6 +6299,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             Fix a broken part: photo in, replacement out <span className="gc-go">→</span>
           </button>
         </section>
+        )}
 
         {/* Sign-in itself lives in the SignInModal popup now (one dialog serves every
             entry point). What stays inline are the non-account extras that used to
@@ -6294,20 +6323,26 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         </div>
         )}
 
-        <footer className="launch-foot">
-          <span>
-            Sizes are AI-generated — check the fit before a long print.
-            {/* Signed in, the rest restated the account chip in the header — nothing
-                actionable. Signed out it is a real offer, so that half stays. */}
-            {!accountEmail && (
-              <>{" "}Runs in your browser; designs and keys stay on this device.{" "}
-                <button className="link" onClick={onSignIn}>Sign in to sync</button></>
-            )}
-          </span>
+        {/* The footer is first-run framing too: the AI-sizes caveat, the local-storage
+            pitch and the free-mode offer all answer "should I trust this?", which a
+            returning user settled long ago. They keep the one thing that is navigation
+            rather than pitch — the door to an empty workspace. */}
+        <footer className={`launch-foot${veteran ? " lean" : ""}`}>
+          {!veteran && (
+            <span>
+              Sizes are AI-generated — check the fit before a long print.
+              {/* Signed in, the rest restated the account chip in the header — nothing
+                  actionable. Signed out it is a real offer, so that half stays. */}
+              {!accountEmail && (
+                <>{" "}Runs in your browser; designs and keys stay on this device.{" "}
+                  <button className="link" onClick={onSignIn}>Sign in to sync</button></>
+              )}
+            </span>
+          )}
           <span className="launch-actions">
-            <button className="launch-free" onClick={onFree}>Start free in generative mode</button>
+            {!veteran && <button className="launch-free" onClick={onFree}>Start free in generative mode</button>}
             {/* A visible link only — deliberately not bound to Escape, so there is one Escape contract. */}
-            <button className="link" onClick={onSkip}>Skip</button>
+            <button className="link" onClick={onSkip}>{veteran ? "Open an empty workspace" : "Skip"}</button>
           </span>
         </footer>
        </div>

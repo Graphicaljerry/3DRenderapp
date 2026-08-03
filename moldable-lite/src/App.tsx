@@ -19,6 +19,7 @@ import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } from "./llm/clarify";
+import { draftPlan, planToPrompt, type BuildPlan } from "./llm/plan";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
 import { downscaleImage } from "./lib/downscale";
@@ -105,6 +106,9 @@ export type ChatMessage = {
   images?: string[]; // product photos a research lookup found (display-only <img> URLs)
   usage?: { inTok: number; outTok: number; usd: number | null; est: boolean }; // beta cost meter, summed over retries
   clarify?: ClarifyState; // a request too vague to build — the questions, in the chat
+  /** Plan mode: the spec to agree on BEFORE anything is generated. `done` freezes the
+   *  card as a record of what was actually built from. */
+  plan?: { prompt: string; plan: BuildPlan; done?: boolean; chose?: "build" | "skip" };
   /** A paid mesh generation waiting on one tap — price on the button, free CAD as the
    *  other exit. `done` freezes the card as a record of what was chosen. */
   confirm?: { text: string; yes: string; no: string; prompt: string; done?: boolean; chose?: "mesh" | "cad" };
@@ -908,7 +912,7 @@ export default function App() {
   // send path closes over `result`/`geometry` state, which only reflect the promote
   // (or discard) after a render. Queue the ask; the effect re-enters send() next
   // render, when its closures see the right base model.
-  type QueuedAsk = { promptText: string; forceMode?: Mode; override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean } };
+  type QueuedAsk = { promptText: string; forceMode?: Mode; override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean } };
   const [queuedAsk, setQueuedAsk] = useState<QueuedAsk | null>(null);
   useEffect(() => {
     if (!queuedAsk || pending) return;
@@ -1217,11 +1221,31 @@ export default function App() {
     setDimsModeState(m);
     localStorage.setItem("moldable_dims", m);
   };
-  const [theme, setThemeState] = useState<"light" | "dark">(() => {
+  // Three-state theme. "system" is the DEFAULT and follows the device live — a device
+  // that goes dark at sunset takes the app with it. Touching the toggle pins a choice;
+  // Settings can hand it back to the system. The launchpad is the exception, below.
+  const [themePref, setThemePrefState] = useState<"light" | "dark" | "system">(() => {
     const saved = localStorage.getItem("moldable_theme");
-    if (saved === "dark" || saved === "light") return saved;
-    return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    return saved === "dark" || saved === "light" ? saved : "system";
   });
+  const [sysDark, setSysDark] = useState(() => !!window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    if (!mq) return;
+    const on = (e: MediaQueryListEvent) => setSysDark(e.matches);
+    mq.addEventListener?.("change", on);
+    return () => mq.removeEventListener?.("change", on);
+  }, []);
+  // The launchpad is a lit stage — the print animation, the wordmark and the one big
+  // question are composed for dark, so with no explicit choice it stays dark whatever
+  // the device says. Inside the workspace, "system" means system.
+  const theme: "light" | "dark" = themePref === "system"
+    ? (!entered ? "dark" : sysDark ? "dark" : "light")
+    : themePref;
+  /** Toggling flips what is on screen and pins it — a toggle that sometimes did
+   *  nothing (because the system overruled it) would be worse than no toggle. */
+  const setThemeState = (v: "light" | "dark" | ((t: "light" | "dark") => "light" | "dark")) =>
+    setThemePrefState(typeof v === "function" ? v(theme) : v);
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     // Mirror the pre-paint inline script in index.html: it sets colorScheme (and a
@@ -1230,9 +1254,10 @@ export default function App() {
     // controls (the chat composer) rendering dark in a light UI.
     document.documentElement.style.colorScheme = theme;
     document.documentElement.style.backgroundColor = theme === "dark" ? "#121213" : "#e8e8e8"; // mirror index.html pre-paint + --page
-    localStorage.setItem("moldable_theme", theme);
+    if (themePref === "system") localStorage.removeItem("moldable_theme");
+    else localStorage.setItem("moldable_theme", themePref);
     scheduleSync(); // no-op until signed in (accountEmailRef guards it)
-  }, [theme]);
+  }, [theme, themePref]);
   const [units, setUnitsState] = useState<"mm" | "in">(() => (localStorage.getItem("moldable_units") === "in" ? "in" : "mm"));
   const setUnits = (f: (u: "mm" | "in") => "mm" | "in") =>
     setUnitsState((u) => {
@@ -1246,6 +1271,14 @@ export default function App() {
   // default and switchable off in Settings → Building, because someone who types full
   // specs every time should never see a card.
   const [clarifyOn, setClarifyOn] = useState(() => localStorage.getItem("moldable_clarify") !== "off");
+  /** Plan mode: write the spec down and agree it before spending a build. Default ON —
+   *  the whole point of the app is a first model that is already right — but one tap
+   *  turns it off for someone who knows exactly what they want. */
+  const [planOn, setPlanOn] = useState(() => localStorage.getItem("moldable_plan") !== "off");
+  const setPlan = (v: boolean) => {
+    setPlanOn(v);
+    try { localStorage.setItem("moldable_plan", v ? "on" : "off"); } catch { /* private mode */ }
+  };
   const setClarify = (v: boolean) => {
     setClarifyOn(v);
     try { localStorage.setItem("moldable_clarify", v ? "on" : "off"); } catch { /* private mode */ }
@@ -3769,7 +3802,7 @@ export default function App() {
   // "Thinking…" bubbles side by side, two API calls, and the loser of the race
   // surfacing as a network error. A ref flips the instant the first call enters.
   const sendingRef = useRef(false);
-  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean }) {
+  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean }) {
     if (sendingRef.current) return;
     // Typing while an AI proposal is on canvas BUILDS ON the proposal instead of
     // silently throwing it away: the previewed change is kept as its own version
@@ -3794,6 +3827,22 @@ export default function App() {
       sendingRef.current = false;
       setGenProgress(null); // the canvas goes back to showing the model, not the build
     }
+  }
+
+  /** The plan card's two exits. "Build it" re-sends with the (possibly edited) plan
+   *  folded into the brief; "Build without a plan" runs the original words. Either way
+   *  the card freezes in the transcript as the record of what was agreed. */
+  function planChoose(msgId: string, choice: "build" | "skip", edited?: BuildPlan) {
+    const msg = messagesRef.current.find((m) => m.id === msgId);
+    const st = msg?.plan;
+    if (!st || st.done) return;
+    setMessages((m) => m.map((x) => (x.id === msgId
+      ? { ...x, plan: { ...st, plan: edited ?? st.plan, done: true, chose: choice } }
+      : x)));
+    const brief = choice === "build" ? planToPrompt(st.prompt, edited ?? st.plan) : st.prompt;
+    // The plan already asked every question worth asking, so clarify would just be a
+    // second card in front of the same build.
+    void send(brief, undefined, { skipPlan: true, skipClarify: choice === "build" });
   }
 
   // One tap approves paid mesh runs for the REST of the session — the gate informs,
@@ -3869,7 +3918,7 @@ export default function App() {
     }
   }
 
-  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; routeAuto?: boolean }) {
+  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean }) {
     if (pendingRef.current) discardPending(true); // safety net — send() promotes a held proposal before ever reaching here
     const p = promptText.trim();
     if (status === "generating") return;
@@ -3984,6 +4033,35 @@ export default function App() {
     // The mode switch decides: Generative -> mesh provider; Precise + photo -> vision CAD.
     const useGen = (routedMode ?? forceMode ?? mode) === "generative";
     setGenProgress((g) => (g ? { ...g, kind: useGen ? "mesh" : "cad" } : g));
+
+    // ---- Plan first: agree the spec before spending the build. ----
+    // Ahead of clarify and of every expensive step, because the whole point is to get
+    // the FIRST model right rather than converge over four paid rounds. Fresh builds
+    // only — an edit already has the canvas as its brief. Best-effort: no brain, a
+    // timeout, or an unparseable reply and this falls straight through to the build it
+    // would have run anyway.
+    if (!override?.skipPlan && planOn && !guided && !result && !image?.markup && (p || image)) {
+      setStage("Writing a build plan…");
+      let planImg: { dataBase64: string; mediaType: string } | undefined;
+      if (image) {
+        try {
+          const du = await blobToDataURL(image.blob);
+          planImg = { dataBase64: du.split(",")[1], mediaType: image.blob.type || "image/png" };
+        } catch { /* plan from the text alone */ }
+      }
+      const draft = await draftPlan(p, brainLlm, brainKeys, effectiveProxy, {
+        image: planImg,
+        engine: useGen ? "mesh" : "cad",
+      });
+      if (draft) {
+        // The placeholder BECOMES the plan card: nothing is generated until it is
+        // approved, so there is no work in flight to narrate.
+        setMessages((m) => m.map((x) => (x.id === placeholderId
+          ? { id: x.id, role: "assistant" as const, text: "", plan: { prompt: p, plan: draft } }
+          : x)));
+        return;
+      }
+    }
 
     // ---- Too vague to build? Ask — with the answers already filled in. ----
     // After routing, so the questions suit the engine that will actually build (a mesh
@@ -4977,12 +5055,15 @@ export default function App() {
   const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");
 
   if (!entered) {
+    // The launchpad is a lit stage — the print animation, the wordmark, the one big
+    // question all read as intended on dark. It defaults there regardless of the
+    // device, and only an explicit choice (the toggle) overrides it.
     return (
       <>
       <Launchpad
         model={model}
         theme={theme}
-        onToggleTheme={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
+        onToggleTheme={() => setThemePrefState(theme === "dark" ? "light" : "dark")}
         onContinue={saveKey}
         onExample={loadExample}
         onAllTemplates={() => { setEntered(true); setShowTemplates(true); }}
@@ -5179,6 +5260,7 @@ export default function App() {
         }}
         clarifyCtl={{ answer: answerClarify, build: buildFromClarify }}
         confirmCtl={{ choose: confirmChoose }}
+        planCtl={{ on: planOn, setOn: setPlan, choose: planChoose }}
         onRetryModel={retryWithModel}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}
@@ -6141,18 +6223,6 @@ function LaunchBackdrop() {
         ctx.fillStyle = t.subtle;
         ctx.font = '500 12px "JetBrains Mono", ui-monospace, monospace';
         ctx.fillText(detail, startX + nameW, y);
-        // A thin progress rule under it: the percentage as a length, not just digits.
-        if (printing) {
-          const barW = Math.max(120, Math.min(260, view.w * 0.3));
-          const bx = view.cx - barW / 2;
-          const by = y + 7;
-          ctx.globalAlpha = 0.22 * fadeA;
-          ctx.fillStyle = t.subtle;
-          ctx.fillRect(bx, by, barW, 2);
-          ctx.globalAlpha = 0.85 * fadeA;
-          ctx.fillStyle = t.accent;
-          ctx.fillRect(bx, by, (barW * pct) / 100, 2);
-        }
         ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
       }
@@ -6357,11 +6427,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
               type="button"
               className={`web-toggle web-${webMode}`}
               onClick={onCycleWeb}
-              aria-label={`Web search: ${webMode}`}
+              aria-label={`Look things up online: ${webMode}`}
               title="Web search for real dimensions (and product photos) before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
             >
               <IconGlobe size={13} />
-              <span className="web-state">{webMode === "auto" ? "Auto" : webMode === "on" ? "On" : "Off"}</span>
+              <span className="web-state">{webMode === "auto" ? "Research · auto" : webMode === "on" ? "Research · on" : "Research · off"}</span>
             </button>
           </div>
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>

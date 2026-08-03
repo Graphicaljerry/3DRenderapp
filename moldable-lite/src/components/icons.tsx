@@ -315,3 +315,10 @@ export const IconCut = () => (
     <path d="M15.5 3.5 20 8l-8.2 8.2-5.2.9.9-5.2Z" />
   </svg>
 );
+/** Plan mode — a short checked list. */
+export const IconChecklist = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <path d="M4 6.5 6 8.5 9.5 5M4 17.5 6 19.5 9.5 16" />
+    <path d="M13 7h7M13 18h7" />
+  </svg>
+);

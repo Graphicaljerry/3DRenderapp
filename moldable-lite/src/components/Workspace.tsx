@@ -5,6 +5,7 @@ import { Markdown } from "./Markdown";
 import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
 import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
+import type { BuildPlan } from "../llm/plan";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
@@ -30,7 +31,7 @@ import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type Upda
 import type { SplitPiece } from "../print/split";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint, IconCut } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -829,9 +830,11 @@ function ResizeMenu({ ctl }: { ctl: Props["resizeCtl"] }) {
 
 /** Docked selection inspector — the selected part's numbers, editable. replicad scale is
  *  uniform-only, so editing any one dimension rescales the whole part to match it. */
-function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }: {
+function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect, onAdjust }: {
   dims: { x: number; y: number; z: number }; units: "mm" | "in"; busy: boolean; canScale: boolean;
   onScale: (axis: "x" | "y" | "z", target: number) => void; onDeselect: () => void;
+  /** Straight to the Adjust panel — the thing people click a model to reach. */
+  onAdjust: () => void;
 }) {
   const [draft, setDraft] = useState<{ axis: "x" | "y" | "z"; v: string } | null>(null);
   const show = (n: number) => (units === "in" ? (n / 25.4).toFixed(2) : String(Math.round(n * 10) / 10));
@@ -864,6 +867,9 @@ function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect }
         </label>
       ))}
       <div className="ins-note">{canScale ? "Edit any size — the whole part rescales to match (uniform)." : "Resizing needs the CAD engine."}</div>
+      {/* Clicking a part and then hunting through the Inspector list for "Adjust" was
+          two steps too many — it is the reason most people click a part at all. */}
+      <button className="ghost sm block ins-adjust" onClick={onAdjust}>Adjust size &amp; shape</button>
     </div>
   );
 }
@@ -1465,6 +1471,8 @@ interface Props {
   };
   /** Question cards living in the transcript: pick an answer, or build from one. */
   confirmCtl: { choose: (msgId: string, yes: boolean) => void };
+  /** Plan mode: approve, edit or skip the spec before anything is generated. */
+  planCtl: { on: boolean; setOn: (v: boolean) => void; choose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void };
   clarifyCtl: {
     answer: (msgId: string, qid: string, value: string) => void;
     build: (msgId: string, withAnswers: boolean) => void;
@@ -2040,7 +2048,7 @@ export function Workspace(p: Props) {
             <button className="chat-hide" title="Hide chat" onClick={() => setChatOpen(false)}>Hide</button>
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} />
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} />
 
           {p.providerWall && (
           <div className="wall-card" role="status">
@@ -2071,13 +2079,28 @@ export function Workspace(p: Props) {
                     type="button"
                     className={`web-toggle web-${p.webMode}`}
                     onClick={p.onCycleWeb}
-                    aria-label={`Web search: ${p.webMode}`}
+                    aria-label={`Look things up online: ${p.webMode}`}
                     title="Web search for real dimensions before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
                   >
                     <IconGlobe size={13} />
-                    <span className="web-state">{p.webMode === "auto" ? "Auto" : p.webMode === "on" ? "On" : "Off"}</span>
+                    <span className="web-state">{p.webMode === "auto" ? "Research · auto" : p.webMode === "on" ? "Research · on" : "Research · off"}</span>
                   </button>
                 )}
+                {/* Plan first. On by default because a first model that is already
+                    right beats four rounds of correcting one — but a direct "just
+                    build it" is one tap away and stays off until turned back on. */}
+                <button
+                  type="button"
+                  className={`web-toggle plan-toggle${p.planCtl.on ? " on" : ""}`}
+                  onClick={() => p.planCtl.setOn(!p.planCtl.on)}
+                  aria-pressed={p.planCtl.on}
+                  title={p.planCtl.on
+                    ? "Plan first: you get a short spec to check and correct before anything is generated. Click to build straight away instead."
+                    : "Building straight from your words. Click to get a plan to check first — it costs one cheap call and usually saves a rebuild."}
+                >
+                  <IconChecklist />
+                  <span className="web-state">{p.planCtl.on ? "Plan first" : "No plan"}</span>
+                </button>
                 {/* Fit rides HERE, not under the mode seg: measured, that row overflows
                     by ~30px and pushed fit onto a line of its own, while this row has
                     ~136px spare. Same family anyway — both are "how the next build runs". */}
@@ -2962,7 +2985,7 @@ export function Workspace(p: Props) {
                 {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
                 {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
                 {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
-                  <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} />
+                  <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} onAdjust={() => { setDockPanel("params"); setDockOpen(true); }} />
                 )}
               </div>
               {/* NOT in the right-dock: that stack steps left to clear the Inspector
@@ -3418,11 +3441,12 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl, planCtl }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
   clarifyCtl: Props["clarifyCtl"];
+  planCtl: Props["planCtl"];
   confirmCtl: Props["confirmCtl"];
 }) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -3447,8 +3471,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
   // (a changing function prop would defeat the memo for every row).
-  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl });
-  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl };
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl };
   const rowApi = useMemo(() => ({
     startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
@@ -3460,6 +3484,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     hasGenKey: (p: string) => rowCb.current.hasGenKey(p),
     clarifyAnswer: (msgId: string, qid: string, v: string) => rowCb.current.clarifyCtl.answer(msgId, qid, v),
     clarifyBuild: (msgId: string, withAnswers: boolean) => rowCb.current.clarifyCtl.build(msgId, withAnswers),
+    planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => rowCb.current.planCtl.choose(msgId, choice, edited),
     confirmChoose: (msgId: string, yes: boolean) => rowCb.current.confirmCtl.choose(msgId, yes),
   }), []);
 
@@ -3531,11 +3556,73 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
  *
  *  Answered or skipped, the card freezes instead of vanishing, so the transcript still
  *  says which numbers the part was actually built from. */
+/** The build plan, before anything is generated. Every line is editable in place —
+ *  correcting "3 mm wall" to "2 mm" here costs a keystroke, whereas discovering it in
+ *  the finished model costs another whole build (and on a mesh engine, real money).
+ *  The assumptions block is deliberately loudest: unstated guesses are what produce a
+ *  confidently wrong first model. */
+function PlanCard({ msgId, st, busy, api }: {
+  msgId: string;
+  st: NonNullable<ChatMessage["plan"]>;
+  busy: boolean;
+  api: { planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void };
+}) {
+  const [draft, setDraft] = useState<BuildPlan>(st.plan);
+  const [editing, setEditing] = useState(false);
+  const p = st.done ? st.plan : draft;
+  const setLine = (key: "steps" | "assumptions", i: number, v: string) =>
+    setDraft((d) => ({ ...d, [key]: d[key]!.map((x, j) => (j === i ? v : x)) }));
+  const list = (key: "steps" | "assumptions", label: string, items: string[]) => (
+    !!items.length && (
+      <div className="plan-sect">
+        <div className="plan-label">{label}</div>
+        <ul className="plan-list">
+          {items.map((x, i) => (
+            <li key={i}>
+              {editing
+                ? <input className="plan-edit" value={x} onChange={(e) => setLine(key, i, e.target.value)} aria-label={`${label} ${i + 1}`} />
+                : x}
+            </li>
+          ))}
+        </ul>
+      </div>
+    )
+  );
+  return (
+    <div className={`bubble plan-card${st.done ? " done" : ""}`}>
+      <div className="plan-head">
+        <span className="plan-kicker">Build plan</span>
+        <b className="plan-title">{p.title}</b>
+      </div>
+      {p.summary && <p className="plan-sum">{p.summary}</p>}
+      {p.size && <div className="plan-size">{p.size.x} × {p.size.y} × {p.size.z} mm</div>}
+      {list("steps", "What gets built", p.steps)}
+      {list("assumptions", "Assuming (change anything that's wrong)", p.assumptions)}
+      {!!p.printNotes?.length && (
+        <div className="plan-sect">
+          <div className="plan-label">Printing</div>
+          <ul className="plan-list">{p.printNotes.map((x, i) => <li key={i}>{x}</li>)}</ul>
+        </div>
+      )}
+      {st.done ? (
+        <p className="fine">{st.chose === "build" ? "→ built from this plan" : "→ built from the original request"}</p>
+      ) : (
+        <div className="plan-actions">
+          <button className="primary sm" disabled={busy} onClick={() => api.planChoose(msgId, "build", draft)}>Build this</button>
+          <button className="ghost sm" disabled={busy} onClick={() => setEditing((v) => !v)}>{editing ? "Done editing" : "Edit plan"}</button>
+          <button className="link" disabled={busy} onClick={() => api.planChoose(msgId, "skip")}>Skip the plan</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClarifyCard({ msgId, c, busy, api }: {
   msgId: string; c: ClarifyState; busy: boolean;
   api: {
     clarifyAnswer: (msgId: string, qid: string, v: string) => void;
     clarifyBuild: (msgId: string, withAnswers: boolean) => void;
+    planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void;
   };
 }) {
   // Free-text lives here rather than in the message: an answer only becomes the message's
@@ -3610,6 +3697,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
     hasBrainKey: (p: LlmProviderId) => boolean; hasGenKey: (p: string) => boolean;
     clarifyAnswer: (msgId: string, qid: string, v: string) => void;
     clarifyBuild: (msgId: string, withAnswers: boolean) => void;
+    planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void;
     confirmChoose: (msgId: string, yes: boolean) => void;
   };
 }) {
@@ -3624,7 +3712,9 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
   return (
         <div className={`msg ${m.role} ${m.error ? "err" : ""}`}>
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
-          {m.clarify ? (
+          {m.plan ? (
+            <PlanCard msgId={m.id} st={m.plan} busy={busy} api={api} />
+          ) : m.clarify ? (
             <ClarifyCard msgId={m.id} c={m.clarify} busy={busy} api={api} />
           ) : m.confirm ? (
             <div className="bubble confirm-card">
@@ -3975,28 +4065,72 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
   );
 }
 
+/** Restoring records a new version whose summary quotes the old one — restore twice
+ *  and every row reads `Restored "Restored "Adjusted…""`, which is how a history panel
+ *  ends up looking like the same row eight times. Unwrap to the change that actually
+ *  happened and carry "restored" as a tag instead. */
+function versionLabel(summary: string): { text: string; restored: boolean } {
+  let text = summary;
+  let restored = false;
+  for (;;) {
+    const m = text.match(/^Restored\s+[“"](.*)[”"]$/s);
+    if (!m) break;
+    text = m[1];
+    restored = true;
+  }
+  return { text, restored };
+}
+
+/** "just now" / "14m ago" / a clock time once it stops being about recency. */
+function whenLabel(ts: number): string {
+  const mins = Math.floor((Date.now() - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  if (mins < 24 * 60) return `${Math.floor(mins / 60)}h ago`;
+  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
+}
+
 function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestore: (id: string) => void }) {
   if (versions.length === 0) return <div className="panel muted">No versions yet — each change is saved here.</div>;
-  const list = [...versions].reverse();
+  // Newest first, the way every history panel works — and each row carries its step
+  // NUMBER counted from the first version, so "which came before which" is readable
+  // without doing arithmetic on timestamps.
+  const list = versions.map((v, i) => ({ v, step: i + 1 })).reverse();
   return (
-    <div className="panel">
-      <h3>Version history</h3>
-      {list.map((v, i) => (
-        <div key={v.id} className={`vrow ${i === 0 ? "current" : ""}`}>
-          {v.thumb
-            ? <img className="vthumb" src={v.thumb} alt="" aria-hidden />
-            : <span className="vthumb vthumb-empty" aria-hidden />}
-          <div className="vbody">
-            <div className="vsum">{v.summary}</div>
-            <div className="vmeta">
-              {new Date(v.createdAt).toLocaleTimeString()} · {v.dims ? `${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : v.engine}
-              {i === 0 ? " · current" : ""}
+    <div className="panel vhistory">
+      <div className="vhead">
+        <h3>History</h3>
+        <span className="fine">{versions.length} step{versions.length === 1 ? "" : "s"} · newest first</span>
+      </div>
+      <div className="vlist">
+        {list.map(({ v, step }, i) => {
+          const { text, restored } = versionLabel(v.summary);
+          return (
+            <div key={v.id} className={`vrow${i === 0 ? " current" : ""}`}>
+              <span className="vstep">{step}</span>
+              {v.thumb
+                ? <img className="vthumb" src={v.thumb} alt="" aria-hidden />
+                : <span className="vthumb vthumb-empty" aria-hidden />}
+              <div className="vbody">
+                <div className="vsum" title={text}>{text}</div>
+                <div className="vmeta">
+                  {whenLabel(v.createdAt)}
+                  {v.dims ? ` · ${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : ` · ${v.engine}`}
+                </div>
+              </div>
+              {i === 0
+                ? <span className="vtag now">Current</span>
+                : (
+                  <>
+                    {restored && <span className="vtag">restored</span>}
+                    <button className="ghost sm" onClick={() => onRestore(v.id)}>Restore</button>
+                  </>
+                )}
             </div>
-          </div>
-          {i !== 0 && <button className="ghost sm" onClick={() => onRestore(v.id)}>Restore</button>}
-        </div>
-      ))}
-      <p className="fine">Restoring records a new version, so nothing is lost.</p>
+          );
+        })}
+      </div>
+      <p className="fine">Restoring adds a step rather than deleting any — nothing is lost.</p>
     </div>
   );
 }

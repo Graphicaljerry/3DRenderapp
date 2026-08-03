@@ -608,15 +608,29 @@ button { font-family: inherit; cursor: pointer; }
 .prow .ok { color: var(--accent-d); font-weight: 600; }
 .prow .no { color: var(--danger); font-weight: 600; }
 .warns { margin: 12px 0; padding-left: 18px; color: var(--warn); font-size: 12.5px; }
-.vrow { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-md); margin-bottom: 8px; }
+/* History rows: a step number, a bigger thumbnail, the change, then its state. The
+   number is the hierarchy — it says which step came first without reading clocks. */
+.vhistory .vhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.vhistory .vhead h3 { margin: 0; }
+.vhistory .vlist { display: flex; flex-direction: column; gap: 6px; }
+.vstep {
+  flex: 0 0 auto; min-width: 20px; text-align: right;
+  font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--subt);
+}
+.vtag {
+  flex: 0 0 auto; font-size: 10px; letter-spacing: .02em; color: var(--subt);
+  background: var(--bg); border-radius: var(--r-full); padding: 2px 7px;
+}
+.vtag.now { color: var(--accent-d); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
+.vrow { display: flex; align-items: center; gap: 9px; padding: 8px 9px; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-md); }
 /* Mini canvas capture per version — the model as it looked (pose included) when that
    change landed. Old versions without one keep a quiet placeholder so rows align. */
-.vthumb { flex: 0 0 auto; width: 42px; height: 42px; border-radius: var(--r-md); border: 1px solid var(--bord); object-fit: cover; background: var(--canvas); }
+.vthumb { flex: 0 0 auto; width: 56px; height: 56px; border-radius: var(--r-md); border: 1px solid var(--bord); object-fit: cover; background: var(--canvas); }
 .vthumb-empty { display: inline-block; }
 .vrow .vbody { flex: 1 1 auto; min-width: 0; }
 .vrow.current { background: var(--accent-w); border-color: #cfe4e0; }
-.vsum { font-size: 13px; color: var(--ink2); }
-.vmeta { font-size: 11px; color: var(--subt); margin-top: 2px; }
+.vsum { font-size: 13px; font-weight: 500; color: var(--ink); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vmeta { font-size: 11px; color: var(--subt); margin-top: 3px; font-variant-numeric: tabular-nums; }
 
 /* ---------- statusbar + export ---------- */
 /* Wraps whole chips to the next line when narrow — the pieces themselves never
@@ -823,12 +837,17 @@ button { font-family: inherit; cursor: pointer; }
    because they are peers, and in one row because they were two related actions
    stranded in two unrelated corners of the page. */
 .launch-tabs { display: flex; gap: 6px; margin-top: 12px; }
+/* Links, not buttons: these are navigation between views, and a filled control
+   promises an action that changes something. */
+.launch-tabs { gap: 16px; }
 .launch-tab {
-  border: 1px solid var(--bord); background: var(--bg); border-radius: var(--r-full);
-  padding: 6px 14px; font-size: 12.5px; font-weight: 500; color: var(--ink2);
-  transition: border-color .15s ease, color .15s ease, background-color .15s ease;
+  border: none; background: none; padding: 0;
+  font-size: 12.5px; font-weight: 500; color: var(--mut);
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--mut) 45%, transparent);
+  transition: color .15s ease, text-decoration-color .15s ease;
 }
-.launch-tab:hover { border-color: var(--accent); color: var(--accent-d); }
+.launch-tab:hover { color: var(--accent-d); text-decoration-color: var(--accent); }
 /* Three-way choice inside a menu row (Dimensions: On select / Always / Off). */
 .pmenu-choice:hover { background: none; }
 .pmenu-opts { display: flex; gap: 3px; margin-top: 5px; width: 100%; }
@@ -1259,9 +1278,12 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .launch-resume:hover { background: var(--accent-w); }
 /* Recent projects: the same chip language as the templates below, with a real
    thumbnail so you recognise the part rather than reading its name. */
-.launch-recents { display: flex; flex-wrap: wrap; gap: 7px; align-items: stretch; }
+/* A GRID, not wrapped inline-flex: every card takes the same column width, so a
+   short name ("Wall hook") no longer sits in a visibly narrower box than a long one.
+   Equal columns are what makes a set read as a set. */
+.launch-recents { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 7px; align-items: stretch; max-width: 640px; }
 .launch-recent {
-  display: inline-flex; align-items: center; gap: 10px; padding: 5px 13px 5px 5px;
+  display: flex; align-items: center; gap: 10px; padding: 5px 13px 5px 5px; min-width: 0;
   border: 1px solid var(--bord); border-radius: var(--r-sm); background: transparent;
   color: var(--ink2); font: inherit; font-size: 13px; text-align: left;
   transition: border-color .15s ease, background-color .15s ease, color .15s ease, transform .15s ease;
@@ -2248,3 +2270,25 @@ details.guide { margin-top: 10px; }
   display: block; margin-top: 2px; font-style: normal;
   font-size: 10.5px; line-height: 1.45; color: var(--mut);
 }
+
+/* ---- Plan mode: the spec you agree before anything is generated ---------------- */
+/* Wider than a chat bubble and quietly framed — it is a document to read, not a
+   remark to skim. The assumptions block is the one that saves rebuilds, so it gets
+   the accent rail rather than blending into the list above it. */
+.plan-card { max-width: 100%; border: 1px solid var(--bord); background: var(--bg); }
+.plan-card.done { opacity: .78; }
+.plan-head { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.plan-kicker { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-d); }
+.plan-title { font-family: var(--font-display); font-size: 15px; font-weight: 600; color: var(--ink); }
+.plan-sum { margin: 5px 0 0; font-size: 12.5px; color: var(--ink2); }
+.plan-size { margin-top: 6px; font-family: var(--font-mono); font-size: 12px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.plan-sect { margin-top: 11px; }
+.plan-label { font-size: 11px; font-weight: 600; color: var(--mut); margin-bottom: 4px; }
+.plan-list { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; color: var(--ink2); }
+.plan-list li { line-height: 1.4; }
+.plan-sect:nth-of-type(2) { padding-left: 9px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.plan-edit { width: 100%; font: inherit; font-size: 12.5px; padding: 2px 6px; border: 1px solid var(--bord); border-radius: var(--r-xs); background: var(--ctl); color: var(--ink); }
+.plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
+.plan-toggle.on { color: var(--accent-d); border-color: var(--accent); }
+/* The one action a selected part is usually selected FOR. */
+.ins-adjust { margin-top: 8px; width: 100%; justify-content: center; }

@@ -875,6 +875,73 @@ function SelectionInspector({ dims, units, busy, canScale, onScale, onDeselect, 
   );
 }
 
+/** One saved measurement — and the place you retype it. Reading "37.4 mm" and wanting
+ *  40 is the whole gesture Shapr3D users reach for; the value is an input, and what
+ *  will actually move to get there is named before you commit, because "set this to 40"
+ *  is ambiguous until you know whether it drives a parameter or rescales the part. */
+function MeasureRow({ m, index, ctl, dimCtl, busy }: {
+  m: Measurement; index: number; ctl: Props["measureCtl"]; dimCtl: Props["dimCtl"]; busy: boolean;
+}) {
+  const span: [number, number, number] = [m.b[0] - m.a[0], m.b[1] - m.a[1], m.b[2] - m.a[2]];
+  const measured = Math.round(Math.hypot(span[0], span[1], span[2]) * 10) / 10;
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(String(measured));
+  const drivers = useMemo(() => (editing ? dimCtl.drivers(measured, span) : []), [editing, measured, dimCtl, span[0], span[1], span[2]]);
+  const [pick, setPick] = useState(0);
+  const target = Number(text);
+  const valid = Number.isFinite(target) && target > 0.01 && Math.abs(target - measured) > 1e-3;
+  if (!editing) {
+    return (
+      <div className="lp-row static">
+        <IconRuler /><span className="lp-name">Measure {index + 1}</span>
+        <button className="lp-sub meas-val" title="Type an exact size for this distance" onClick={() => { setText(String(measured)); setPick(0); setEditing(true); }}>
+          {measured} mm
+        </button>
+        <button className="x" aria-label="Delete measurement" onClick={() => ctl.remove(m.id)}><IconX /></button>
+      </div>
+    );
+  }
+  return (
+    <div className="lp-row static meas-edit">
+      <div className="meas-edit-top">
+        <IconRuler />
+        <span className="lp-name">Measure {index + 1}</span>
+        <input
+          className="meas-input"
+          value={text}
+          autoFocus
+          inputMode="decimal"
+          aria-label={`Target size for measurement ${index + 1}`}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && valid && drivers[pick]) { dimCtl.apply(drivers[pick], measured, target); setEditing(false); }
+            if (e.key === "Escape") setEditing(false);
+          }}
+        />
+        <span className="fine">mm</span>
+      </div>
+      {drivers.length === 0 ? (
+        <p className="fine">Nothing here can drive that distance — no parameter matches it. Adjust the part in the Adjust panel, or ask in chat.</p>
+      ) : (
+        <>
+          <div className="meas-drivers" role="radiogroup" aria-label="What to change">
+            {drivers.map((d, i) => (
+              <button key={i} role="radio" aria-checked={pick === i} className={`chip sm${pick === i ? " on" : ""}`} onClick={() => setPick(i)}>
+                {d.label}
+              </button>
+            ))}
+          </div>
+          <p className="fine">{measured} → {valid ? target : "…"} mm by changing <b>{drivers[pick]?.label}</b>. Free — no AI.</p>
+        </>
+      )}
+      <div className="meas-actions">
+        <button className="primary sm" disabled={!valid || busy || !drivers[pick]} onClick={() => { dimCtl.apply(drivers[pick], measured, target); setEditing(false); }}>Set</button>
+        <button className="ghost sm" onClick={() => setEditing(false)}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
 /** Tools-and-gestures cheat sheet — the toolbar's hover tooltips don't exist on touch
  *  devices, so the ? button opens this instead. Short, icon-anchored, closable. */
 /* The Inspector dock. One panel at a time, docked beside a stage that stays live —
@@ -1678,6 +1745,12 @@ interface Props {
     pinSize: number;
     setPinSize: (v: number) => void;
   };
+  /** Typed dimensions: take a measured distance to an exact number without the AI.
+   *  `drivers` says what could legitimately move it; `apply` moves it. */
+  dimCtl: {
+    drivers: (measured: number, span?: [number, number, number]) => { kind: string; key?: string; axis?: string; label: string; current: number }[];
+    apply: (driver: any, measured: number, target: number) => void;
+  };
   measureCtl: {
     mode: boolean;
     toggle: () => void;
@@ -1922,11 +1995,7 @@ export function Workspace(p: Props) {
                     </button>
                   ))}
                   {p.measureCtl.items.map((mm, i) => (
-                    <div key={mm.id} className="lp-row static">
-                      <IconRuler /><span className="lp-name">Measure {i + 1}</span>
-                      <span className="lp-sub">{Math.round(Math.hypot(mm.b[0] - mm.a[0], mm.b[1] - mm.a[1], mm.b[2] - mm.a[2]) * 10) / 10} mm</span>
-                      <button className="x" aria-label="Delete measurement" onClick={() => p.measureCtl.remove(mm.id)}><IconX /></button>
-                    </div>
+                    <MeasureRow key={mm.id} m={mm} index={i} ctl={p.measureCtl} dimCtl={p.dimCtl} busy={p.status === "generating"} />
                   ))}
                   {!p.geometry && <div className="lp-empty">Nothing on the canvas yet</div>}
                 </div>

@@ -2324,3 +2324,13 @@ details.guide { margin-top: 10px; }
 /* The one action a selected part is usually selected FOR. */
 .ins-adjust { margin-top: 8px; width: 100%; justify-content: center; }
 .msg-act.danger { color: var(--danger, #b4453c); font-weight: 600; }
+
+/* Typed dimensions: a saved measurement's value is an input, and what will move to
+   reach the new number is named before it happens. */
+.meas-val { border: none; background: none; padding: 0; font: inherit; color: var(--ink2); text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, var(--mut) 45%, transparent); }
+.meas-val:hover { color: var(--accent-d); }
+.meas-edit { flex-direction: column; align-items: stretch; gap: 6px; }
+.meas-edit-top { display: flex; align-items: center; gap: 7px; }
+.meas-input { width: 72px; font: inherit; font-size: 12.5px; padding: 2px 6px; border: 1px solid var(--accent); border-radius: var(--r-xs); background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums; }
+.meas-drivers { display: flex; flex-wrap: wrap; gap: 4px; }
+.meas-actions { display: flex; gap: 6px; }

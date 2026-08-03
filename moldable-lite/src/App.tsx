@@ -2209,6 +2209,52 @@ export default function App() {
       if (queued) void applyParams(queued);
     }
   }
+  // ---- Typed dimensions: set a measured distance by typing the number you want ----
+  /** What can actually DRIVE a measured distance to a new value. Named parameters
+   *  first — changing "magnet spacing" is exact and rebuilds through the same path a
+   *  slider does. Failing that, a uniform rescale along the measurement's own axis is
+   *  still deterministic and free. Nothing here spends a token: this is arithmetic,
+   *  and handing arithmetic to a language model is how you get 9.97 mm. */
+  type DimDriver =
+    | { kind: "param"; key: string; label: string; current: number }
+    | { kind: "scale"; axis: "x" | "y" | "z"; label: string; current: number };
+
+  function dimDrivers(measured: number, span?: [number, number, number]): DimDriver[] {
+    const out: DimDriver[] = [];
+    // A parameter whose CURRENT value is what the tape reads is almost certainly the
+    // one that put those two points there. Tolerance covers tessellation and the
+    // user's aim; anything looser starts matching unrelated numbers.
+    const tol = Math.max(0.25, measured * 0.02);
+    for (const [k, v] of Object.entries(paramValues)) {
+      if (typeof v !== "number") continue;
+      if (Math.abs(v - measured) <= tol) out.push({ kind: "param", key: k, label: humanizeParam(k), current: v });
+      // Half-value too: a diameter measured across a circle is often stored as radius.
+      else if (Math.abs(v * 2 - measured) <= tol) out.push({ kind: "param", key: k, label: `${humanizeParam(k)} (radius)`, current: v });
+    }
+    // …and the fallback: rescale along whichever axis the measurement mostly runs
+    // down. Offered last because it moves EVERYTHING, which is right for "make the
+    // part 10 mm wider" and wrong for "make this one hole 10 mm".
+    if (span && dims) {
+      const ax = (["x", "y", "z"] as const).reduce((best, k, i) =>
+        Math.abs(span[i]) > Math.abs(span[["x", "y", "z"].indexOf(best) as 0 | 1 | 2]) ? k : best, "x" as "x" | "y" | "z");
+      out.push({ kind: "scale", axis: ax, label: `Rescale the whole part (${ax.toUpperCase()})`, current: dims[ax] });
+    }
+    return out;
+  }
+
+  /** Apply a typed dimension through the chosen driver. */
+  async function applyTypedDim(driver: DimDriver, measured: number, target: number) {
+    if (!(target > 0.01) || Math.abs(target - measured) < 1e-3) return;
+    if (driver.kind === "param") {
+      // Radius-backed parameters take half of what was measured across the circle.
+      const isRadius = driver.label.endsWith("(radius)");
+      await applyParams({ ...paramValues, [driver.key]: isRadius ? target / 2 : target });
+      return;
+    }
+    // A whole-body rescale: the measured span grows by the same ratio as the part.
+    scaleToDim(driver.axis, (dims?.[driver.axis] ?? 0) * (target / measured));
+  }
+
   // Mid-scrub live preview. Differs from applyParams on purpose: it never flips global
   // status (which disables the very rows being dragged — the old "params feel broken"
   // report), never posts error bubbles (transient mid-drag values legitimately fail to
@@ -5543,6 +5589,7 @@ export default function App() {
           pinSize,
           setPinSize: setPin,
         }}
+        dimCtl={{ drivers: dimDrivers, apply: (d, measured, target) => void applyTypedDim(d, measured, target) }}
         measureCtl={{
           mode: measureMode,
           toggle: toggleMeasureTool,

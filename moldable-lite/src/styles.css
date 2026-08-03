@@ -373,24 +373,34 @@ button { font-family: inherit; cursor: pointer; }
    floating over one. */
 .build-stage {
   position: absolute; inset: 0; z-index: 4;
+  /* A scrim. Without it the stage's thin accent lines sat directly on the model and
+     the two competed — the progress was legible only where the canvas happened to be
+     empty. It fades in with the build and leaves with it, so the model is never dimmed
+     when there is nothing to read over it. */
+  background: color-mix(in srgb, #000 42%, transparent);
+  backdrop-filter: blur(1.5px);
+  animation: bs-scrim .28s ease both;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 3px; pointer-events: none; text-align: center; padding: 20px;
 }
 .build-stage-canvas { width: min(280px, 46%); height: 170px; margin-bottom: 6px; }
+@keyframes bs-scrim { from { opacity: 0; } to { opacity: 1; } }
+/* On the scrim, text is light in BOTH themes — it is over a dimmed 3D stage, not
+   over the page. */
 .build-stage-name {
-  font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--ink);
+  font-family: var(--font-display); font-size: 17px; font-weight: 600; color: #f2f5f3;
   letter-spacing: -0.01em; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.build-stage-phase { font-size: 12.5px; color: var(--mut); max-width: 42ch; }
-.build-stage-bar { width: min(240px, 60%); height: 3px; margin-top: 9px; border-radius: var(--r-full); background: color-mix(in srgb, var(--mut) 22%, transparent); overflow: hidden; }
+.build-stage-phase { font-size: 12.5px; color: rgba(242,245,243,.72); max-width: 42ch; }
+.build-stage-bar { width: min(240px, 60%); height: 3px; margin-top: 9px; border-radius: var(--r-full); background: rgba(242,245,243,.18); overflow: hidden; }
 .build-stage-bar span { display: block; height: 100%; background: var(--accent); border-radius: var(--r-full); transition: width .4s ease; }
 /* No number to show: a sweep that reads as "working", never as a measurement. */
 .build-stage-bar span.indet { width: 38%; animation: bs-sweep 1.5s ease-in-out infinite; }
 @keyframes bs-sweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }
-.build-stage-steps { display: flex; gap: 10px; margin-top: 11px; font-size: 11px; color: var(--subt); font-variant-numeric: tabular-nums; }
-.bs-step.done { color: var(--mut); }
-.bs-step.on { color: var(--accent-d); font-weight: 600; }
-.build-stage-meta { margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--subt); font-variant-numeric: tabular-nums; }
+.build-stage-steps { display: flex; gap: 10px; margin-top: 11px; font-size: 11px; color: rgba(242,245,243,.45); font-variant-numeric: tabular-nums; }
+.bs-step.done { color: rgba(242,245,243,.7); }
+.bs-step.on { color: #8fd3b8; font-weight: 600; }
+.build-stage-meta { margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: rgba(242,245,243,.55); font-variant-numeric: tabular-nums; }
 @media (prefers-reduced-motion: reduce) { .build-stage-bar span.indet { animation: none; width: 100%; opacity: .5; } }
 
 /* Pen-cut flyout: the confirm step for a drawn cut — what it will do, the pin
@@ -494,7 +504,25 @@ button { font-family: inherit; cursor: pointer; }
 .viewer-head .viewer-tools .seg.sm .iconbtn { height: 100%; }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
 /* The head cluster reads as one raised object, like the tab strip opposite it. */
-.viewer-head .viewer-tools { background: var(--bg); border-radius: var(--r-lg); box-shadow: 0 2px 9.3px rgba(0,0,0,.05); padding: 3px; gap: 2px; flex-wrap: nowrap; }
+/* Same surface, same shadow, same radius as the vertical rail — they are one family
+   of floating controls over the stage, and reading as two different materials made
+   the horizontal one look like a leftover. */
+.viewer-head .viewer-tools {
+  background: var(--chrome); border-radius: var(--r-full);
+  box-shadow: 0 17px 14px -4px rgba(0, 0, 0, 0.11);
+  padding: 4px 6px; gap: 3px; flex-wrap: nowrap;
+}
+/* …and the same icon size. These were rendering ~15px against the rail's 17px, which
+   is exactly the kind of difference you feel without being able to name. */
+.viewer-head .viewer-tools .iconbtn svg { width: 19px; height: 19px; }
+/* Undo/redo sat at --mut on --bg and dissolved into the pill. They are the two most
+   used controls in the app; they get ink weight, and their disabled state is what
+   carries the "nothing to undo" message. */
+.viewer-head .viewer-tools .iconbtn { color: var(--ink2); }
+.viewer-head .viewer-tools .iconbtn:disabled { color: var(--subt); opacity: .55; }
+/* The snapping control earns a word: a magnet glyph alone reads as the magnet TOOL. */
+.snap-btn { gap: 5px; padding-right: 9px; }
+.snap-btn .snap-name { font-size: 12px; font-weight: 500; line-height: 1; }
 .viewer-head .viewer-tools .ghost { border-color: transparent; background: transparent; white-space: nowrap; }
 .viewer-head .viewer-tools .ghost:hover { background: var(--surf); border-color: transparent; }
 /* Toolbar buttons carry an icon + a text label; the label collapses when the viewer
@@ -1869,7 +1897,10 @@ details.guide { margin-top: 10px; }
 /* Dark mode: --chrome sits within a few percent of the dark canvas, so the rail
    dissolved into the scene. Lift its surface and add a hairline — the pill has to read
    as chrome floating OVER the stage, not as part of it. */
-[data-theme="dark"] .canvas-rail {
+/* The two floating tool pills are ONE material — same fill, hairline and drop in
+   both themes. They were a shade apart, which read as two unrelated widgets. */
+[data-theme="dark"] .canvas-rail,
+[data-theme="dark"] .viewer-head .viewer-tools {
   background: #24262a;
   border: 1px solid rgba(255, 255, 255, 0.09);
   box-shadow: 0 18px 22px -8px rgba(0, 0, 0, 0.55);
@@ -2292,3 +2323,4 @@ details.guide { margin-top: 10px; }
 .plan-toggle.on { color: var(--accent-d); border-color: var(--accent); }
 /* The one action a selected part is usually selected FOR. */
 .ins-adjust { margin-top: 8px; width: 100%; justify-content: center; }
+.msg-act.danger { color: var(--danger, #b4453c); font-weight: 600; }

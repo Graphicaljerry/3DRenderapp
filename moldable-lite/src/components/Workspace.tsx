@@ -717,8 +717,9 @@ function SnapMenu({ snap, setSnap }: { snap: { move: number; rotate: number }; s
   useOutsideClose(box, open, () => setOpen(false));
   return (
     <div ref={box} style={{ position: "relative", display: "inline-flex" }}>
-      <button className={`ghost sm iconbtn has-modes${active ? " on" : ""}`} aria-label="Snapping" aria-expanded={open} title="Snapping — grid steps for Move, angle steps for Rotate" onClick={() => setOpen((v) => !v)}>
+      <button className={`ghost sm iconbtn snap-btn has-modes${active ? " on" : ""}`} aria-label="Snapping" aria-expanded={open} title="Snapping — grid steps for Move, angle steps for Rotate" onClick={() => setOpen((v) => !v)}>
         <IconMagnet />
+        <span className="snap-name">Snap</span>
       </button>
       {open && (
         <div className="snap-menu" role="menu">
@@ -1471,6 +1472,8 @@ interface Props {
   };
   /** Question cards living in the transcript: pick an answer, or build from one. */
   confirmCtl: { choose: (msgId: string, yes: boolean) => void };
+  /** Remove one line from the transcript (two-step confirm lives in the row). */
+  onDeleteMessage: (id: string) => void;
   /** Plan mode: approve, edit or skip the spec before anything is generated. */
   planCtl: { on: boolean; setOn: (v: boolean) => void; choose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void };
   clarifyCtl: {
@@ -2048,7 +2051,7 @@ export function Workspace(p: Props) {
             <button className="chat-hide" title="Hide chat" onClick={() => setChatOpen(false)}>Hide</button>
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} />
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage} />
 
           {p.providerWall && (
           <div className="wall-card" role="status">
@@ -3441,12 +3444,13 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl, planCtl }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl, planCtl, onDeleteMessage }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
   clarifyCtl: Props["clarifyCtl"];
   planCtl: Props["planCtl"];
+  onDeleteMessage: (id: string) => void;
   confirmCtl: Props["confirmCtl"];
 }) {
   const endRef = useRef<HTMLDivElement>(null);
@@ -3471,8 +3475,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
   // (a changing function prop would defeat the memo for every row).
-  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl });
-  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl };
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage };
   const rowApi = useMemo(() => ({
     startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
@@ -3485,6 +3489,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     clarifyAnswer: (msgId: string, qid: string, v: string) => rowCb.current.clarifyCtl.answer(msgId, qid, v),
     clarifyBuild: (msgId: string, withAnswers: boolean) => rowCb.current.clarifyCtl.build(msgId, withAnswers),
     planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => rowCb.current.planCtl.choose(msgId, choice, edited),
+    deleteMessage: (msgId: string) => rowCb.current.onDeleteMessage(msgId),
     confirmChoose: (msgId: string, yes: boolean) => rowCb.current.confirmCtl.choose(msgId, yes),
   }), []);
 
@@ -3623,6 +3628,7 @@ function ClarifyCard({ msgId, c, busy, api }: {
     clarifyAnswer: (msgId: string, qid: string, v: string) => void;
     clarifyBuild: (msgId: string, withAnswers: boolean) => void;
     planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void;
+    deleteMessage: (msgId: string) => void;
   };
 }) {
   // Free-text lives here rather than in the message: an answer only becomes the message's
@@ -3698,6 +3704,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
     clarifyAnswer: (msgId: string, qid: string, v: string) => void;
     clarifyBuild: (msgId: string, withAnswers: boolean) => void;
     planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void;
+    deleteMessage: (msgId: string) => void;
     confirmChoose: (msgId: string, yes: boolean) => void;
   };
 }) {
@@ -3705,6 +3712,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
   const setEditText = api.setEditText;
   const submitEdit = api.submitEdit;
   const startEdit = api.startEdit;
+  const [confirmDel, setConfirmDel] = useState<string | null>(null);
   const onRetryModel = api.onRetryModel;
   const brain = useMemo(() => ({ provider: brainProvider, model: brainModel }), [brainProvider, brainModel]);
   const hasBrainKey = api.hasBrainKey;
@@ -3831,15 +3839,30 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
               {/* Retry / edit any typed prompt — including one sent with a photo, so
                   a failed generation can be re-run (the attached photo, if still in
                   the composer, rides along). */}
-              {m.role === "user" && m.text && (
+              {(m.role === "user" ? !!m.text : !m.streaming) && (
                 <div className="msg-actions">
-                  {busy ? (
-                    <span className="msg-act" style={{ opacity: 0.4 }}>Retry</span>
-                  ) : (
-                    <RetryMenu mode={m.mode ?? "precise"} brain={brain} hasBrainKey={hasBrainKey} genProvider={genProvider} genModel={genModel} hasGenKey={hasGenKey}
-                      onPick={(value) => onRetryModel(m.text, m.mode ?? "precise", value)} />
+                  {m.role === "user" && m.text && (
+                    <>
+                      {busy ? (
+                        <span className="msg-act" style={{ opacity: 0.4 }}>Retry</span>
+                      ) : (
+                        <RetryMenu mode={m.mode ?? "precise"} brain={brain} hasBrainKey={hasBrainKey} genProvider={genProvider} genModel={genModel} hasGenKey={hasGenKey}
+                          onPick={(value) => onRetryModel(m.text, m.mode ?? "precise", value)} />
+                      )}
+                      <button className="msg-act" disabled={busy} title="Edit this message and resend" onClick={() => startEdit(m)}>Edit</button>
+                    </>
                   )}
-                  <button className="msg-act" disabled={busy} title="Edit this message and resend" onClick={() => startEdit(m)}>Edit</button>
+                  {/* Two-step rather than a dialog: a transcript line is small enough
+                      that a modal over the whole app is heavier than the thing being
+                      deleted, but it still can't go on one stray click. */}
+                  {confirmDel === m.id ? (
+                    <>
+                      <button className="msg-act danger" onClick={() => { setConfirmDel(null); api.deleteMessage(m.id); }}>Delete?</button>
+                      <button className="msg-act" onClick={() => setConfirmDel(null)}>Keep</button>
+                    </>
+                  ) : (
+                    <button className="msg-act" title="Delete this message" onClick={() => setConfirmDel(m.id)}>Delete</button>
+                  )}
                 </div>
               )}
             </>

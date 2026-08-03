@@ -59,7 +59,10 @@ export function BuildStage({ progress }: { progress: BuildProgress }) {
 
     const draw = (now: number) => {
       const css = getComputedStyle(document.documentElement);
-      const accent = css.getPropertyValue("--accent").trim() || "#498a6f";
+      // Drawn over a dark scrim, so a fixed light accent beats the theme token —
+      // the light theme's accent is tuned for a pale page and vanishes here.
+      const accent = "#8fd3b8";
+      void css;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const w = cv.clientWidth;
       const h = cv.clientHeight;

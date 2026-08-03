@@ -623,6 +623,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!(s.tc as any).object || !(s.tcR as any).object) {
         s.tc.enabled = true;
         s.tcR.enabled = true;
+        applyGizmoCursor(s); // …but the cursor still has to be told when to let go
         return;
       }
       // Two raycasts per event below — cap at frame rate. pointerdown stays ungated:
@@ -641,6 +642,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         // Off both gizmos — leave both armed so whichever is reached first still works.
         s.tc.enabled = true;
         s.tcR.enabled = true;
+        // …and DROP the hover state. This branch used to return without touching the
+        // cursor, so moving off a rotate ring left the rotate cursor stuck on until
+        // some unrelated click happened to reset it (a real report). The gizmos' own
+        // axis fields lag a frame behind their internal raycast, so clear them here
+        // rather than trusting them — this raycast is the authority.
+        (s.tc as any).axis = null;
+        (s.tcR as any).axis = null;
+        applyGizmoCursor(s);
         return;
       }
       // Primary-handle rule: translate wins ties and near-ties (within 2 mm of ray depth).
@@ -669,6 +678,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       renderer.domElement.style.cursor = winner.getMode() === "rotate" ? ROTATE_CURSOR : "move";
     };
     renderer.domElement.addEventListener("pointermove", arbitrate, true);
+    // Leaving the canvas ends every hover — without this the last cursor the pointer
+    // saw stayed painted on while it was somewhere else entirely.
+    const dropHover = () => {
+      const s = st.current;
+      if (!s || s.transforming) return;
+      (s.tc as any).axis = null;
+      (s.tcR as any).axis = null;
+      applyGizmoCursor(s);
+    };
+    renderer.domElement.addEventListener("pointerleave", dropHover);
     renderer.domElement.addEventListener("pointerdown", arbitrate, true);
     // Keep the scale PREVIEW uniform (replicad scale is uniform only) so what you drag is what
     // you get — collapse any per-axis handle drag to a single factor live.
@@ -1962,6 +1981,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       ro.disconnect();
       renderer.domElement.removeEventListener("pointerdown", onCtxDown);
       renderer.domElement.removeEventListener("contextmenu", onCtxMenu);
+      renderer.domElement.removeEventListener("pointerleave", dropHover);
       renderer.domElement.removeEventListener("pointerup", onDblPtr);
       renderer.domElement.removeEventListener("pointerdown", onDown);
       renderer.domElement.removeEventListener("pointerup", onUp);

@@ -856,6 +856,37 @@ export default function App() {
     if (ng !== g) ng.dispose();
     return pos;
   };
+  /** Keep only the parts of a diff a person would call a change. Islands are scored by
+   *  volume: anything under a fraction of the biggest one — or under a flat floor — is
+   *  re-tessellation noise spread over the surface, not the edit that was asked for. */
+  function significantIslands(soup: Float32Array | null): Float32Array | null {
+    if (!soup || soup.length < 9) return null;
+    if (meshVolume(soup) < 0.05) return null;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(soup, 3));
+    let parts: THREE.BufferGeometry[];
+    try {
+      parts = splitConnectedParts(g);
+    } catch {
+      return soup; // can't separate it — better to show the whole diff than nothing
+    }
+    if (parts.length <= 1) return meshVolume(soup) < 0.5 ? null : soup;
+    const scored = parts
+      .map((pg) => {
+        const arr = (pg.index ? pg.toNonIndexed() : pg).getAttribute("position").array as Float32Array;
+        return { arr, vol: Math.abs(meshVolume(arr)) };
+      })
+      .sort((a, b) => b.vol - a.vol);
+    const biggest = scored[0].vol;
+    const keep = scored.filter((x) => x.vol >= Math.max(0.5, biggest * 0.04));
+    if (!keep.length) return null;
+    const total = keep.reduce((n, x) => n + x.arr.length, 0);
+    const out = new Float32Array(total);
+    let o = 0;
+    for (const x of keep) { out.set(x.arr, o); o += x.arr.length; }
+    return out;
+  }
+
   /** What would this change do, physically? added = new − old, removed = old − new. */
   async function computeChangeDiff(oldG: THREE.BufferGeometry | null, newG: THREE.BufferGeometry) {
     try {
@@ -866,8 +897,13 @@ export default function App() {
       let added: Float32Array | null = null;
       if (await previewSetBase(oldG)) removed = await previewBoolean(newSoup, -1);
       if (await previewSetBase(newG)) added = await previewBoolean(oldSoup, -1);
-      if (removed && meshVolume(removed) < 1) removed = null; // tessellation crumbs
-      if (added && meshVolume(added) < 1) added = null;
+      // Rebuilding a CAD program re-tessellates the WHOLE surface, so the boolean also
+      // returns a confetti of sliver shells everywhere the triangles happen to fall
+      // differently — which is why filling one hole used to light up the entire model
+      // (a real report: the preview misled, even though the applied result was right).
+      // Judge each disconnected island on its own and keep only ones with real volume.
+      removed = significantIslands(removed);
+      added = significantIslands(added);
       return added || removed ? { added, removed } : null;
     } catch {
       return null; // no diff ≠ no preview — the bar still shows the proposal
@@ -4818,7 +4854,10 @@ export default function App() {
     try {
       await rebuildHead(next);
       stampHeadThumb();
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restored an earlier version." }]);
+      // No chat bubble. A restore is a HISTORY event and the History panel already
+      // shows it as a step; posting one bubble per restore turned the transcript into
+      // sixteen identical lines that buried the actual conversation (a real report).
+      // Failures still speak up — those are news.
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
     }
@@ -5261,6 +5300,7 @@ export default function App() {
         clarifyCtl={{ answer: answerClarify, build: buildFromClarify }}
         confirmCtl={{ choose: confirmChoose }}
         planCtl={{ on: planOn, setOn: setPlan, choose: planChoose }}
+        onDeleteMessage={(id) => setMessages((m) => m.filter((x) => x.id !== id))}
         onRetryModel={retryWithModel}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}

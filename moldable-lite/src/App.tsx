@@ -54,6 +54,7 @@ import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIn
 import type { Project, Pin, Version } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
+import type { BuildProgress } from "./components/BuildStage";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { IS_DESKTOP } from "./lib/desktopUpdate";
@@ -461,6 +462,9 @@ export default function App() {
     };
   }, []);
 
+  /** What the canvas shows while a build runs: the name, the live phase, and a real
+   *  percentage when the engine reports one (mesh does; CAD has phases instead). */
+  const [genProgress, setGenProgress] = useState<BuildProgress | null>(null);
   const [sel, setSel] = useState<EngineSelection | null>(null);
   const [booting, setBooting] = useState(false);
   // Lazy: the mesh-engine module (GLB loaders, export helpers) loads with the
@@ -3788,6 +3792,7 @@ export default function App() {
       await sendInner(promptText, forceMode, override);
     } finally {
       sendingRef.current = false;
+      setGenProgress(null); // the canvas goes back to showing the model, not the build
     }
   }
 
@@ -3902,9 +3907,21 @@ export default function App() {
     // Advancing to a new stage checks the current one off into `steps` (the timeline
     // draws its connector line); writing `text` directly instead updates the active
     // row in place — that's the channel for progress ticks like "running 40%".
-    const setStage = (text: string) => setMessages((m) => m.map((x) => (x.id === placeholderId
-      ? { ...x, text, steps: x.text && x.text !== text ? [...(x.steps ?? []), x.text] : x.steps, streaming: true }
-      : x)));
+    const setStage = (text: string) => {
+      setMessages((m) => m.map((x) => (x.id === placeholderId
+        ? { ...x, text, steps: x.text && x.text !== text ? [...(x.steps ?? []), x.text] : x.steps, streaming: true }
+        : x)));
+      // The same line drives the canvas stage. A percentage the provider embedded in
+      // its status ("running 40%") is a REAL number, so it becomes the bar; anything
+      // else leaves the bar indeterminate rather than inventing one.
+      const pm = text.match(/(\d{1,3})\s*%/);
+      setGenProgress((g) => ({
+        name: g?.name || project?.name || (p ? p.slice(0, 60) : "New part"),
+        phase: text,
+        pct: pm ? Math.min(100, Number(pm[1])) : null,
+        kind: g?.kind ?? "cad",
+      }));
+    };
 
     // Fresh chat + the user never touched the engine switch → route by what the words
     // describe. Organic/sculptural things are beyond CAD's reach and belong on the mesh
@@ -3966,6 +3983,7 @@ export default function App() {
     }
     // The mode switch decides: Generative -> mesh provider; Precise + photo -> vision CAD.
     const useGen = (routedMode ?? forceMode ?? mode) === "generative";
+    setGenProgress((g) => (g ? { ...g, kind: useGen ? "mesh" : "cad" } : g));
 
     // ---- Too vague to build? Ask — with the answers already filled in. ----
     // After routing, so the questions suit the engine that will actually build (a mesh
@@ -5036,6 +5054,7 @@ export default function App() {
         onWallRetry={() => { const t = providerWall; setProviderWall(null); if (t) void send(t); }}
         onWallMesh={() => { const t = providerWall; setProviderWall(null); setMode("generative"); if (t) void send(t, "generative"); }}
         booting={booting || (!sel && mode === "precise")}
+        genProgress={genProgress}
         accountEmail={accountEmail}
         theme={theme}
         onToggleTheme={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
@@ -5608,6 +5627,7 @@ function LaunchBackdrop() {
         accent,
         body,
         subtle: cs.getPropertyValue("--subt").trim() || "#8b968f",
+        ink: cs.getPropertyValue("--ink2").trim() || (dark ? "#e6ebe8" : "#26302b"),
         dark,
         grid: dark ? 0.07 : 0.13,
         gridMajor: dark ? 0.14 : 0.24,
@@ -6099,15 +6119,40 @@ function LaunchBackdrop() {
       {
         const pct = Math.round((printing ? p / PRINT : 1) * 100);
         const anchor = iso(view, 0, 0, 0);
-        ctx.globalAlpha = (t.dark ? 0.6 : 0.75) * fadeA;
+        const y = Math.min(anchor[1] - view.w * 0.12, partTopY - 16);
+        // The name is the point of the whole animation — it says what is being drawn.
+        // At 11px in the palette's faintest grey it was unreadable at arm's length, so
+        // the name carries the ink weight and the telemetry trails it, quieter.
+        const detail = printing
+          ? ` · layer ${Math.min(upto + 1, solid.layers)}/${solid.layers} · ${pct}%`
+          : engraving ? " · lettering" : " · done";
+        ctx.textBaseline = "bottom";
+        ctx.font = '600 15px "JetBrains Mono", ui-monospace, monospace';
+        const nameW = ctx.measureText(name).width;
+        ctx.font = '500 12px "JetBrains Mono", ui-monospace, monospace';
+        const detailW = ctx.measureText(detail).width;
+        const startX = view.cx - (nameW + detailW) / 2;
+        ctx.textAlign = "left";
+        ctx.globalAlpha = (t.dark ? 0.92 : 0.86) * fadeA;
+        ctx.fillStyle = t.ink;
+        ctx.font = '600 15px "JetBrains Mono", ui-monospace, monospace';
+        ctx.fillText(name, startX, y);
+        ctx.globalAlpha = (t.dark ? 0.66 : 0.7) * fadeA;
         ctx.fillStyle = t.subtle;
-        ctx.font = '500 11px "JetBrains Mono", ui-monospace, monospace';
-        ctx.textAlign = "center"; ctx.textBaseline = "bottom";
-        const label = printing
-          ? `${name} · layer ${Math.min(upto + 1, solid.layers)}/${solid.layers} · ${pct}%`
-          : engraving ? `${name} · lettering` : `${name} · done`;
-        // Above the part itself, and never lower than just over the bed's back corner.
-        ctx.fillText(label, view.cx, Math.min(anchor[1] - view.w * 0.12, partTopY - 16));
+        ctx.font = '500 12px "JetBrains Mono", ui-monospace, monospace';
+        ctx.fillText(detail, startX + nameW, y);
+        // A thin progress rule under it: the percentage as a length, not just digits.
+        if (printing) {
+          const barW = Math.max(120, Math.min(260, view.w * 0.3));
+          const bx = view.cx - barW / 2;
+          const by = y + 7;
+          ctx.globalAlpha = 0.22 * fadeA;
+          ctx.fillStyle = t.subtle;
+          ctx.fillRect(bx, by, barW, 2);
+          ctx.globalAlpha = 0.85 * fadeA;
+          ctx.fillStyle = t.accent;
+          ctx.fillRect(bx, by, (barW * pct) / 100, 2);
+        }
         ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
         ctx.globalAlpha = 1;
       }
@@ -6345,10 +6390,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             recent card — the card itself now carries the continue treatment instead. */}
         {!!recent?.length && (
           <section className="launch-sect">
-            <div className="launch-label-row">
-              <p className="launch-label">Recent projects</p>
-              <button className="launch-more" onClick={onAllProjects}>All projects</button>
-            </div>
+            <p className="launch-label">Recent projects</p>
             <div className="launch-recents">
               {recent.map((r, i) => {
                 const cont = !!resume && (resume.id === r.id || (i === 0 && !recent.some((x) => x.id === resume.id)));
@@ -6364,6 +6406,14 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
                   </button>
                 );
               })}
+            </div>
+            {/* Both doors out of "my work" in one row under the grid. "All projects"
+                used to float in the section label and the empty-workspace link was
+                stranded on its own down the page — two related actions, two unrelated
+                places. Tab-styled because that is what they are: sideways moves. */}
+            <div className="launch-tabs">
+              <button className="launch-tab" onClick={onAllProjects}>All projects</button>
+              <button className="launch-tab" onClick={onSkip}>Open an empty workspace</button>
             </div>
           </section>
         )}
@@ -6415,11 +6465,12 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         </div>
         )}
 
-        {/* The footer is first-run framing too: the AI-sizes caveat, the local-storage
+        {/* The footer is first-run framing: the AI-sizes caveat, the local-storage
             pitch and the free-mode offer all answer "should I trust this?", which a
-            returning user settled long ago. They keep the one thing that is navigation
-            rather than pitch — the door to an empty workspace. */}
-        <footer className={`launch-foot${veteran ? " lean" : ""}`}>
+            returning user settled long ago — and their navigation now lives in the
+            tab row under their projects, so for them the footer goes entirely. */}
+        {!veteran && (
+        <footer className="launch-foot">
           {!veteran && (
             <span>
               Sizes are AI-generated — check the fit before a long print.
@@ -6432,11 +6483,19 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             </span>
           )}
           <span className="launch-actions">
-            {!veteran && <button className="launch-free" onClick={onFree}>Start free in generative mode</button>}
+            <button className="launch-free" onClick={onFree}>Start free in generative mode</button>
             {/* A visible link only — deliberately not bound to Escape, so there is one Escape contract. */}
-            <button className="link" onClick={onSkip}>{veteran ? "Open an empty workspace" : "Skip"}</button>
+            <button className="link" onClick={onSkip}>Skip</button>
           </span>
         </footer>
+        )}
+        {/* A veteran with no projects yet still needs the door. */}
+        {veteran && !recent?.length && (
+          <div className="launch-tabs">
+            <button className="launch-tab" onClick={onAllProjects}>All projects</button>
+            <button className="launch-tab" onClick={onSkip}>Open an empty workspace</button>
+          </div>
+        )}
        </div>
       </main>
     </div>

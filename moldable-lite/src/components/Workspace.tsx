@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSPr
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
+import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
 import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
@@ -1450,6 +1451,8 @@ interface Props {
   onMeasure: () => void;
   messages: ChatMessage[];
   status: "idle" | "generating";
+  genProgress: BuildProgress | null; // live build stage shown over the canvas
+
   input: string;
   setInput: (v: string) => void;
   onSend: (p: string, forceMode?: Mode) => void;
@@ -3057,7 +3060,15 @@ export function Workspace(p: Props) {
                   <small>loading OpenCascade (WASM)</small>
                 </div>
               )}
-              {!p.booting && !p.geometry && <div className="viewer-overlay muted">Describe something or drop a photo to see it here.</div>}
+              {/* A build in flight owns the canvas: what is being made, which phase it
+                  is in, and a part visibly assembling itself. The bare "describe
+                  something" line stayed up through the whole generation — the one
+                  moment the user is definitely watching. */}
+              {p.genProgress ? (
+                <BuildStage progress={p.genProgress} />
+              ) : (
+                !p.booting && !p.geometry && <div className="viewer-overlay muted">Describe something or drop a photo to see it here.</div>
+              )}
             </div>
             {/* Sibling of .right-dock, never a child: `.right-dock:empty { display: none }`
                 is the only thing that hides that stack, so an always-rendered child there

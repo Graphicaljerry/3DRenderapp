@@ -368,6 +368,31 @@ button { font-family: inherit; cursor: pointer; }
 .src-row { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 5px; }
 .src-chip { font-size: 11px; padding: 2.5px 9px; border-radius: var(--r-full); color: var(--mut); text-decoration: none; background: var(--ctl); }
 .src-chip:hover { color: var(--accent-d); border-color: var(--accent); }
+/* The build stage: what the canvas shows while a model is being generated. Centred
+   on the viewer, no card chrome — it IS the canvas for that minute, not a panel
+   floating over one. */
+.build-stage {
+  position: absolute; inset: 0; z-index: 4;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 3px; pointer-events: none; text-align: center; padding: 20px;
+}
+.build-stage-canvas { width: min(280px, 46%); height: 170px; margin-bottom: 6px; }
+.build-stage-name {
+  font-family: var(--font-display); font-size: 17px; font-weight: 600; color: var(--ink);
+  letter-spacing: -0.01em; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.build-stage-phase { font-size: 12.5px; color: var(--mut); max-width: 42ch; }
+.build-stage-bar { width: min(240px, 60%); height: 3px; margin-top: 9px; border-radius: var(--r-full); background: color-mix(in srgb, var(--mut) 22%, transparent); overflow: hidden; }
+.build-stage-bar span { display: block; height: 100%; background: var(--accent); border-radius: var(--r-full); transition: width .4s ease; }
+/* No number to show: a sweep that reads as "working", never as a measurement. */
+.build-stage-bar span.indet { width: 38%; animation: bs-sweep 1.5s ease-in-out infinite; }
+@keyframes bs-sweep { 0% { transform: translateX(-110%); } 100% { transform: translateX(320%); } }
+.build-stage-steps { display: flex; gap: 10px; margin-top: 11px; font-size: 11px; color: var(--subt); font-variant-numeric: tabular-nums; }
+.bs-step.done { color: var(--mut); }
+.bs-step.on { color: var(--accent-d); font-weight: 600; }
+.build-stage-meta { margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--subt); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .build-stage-bar span.indet { animation: none; width: 100%; opacity: .5; } }
+
 /* Pen-cut flyout: the confirm step for a drawn cut — what it will do, the pin
    settings, and the two ways out. Wider than the other flyouts because the pin
    sizes are a row of chips. */
@@ -787,7 +812,23 @@ button { font-family: inherit; cursor: pointer; }
 .sgroup-head b { font-size: 13px; font-weight: 700; color: var(--ink); }
 .sgroup-head span { font-size: 11px; color: var(--subt); }
 /* Deployed-build stamp in the status bar — proof a refresh picked up the new deploy. */
-.build-tag { font-size: 10px; color: var(--subt); white-space: nowrap; user-select: all; }
+/* The build number is how anyone tells whether an update actually landed, so it is
+   a readable chip rather than 10px of the faintest grey in the palette. */
+.build-tag {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500; line-height: 1;
+  color: var(--ink2); background: var(--ctl); border-radius: var(--r-full);
+  padding: 3px 8px; white-space: nowrap; user-select: all; font-variant-numeric: tabular-nums;
+}
+/* Sideways moves out of "my work" — All projects, an empty workspace. Tab-shaped
+   because they are peers, and in one row because they were two related actions
+   stranded in two unrelated corners of the page. */
+.launch-tabs { display: flex; gap: 6px; margin-top: 12px; }
+.launch-tab {
+  border: 1px solid var(--bord); background: var(--bg); border-radius: var(--r-full);
+  padding: 6px 14px; font-size: 12.5px; font-weight: 500; color: var(--ink2);
+  transition: border-color .15s ease, color .15s ease, background-color .15s ease;
+}
+.launch-tab:hover { border-color: var(--accent); color: var(--accent-d); }
 /* Three-way choice inside a menu row (Dimensions: On select / Always / Off). */
 .pmenu-choice:hover { background: none; }
 .pmenu-opts { display: flex; gap: 3px; margin-top: 5px; width: 100%; }

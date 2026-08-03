@@ -591,8 +591,11 @@ export default function App() {
     setPlateCount((c) => c - 1);
     setActivePlate((a) => (a === 0 ? 0 : a === n ? 0 : a > n ? a - 1 : a));
   };
-  /** Everything on the canvas, with its plate — the shared input for both plate exports. */
-  function collectPlateParts(): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[] }[] | null {
+  /** Everything on the canvas, with its plate — the shared input for EVERY 3MF export.
+   *  `modelGeom` overrides the model's mesh: preflight may have repaired it, and the
+   *  repaired result isn't in React state yet when the export runs. */
+  function collectPlateParts(modelGeom?: THREE.BufferGeometry): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[] }[] | null {
+    const geometry = modelGeom ?? geometryRef.current;
     if (!geometry) return null;
     // The model's per-face paint rides along only when its triangle count still matches
     // (a CAD edit reshuffles triangles → drop the stale paint rather than mispaint).
@@ -619,38 +622,74 @@ export default function App() {
     }
     return parts;
   }
+  /** Analyse + auto-repair once, ahead of ANY export. Every download path runs this —
+      shipping an unchecked mesh out of one menu and a checked one out of another is
+      how a user ends up printing a hole they were told didn't exist. */
+  function prepareExport() {
+    if (!result) return null;
+    const pf = preflightExport(result, printer);
+    if (pf.repaired) {
+      const rr = pf.result.kind === "generative" ? { ...pf.result, glb: geometryToSTL(pf.result.geometry), meshXform: undefined } : pf.result;
+      applyResult(rr, project?.name ?? "Model", "Auto-repaired the mesh for export (watertight)", "auto-repair for export");
+    } // viewer + report show exactly what was exported
+    return pf;
+  }
+  /** Painting is per-triangle data only the 3MF carries. Every export that drops it says
+      so — EVERY time, not once, because the second silent STL is the one that gets
+      printed in a single colour by someone who thought the paint went with it. */
+  function paintCaveat(format: string): string {
+    if (format === "3mf" || !facePaint?.some((v) => v)) return "";
+    return `Your painted colours are not in this file — ${format.toUpperCase()} has nowhere to put them. Export 3MF to keep them.`;
+  }
+  /** What a repeat of the same export still needs to say: nothing, unless something
+      actually happened to the file (paint dropped, mesh repaired). */
+  const exportBrief = (label: string, pf: ReturnType<typeof preflightExport>, caveat: string) =>
+    caveat ? `${label} ${caveat}` : pf.repaired ? `${label} ${preflightSummary(pf)}` : undefined;
+  /** The 3MF the app hands out for "the model": everything on the canvas as named
+      objects in one file, with part colours and per-face paint intact. Plates are
+      flattened — the plate exports below are what honours those. Returns null when
+      there's nothing to collect, so the caller can fall back to the engine writer. */
+  async function build3MF(modelGeom: THREE.BufferGeometry): Promise<{ blob: Blob; parts: number } | null> {
+    const parts = collectPlateParts(modelGeom);
+    if (!parts?.length) return null;
+    const { write3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
+    return { blob: write3MF(parts.map((p) => ({ ...p, plate: 1 })), { title: exportBase() }), parts: parts.length };
+  }
   /** One 3MF per non-empty plate — real named <object>s, positioned as placed. */
   async function exportPlates() {
-    const all = collectPlateParts();
+    const pf = prepareExport();
+    const all = collectPlateParts(pf?.result.geometry);
     if (!all) return;
-    const { geometriesTo3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
-    const plates = new Map<number, { geometry: THREE.BufferGeometry; name: string }[]>();
+    const { write3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
+    const plates = new Map<number, typeof all>();
     for (const part of all) {
       if (!plates.has(part.plate)) plates.set(part.plate, []);
       plates.get(part.plate)!.push(part);
     }
     const base = safeFileName(exportBase(), "3mf").replace(/\.[^.]+$/, "");
     const entries = [...plates.entries()].sort((x, y) => x[0] - y[0]);
+    const one = (n: number, parts: typeof all) => write3MF(parts, { title: `${exportBase()} — plate ${n}` });
     if (entries.length === 1) {
-      downloadBlob(geometriesTo3MF(entries[0][1]), `${base}-plate-${entries[0][0]}.3mf`);
+      downloadBlob(one(entries[0][0], entries[0][1]), `${base}-plate-${entries[0][0]}.3mf`);
     } else {
       // One zip, not N downloads: browsers throttle or block repeated downloadBlob()
       // calls, so a user could silently receive fewer files than they had plates.
       const files: Record<string, Blob> = {};
-      for (const [n, parts] of entries) files[`${base}-plate-${n}.3mf`] = geometriesTo3MF(parts);
+      for (const [n, parts] of entries) files[`${base}-plate-${n}.3mf`] = one(n, parts);
       downloadBlob(await (await import("./print/exportClient")).zipModelFiles(files), `${base}-plates.zip`);
     }
-    explainOnce("export-plates", `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files${entries.length > 1 ? " in one zip" : ""} — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options.`);
+    explainOnce("export-plates", `Exported ${plates.size} plate${plates.size > 1 ? "s" : ""} as separate 3MF files${entries.length > 1 ? " in one zip" : ""} — each part is a named object, so Bambu Studio / OrcaSlicer can arrange, paint, and set per-part options. ${pf ? preflightSummary(pf) : ""}`);
   }
   /** ONE project 3MF with every plate laid out — Bambu Studio / OrcaSlicer open it with
       the plates intact (each part named, grouped and positioned on its plate). */
   async function exportPlatesProject() {
-    const all = collectPlateParts();
+    const pf = prepareExport();
+    const all = collectPlateParts(pf?.result.geometry);
     if (!all) return;
     const { platesToProject3MF } = await import("./print/exportClient"); // 3MF writer loads on demand
     downloadBlob(platesToProject3MF(all, plateCount, { x: printer.bed.x, y: printer.bed.y }, plateNames), safeFileName(`${exportBase()}-plates`, "3mf"));
     const used = new Set(all.map((p) => p.plate)).size;
-    explainOnce("export-project", `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust.`);
+    explainOnce("export-project", `Exported one project 3MF with ${plateCount} plate${plateCount > 1 ? "s" : ""} (${used} in use) for your ${printer.bed.x}×${printer.bed.y} mm bed. Open it in Bambu Studio or OrcaSlicer — the plates and part placement come through. If your slicer only shows the geometry, use "One file per plate" instead and tell me which slicer version so I can adjust. ${pf ? preflightSummary(pf) : ""}`);
   }
   const [partCount, setPartCount] = useState(1); // disconnected solids in the model mesh
   // Dry-fit sandbox. Separating (and any "Make it fit" carve) deliberately does NOT
@@ -2596,22 +2635,35 @@ export default function App() {
     );
   }
 
-  const pieceBlob = async (g: THREE.BufferGeometry, format: "stl" | "3mf") =>
-    format === "stl" ? geometryToSTL(g) : (await import("./print/exportClient")).geometryTo3MF(g);
+  // A cut piece keeps its name and its cut-face colour in the file, so a slicer's part
+  // list reads "Part 3" instead of an unnamed mesh. Paint doesn't survive a cut (the
+  // triangles are new), which is why the receipts say so rather than staying quiet.
+  const pieceBlob = async (g: THREE.BufferGeometry, format: "stl" | "3mf", name: string, color?: string) =>
+    format === "stl" ? geometryToSTL(g) : (await import("./print/exportClient")).geometryTo3MF(g, { name, color });
   async function exportPiece(index: number, format: "stl" | "3mf") {
     const piece = splitPieces?.[index];
     if (!piece) return;
+    const pf = prepareExport();
     const base = safeFileName(exportBase(), format).replace(/\.[^.]+$/, "");
-    downloadBlob(await pieceBlob(piece.geometry, format), `${base}-part${index + 1}.${format}`);
+    downloadBlob(await pieceBlob(piece.geometry, format, `Part ${index + 1}`, piece.color), `${base}-part${index + 1}.${format}`);
+    if (!pf) return;
+    const caveat = paintCaveat(format);
+    const label = `Exported part ${index + 1} on its own.`;
+    explainOnce("export-piece", `${label} ${preflightSummary(pf)}${caveat ? " " + caveat : ""}`, exportBrief(label, pf, caveat));
   }
   async function exportAllPieces(format: "stl" | "3mf") {
     if (!splitPieces?.length) return;
+    const pf = prepareExport();
     const base = safeFileName(exportBase(), format).replace(/\.[^.]+$/, "");
     try {
       const files: Record<string, Blob> = {};
-      for (const [i, p] of splitPieces.entries()) files[`${base}-part${i + 1}.${format}`] = await pieceBlob(p.geometry, format);
+      for (const [i, p] of splitPieces.entries()) files[`${base}-part${i + 1}.${format}`] = await pieceBlob(p.geometry, format, `Part ${i + 1}`, p.color);
       const zip = await (await import("./print/exportClient")).zipModelFiles(files);
       downloadBlob(zip, `${base}-parts-${format}.zip`);
+      if (!pf) return;
+      const caveat = paintCaveat(format);
+      const label = `Exported all ${splitPieces.length} pieces as separate ${format.toUpperCase()} files in one zip.`;
+      explainOnce("export-pieces", `${label} ${preflightSummary(pf)}${caveat ? " " + caveat : ""}`, exportBrief(label, pf, caveat));
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
     }
@@ -2623,12 +2675,11 @@ export default function App() {
     const engine = result.kind === "generative" ? await getGenEngine() : sel?.engine;
     if (!engine) return;
     try {
-      const pf = preflightExport(result, printer);
-      if (pf.repaired) {
-        const rr = pf.result.kind === "generative" ? { ...pf.result, glb: geometryToSTL(pf.result.geometry), meshXform: undefined } : pf.result;
-        applyResult(rr, project?.name ?? "Model", "Auto-repaired the mesh for export (watertight)", "auto-repair for export");
-      }
-      const blob = await engine.export(pf.result, "3mf");
+      const pf = prepareExport();
+      if (!pf) return;
+      // The same file the Export menu writes — the slicer gets the named objects and
+      // the paint, not a bare mesh.
+      const blob = (await build3MF(pf.result.geometry))?.blob ?? (await engine.export(pf.result, "3mf"));
       const hand = await openInSlicer(target, blob, safeFileName(exportBase(), "3mf"));
       const app = target === "bambu" ? "Bambu Studio" : "OrcaSlicer";
       const said =
@@ -4833,16 +4884,16 @@ export default function App() {
     if (!engine) return;
     try {
       // Print-ready by default: analyse, auto-repair meshes, sanity-check scale/bed.
-      const pf = preflightExport(result, printer);
-      if (pf.repaired) {
-        const rr = pf.result.kind === "generative" ? { ...pf.result, glb: geometryToSTL(pf.result.geometry), meshXform: undefined } : pf.result;
-        applyResult(rr, project?.name ?? "Model", "Auto-repaired the mesh for export (watertight)", "auto-repair for export");
-      } // viewer + report show exactly what was exported
-      const blob = await engine.export(pf.result, format);
-      downloadBlob(blob, safeFileName(exportBase(), format));
+      const pf = prepareExport();
+      if (!pf) return;
+      const made = format === "3mf" ? await build3MF(pf.result.geometry) : null;
+      downloadBlob(made?.blob ?? (await engine.export(pf.result, format)), safeFileName(exportBase(), format));
       // STEP is a CAD hand-off, not a print file — skip the print-readiness line.
       if (format !== "step") {
-        explainOnce("export", `Exported ${format.toUpperCase()}. ${preflightSummary(pf)}`);
+        const named = made && made.parts > 1 ? ` All ${made.parts} objects are in the one file, named.` : "";
+        const caveat = paintCaveat(format);
+        const label = `Exported ${format.toUpperCase()}.`;
+        explainOnce("export", `${label} ${preflightSummary(pf)}${named}${caveat ? " " + caveat : ""}`, exportBrief(label, pf, caveat));
       }
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);

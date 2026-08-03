@@ -88,90 +88,89 @@ function projectSettingsConfig(palette: string[]): string {
   }, null, 1);
 }
 
-/** Minimal core-3MF (OPC zip). Carries mm units, unlike STL. */
-/** Several positioned solids → ONE 3MF with a real <object> per part, named — slicers
- *  (Bambu/Orca/Prusa) list them separately for arranging, painting, per-part settings.
- *  A painted part carries its colour as a core-3MF base material (displaycolor), so any
- *  conformant reader shows it in the right colour. */
-export function geometriesTo3MF(parts: { geometry: THREE.BufferGeometry; name: string; color?: string }[]): Blob {
-  const { palette, slotOf, painted } = buildFilaments(parts);
-  const objects: string[] = [];
-  const items: string[] = [];
-  // A single <basematerials> resource holds the palette; objects point at it by pindex.
-  const MAT_ID = parts.length + 1;
-  parts.forEach((part, pi) => {
-    const g = part.geometry;
-    const pos = g.getAttribute("position") as THREE.BufferAttribute;
-    const idx = g.index;
-    const verts: string[] = [];
-    for (let i = 0; i < pos.count; i++) verts.push(`<vertex x="${f(pos.getX(i))}" y="${f(pos.getY(i))}" z="${f(pos.getZ(i))}"/>`);
-    const tris: string[] = [];
-    if (idx) for (let i = 0; i < idx.count; i += 3) tris.push(`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i + 1)}" v3="${idx.getX(i + 2)}"/>`);
-    else for (let i = 0; i < pos.count; i += 3) tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"/>`);
-    const id = pi + 1;
-    const safe = part.name.replace(/[<>&"]/g, "_");
-    const matAttr = painted ? ` pid="${MAT_ID}" pindex="${slotOf(part.color) - 1}"` : "";
-    objects.push(`<object id="${id}" type="model" name="${safe}"${matAttr}><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
-    items.push(`<item objectid="${id}"/>`);
-  });
-  const baseMats = painted
-    ? `<basematerials id="${MAT_ID}">${palette.map((c, i) => `<base name="Filament ${i + 1}" displaycolor="${c}FF"/>`).join("")}</basematerials>`
-    : "";
-  const model = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
- <resources>${baseMats}${objects.join("")}</resources>
- <build>${items.join("")}</build>
-</model>`;
-  return zip3mf(model);
+/** One solid on its way into a 3MF. Everything except the geometry is optional, so a
+ *  bare mesh and a painted, named, plated part go through the same writer. */
+export interface Solid3MF {
+  geometry: THREE.BufferGeometry;
+  name?: string;
+  /** Whole-part colour → the object's filament slot. */
+  color?: string;
+  /** Per-triangle paint: 1-based index into `paintPalette`, 0 = unpainted. */
+  paint?: Uint8Array;
+  paintPalette?: string[];
+  /** Which build plate this belongs on. Absent = the only plate. */
+  plate?: number;
 }
 
-/** One multi-plate PROJECT 3MF that Bambu Studio / OrcaSlicer open with the plates
- *  intact — the closest thing to handing the slicer your whole plate layout at once.
+export interface Write3MFOpts {
+  /** Declare this many plates even when some are empty, so the layout round-trips. */
+  plateCount?: number;
+  /** Bed size. Supplying it turns on the side-by-side plate layout; without it, parts
+   *  are written where they already are. */
+  bed?: { x: number; y: number };
+  plateNames?: Record<number, string>;
+  /** Document title in the slicer's file info. */
+  title?: string;
+}
+
+/**
+ * THE 3MF writer. Every export in the app comes through here, because the alternative
+ * — a "simple" writer beside a "full" one — is how object names, part colours and
+ * per-face paint quietly disappeared from ordinary single-model exports.
  *
- *  How it works (the Bambu/Orca project dialect of 3MF):
- *  - `Metadata/model_settings.config` declares every <plate> (plater_id) and maps each
- *    object onto one via <model_instance>; an <assemble> section restates placements.
- *  - The slicer only parses that config when the root model carries BambuStudio
- *    application metadata — without it, it falls back to "geometry only".
- *  - Plates live side by side in world coords (a row along +X, one bed-width apart plus
- *    a logical gap), so even a strict positional reader lands parts on the right plate.
- *  Parts keep their relative placement per plate; each plate's group is centred on its
- *  bed and dropped to z=0. */
-export function platesToProject3MF(
-  parts: { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[] }[],
-  plateCount: number,
-  bed: { x: number; y: number },
-  plateNames?: Record<number, string>,
-): Blob {
-  const { palette, slotOf, painted } = buildFilaments(parts);
-  const stride = bed.x * 1.2;
-  // Per-plate group bounds → one shared translation per plate (relative layout survives).
-  const groups = new Map<number, { min: THREE.Vector3; max: THREE.Vector3 }>();
-  for (const part of parts) {
-    part.geometry.computeBoundingBox();
-    const bb = part.geometry.boundingBox!;
-    const g = groups.get(part.plate);
-    if (!g) groups.set(part.plate, { min: bb.min.clone(), max: bb.max.clone() });
-    else {
-      g.min.min(bb.min);
-      g.max.max(bb.max);
+ * What one file carries:
+ *  - a real named <object> per solid, so slicers list them separately for arranging,
+ *    painting and per-part settings;
+ *  - the palette as core-3MF <basematerials> with displaycolor, which ANY conformant
+ *    reader (PrusaSlicer, Cura, Windows 3D Viewer) uses to show the right colours;
+ *  - the Bambu/Orca project dialect on top: `Metadata/model_settings.config` names each
+ *    object and pins it to a filament slot, per-triangle `paint_color` carries MMU
+ *    painting, and `project_settings.config` pre-loads the AMS with the exact colours.
+ *    The slicer only parses that config when the root model carries BambuStudio
+ *    application metadata, so it is always emitted.
+ *  - plates, when a bed is given: `<plate>` blocks map objects onto plater_ids, AND the
+ *    plates are laid out side by side in world coordinates one bed-width apart, so even
+ *    a reader that ignores the config lands each part on the right plate. Each plate's
+ *    group is centred on the bed and dropped to z = 0; relative placement within a plate
+ *    survives.
+ */
+export function write3MF(solids: Solid3MF[], opts: Write3MFOpts = {}): Blob {
+  const { palette, slotOf, painted } = buildFilaments(solids);
+  const plateOf = (s: Solid3MF) => s.plate ?? 1;
+  const laidOut = !!opts.bed;
+
+  // Per-plate group bounds → one shared translation per plate.
+  const shift = (() => {
+    if (!opts.bed) return () => [0, 0, 0] as [number, number, number];
+    const bed = opts.bed;
+    const stride = bed.x * 1.2;
+    const groups = new Map<number, { min: THREE.Vector3; max: THREE.Vector3 }>();
+    for (const s of solids) {
+      s.geometry.computeBoundingBox();
+      const bb = s.geometry.boundingBox!;
+      const g = groups.get(plateOf(s));
+      if (!g) groups.set(plateOf(s), { min: bb.min.clone(), max: bb.max.clone() });
+      else { g.min.min(bb.min); g.max.max(bb.max); }
     }
-  }
-  const shift = (plate: number): [number, number, number] => {
-    const g = groups.get(plate)!;
-    return [
-      (plate - 1) * stride + bed.x / 2 - (g.min.x + g.max.x) / 2,
-      bed.y / 2 - (g.min.y + g.max.y) / 2,
-      -g.min.z,
-    ];
-  };
+    return (plate: number): [number, number, number] => {
+      const g = groups.get(plate)!;
+      return [
+        (plate - 1) * stride + bed.x / 2 - (g.min.x + g.max.x) / 2,
+        bed.y / 2 - (g.min.y + g.max.y) / 2,
+        -g.min.z,
+      ];
+    };
+  })();
 
   const objects: string[] = [];
   const items: string[] = [];
   const settingsObjects: string[] = [];
   const assembleItems: string[] = [];
   const instancesByPlate = new Map<number, string[]>();
-  parts.forEach((part, pi) => {
+  // A single <basematerials> resource holds the palette; objects point at it by pindex.
+  const MAT_ID = solids.length + 1;
+
+  solids.forEach((part, pi) => {
     const g = part.geometry;
     const pos = g.getAttribute("position") as THREE.BufferAttribute;
     const idx = g.index;
@@ -193,17 +192,20 @@ export function platesToProject3MF(
     const tris: string[] = [];
     if (idx) { let t = 0; for (let i = 0; i < idx.count; i += 3, t++) tris.push(`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i + 1)}" v3="${idx.getX(i + 2)}"${paintAttr(t)}/>`); }
     else { let t = 0; for (let i = 0; i < pos.count; i += 3, t++) tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"${paintAttr(t)}/>`); }
+
     const id = pi + 1;
-    const safe = part.name.replace(/[<>&"]/g, "_");
-    const [tx, ty, tz] = shift(part.plate);
+    const plate = plateOf(part);
+    const safe = xml(part.name ?? `Part ${id}`);
+    const matAttr = painted ? ` pid="${MAT_ID}" pindex="${ex - 1}"` : "";
+    const [tx, ty, tz] = shift(plate);
     const transform = `1 0 0 0 1 0 0 0 1 ${f(tx)} ${f(ty)} ${f(tz)}`;
-    objects.push(`<object id="${id}" type="model" name="${safe}"><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
-    items.push(`<item objectid="${id}" transform="${transform}" printable="1"/>`);
+    objects.push(`<object id="${id}" type="model" name="${safe}"${matAttr}><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
+    items.push(laidOut ? `<item objectid="${id}" transform="${transform}" printable="1"/>` : `<item objectid="${id}" printable="1"/>`);
     settingsObjects.push(
       `  <object id="${id}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="1" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n  </object>`,
     );
-    if (!instancesByPlate.has(part.plate)) instancesByPlate.set(part.plate, []);
-    instancesByPlate.get(part.plate)!.push(
+    if (!instancesByPlate.has(plate)) instancesByPlate.set(plate, []);
+    instancesByPlate.get(plate)!.push(
       `    <model_instance>\n      <metadata key="object_id" value="${id}"/>\n      <metadata key="instance_id" value="0"/>\n      <metadata key="identify_id" value="${100 + id}"/>\n    </model_instance>`,
     );
     assembleItems.push(`   <assemble_item object_id="${id}" instance_id="0" transform="${transform}" offset="0 0 0" />`);
@@ -211,8 +213,9 @@ export function platesToProject3MF(
 
   // Every plate the user created is declared — empty ones included, so the layout round-trips.
   const plateBlocks: string[] = [];
-  for (let n = 1; n <= Math.max(plateCount, ...parts.map((x) => x.plate)); n++) {
-    const label = (plateNames?.[n] ?? "").replace(/[<>&"]/g, "_");
+  const lastPlate = Math.max(opts.plateCount ?? 1, ...solids.map(plateOf));
+  for (let n = 1; n <= lastPlate; n++) {
+    const label = xml(opts.plateNames?.[n] ?? "");
     plateBlocks.push(
       `  <plate>\n    <metadata key="plater_id" value="${n}"/>\n    <metadata key="plater_name" value="${label}"/>\n    <metadata key="locked" value="false"/>\n${(instancesByPlate.get(n) ?? []).join("\n")}\n  </plate>`,
     );
@@ -226,12 +229,15 @@ ${assembleItems.join("\n")}
   </assemble>
 </config>`;
 
+  const baseMats = painted
+    ? `<basematerials id="${MAT_ID}">${palette.map((c, i) => `<base name="Filament ${i + 1}" displaycolor="${c}FF"/>`).join("")}</basematerials>`
+    : "";
   const model = `<?xml version="1.0" encoding="UTF-8"?>
 <model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" xmlns:BambuStudio="http://schemas.bambulab.com/package/2021">
  <metadata name="Application">BambuStudio-01.10.01.50</metadata>
  <metadata name="BambuStudio:3mfVersion">1</metadata>
- <metadata name="Title">Moldable multi-plate project</metadata>
- <resources>${objects.join("")}</resources>
+ <metadata name="Title">${xml(opts.title ?? "Moldable model")}</metadata>
+ <resources>${baseMats}${objects.join("")}</resources>
  <build>${items.join("")}</build>
 </model>`;
   const extras: Record<string, string> = { "Metadata/model_settings.config": modelSettings };
@@ -239,6 +245,17 @@ ${assembleItems.join("\n")}
   // pre-loaded, and each object is already assigned to its slot via the extruder above.
   if (painted) extras["Metadata/project_settings.config"] = projectSettingsConfig(palette);
   return zip3mf(model, extras);
+}
+
+/** One multi-plate PROJECT 3MF that Bambu Studio / OrcaSlicer open with the plates
+ *  intact — the closest thing to handing the slicer your whole plate layout at once. */
+export function platesToProject3MF(
+  parts: Solid3MF[],
+  plateCount: number,
+  bed: { x: number; y: number },
+  plateNames?: Record<number, string>,
+): Blob {
+  return write3MF(parts, { plateCount, bed, plateNames, title: "Moldable multi-plate project" });
 }
 
 function zip3mf(model: string, extras?: Record<string, string>): Blob {
@@ -261,61 +278,15 @@ function zip3mf(model: string, extras?: Record<string, string>): Blob {
   return new Blob([zipped as unknown as BlobPart], { type: "model/3mf" });
 }
 
-export function geometryTo3MF(geometry: THREE.BufferGeometry): Blob {
-  const g = geometry.index ? geometry : geometry.clone();
-  const pos = g.getAttribute("position") as THREE.BufferAttribute;
-  const idx = g.index;
-
-  const verts: string[] = [];
-  for (let i = 0; i < pos.count; i++) {
-    verts.push(
-      `<vertex x="${f(pos.getX(i))}" y="${f(pos.getY(i))}" z="${f(pos.getZ(i))}"/>`,
-    );
-  }
-  const tris: string[] = [];
-  if (idx) {
-    for (let i = 0; i < idx.count; i += 3) {
-      tris.push(`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i + 1)}" v3="${idx.getX(i + 2)}"/>`);
-    }
-  } else {
-    for (let i = 0; i < pos.count; i += 3) {
-      tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"/>`);
-    }
-  }
-
-  const model = `<?xml version="1.0" encoding="UTF-8"?>
-<model unit="millimeter" xml:lang="en-US" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
- <resources>
-  <object id="1" type="model">
-   <mesh>
-    <vertices>${verts.join("")}</vertices>
-    <triangles>${tris.join("")}</triangles>
-   </mesh>
-  </object>
- </resources>
- <build><item objectid="1"/></build>
-</model>`;
-
-  const contentTypes = `<?xml version="1.0" encoding="UTF-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
- <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
- <Default Extension="model" ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>
-</Types>`;
-
-  const rels = `<?xml version="1.0" encoding="UTF-8"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
- <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
-</Relationships>`;
-
-  const zipped = zipSync({
-    "[Content_Types].xml": strToU8(contentTypes),
-    "_rels/.rels": strToU8(rels),
-    "3D/3dmodel.model": strToU8(model),
-  });
-  return new Blob([zipped as unknown as BlobPart], { type: "model/3mf" });
+/** A single solid. Still goes through write3MF, so a plain export is not a poorer file
+ *  than a plate export — it just has one object on one plate. */
+export function geometryTo3MF(geometry: THREE.BufferGeometry, about?: Omit<Solid3MF, "geometry" | "plate">): Blob {
+  return write3MF([{ geometry, ...about }], { title: about?.name });
 }
 
 const f = (n: number) => (Math.round(n * 1000) / 1000).toString();
+/** XML attribute text. Names come from project titles the user typed. */
+const xml = (s: string) => s.replace(/[<>&"']/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;", "'": "&apos;" }[c]!));
 
 /** Bundle several already-exported model files into one .zip (for "export each piece
  *  as a separate STL/3MF"). Keys are the in-zip filenames. */

@@ -14,6 +14,12 @@
 //
 // Depths: "bite" defaults to 3×d (capped) — enough engagement that the plastic, not
 // the screw, sets the strength; "insert" is the insert length plus a melt allowance.
+//
+// Every bore below is a book figure for an average machine, so it goes through
+// bore() before it becomes geometry: once the user has printed the Tolerance test
+// coupon, an M3 clearance hole is whatever passes an M3 on THEIR printer.
+
+import { bore, boreNote } from "./fit";
 
 export type ScrewFit = "through" | "bite" | "insert";
 
@@ -51,23 +57,30 @@ export interface ScrewCut {
 }
 
 export function screwCut(s: ScrewSize, fit: ScrewFit, countersink: boolean): ScrewCut {
+  const cal = boreNote(); // "" unless the user has measured their printer
   if (fit === "insert" && s.insertBore) {
+    const d = bore(s.insertBore);
+    const depth = (s.insertLen ?? 6) + 1.5;
     return {
-      minor: s.insertBore, major: s.insertBore, pitch: 0,
-      depth: (s.insertLen ?? 6) + 1.5, countersink: 0,
-      what: `${s.label} heat-set insert pocket (⌀${s.insertBore} × ${((s.insertLen ?? 6) + 1.5).toFixed(1)} mm)`,
+      minor: d, major: d, pitch: 0, depth, countersink: 0,
+      what: `${s.label} heat-set insert pocket (⌀${d} × ${depth.toFixed(1)} mm)${cal}`,
     };
   }
   if (fit === "bite") {
     const depth = Math.min(14, Math.round(3 * s.d * 10) / 10);
+    const d = bore(s.bite);
+    // Only the bore moves with the printer. The rib crest stays at nominal thread
+    // diameter — that's the material the screw actually cuts, and letting it grow
+    // with the allowance would trade the whole point of a bite hole for a loose one.
     return {
-      minor: s.bite, major: s.d, pitch: s.pitch, depth, countersink: 0,
-      what: `${s.label} thread-bite hole (⌀${s.bite} bore, ribbed to ⌀${s.d}, ${depth} mm deep)`,
+      minor: d, major: Math.max(s.d, d), pitch: s.pitch, depth, countersink: 0,
+      what: `${s.label} thread-bite hole (⌀${d} bore, ribbed to ⌀${s.d}, ${depth} mm deep)${cal}`,
     };
   }
+  const d = bore(s.clearance);
   return {
-    minor: s.clearance, major: s.clearance, pitch: 0, depth: 0,
-    countersink: countersink ? s.head + 0.6 : 0,
-    what: `${s.label} clearance hole (⌀${s.clearance}, through${countersink ? ", countersunk" : ""})`,
+    minor: d, major: d, pitch: 0, depth: 0,
+    countersink: countersink ? bore(s.head + 0.6) : 0,
+    what: `${s.label} clearance hole (⌀${d}, through${countersink ? ", countersunk" : ""})${cal}`,
   };
 }

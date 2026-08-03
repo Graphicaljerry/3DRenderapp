@@ -9,7 +9,7 @@ import type { BuildPlan } from "../llm/plan";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
-import { FASTENER_GROUPS, findFastener, insertBossHint } from "../cad/fasteners";
+import { FASTENER_GROUPS, findFastener, insertBossHint, fastenerHole, fastenerLabel, fastenerFor, fastenerCalNote } from "../cad/fasteners";
 import type { SurfacePattern } from "../engine/previewEngine";
 
 /** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
@@ -3417,11 +3417,11 @@ function ModelMenu({ value, groups, title, onPick, label }: { value: string; gro
 /** First-class FDM fit control — how loose the fitted features should be.
  *  Snug is the sensible default; re-fitting is one click, not a reprint. */
 const FIT_WHAT =
-  "Only matters when a part has to mate with something — a lid on a box, a peg in a hole, a slot over a tab. " +
+  "Only matters when a part has to mate with something — a lid on a box, a peg in a hole, a slot over a tab, the pins that hold two cut halves together. " +
   "FDM printers lay down plastic slightly wider than the model, so two parts printed at exactly the same size seize up. " +
   "This is the gap left on each side to compensate: Loose slides freely, Snug goes together by hand, Press needs a firm push and holds without glue. " +
   "It has nothing to do with whether the part fits your print bed — that is the 'Fits bed' check on the model. " +
-  "Print the Tolerance test coupon (Templates) and enter what actually fit, and these become your printer's measured numbers instead of estimates.";
+  "Print the Tolerance test coupon (Templates) and enter what actually fit: this number becomes your printer's measurement instead of an estimate, and every hole the app drills — screw, magnet, insert — shifts by the same amount.";
 const FIT_OPTS: { id: FitId; label: string; plain: string }[] = [
   // No millimetres in the hint: the real number comes from fitClearance(), which moves
   // with calibration. Baking one in here is how the tooltips came to disagree with it.
@@ -4234,8 +4234,10 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
   const AX = "XYZ";
   const r1 = (v: number) => Math.round(v * 100) / 100;
   // Fastener presets: the current draft matches a preset when ⌀+depth agree.
-  const activePreset = FASTENER_GROUPS.flatMap((g) => g.items).find((i) => i.diameter === d.diameter && i.depth === d.depth)?.id ?? "";
-  const bossHint = activePreset ? insertBossHint(findFastener(activePreset)!) : null;
+  const preset = fastenerFor(d.diameter, d.depth);
+  const activePreset = preset?.id ?? "";
+  const bossHint = preset ? insertBossHint(preset) : null;
+  const calNote = fastenerCalNote();
   const spacing = d.ref ? Math.hypot(d.at[axes[0]] - d.ref.center[axes[0]], d.at[axes[1]] - d.ref.center[axes[1]]) : 0;
   const setSpacing = (target: number) => {
     if (!d.ref || spacing < 0.01 || target <= 0) return;
@@ -4258,19 +4260,20 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
           title="Fastener presets — sets the right hole size for heat-set inserts, screw clearance, or screws that thread into the plastic"
           onChange={(e) => {
             const f = findFastener(e.target.value);
-            if (f) ctl.patch({ diameter: f.diameter, depth: f.depth });
+            if (f) ctl.patch(fastenerHole(f));
           }}
         >
           <option value="">Custom size…</option>
           {FASTENER_GROUPS.map((g) => (
             <optgroup key={g.group} label={g.group}>
               {g.items.map((i) => (
-                <option key={i.id} value={i.id}>{i.label}</option>
+                <option key={i.id} value={i.id}>{fastenerLabel(i)}</option>
               ))}
             </optgroup>
           ))}
         </select>
       </div>
+      {calNote && <div className="fine" style={{ margin: "2px 0 4px" }}>{calNote}</div>}
       {bossHint && <div className="fine" style={{ margin: "2px 0 4px" }}>{bossHint}</div>}
       <div className="hp-row">
         <label>⌀</label>

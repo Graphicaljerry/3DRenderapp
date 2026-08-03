@@ -27,7 +27,8 @@ import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./l
 import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, fitClearance, fitCalibration, saveFitCalibration, type FitId, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { fitClearance, fitCalibration, saveFitCalibration, boreNote, type FitId } from "./lib/fit";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -2454,7 +2455,9 @@ export default function App() {
     if (!v) setPendingCut(null);
     if (v) { setPaintModeState(false); setMeasureMode(false); setSelectMode(false); }
   };
-  const connectorOpts = () => (connectorsOn ? { diameter: pinSize, depth: Math.max(2.5, pinSize * 0.8), clearance: 0.2, maxPerFace: 3 } : null);
+  // The socket gap is the part-fit setting, not a constant: a press fit means the pins
+  // want tapping in, a loose one means they should drop together.
+  const connectorOpts = () => (connectorsOn ? { diameter: pinSize, depth: Math.max(2.5, pinSize * 0.8), clearance: fitClearance(fit), maxPerFace: 3 } : null);
 
   /** Apply the drawn stroke: slice the model along it, pin the halves together. */
   async function applyPenCut() {
@@ -2506,7 +2509,7 @@ export default function App() {
       setMessages((m) => [...m, {
         id: mid(), role: "assistant",
         text: pieces.length === 2 && pinned
-          ? `Cut along your line into ${pieces.length} parts, with ${pinned} registration pin${pinned === 1 ? "" : "s"} (${Math.round(pinMm * 10) / 10} mm) — one side has the peg, the other the matching socket with 0.2 mm print clearance, so they only go together one way. Export each piece separately from the pieces list, or send them to their own plates.`
+          ? `Cut along your line into ${pieces.length} parts, with ${pinned} registration pin${pinned === 1 ? "" : "s"} (${Math.round(pinMm * 10) / 10} mm) — one side has the peg, the other the matching socket with ${fitClearance(fit)} mm print clearance (your ${fit} fit${fitCalibration() != null ? ", measured on your printer" : ""}), so they only go together one way. Export each piece separately from the pieces list, or send them to their own plates.`
           : `Cut along your line into ${pieces.length} parts.${opts && pieces.length > 2 ? " Pins are only fitted when the line makes exactly two pieces — this one made more." : opts ? " There was nowhere thick enough for a pin even at the smallest size, so the faces are plain." : ""}`,
       }]);
     } catch (err: any) {
@@ -3075,7 +3078,7 @@ export default function App() {
     const { diameter, depth } = magnetPocket(size, fit);
     const ops = [...(cur.source.ops ?? [])];
     ops[he.index] = { ...(ops[he.index] as HoleOp), diameter, depth };
-    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm)`, "resize magnet");
+    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm)${boreNote()}`, "resize magnet");
   }
 
   /** Resize/refit the selected screw hole to the tool's (possibly just-changed) preset. */
@@ -3170,7 +3173,7 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
-      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, hole ⌀${diameter} × ${depth} mm deep)${pairNote}`;
+      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, hole ⌀${diameter} × ${depth} mm deep)${boreNote()}${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
       // One receipt for the whole run, counting up as you place: a far-side pocket is
       // invisible from this angle and a skipped pair (thin wall) would fail silently, so
@@ -7479,7 +7482,10 @@ function SettingsModal({
                 }}
               />
               <p className="fine">
-                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: 0.05 mm for one notch, then +0.1 mm per extra notch. That is the gap per side — the same number every fit uses. Snug/loose/press fits in every future part then use YOUR printer's reality instead of the 0.2 mm default.
+                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: 0.05 mm for one notch, then +0.1 mm per extra notch. That is the gap per side.
+              </p>
+              <p className="fine">
+                It sets more than the Loose/Snug/Press chip. The difference between your number and the 0.2 mm average is how far your machine drifts from the charts, so it also shifts <b>every hole the app drills</b> — screw clearance and pilot holes, heat-set insert pockets, magnet pockets, and the sockets on cut pieces — off the book figure and onto your printer. Receipts say when a size includes it.
               </p>
             </SGroup>
           </>

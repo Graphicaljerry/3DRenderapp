@@ -19,6 +19,7 @@ import { Evaluator, Brush, SUBTRACTION, ADDITION } from "three-bvh-csg";
 import { MeshBVH } from "three-mesh-bvh";
 import { splitConnectedParts } from "./separate";
 import type { SplitPiece } from "./split";
+import { fitClearance } from "../lib/fit";
 
 const CSG_MAT = new THREE.MeshStandardMaterial();
 const r1 = (n: number) => Math.round(n * 10) / 10;
@@ -206,13 +207,14 @@ export interface ConnectorOpts {
   diameter?: number;
   /** How far the pin stands out of the face (mm). */
   depth?: number;
-  /** Printed gap per side between pin and socket (mm) — the printer's reality. */
+  /** Printed gap per side between pin and socket (mm) — the printer's reality.
+   *  Defaults to the user's calibrated snug fit rather than a constant. */
   clearance?: number;
   /** Cap on how many pins a single cut face gets. */
   maxPerFace?: number;
 }
 
-const DEF: Required<ConnectorOpts> = { diameter: 5, depth: 4, clearance: 0.2, maxPerFace: 3 };
+const defaults = (): Required<ConnectorOpts> => ({ diameter: 5, depth: 4, clearance: fitClearance("snug"), maxPerFace: 3 });
 
 /** Solid-inside test: cast a ray and count crossings — odd means inside. Raycast
     through the BVH directly rather than a Mesh, because a Mesh carries a material and
@@ -312,7 +314,7 @@ export function addConnectors(
   sites: { pos: THREE.Vector3; axis: THREE.Vector3 }[],
   opts?: ConnectorOpts,
 ): { pieces: THREE.BufferGeometry[]; added: number; diameter: number } {
-  const o = { ...DEF, ...opts };
+  const o = { ...defaults(), ...opts };
   const inside = makeInside(original);
   const WALL = 1.2; // material left around a socket so it doesn't blow out the side
   // A pin that doesn't fit isn't a reason to give up on registration — try smaller

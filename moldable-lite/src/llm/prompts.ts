@@ -163,35 +163,12 @@ Rules:
 - ONLY if the change touches most of the program (a near-total rewrite), return the complete updated program in a single \`\`\`js code block instead.`;
 
 // A one-line fit directive appended to the user's request; maps a friendly
-// setting to an FDM clearance the model applies to mating features.
-export type FitId = "loose" | "snug" | "press";
-export const FIT_CLEARANCE: Record<FitId, number> = { loose: 0.4, snug: 0.2, press: 0.1 };
-const FIT_CAL_LS = "moldable_fit_cal";
-
-/** The user's measured snug clearance (from printing the Tolerance test coupon
- *  template), or null when uncalibrated. Every printer/filament squishes
- *  differently — one printed measurement beats any table. */
-export function fitCalibration(): number | null {
-  try {
-    const v = parseFloat(localStorage.getItem(FIT_CAL_LS) ?? "");
-    if (isFinite(v) && v >= 0 && v <= 1) return v;
-  } catch {}
-  return null;
-}
-export function saveFitCalibration(v: number | null) {
-  try {
-    if (v == null || !isFinite(v)) localStorage.removeItem(FIT_CAL_LS);
-    else localStorage.setItem(FIT_CAL_LS, String(Math.round(v * 100) / 100));
-  } catch {}
-}
-
-/** Effective clearance for a fit, honouring the printed calibration: the measured
- *  value IS "snug"; loose/press shift with it by the same margins as the defaults. */
-export function fitClearance(fit: FitId): number {
-  const cal = fitCalibration();
-  const shift = cal == null ? 0 : cal - FIT_CLEARANCE.snug;
-  return Math.round(Math.max(0.05, FIT_CLEARANCE[fit] + shift) * 100) / 100;
-}
+// setting to an FDM clearance the model applies to mating features. The numbers
+// themselves live in lib/fit.ts, which every hole the app cuts also goes through —
+// re-exported here so the prompt layer's existing importers keep working.
+import { fitClearance, fitCalibration, type FitId } from "../lib/fit";
+export { FIT_CLEARANCE, fitCalibration, saveFitCalibration, fitClearance, boreAllowance, bore, fitSource, boreNote, isCalibrated } from "../lib/fit";
+export type { FitId } from "../lib/fit";
 
 export function fitDirective(fit: FitId): string {
   const mm = fitClearance(fit);

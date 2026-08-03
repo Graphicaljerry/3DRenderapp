@@ -21,6 +21,9 @@ The app lives in `moldable-lite/`; it deploys to GitHub Pages from `main`.
 - Keep chat replies concise and plain-language; Jerry is a designer-developer
   who wants outcomes and honest caveats, not walls of process.
 - Never put AI model identifiers in commits, code comments, or anything pushed.
+- **Anti-slop guardrail**: before designing/restyling UI, writing microcopy, or
+  reviewing code, apply `skills/no-ai-slop/SKILL.md` — and run its review pass
+  on every feature's diff before shipping.
 
 ## Documentation upkeep (standing instruction)
 

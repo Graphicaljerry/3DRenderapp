@@ -39,7 +39,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe } from "./components/icons";
+import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe, IconSun, IconMoon } from "./components/icons";
 import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
@@ -6115,7 +6115,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           </span>
         </div>
         <div className="launch-top-right">
-          <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? "☀" : "☾"}</button>
+          <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? <IconSun /> : <IconMoon />}</button>
           {accountEmail
             ? <span className="launch-account" title={cloudOffline ? `Signed in as ${accountEmail} — the sync service isn't reachable from this network right now; changes stay on this device until it is` : `Signed in as ${accountEmail}`}>Signed in · {accountEmail}{cloudOffline ? " · offline" : ""}</span>
             : <button className="ghost sm" onClick={onSignIn}>Sign in</button>}
@@ -6233,7 +6233,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <section className="launch-sect">
             <div className="launch-label-row">
               <p className="launch-label">Recent projects</p>
-              <button className="launch-more" onClick={onAllProjects}>All projects →</button>
+              <button className="launch-more" onClick={onAllProjects}>All projects</button>
             </div>
             <div className="launch-recents">
               {recent.map((r, i) => {
@@ -6257,7 +6257,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         <section className="launch-sect">
           <div className="launch-label-row">
             <p className="launch-label">Start from a template</p>
-            <button className="launch-more" onClick={onAllTemplates}>All {TEMPLATES.length} →</button>
+            <button className="launch-more" onClick={onAllTemplates}>All {TEMPLATES.length}</button>
           </div>
           <div className="launch-chips">
             {TEMPLATES.filter((t) => t.kind === "cad").slice(0, 4).map((t) => (
@@ -6290,7 +6290,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
           <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
         </details>
-        <button className="link" onClick={onExample}>Or view the built-in example model →</button>
+        <button className="link" onClick={onExample}>Or view the built-in example model</button>
         </div>
         )}
 

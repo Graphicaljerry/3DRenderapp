@@ -1,4 +1,4 @@
-import { IconX } from "./icons";
+import { IconX, IconFolder } from "./icons";
 import { useEffect, useMemo, useState } from "react";
 import { listProjects, deleteProject, duplicateProject, putProject } from "../store/projects";
 import { recordTombstone } from "../lib/cloud";
@@ -164,9 +164,9 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
                 >
                   <option value="" disabled>Move to…</option>
                   {folders.map((f) => (
-                    <option key={f} value={f}>📁 {f}</option>
+                    <option key={f} value={f}>{f}</option>
                   ))}
-                  <option value="__new__">＋ New folder…</option>
+                  <option value="__new__">New folder…</option>
                   <option value="__none__">No folder</option>
                 </select>
                 <button className="ghost sm danger" disabled={!selIds.size} onClick={() => void deleteSelected()}>
@@ -179,7 +179,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
                 <button className={`lib-chip${folder === null ? " on" : ""}`} onClick={() => setFolder(null)}>All ({folderCount(null)})</button>
                 {folders.map((f) => (
                   <button key={f} className={`lib-chip${folder === f ? " on" : ""}`} onClick={() => setFolder(folder === f ? null : f)}>
-                    📁 {f} ({folderCount(f)})
+                    <span className="lib-folder"><IconFolder /> {f}</span> ({folderCount(f)})
                   </button>
                 ))}
                 {items.some((i) => !i.folder) && (
@@ -220,7 +220,7 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
                         </div>
                         <div className="lib-meta">
                           {p.versions.length} version{p.versions.length === 1 ? "" : "s"}
-                          {p.folder ? ` · 📁 ${p.folder}` : ""}
+                          {p.folder ? <> · <span className="lib-folder"><IconFolder /> {p.folder}</span></> : null}
                         </div>
                       </button>
                       {!selMode && <div className="lib-actions">
@@ -244,9 +244,9 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
                         >
                           <option value="">No folder</option>
                           {folders.map((f) => (
-                            <option key={f} value={f}>📁 {f}</option>
+                            <option key={f} value={f}>{f}</option>
                           ))}
-                          <option value="__new__">＋ New folder…</option>
+                          <option value="__new__">New folder…</option>
                         </select>
                         <button
                           className="ghost sm danger"

@@ -74,7 +74,7 @@ export function TemplateStrip({ onPick, onMore, busy }: { onPick: (t: Template) 
         ))}
       </div>
       <button className="tpl-more" onClick={onMore}>
-        All {TEMPLATES.length} templates — parts and sculpts →
+        All {TEMPLATES.length} templates — parts and sculpts
       </button>
     </div>
   );

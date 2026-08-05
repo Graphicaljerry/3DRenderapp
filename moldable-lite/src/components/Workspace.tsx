@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
@@ -1595,6 +1595,8 @@ interface Props {
   confirmCtl: { choose: (msgId: string, yes: boolean) => void; offer: (msgId: string, accepted: boolean) => void };
   /** Remove one line from the transcript (two-step confirm lives in the row). */
   onDeleteMessage: (id: string) => void;
+  /** Remove several at once — the Select sweep's single confirm already happened. */
+  onDeleteMessages: (ids: string[]) => void;
   /** Plan mode: approve, edit or skip the spec before anything is generated. */
   planCtl: { on: boolean; setOn: (v: boolean) => void; choose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void };
   clarifyCtl: {
@@ -1847,6 +1849,22 @@ export function Workspace(p: Props) {
   // Open beside the stage on desktop; on a phone the sheet starts in PEEK, because the
   // first thing a phone user should see is their model, not an empty transcript.
   const [chatOpen, setChatOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 760);
+  // Transcript multi-select: null = off; a Set while picking. One confirm deletes the
+  // whole selection — the per-message two-step stays for onesies, this is for sweeps.
+  const [msgSel, setMsgSel] = useState<Set<string> | null>(null);
+  const [msgSelConfirm, setMsgSelConfirm] = useState(false);
+  const msgSelToggle = useCallback((id: string) => {
+    setMsgSelConfirm(false);
+    setMsgSel((s) => {
+      if (!s) return s;
+      const n = new Set(s);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }, []);
+  const endMsgSel = () => { setMsgSel(null); setMsgSelConfirm(false); };
+  // Which fastener the consolidated rail slot re-arms with (and shows as its icon).
+  const [lastFastener, setLastFastener] = useState<"magnet" | "screw">("magnet");
   // Resizable chat column: drag the divider to trade chat width for 3D-viewer room
   // (most valuable on iPad-sized screens). Persisted; double-click resets.
   const CHAT_W_DEFAULT = 400;
@@ -2168,13 +2186,36 @@ export function Workspace(p: Props) {
           </button>
           <div className="chat-bar">
             <span className="chat-title">Chat</span>
-            {/* Today, in words — the transcript below is undated, so the head carries
-                the one timestamp the session needs. */}
-            <span className="chat-date">{chatDate()}</span>
-            <button className="chat-hide" title="Hide chat" onClick={() => setChatOpen(false)}>Hide</button>
+            {msgSel ? (
+              /* Selection header: the count IS the state, and the whole sweep rides on
+                 ONE confirm — the reason this mode exists at all. */
+              <span className="chat-selbar">
+                <span className="chat-date">{msgSel.size} selected</span>
+                <button className="chat-hide" onClick={() => { setMsgSelConfirm(false); setMsgSel(new Set(p.messages.map((m) => m.id))); }}>All</button>
+                {msgSelConfirm ? (
+                  <button className="chat-hide danger" onClick={() => { p.onDeleteMessages([...msgSel]); endMsgSel(); }}>Really delete {msgSel.size}?</button>
+                ) : (
+                  <button className="chat-hide danger" disabled={msgSel.size === 0} onClick={() => setMsgSelConfirm(true)}>Delete {msgSel.size || ""}</button>
+                )}
+                <button className="chat-hide" onClick={endMsgSel}>Cancel</button>
+              </span>
+            ) : (
+              <>
+                {/* Today, in words — the transcript below is undated, so the head carries
+                    the one timestamp the session needs. */}
+                <span className="chat-date">{chatDate()}</span>
+                <span className="chat-selbar">
+                  {p.messages.length > 1 && (
+                    <button className="chat-hide" title="Pick several messages and delete them in one go" onClick={() => setMsgSel(new Set())}>Select</button>
+                  )}
+                  <button className="chat-hide" title="Hide chat" onClick={() => setChatOpen(false)}>Hide</button>
+                </span>
+              </>
+            )}
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage} />
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage}
+            selecting={msgSel} onToggleSelect={msgSelToggle} />
 
           {p.providerWall && (
           <div className="wall-card" role="status">
@@ -2799,23 +2840,45 @@ export function Workspace(p: Props) {
                     )}
                   </div>
                   <div className="rail-tool">
-                    {/* Magnet pockets: catalogue sizes, hover ghost, tap to sink. */}
+                    {/* Magnets and screws share one Fasteners slot: both cut pockets with
+                        the same free CAD hole machinery, and two rail rows for one job made
+                        the rail read longer than it is. The flyout's first row picks which;
+                        the rail icon shows the one you'd get. */}
                     <button
-                      className={`ghost sm iconbtn${p.magnetCtl.tool ? " on" : ""}`}
-                      aria-pressed={!!p.magnetCtl.tool}
-                      aria-label="Magnets"
+                      className={`ghost sm iconbtn${p.magnetCtl.tool || p.screwCtl.tool ? " on" : ""}`}
+                      aria-pressed={!!(p.magnetCtl.tool || p.screwCtl.tool)}
+                      aria-label="Fasteners"
                       disabled={!p.geometry || p.tab !== "3d" || !p.magnetCtl.canUse}
                       title={p.magnetCtl.canUse
-                        ? "Magnet pockets: pick a disc-magnet size, hover the model for a preview, click to sink the pocket"
-                        : "Magnet pockets work on Precise (CAD) models — mesh models can't be drilled"}
-                      onClick={p.magnetCtl.toggle}
+                        ? "Fasteners: magnet pockets and screw holes. Pick which in the panel, hover the model for a preview, click to cut."
+                        : "Fasteners work on Precise (CAD) models — mesh models can't be drilled"}
+                      onClick={() => {
+                        if (p.magnetCtl.tool) p.magnetCtl.toggle();
+                        else if (p.screwCtl.tool) p.screwCtl.toggle();
+                        else (lastFastener === "screw" ? p.screwCtl : p.magnetCtl).toggle();
+                      }}
                     >
-                      <IconMagnet />
-                    <span className="rail-name">Magnets</span>
+                      {lastFastener === "screw" ? <IconScrew /> : <IconMagnet />}
+                    <span className="rail-name">Fasteners</span>
                     </button>
-                    {p.magnetCtl.tool && (
+                    {(p.magnetCtl.tool || p.screwCtl.tool) && (
                       <div className="rail-fly">
                         <div className="magnet-fly">
+                          {/* Arming one puts the other down (dismissOverlays inside the
+                              toggles) — the seg only ever needs to switch the off one on. */}
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Fastener kind">
+                            <button className={p.magnetCtl.tool ? "on" : ""} role="radio" aria-checked={!!p.magnetCtl.tool}
+                              title="Pockets for disc magnets — press-fit or glued"
+                              onClick={() => { setLastFastener("magnet"); if (!p.magnetCtl.tool) p.magnetCtl.toggle(); }}>
+                              <IconMagnet size={13} /><span className="btn-label">Magnet</span>
+                            </button>
+                            <button className={p.screwCtl.tool ? "on" : ""} role="radio" aria-checked={!!p.screwCtl.tool}
+                              title="Screw holes — clearance, thread-bite or heat-set insert"
+                              onClick={() => { setLastFastener("screw"); if (!p.screwCtl.tool) p.screwCtl.toggle(); }}>
+                              <IconScrew size={13} /><span className="btn-label">Screw</span>
+                            </button>
+                          </div>
+                          {p.magnetCtl.tool && (<>
                           <div className="paint-lbl">Disc magnet · ⌀×h mm</div>
                           <div className="magnet-sizes" role="radiogroup" aria-label="Magnet size">
                             {p.magnetCtl.sizes.map((s) => {
@@ -2869,28 +2932,8 @@ export function Workspace(p: Props) {
                               Remove all ({p.magnetCtl.placedCount})
                             </button>
                           )}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="rail-tool">
-                    {/* Screw holes: right-sized bores with a ribbed thread pattern to bite into. */}
-                    <button
-                      className={`ghost sm iconbtn${p.screwCtl.tool ? " on" : ""}`}
-                      aria-pressed={!!p.screwCtl.tool}
-                      aria-label="Screws"
-                      disabled={!p.geometry || p.tab !== "3d" || !p.screwCtl.canUse}
-                      title={p.screwCtl.canUse
-                        ? "Screw holes: pick a size, hover the model for a preview, click to cut — clearance, thread-bite (ribbed) or heat-set insert"
-                        : "Screw holes work on Precise (CAD) models — mesh models can't be drilled"}
-                      onClick={p.screwCtl.toggle}
-                    >
-                      <IconScrew />
-                    <span className="rail-name">Screws</span>
-                    </button>
-                    {p.screwCtl.tool && (
-                      <div className="rail-fly">
-                        <div className="magnet-fly">
+                          </>)}
+                          {p.screwCtl.tool && (<>
                           <div className="paint-lbl">Screw size</div>
                           <div className="magnet-sizes" role="radiogroup" aria-label="Screw size">
                             {p.screwCtl.sizes.map((s) => {
@@ -2949,6 +2992,7 @@ export function Workspace(p: Props) {
                               Remove all ({p.screwCtl.placedCount})
                             </button>
                           )}
+                          </>)}
                         </div>
                       </div>
                     )}
@@ -3325,7 +3369,7 @@ export function Workspace(p: Props) {
                 Escape or outside-click dismissal — it closed on re-click, onMouseLeave,
                 or picking an item, and mouse-leave is unreachable on touch. */}
             <div className="export-wrap">
-              <button className={`primary${dockPanel === "export" && dockOpen ? " on" : ""}`} disabled={!p.geometry} onClick={() => { setDockPanel("export"); setDockOpen(true); }}>Export…</button>
+              <button className={`primary export-cta${dockPanel === "export" && dockOpen ? " on" : ""}`} disabled={!p.geometry} onClick={() => { setDockPanel("export"); setDockOpen(true); }}><IconExport size={14} /> Export</button>
             </div>
           </div>
         </section>
@@ -3567,7 +3611,7 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl, planCtl, onDeleteMessage }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, selecting, onToggleSelect }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string) => void;
@@ -3575,8 +3619,20 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   planCtl: Props["planCtl"];
   onDeleteMessage: (id: string) => void;
   confirmCtl: Props["confirmCtl"];
+  /** Multi-select sweep: null = off; the Set while picking (owned by the chat bar). */
+  selecting: Set<string> | null;
+  onToggleSelect: (id: string) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
+  // Click-to-expand for photos in the transcript. One viewer for every image kind —
+  // the row hands the URL up, Esc or any click dismisses.
+  const [zoomImg, setZoomImg] = useState<string | null>(null);
+  useEffect(() => {
+    if (!zoomImg) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoomImg(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [zoomImg]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const lastText = messages[messages.length - 1]?.text;
@@ -3598,8 +3654,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
   // (a changing function prop would defeat the memo for every row).
-  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage });
-  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage };
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, zoom: setZoomImg as (u: string) => void, toggle: onToggleSelect });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, zoom: setZoomImg, toggle: onToggleSelect };
   const rowApi = useMemo(() => ({
     startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
@@ -3615,6 +3671,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     deleteMessage: (msgId: string) => rowCb.current.onDeleteMessage(msgId),
     confirmChoose: (msgId: string, yes: boolean) => rowCb.current.confirmCtl.choose(msgId, yes),
     offerChoose: (msgId: string, accepted: boolean) => rowCb.current.confirmCtl.offer(msgId, accepted),
+    zoomImage: (url: string) => rowCb.current.zoom(url),
+    toggleSelect: (msgId: string) => rowCb.current.toggle(msgId),
   }), []);
 
   // How many messages were already on screen when this list first mounted.
@@ -3623,7 +3681,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   const baseCount = baseCountRef.current;
 
   return (
-    <div className="messages">
+    <div className={`messages${selecting ? " selecting" : ""}`}>
       {messages.length === 0 && (
         <div className="empty">
           <p className="empty-q">What do you want to make?</p>
@@ -3667,10 +3725,19 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
           brainModel={brain.model}
           genProvider={genProvider}
           genModel={genModel}
+          selectMode={!!selecting}
+          selected={selecting?.has(m.id) ?? false}
           api={rowApi}
         />
       ))}
       <div ref={endRef} />
+      {/* Enlarged photo, portal'd to the body so no card transform can clip it. */}
+      {zoomImg && createPortal(
+        <div className="img-lightbox" role="dialog" aria-label="Enlarged photo — click anywhere or press Esc to close" onClick={() => setZoomImg(null)}>
+          <img src={zoomImg} alt="enlarged reference" />
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -3817,9 +3884,10 @@ function ClarifyCard({ msgId, c, busy, api }: {
 
 /** One chat bubble. Memoised: chat history is immutable once written, so a row only
     re-renders when something about THAT message changes. */
-const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, api }: {
+const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, selectMode, selected, api }: {
   m: ChatMessage; fresh: boolean; editing: boolean; editText: string; thinking: string; busy: boolean;
   brainProvider: LlmProviderId; brainModel: string; genProvider: string; genModel: string;
+  selectMode: boolean; selected: boolean;
   api: {
     startEdit: (m: ChatMessage) => void; submitEdit: (m: ChatMessage) => void;
     cancelEdit: () => void; setEditText: (s: string) => void;
@@ -3831,6 +3899,8 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
     deleteMessage: (msgId: string) => void;
     confirmChoose: (msgId: string, yes: boolean) => void;
     offerChoose: (msgId: string, accepted: boolean) => void;
+    zoomImage: (url: string) => void;
+    toggleSelect: (msgId: string) => void;
   };
 }) {
   const setEditingId = api.cancelEdit;
@@ -3843,7 +3913,12 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
   const hasBrainKey = api.hasBrainKey;
   const hasGenKey = api.hasGenKey;
   return (
-        <div className={`msg ${m.role} ${m.error ? "err" : ""}`}>
+        <div
+          className={`msg ${m.role} ${m.error ? "err" : ""}${selectMode ? " selectable" : ""}${selected ? " selected" : ""}`}
+          onClick={selectMode ? () => api.toggleSelect(m.id) : undefined}
+        >
+          {/* In select mode the WHOLE row is the tap target — the mark just shows state. */}
+          {selectMode && <span className="sel-mark" aria-hidden="true">{selected && <IconCheck size={11} />}</span>}
           <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
           {m.plan ? (
             <PlanCard msgId={m.id} st={m.plan} busy={busy} api={api} />
@@ -3896,15 +3971,18 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                   checks and step text sit straight on the chat background (both themes
                   carry enough contrast), and the bubble arrives with the reply itself. */}
               <div className={m.role === "assistant" && m.streaming ? "bubble-open" : `bubble ${m.streaming ? "muted" : ""}`}>
-                {m.image && <img className="bubble-img" src={m.image} alt="reference" />}
+                {m.image && <img className="bubble-img zoomable" src={m.image} alt="reference — click to enlarge" title="Click to enlarge" onClick={() => !selectMode && api.zoomImage(m.image!)} />}
                 {/* Every photo travelling with this message, INSIDE the bubble: extra
                     uploads on a user message, product photos found online on a research
                     note. A thumb that 404s or blocks hotlinking hides itself. */}
                 {!!m.images?.length && (
                   <div className="ref-strip">
                     {m.images.map((u, i) => (
-                      <a key={i} href={u.startsWith("data:") ? undefined : u} target="_blank" rel="noopener noreferrer" title={u.startsWith("data:") ? "Attached reference photo" : "Product photo found online — open full size"}>
-                        <img src={u} alt="reference photo" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }} />
+                      // Attached photos enlarge in place; web finds still open their page.
+                      <a key={i} href={u.startsWith("data:") ? undefined : u} target="_blank" rel="noopener noreferrer"
+                        title={u.startsWith("data:") ? "Attached reference photo — click to enlarge" : "Product photo found online — open full size"}
+                        onClick={u.startsWith("data:") ? () => !selectMode && api.zoomImage(u) : undefined}>
+                        <img className={u.startsWith("data:") ? "zoomable" : undefined} src={u} alt="reference photo" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }} />
                       </a>
                     ))}
                   </div>

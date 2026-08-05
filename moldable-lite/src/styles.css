@@ -294,8 +294,38 @@ button { font-family: inherit; cursor: pointer; }
 .guided-cta:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .gc-title { font-size: 14px; font-weight: 600; }
 .gc-sub { font-size: 11.5px; opacity: .85; }
-.msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; }
+.msg { display: flex; flex-direction: column; gap: 4px; max-width: 92%; position: relative; }
 .msg.user { align-self: flex-end; align-items: flex-end; }
+
+/* ---- Transcript multi-select: whole rows become tap targets; everything inside
+   goes inert so a sweep can't accidentally press a button it crosses. ---- */
+.msg.selectable { cursor: pointer; padding-left: 26px; }
+.msg.user.selectable { padding-left: 0; padding-right: 26px; }
+.messages.selecting .bubble, .messages.selecting .bubble-open, .messages.selecting .msg-actions,
+.messages.selecting .think-done, .messages.selecting .src-row, .messages.selecting .confirm-card { pointer-events: none; }
+.sel-mark {
+  position: absolute; top: 20px; left: 0; width: 17px; height: 17px;
+  border: 1.5px solid var(--bord2); border-radius: var(--r-full); background: var(--card);
+  display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto;
+}
+.msg.user .sel-mark { left: auto; right: 0; }
+.msg.selected .sel-mark { background: var(--accent); border-color: var(--accent); }
+.msg.selected > .bubble, .msg.selected > .bubble-open, .msg.selected .confirm-card { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat-selbar { display: inline-flex; align-items: center; gap: 2px; }
+.chat-hide.danger { color: #c0392b; }
+.chat-hide.danger:hover { background: rgba(192, 57, 43, 0.1); color: #c0392b; }
+.chat-hide:disabled { opacity: 0.4; cursor: default; }
+[data-theme="dark"] .chat-hide.danger { color: #e07b6d; }
+
+/* ---- Click-to-expand photos ---- */
+.zoomable { cursor: zoom-in; }
+.img-lightbox {
+  position: fixed; inset: 0; z-index: 300; background: rgba(10, 12, 11, 0.78);
+  display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 4vmin;
+}
+/* Fixed width + object-fit rather than max-width alone: "enlarge" must also mean a
+   small photo actually grows, not just that a big one fits. */
+.img-lightbox img { width: min(88vw, 1100px); max-height: 90vh; object-fit: contain; border-radius: var(--r-md); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5); }
 .who { font-size: 11px; font-weight: 500; color: var(--ink2); }
 /* overflow-wrap: long unbreakable strings (chunk URLs in error messages, pasted
    links) used to run straight through the bubble's edge. */
@@ -1216,6 +1246,8 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .export-panel .fine { margin: 0; }
 /* The status-bar trigger reads as pressed while its panel is the open one. */
 .statusbar .primary.on { background: var(--accent-d); }
+.export-cta { display: inline-flex; align-items: center; gap: 6px; }
+.export-cta svg { flex: 0 0 auto; }
 
 /* ---------- Launchpad (the entry surface) ----------
    A route, not a modal: the composer is the only filled, high-contrast object on

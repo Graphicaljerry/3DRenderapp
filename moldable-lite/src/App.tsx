@@ -5475,6 +5475,7 @@ export default function App() {
         confirmCtl={{ choose: confirmChoose, offer: offerChoose }}
         planCtl={{ on: planOn, setOn: setPlan, choose: planChoose }}
         onDeleteMessage={(id) => setMessages((m) => m.filter((x) => x.id !== id))}
+        onDeleteMessages={(ids) => { const kill = new Set(ids); setMessages((m) => m.filter((x) => !kill.has(x.id))); }}
         onRetryModel={retryWithModel}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}

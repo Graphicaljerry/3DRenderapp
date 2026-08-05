@@ -113,6 +113,11 @@ export type ChatMessage = {
   /** A paid mesh generation waiting on one tap — price on the button, free CAD as the
    *  other exit. `done` freezes the card as a record of what was chosen. */
   confirm?: { text: string; yes: string; no: string; prompt: string; done?: boolean; chose?: "mesh" | "cad" };
+  /** A one-tap suggestion the app is CONFIDENT about but won't do silently — convert
+   *  an inch-unit import, take the computed print orientation. One card type for all
+   *  of them; `kind` tells the dispatcher what accepting means. The card freezes
+   *  either way, so the transcript records what was chosen. */
+  offer?: { text: string; yes: string; no: string; kind: "inches" | "orient"; done?: boolean; accepted?: boolean };
   /** A live web lookup. The step timeline said "Searching the web…" in the same grey
    *  as every other stage, so a lookup that takes 20 s read as the app hanging — and
    *  with the globe deliberately switched ON, nothing confirmed it was actually
@@ -1903,7 +1908,11 @@ export default function App() {
     setTimeout(async () => {
       try {
         const { findThinWalls } = await import("./print/thinwalls"); // three-mesh-bvh loads on demand
-        const rep = findThinWalls(geometry, thinWallLimitMM(printer));
+        // Coverage scales with the mesh: the flat 800-sample cap left a million-triangle
+        // sculpt 99.9% unexamined while the result read as a clean bill of health.
+        const pos = geometry.getAttribute("position");
+        const tris = Math.floor((geometry.index ? geometry.index.count : pos.count) / 3);
+        const rep = findThinWalls(geometry, thinWallLimitMM(printer), { maxSamples: Math.min(6000, Math.max(800, Math.round(tris / 4))) });
         setThinReport(rep);
         setThinShow(rep.thinSamples > 0);
       } catch (err: any) {
@@ -1917,7 +1926,7 @@ export default function App() {
   function runOrientSuggest() {
     if (!geometry) return;
     try {
-      setOrientSug(suggestOrientation(geometry, printer.overhangThresholdDeg));
+      setOrientSug(suggestOrientation(geometry, printer.overhangThresholdDeg, printer.bed));
     } catch {
       setOrientSug(null);
     }
@@ -1970,7 +1979,7 @@ export default function App() {
   async function autoOrientDrop() {
     if (!geometry || status === "generating") return;
     let s: OrientSuggestion | null = null;
-    try { s = suggestOrientation(geometry, printer.overhangThresholdDeg); } catch { /* degenerate geometry — nothing to say */ }
+    try { s = suggestOrientation(geometry, printer.overhangThresholdDeg, printer.bed); } catch { /* degenerate geometry — nothing to say */ }
     if (!s) return;
     setOrientSug(s); // Printability panel shows the numbers either way
     if (!s.improved) {
@@ -2854,6 +2863,12 @@ export default function App() {
               text: `Imported ${f.name} as an editable CAD solid${caveat} (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
             },
           ]);
+          if (asCad === "stl") {
+            maybeOfferInches(res.dims); // STEP carries real units; STL just carries numbers
+            // Downloaded STLs arrive lying however they were modelled — same offer as
+            // the mesh path, and only once units are settled (see above).
+            if (Math.max(res.dims.x, res.dims.y, res.dims.z) > 13) maybeOfferOrientation(res.geometry);
+          }
           setStatus("idle");
           return;
         } catch (err: any) {
@@ -2888,6 +2903,10 @@ export default function App() {
         ...m,
         { id: mid(), role: "assistant", text: `Imported ${f.name} (${d.x} × ${d.y} × ${d.z} mm). Measure it, run Printability/repair, resize, and export or send to your slicer — like any generated model.` },
       ]);
+      maybeOfferInches(d);
+      // Only when the size is trusted: an inch-suspect model gets units settled first —
+      // orientation advice on a part that's about to grow 25× would describe the wrong part.
+      if (Math.max(d.x, d.y, d.z) > 13) maybeOfferOrientation(g);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that 3D file: " + String(err?.message ?? err), error: true }]);
     } finally {
@@ -3993,6 +4012,63 @@ export default function App() {
       pickMode("precise");
       void send(c.prompt, "precise", { skipClarify: true });
     }
+  }
+
+  /** One-tap offer accepted or declined. Accepting re-runs the underlying tool at TAP
+   *  time rather than replaying stale state — the model may have changed since the
+   *  card was posted, and both tools recompute from the current geometry anyway. */
+  function offerChoose(msgId: string, accepted: boolean) {
+    const o = messages.find((x) => x.id === msgId)?.offer;
+    if (!o || o.done) return;
+    setMessages((m) => m.map((x) => (x.id === msgId && x.offer ? { ...x, offer: { ...x.offer, done: true, accepted } } : x)));
+    if (!accepted) return;
+    if (o.kind === "inches") void inchRescue();
+    else if (o.kind === "orient") void autoOrientDrop();
+  }
+  /** Convert an inch-unit import: 1 in = 25.4 mm, uniformly. */
+  async function inchRescue() {
+    const before = resultRef.current?.dims; // state lags the await — scale the numbers we have
+    await resizeModel([25.4, 25.4, 25.4]);
+    const r1 = (v: number) => Math.round(v * 25.4 * 10) / 10;
+    appendMsg({ role: "assistant", text: `Converted from inches — the model is now ${before ? `${r1(before.x)} × ${r1(before.y)} × ${r1(before.z)} mm` : "25.4× bigger"}. Undo reverts it.` });
+  }
+  /** Import sizes that smell like inches: everything under ~half a foot when read as
+   *  millimetres, i.e. a "part" smaller than a fingernail. Real millimetre models this
+   *  small exist but are rare; inch-authored STLs land here every time. The band's top
+   *  end also keeps the CONVERTED size inside a typical build volume, so accepting
+   *  can't produce something unprintable. */
+  function maybeOfferInches(d: { x: number; y: number; z: number }) {
+    const maxDim = Math.max(d.x, d.y, d.z);
+    if (maxDim < 0.05 || maxDim > 13) return;
+    setMessages((m) => [...m, {
+      id: mid(), role: "assistant",
+      offer: {
+        kind: "inches",
+        text: `That came in tiny — ${d.x} × ${d.y} × ${d.z} mm, smaller than a fingernail. Files saved in inches read 25.4× too small here, because STL has no units and this app works in millimetres. If it was designed in inches, one tap fixes it.`,
+        yes: "It was inches — scale ×25.4",
+        no: `No, it really is ${maxDim} mm`,
+      },
+      text: "",
+    }]);
+  }
+  /** After an import lands: if the computed print orientation would meaningfully cut
+   *  supports, offer it — the app always knew, it just never said. Only for imports;
+   *  CAD builds are authored flat and an offer after every edit would be noise. */
+  function maybeOfferOrientation(g: THREE.BufferGeometry) {
+    try {
+      const s = suggestOrientation(g, printer.overhangThresholdDeg, printer.bed);
+      if (!s?.improved) return;
+      setMessages((m) => [...m, {
+        id: mid(), role: "assistant",
+        offer: {
+          kind: "orient",
+          text: `This prints better in a different orientation: ${s.reason.replace(/^Cuts/, "rotating it cuts")} Want it laid that way? It only changes how the part sits on the plate, not its shape.`,
+          yes: "Lay it that way",
+          no: "Keep it as imported",
+        },
+        text: "",
+      }]);
+    } catch { /* degenerate geometry — no advice beats wrong advice */ }
   }
 
   /** A chip picked, or a measurement typed, on a question card in the transcript. */
@@ -5396,7 +5472,7 @@ export default function App() {
           dismissNote: () => setImproveNote(null),
         }}
         clarifyCtl={{ answer: answerClarify, build: buildFromClarify }}
-        confirmCtl={{ choose: confirmChoose }}
+        confirmCtl={{ choose: confirmChoose, offer: offerChoose }}
         planCtl={{ on: planOn, setOn: setPlan, choose: planChoose }}
         onDeleteMessage={(id) => setMessages((m) => m.filter((x) => x.id !== id))}
         onRetryModel={retryWithModel}
@@ -5414,7 +5490,11 @@ export default function App() {
           toggleOverhang: () => { setOverhangView((v) => !v); setThinShow(false); },
           thin: { report: thinReport, busy: thinBusy, run: runThinWalls, shown: thinShow, toggleShown: () => setThinShow((v) => !v) },
           orient: { suggestion: orientSug, run: runOrientSuggest, apply: () => void applyOrientation(), auto: () => void autoOrientDrop(), face: (n) => void snapFaceToPlate(n) },
-          chamfer: { can: activeKind === "replicad" && result?.source.kind === "code", apply: (size) => void applyChamferBottom(size) },
+          chamfer: {
+            can: activeKind === "replicad" && result?.source.kind === "code",
+            done: result?.source.kind === "code" && (result.source.ops ?? []).some((op) => op.type === "chamferBottom"),
+            apply: (size) => void applyChamferBottom(size),
+          },
         }}
         modelSelected={(modelSelected || transformMode !== "off") && !attachSelected}
         onModelSelect={selectModel}

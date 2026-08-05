@@ -44,17 +44,28 @@ function collectTris(geometry: THREE.BufferGeometry): Tri[] {
   return tris;
 }
 
-/** Overhang + contact area (mm²) with the model rotated so `down` points at the bed. */
-function scoreOrientation(tris: Tri[], down: THREE.Vector3, sinT: number): { overhang: number; contact: number; score: number } {
+/** Overhang + contact area (mm²) with the model rotated so `down` points at the bed,
+    plus the rotated bounding box — the caller uses it to reject poses that leave the
+    build volume. */
+function scoreOrientation(tris: Tri[], down: THREE.Vector3, sinT: number): { overhang: number; contact: number; score: number; size: [number, number, number] } {
   const q = new THREE.Quaternion().setFromUnitVectors(down, DOWN);
   const m = new THREE.Matrix4().makeRotationFromQuaternion(q).elements;
-  // Only rotated n.z and rotated vertex z are needed — one matrix row each.
+  const rx = (x: number, y: number, z: number) => m[0] * x + m[4] * y + m[8] * z;
+  const ry = (x: number, y: number, z: number) => m[1] * x + m[5] * y + m[9] * z;
   const rz = (x: number, y: number, z: number) => m[2] * x + m[6] * y + m[10] * z;
   let zmin = Infinity;
+  const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  const grow = (x: number, y: number, z: number) => {
+    const px = rx(x, y, z), py = ry(x, y, z), pz = rz(x, y, z);
+    if (px < lo[0]) lo[0] = px; if (px > hi[0]) hi[0] = px;
+    if (py < lo[1]) lo[1] = py; if (py > hi[1]) hi[1] = py;
+    if (pz < lo[2]) lo[2] = pz; if (pz > hi[2]) hi[2] = pz;
+    return pz;
+  };
   for (const t of tris) {
-    const z1 = rz(t.ax, t.ay, t.az), z2 = rz(t.bx, t.by, t.bz), z3 = rz(t.cx, t.cy, t.cz);
-    const lo = Math.min(z1, z2, z3);
-    if (lo < zmin) zmin = lo;
+    const z1 = grow(t.ax, t.ay, t.az), z2 = grow(t.bx, t.by, t.bz), z3 = grow(t.cx, t.cy, t.cz);
+    const l = Math.min(z1, z2, z3);
+    if (l < zmin) zmin = l;
   }
   let overhang = 0, contact = 0;
   const EPS = 0.3; // "touches the bed" tolerance, mm
@@ -66,7 +77,15 @@ function scoreOrientation(tris: Tri[], down: THREE.Vector3, sinT: number): { ove
     else overhang += t.area;
   }
   // Tweaker spirit: minimise supported area, reward a solid footprint.
-  return { overhang, contact, score: overhang - 0.25 * contact };
+  return { overhang, contact, score: overhang - 0.25 * contact, size: [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]] };
+}
+
+/** Would a part this size rest inside the build volume? XY may swap — the part can
+    be yawed on the plate — but height can't. */
+function fitsBed(size: [number, number, number], bed: { x: number; y: number; z: number }): boolean {
+  const [a, b, h] = size;
+  if (h > bed.z) return false;
+  return (a <= bed.x && b <= bed.y) || (a <= bed.y && b <= bed.x);
 }
 
 /** Candidate "down" directions: the six axes + the biggest area-weighted normal clusters. */
@@ -97,16 +116,21 @@ function candidates(tris: Tri[]): THREE.Vector3[] {
   return out;
 }
 
-export function suggestOrientation(geometry: THREE.BufferGeometry, thresholdDeg: number): OrientSuggestion | null {
+export function suggestOrientation(geometry: THREE.BufferGeometry, thresholdDeg: number, bed?: { x: number; y: number; z: number }): OrientSuggestion | null {
   const tris = collectTris(geometry);
   if (!tris.length) return null;
   const sinT = Math.sin(THREE.MathUtils.degToRad(thresholdDeg));
 
   const current = scoreOrientation(tris, DOWN.clone(), sinT);
+  // A pose that saves supports but hangs outside the build volume is not a
+  // suggestion, it's a trap — unless the part doesn't fit as it stands either,
+  // in which case size is a separate problem and support math still helps.
+  const mustFit = bed != null && fitsBed(current.size, bed);
   let bestDown = DOWN.clone();
   let best = current;
   for (const d of candidates(tris)) {
     const s = scoreOrientation(tris, d, sinT);
+    if (mustFit && !fitsBed(s.size, bed)) continue;
     if (s.score < best.score - 1e-6) { best = s; bestDown = d; }
   }
 

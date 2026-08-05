@@ -19,7 +19,7 @@ export interface PrintPrepCtl {
   toggleOverhang: () => void;
   thin: { report: ThinWallReport | null; busy: boolean; run: () => void; shown: boolean; toggleShown: () => void };
   orient: { suggestion: OrientSuggestion | null; run: () => void; apply: () => void; auto: () => void; face: (normal: [number, number, number]) => void };
-  chamfer: { can: boolean; apply: (size: number) => void };
+  chamfer: { can: boolean; done: boolean; apply: (size: number) => void };
 }
 import type { Version } from "../store/types";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
@@ -1014,8 +1014,19 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
   const hasPlates = p.plateCtl.count > 1 || p.attachments.length > 0;
   const isMesh = p.activeKind !== "replicad";
 
-  // The four checks preflight actually runs. Nothing here is claimed that the code
-  // does not compute — wall thickness and floating islands are deliberately absent.
+  // Walls join the gate: kick the sampling scan off once when the panel opens (it
+  // invalidates itself on any rebuild), so by the time a file leaves, the row shows a
+  // real measurement — as a warning, never a blocker, because thin can be intentional.
+  const thin = p.printPrep.thin;
+  const thinKick = useRef(false);
+  useEffect(() => {
+    if (thinKick.current || !p.geometry || thin.report || thin.busy) return;
+    thinKick.current = true;
+    thin.run();
+  }, [p.geometry, thin]);
+
+  // The five checks that actually run. Nothing here is claimed that the code does
+  // not compute — floating islands are deliberately absent.
   const tight = r?.manifold.isWatertight ?? null;
   const fits = r?.bedFit.fitsRotated ?? null;
   const heavy = r ? r.triangleCount > HEAVY_TRIANGLES : null;
@@ -1047,7 +1058,23 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
           <Check ok={fits} label="Fits your bed" detail={`${p.printer.bed.x}×${p.printer.bed.y}×${p.printer.bed.z} mm`} />
           <Check ok={sane} label="Scale looks right" detail={maxDim ? `${Math.round(maxDim)} mm` : undefined} />
           <Check ok={heavy === null ? null : !heavy} label="Slicer-friendly" detail={r.triangleCount >= 1000 ? `${Math.round(r.triangleCount / 1000)}k tris` : `${r.triangleCount} tris`} />
+          {/* Honest phrasing on the pass state: this is a sample, not a proof — say how
+              many spots were measured rather than pronouncing the walls "healthy". */}
+          <Check
+            ok={thin.report ? thin.report.thinSamples === 0 : null}
+            label={thin.report ? (thin.report.thinSamples > 0 ? "Thin walls found" : "Walls") : "Walls"}
+            detail={
+              !thin.report
+                ? thin.busy ? "measuring…" : undefined
+                : thin.report.thinSamples > 0
+                  ? `${thin.report.thinSamples} spots under ${thin.report.thresholdMM} mm`
+                  : `none thin in ${thin.report.sampled} samples`
+            }
+          />
         </>
+      )}
+      {thin.report && thin.report.thinSamples > 0 && (
+        <p className="fine">Thinnest ≈ {thin.report.minThicknessMM} mm — under {thin.report.thresholdMM} mm walls print fragile or vanish. <button className="link" onClick={thin.toggleShown}>{thin.shown ? "Hide them" : "Show them on the model"}</button></p>
       )}
 
       {r && !tight && isMesh && (
@@ -1066,6 +1093,20 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
         <button className="link xoverride" onClick={() => setOverride(true)}>
           Export anyway — I'll deal with it in the slicer
         </button>
+      )}
+
+      {/* Elephant's foot, at the moment it matters: right before the file leaves. Once
+          per model — the ops chain remembers, so this row reads "added" after. */}
+      {p.printPrep.chamfer.can && (
+        p.printPrep.chamfer.done ? (
+          <p className="fine">✓ Bottom bevel added — the squished first layer stays inside the true footprint.</p>
+        ) : (
+          <div className="xfix">
+            <button className="ghost sm" disabled={busy} onClick={() => p.printPrep.chamfer.apply(0.4)} title="Most printers squash the first layer slightly outward (the “elephant's foot”), which fattens the footprint and shrinks holes near the bed. A 0.4 mm bevel on every bottom edge absorbs the bulge. Undoable.">
+              Add 0.4 mm bottom bevel — first-layer squish guard
+            </button>
+          </div>
+        )
       )}
 
       <p className="dock-sub">File <Hint text={FORMATS_WHAT} /></p>
@@ -1551,7 +1592,7 @@ interface Props {
     note: string | null; dismissNote: () => void;
   };
   /** Question cards living in the transcript: pick an answer, or build from one. */
-  confirmCtl: { choose: (msgId: string, yes: boolean) => void };
+  confirmCtl: { choose: (msgId: string, yes: boolean) => void; offer: (msgId: string, accepted: boolean) => void };
   /** Remove one line from the transcript (two-step confirm lives in the row). */
   onDeleteMessage: (id: string) => void;
   /** Plan mode: approve, edit or skip the spec before anything is generated. */
@@ -3573,6 +3614,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => rowCb.current.planCtl.choose(msgId, choice, edited),
     deleteMessage: (msgId: string) => rowCb.current.onDeleteMessage(msgId),
     confirmChoose: (msgId: string, yes: boolean) => rowCb.current.confirmCtl.choose(msgId, yes),
+    offerChoose: (msgId: string, accepted: boolean) => rowCb.current.confirmCtl.offer(msgId, accepted),
   }), []);
 
   // How many messages were already on screen when this list first mounted.
@@ -3788,6 +3830,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
     planChoose: (msgId: string, choice: "build" | "skip", edited?: BuildPlan) => void;
     deleteMessage: (msgId: string) => void;
     confirmChoose: (msgId: string, yes: boolean) => void;
+    offerChoose: (msgId: string, accepted: boolean) => void;
   };
 }) {
   const setEditingId = api.cancelEdit;
@@ -3815,6 +3858,18 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                 <div className="edit-actions">
                   <button className="primary sm" disabled={busy} onClick={() => api.confirmChoose(m.id, true)}>{m.confirm.yes}</button>
                   <button className="ghost sm" disabled={busy} onClick={() => api.confirmChoose(m.id, false)}>{m.confirm.no}</button>
+                </div>
+              )}
+            </div>
+          ) : m.offer ? (
+            <div className="bubble confirm-card">
+              <p className="cc-text">{m.offer.text}</p>
+              {m.offer.done ? (
+                <p className="fine">{m.offer.accepted ? `→ ${m.offer.yes}` : `→ ${m.offer.no}`}</p>
+              ) : (
+                <div className="edit-actions">
+                  <button className="primary sm" disabled={busy} onClick={() => api.offerChoose(m.id, true)}>{m.offer.yes}</button>
+                  <button className="ghost sm" disabled={busy} onClick={() => api.offerChoose(m.id, false)}>{m.offer.no}</button>
                 </div>
               )}
             </div>
@@ -4130,8 +4185,8 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
           {prep.thin.busy ? "Checking walls…" : "Check wall thickness"}
         </button>
         {prep.chamfer.can && (
-          <button className="ghost sm" disabled={busy} onClick={() => prep.chamfer.apply(0.3)} title="Bevel every bottom edge by 0.3 mm so the squished first layer (elephant foot) doesn't bulge past the true footprint">
-            Elephant-foot bevel
+          <button className="ghost sm" disabled={busy || prep.chamfer.done} onClick={() => prep.chamfer.apply(0.4)} title="Bevel every bottom edge by 0.4 mm so the squished first layer (elephant foot) doesn't bulge past the true footprint">
+            {prep.chamfer.done ? "✓ Elephant-foot bevel" : "Elephant-foot bevel"}
           </button>
         )}
       </div>
@@ -4155,7 +4210,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
             {thin.thinSamples > 0
               ? `⚠️ ${thin.thinSamples} of ${thin.sampled} sampled spots are under ${thin.thresholdMM} mm (thinnest ≈ ${thin.minThicknessMM} mm) — they may print fragile or vanish. Thicken them${nozzleMM > 0.25 ? ", or fit a smaller nozzle" : ""}.`
               : thin.sampled > 0
-                ? `Walls look healthy — thinnest sampled ≈ ${thin.minThicknessMM} mm (limit ${thin.thresholdMM} mm).`
+                ? `No thin walls in ${thin.sampled} sampled spots — thinnest measured ≈ ${thin.minThicknessMM} mm (limit ${thin.thresholdMM} mm). A sample, not a proof: a sliver smaller than the sampling grid can still slip through.`
                 : "Couldn't measure walls here (open surfaces) — run Fix model first."}
           </p>
           {thin.thinSamples > 0 && (

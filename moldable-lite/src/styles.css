@@ -936,7 +936,11 @@ button { font-family: inherit; cursor: pointer; }
 .paint-fly { display: flex; flex-direction: column; gap: 9px; padding: 10px; min-width: 176px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
 .paint-lbl { font-size: 11px; font-weight: 600; color: var(--subt); }
 /* Magnet tool flyout: catalogue-size chips + fit + the pair-through-the-wall toggle. */
-.magnet-fly { display: flex; flex-direction: column; gap: 9px; padding: 10px; width: 208px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+/* 234px: the widest row is the screw tool's Bites in / Slides through / Heat-set seg
+   at 204px + pill padding — 208px clipped "Heat-set" at the panel edge. */
+.magnet-fly { display: flex; flex-direction: column; gap: 9px; padding: 10px; width: 234px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+/* Belt and braces: a seg that ever outgrows the panel wraps instead of clipping. */
+.magnet-fly .mode-seg { flex-wrap: wrap; max-width: 100%; }
 .magnet-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
 .magnet-sizes .msize { padding: 5px 0; border: 1px solid var(--bord); border-radius: var(--r-sm); background: var(--ctl); color: var(--ink2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
 .magnet-sizes .msize:hover { border-color: var(--bord-strong); color: var(--ink); }

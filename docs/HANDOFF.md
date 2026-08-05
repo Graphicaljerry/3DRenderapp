@@ -904,13 +904,24 @@ The audit's top three findings, all "connect what already exists":
   format can't carry is now stated on EVERY export, not once — the second silent STL is
   the one that gets printed in one colour.
 
-Still open from the audit, in the order it ranked them: inch rescue on STL import
-(`loadMesh.ts` has no units check); offer the already-computed orientation as a one-tap
-chip (and teach `orient.ts` about the bed, so it can't suggest a rotation that leaves
-the build volume); thin walls into the export gate with an honest confidence line
-(`thinwalls.ts` caps at 800 samples then says "Walls look healthy"); a bottom-edge
-chamfer default for elephant's foot. Plus a naming problem: Plates / Pieces /
-Attachments / Objects are four words for containers, and users can't tell which is which.
+- **v335 — the four "the app already knew and never said" fixes**, on one new
+  mechanism: `ChatMessage.offer`, a one-tap suggestion card that freezes with the
+  choice recorded (`offerChoose` in App.tsx dispatches by `kind`). Inch rescue:
+  imports under 13 mm across get the ×25.4 offer (STEP exempt — real units).
+  Orientation: imports get the offer when a different pose meaningfully cuts
+  supports, and `suggestOrientation` now takes the bed — a pose that leaves the
+  build volume is rejected before it's suggested (unless the current pose doesn't
+  fit either). Walls joined the export gate as a fifth row, auto-run, with a
+  sample budget that scales with the mesh (was a flat 800) and honest pass copy
+  ("none thin in N samples", not "healthy"). The elephant-foot bevel is offered
+  in the export gate with the why on the button; the ops chain remembers so it
+  can't stack.
+
+Still open from the audit: the naming problem — Plates / Pieces / Attachments /
+Objects are four words for containers, and users can't tell which is which; the
+invisible-state list (fit chip visibility, printer preset reach, silent PLA
+injection in project_settings); "needs the Precise engine" leaking internal
+vocabulary; auto-repair without a caveat line.
 
 ## Conventions
 

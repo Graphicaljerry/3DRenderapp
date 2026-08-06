@@ -128,6 +128,7 @@ interface Props {
   visiblePlate: number; // 0 = all; otherwise only objects on this build plate render
   plateFor: (key: string) => number; // which plate an object ("model" or attachment id) is on
   showcase: boolean; // presentation mode: clean stage, studio light, slow turntable
+  showcaseScene: ShowcaseScene; // which stage the showcase is lit on
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; // display material
   partColors?: Record<string, string>; // per-part fill colour (objectId → hex): "model" + attachment ids
   paintMode?: boolean; // Paint tool active: click a face region to fill it with the active filament
@@ -192,6 +193,9 @@ interface Props {
 // pick a face / edge / corner. One tool, one segmented control.
 export type SelectKind = "face" | "edge" | "vertex" | "point";
 
+/** Showcase stages. "workshop" is the plain viewport; the rest swap backdrop + lights. */
+export type ShowcaseScene = "studio" | "daylight" | "dark" | "workshop";
+
 /** Cursor for the rotation rings. CSS has no rotate cursor, and `grab` reads as "pick
  *  this up and move it" — the wrong promise on a ring that only ever spins the part. A
  *  circular arrow says rotate outright; the heavy dark stroke underneath is a halo, so
@@ -208,6 +212,133 @@ const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // 
 // Must match --canvas in styles.css: the scene IS the canvas card's surface, and any
 // difference shows as a colour seam inside the rounded corners.
 const THEME_SCENE = { light: "#d5d6d7", dark: "#17181a" } as const; // dark: neutral, no blue cast
+
+// ---- Showcase stages -------------------------------------------------------
+// A stage = backdrop sweep (seamless studio paper), a soft world ambient, a light
+// rig, a ground decal tone, and how strongly the room reflections read. The rig
+// is defined in CAMERA space and rides along as the turntable orbits — a rim
+// light stays a rim through the whole revolution instead of sweeping from
+// backlight to floodlight. (Camera space: +x right, +y up, −z into the screen;
+// each light aims at the model, which sits at the world origin.)
+type StageLight = { color: number; intensity: number; pos: [number, number, number] };
+const STAGES: Record<Exclude<ShowcaseScene, "workshop">, {
+  bg: [number, string][];
+  hemi: number;
+  lights: StageLight[];
+  shadow: { color: string; alpha: number }; // "r,g,b" + peak alpha of the ground decal
+  env: number; // envMapIntensity on the model material
+}> = {
+  studio: {
+    bg: [[0, "#f4f5f7"], [0.55, "#e9ebee"], [1, "#dcdfe4"]],
+    hemi: 0.8,
+    lights: [
+      { color: 0xffffff, intensity: 1.5, pos: [90, 110, 60] }, // key, upper right
+      { color: 0xf2f5ff, intensity: 0.5, pos: [-130, 10, 40] }, // cool fill, left
+      { color: 0xffffff, intensity: 0.6, pos: [-30, 150, -330] }, // rim, behind the part
+    ],
+    shadow: { color: "28,32,38", alpha: 0.55 },
+    env: 0.5,
+  },
+  daylight: {
+    bg: [[0, "#d8e7fa"], [0.6, "#eef4fa"], [1, "#e6ebf0"]],
+    hemi: 1.1,
+    lights: [
+      { color: 0xffeedd, intensity: 1.9, pos: [110, 150, 20] }, // the sun, warm
+      { color: 0xdfeaff, intensity: 0.45, pos: [-120, 30, 30] }, // sky bounce
+    ],
+    shadow: { color: "40,52,68", alpha: 0.38 },
+    env: 0.4,
+  },
+  dark: {
+    bg: [[0, "#242830"], [0.55, "#15181d"], [1, "#0b0d10"]],
+    hemi: 0.1,
+    lights: [
+      { color: 0xcfe0ff, intensity: 1.8, pos: [-90, 130, -320] }, // cool rim, behind left
+      { color: 0xfff1df, intensity: 1.0, pos: [140, 60, -300] }, // warm kicker, behind right
+      { color: 0x9fb4d8, intensity: 0.32, pos: [0, 40, 120] }, // faint front wash — barely see the form
+    ],
+    shadow: { color: "205,220,240", alpha: 0.16 }, // a spotlight pool, not a shadow
+    env: 0.18,
+  },
+};
+
+function sweepTex(stops: [number, string][]): THREE.CanvasTexture {
+  const cv = document.createElement("canvas");
+  cv.width = 8;
+  cv.height = 256;
+  const ctx = cv.getContext("2d")!;
+  const g = ctx.createLinearGradient(0, 0, 0, 256);
+  for (const [at, c] of stops) g.addColorStop(at, c);
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 8, 256);
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
+/** Soft radial decal under the part — reads as ambient occlusion on light stages and
+ *  as a spotlight pool on the dark one. The thumbnail's trick, sized to the model. */
+function contactShadow(box: THREE.Box3, tone: { color: string; alpha: number }): THREE.Mesh {
+  const cv = document.createElement("canvas");
+  cv.width = 256;
+  cv.height = 256;
+  const ctx = cv.getContext("2d")!;
+  const rg = ctx.createRadialGradient(128, 128, 8, 128, 128, 128);
+  rg.addColorStop(0, `rgba(${tone.color},${tone.alpha})`);
+  rg.addColorStop(0.45, `rgba(${tone.color},${tone.alpha * 0.62})`);
+  rg.addColorStop(0.75, `rgba(${tone.color},${tone.alpha * 0.22})`);
+  rg.addColorStop(1, `rgba(${tone.color},0)`);
+  ctx.fillStyle = rg;
+  ctx.fillRect(0, 0, 256, 256);
+  const size = Math.max(box.max.x - box.min.x, box.max.y - box.min.y, 8) * 2.2;
+  const tex = new THREE.CanvasTexture(cv);
+  tex.colorSpace = THREE.SRGBColorSpace; // untagged, the dark tone gets read as linear and washes out
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }),
+  );
+  m.position.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, box.min.z + 0.01);
+  return m;
+}
+
+// One PMREM environment for the whole session — what makes Glossy/Metal finishes
+// read as real surfaces instead of flat plastic. A soft gray dome (predictable
+// irradiance — three's RoomEnvironment floods an untone-mapped scene with ~10×
+// the light its numbers suggest, measured here by bisection) plus two bright
+// softbox cards that put real highlights on shiny finishes. Lazy: never built
+// unless a stage is used.
+let stageEnvTex: THREE.Texture | null = null;
+function stageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
+  if (!stageEnvTex) {
+    const sc = new THREE.Scene();
+    const dome = new THREE.Mesh(
+      new THREE.SphereGeometry(50, 32, 16),
+      new THREE.MeshBasicMaterial({ map: sweepTex([[0, "#ffffff"], [0.5, "#b9c0c8"], [1, "#585c62"]]), side: THREE.BackSide }),
+    );
+    sc.add(dome);
+    const card = (w: number, h: number, x: number, y: number, z: number, hdr: number) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(hdr, hdr, hdr) }));
+      m.position.set(x, y, z);
+      m.lookAt(0, 0, 0);
+      sc.add(m);
+    };
+    card(26, 14, 18, 24, 26, 5); // main softbox, upper right
+    card(14, 10, -30, 8, 6, 3.2); // strip light, left
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    stageEnvTex = pmrem.fromScene(sc, 0.04).texture;
+    pmrem.dispose();
+    sc.traverse((o) => {
+      const any = o as THREE.Mesh;
+      if (any.geometry) any.geometry.dispose();
+      const m = any.material as (THREE.Material & { map?: THREE.Texture | null }) | undefined;
+      if (m) {
+        m.map?.dispose();
+        m.dispose();
+      }
+    });
+  }
+  return stageEnvTex;
+}
 // Solid build plate (Bambu/Orca-style): a slab sized to the printer bed so models
 // stand off the background instead of floating on gridlines.
 function buildPlate(bed: { x: number; y: number; z?: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
@@ -331,7 +462,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
@@ -420,6 +551,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         const src = g.index ? g.toNonIndexed() : g;
         return (src.getAttribute("position") as THREE.BufferAttribute).array;
       };
+      // Raw internals for scene-debugging harnesses (lights, materials, stage).
+      (window as any).__viewerS = () => st.current;
     }
 
     // Right-CLICK (no drag) → quick-action context menu on whatever is under the cursor.
@@ -2382,7 +2515,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     for (const [id, m] of s.attachMap) m.visible = visiblePlate === 0 || plateFor(id) === visiblePlate;
   }, [visiblePlate, plateFor, attachments, geometry]);
 
-  // Showcase: hide the workshop chrome, warm up the light, spin the turntable.
+  // Showcase: hide the workshop chrome and spin the turntable. Lighting and the
+  // backdrop belong to the stage effect below, which owns them in EVERY mode so
+  // the two never fight over the same lights.
   useEffect(() => {
     const s = st.current;
     if (!s) return;
@@ -2393,11 +2528,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.measures.visible = !showcase;
     s.controls.autoRotate = showcase;
     s.controls.autoRotateSpeed = 1.4;
-    const hemi = s.scene.children.find((o) => (o as THREE.HemisphereLight).isHemisphereLight) as THREE.HemisphereLight | undefined;
-    const dir = s.scene.children.find((o) => (o as THREE.DirectionalLight).isDirectionalLight) as THREE.DirectionalLight | undefined;
-    if (hemi) hemi.intensity = showcase ? 1.35 : clay ? 1.3 : 1.05;
-    if (dir) dir.intensity = showcase ? 2.1 : clay ? 0.9 : 1.4;
-  }, [showcase, showDims, clay]);
+  }, [showcase, showDims]);
 
   // Display material: filament colour + finish, and the baked texture when the model
   // ships painted (AI meshes). Split-piece vertex colours always win over both.
@@ -2519,6 +2650,81 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.plate.visible = showPlate && !showcase;
     s.scene.add(s.plate);
   }, [bed.x, bed.y, bed.z, theme, showPlate, showcase, plateColor]);
+
+  // Showcase scenery — backdrop sweep, stage lights, ground decal, reflections —
+  // swappable while the turntable runs. This effect owns the scene's lighting in
+  // EVERY mode (workshop and plain viewport included), so nothing else fights it.
+  // Declared AFTER the theme effect on purpose: a theme change repaints the
+  // background there first, and this one re-lays the stage over it.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    const hemi = s.scene.children.find((o) => (o as THREE.HemisphereLight).isHemisphereLight) as THREE.HemisphereLight | undefined;
+    const dir = s.scene.children.find((o) => (o as THREE.DirectionalLight).isDirectionalLight) as THREE.DirectionalLight | undefined;
+    const preset = showcase && showcaseScene !== "workshop" ? STAGES[showcaseScene] : null;
+    const probe = (stage: string, extras: number, shadow = false) => {
+      if (import.meta.env.DEV) {
+        (window as any).__viewerStage = () => ({
+          stage,
+          extras,
+          shadow,
+          env: !!s.scene.environment,
+          sweep: !!(s.scene.background as THREE.Texture | null)?.isTexture,
+          hemi: hemi?.intensity,
+          dir: dir?.intensity,
+          envI: s.material.envMapIntensity,
+        });
+      }
+    };
+    if (!preset) {
+      s.scene.background = new THREE.Color(THEME_SCENE[theme]);
+      s.scene.environment = null;
+      s.material.envMapIntensity = 1;
+      if (hemi) hemi.intensity = showcase ? 1.35 : clay ? 1.3 : 1.05;
+      if (dir) {
+        dir.intensity = showcase ? 2.1 : clay ? 0.9 : 1.4;
+        dir.color.set(0xffffff);
+      }
+      probe(showcase ? "workshop" : "off", 0);
+      return;
+    }
+    const bg = sweepTex(preset.bg);
+    s.scene.background = bg;
+    s.scene.environment = stageEnv(s.renderer);
+    s.material.envMapIntensity = preset.env;
+    if (hemi) hemi.intensity = preset.hemi;
+    if (dir) dir.intensity = 0; // world-fixed → it would sweep as the turntable orbits
+    // The light rig rides the camera (lights aim at the origin, where the model
+    // sits) — the camera must be in the scene graph for its children to render.
+    s.scene.add(s.camera);
+    const rig = new THREE.Group();
+    for (const l of preset.lights) {
+      const d = new THREE.DirectionalLight(l.color, l.intensity);
+      d.position.set(...l.pos);
+      rig.add(d);
+    }
+    s.camera.add(rig);
+    // The ground decal stays world-fixed — shadows don't orbit with the viewer.
+    const stage = new THREE.Group();
+    const hasShadow = !!(s.mesh && geometry);
+    if (hasShadow) stage.add(contactShadow(new THREE.Box3().setFromObject(s.mesh!), preset.shadow));
+    s.scene.add(stage);
+    probe(showcaseScene, preset.lights.length, hasShadow);
+    return () => {
+      s.camera.remove(rig);
+      s.scene.remove(stage);
+      stage.traverse((o) => {
+        const any = o as THREE.Mesh;
+        if (any.geometry) any.geometry.dispose();
+        const m = (any as { material?: THREE.Material }).material as (THREE.Material & { map?: THREE.Texture | null }) | undefined;
+        if (m) {
+          m.map?.dispose();
+          m.dispose();
+        }
+      });
+      bg.dispose();
+    };
+  }, [showcase, showcaseScene, theme, clay, geometry]);
 
   // Grid line opacity (Settings > Appearance) — re-applied after theme rebuilds too.
   useEffect(() => {

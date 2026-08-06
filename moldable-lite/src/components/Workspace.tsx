@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
-import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
+import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type ShowcaseScene, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
 import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
@@ -333,7 +333,7 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGra
           <Row on={plate} label="Build plate" hint="Solid plate under the model, sized to your printer" onClick={() => setPlate(!plate)} />
           <Row on={overhangOn} label="Overhang heatmap" hint="Paint faces that will need support" onClick={toggleOverhang} />
           <Row on={stats} label="Stats" hint="Triangles, volume, watertight" onClick={() => setStats(!stats)} />
-          <Row on={showcase} label="Showcase" hint="Clean stage + slow turntable" onClick={() => setShowcase(!showcase)} />
+          <Row on={showcase} label="Showcase" hint="Slow turntable on a studio stage" onClick={() => setShowcase(!showcase)} />
           <div className="pmenu-sep" />
           <button role="menuitem" className="pmenu-item" onClick={() => setUnits((u) => (u === "mm" ? "in" : "mm"))}>
             <b>Units: {units === "mm" ? "millimetres" : "inches"}</b>
@@ -1677,6 +1677,8 @@ interface Props {
   setActivePlate: (n: number) => void;
   showcase: boolean;
   setShowcase: (v: boolean) => void;
+  showcaseScene: ShowcaseScene;
+  setShowcaseScene: (v: ShowcaseScene) => void;
   appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" };
   setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void;
   partColors: Record<string, string>;
@@ -2577,6 +2579,7 @@ export function Workspace(p: Props) {
                 visiblePlate={p.activePlate}
                 plateFor={p.plateFor}
                 showcase={p.showcase}
+                showcaseScene={p.showcaseScene}
                 onAttachSelect={p.onAttachSelect}
                 snap={p.snap}
                 appearance={p.appearance}
@@ -3169,6 +3172,20 @@ export function Workspace(p: Props) {
                   exportEach={p.plateCtl.exportEach}
                   exportProject={p.plateCtl.exportProject}
                 />
+              )}
+              {/* Showcase scene bar: swap the stage while the turntable runs. Sits just
+                  above the view snaps — the two read as one bottom-center cluster. */}
+              {(p.tab === "3d" || p.tab === "params") && p.showcase && (
+                <div className="showcase-bar seg sm" role="radiogroup" aria-label="Showcase scene">
+                  {([
+                    ["studio", "Studio", "Seamless backdrop, studio lights, soft shadow — the look of the project thumbnails."],
+                    ["daylight", "Daylight", "Bright and airy, lit like a windowsill."],
+                    ["dark", "Dark stage", "Charcoal backdrop, cool rim light — dramatic."],
+                    ["workshop", "Workshop", "The plain viewport, just spinning."],
+                  ] as const).map(([v, l, t]) => (
+                    <button key={v} className={p.showcaseScene === v ? "on" : ""} role="radio" aria-checked={p.showcaseScene === v} title={t} onClick={() => p.setShowcaseScene(v)}>{l}</button>
+                  ))}
+                </div>
               )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && (
                 <div className="view-snaps" role="group" aria-label="View angles">

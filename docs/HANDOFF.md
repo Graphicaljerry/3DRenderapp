@@ -943,5 +943,6 @@ vocabulary; auto-repair without a caveat line.
 6. **Failure analytics** — opt-in local event log of failed ops/builds.
 
 Also queued (user-requested): texture LIBRARY (more procedural patterns + grayscale
-height-map upload), full lighting controls (draggable key light, environment presets),
+height-map upload), draggable key light (environment presets shipped as Showcase
+scenes — Studio/Daylight/Dark stage/Workshop with a camera-riding light rig),
 snap-to-object magnetism, per-axis scale for mesh models.

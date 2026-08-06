@@ -6,7 +6,7 @@ import { MeasureModal } from "./components/MeasureModal";
 import type { SvgMode, SvgParams } from "./components/ExtrudeModal";
 import { geometryToSTL } from "./print/stl";
 import type { SplitPiece } from "./print/split";
-import type { ViewerHandle, PickedFeature, SelectKind, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
+import type { ViewerHandle, PickedFeature, SelectKind, ShowcaseScene, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
 import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfacePattern } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
@@ -556,6 +556,15 @@ export default function App() {
   });
   const [activePlate, setActivePlate] = useState<number | 0>(0); // 0 = show all plates
   const [showcase, setShowcase] = useState(false); // presentation mode: clean stage + turntable
+  // Which stage the showcase spins on — remembered, since it's a taste choice.
+  const [showcaseScene, setShowcaseSceneState] = useState<ShowcaseScene>(() => {
+    const v = localStorage.getItem("moldable_showcase_scene");
+    return v === "studio" || v === "daylight" || v === "dark" || v === "workshop" ? v : "studio";
+  });
+  const setShowcaseScene = (v: ShowcaseScene) => {
+    setShowcaseSceneState(v);
+    try { localStorage.setItem("moldable_showcase_scene", v); } catch { /* private mode */ }
+  };
   // Per-part fill colour (Bambu-style): objectId ("model" or an attachment id) → hex.
   // Painted parts render tinted in the viewer and export as filament slots the slicer picks up.
   const [partColors, setPartColors] = useState<Record<string, string>>({});
@@ -5733,6 +5742,8 @@ export default function App() {
         setActivePlate={setActivePlate}
         showcase={showcase}
         setShowcase={setShowcase}
+        showcaseScene={showcaseScene}
+        setShowcaseScene={setShowcaseScene}
         appearance={appearance}
         setAppearance={setAppearance}
         partColors={partColors}

@@ -118,7 +118,7 @@ export type ChatMessage = {
    *  an inch-unit import, take the computed print orientation. One card type for all
    *  of them; `kind` tells the dispatcher what accepting means. The card freezes
    *  either way, so the transcript records what was chosen. */
-  offer?: { text: string; yes: string; no: string; kind: "inches" | "orient"; done?: boolean; accepted?: boolean };
+  offer?: { text: string; yes: string; no: string; kind: "inches" | "orient" | "flush"; done?: boolean; accepted?: boolean };
   /** A live web lookup. The step timeline said "Searching the web…" in the same grey
    *  as every other stage, so a lookup that takes 20 s read as the app hanging — and
    *  with the globe deliberately switched ON, nothing confirmed it was actually
@@ -2052,6 +2052,25 @@ export default function App() {
     () => pocketFacing(result?.source.kind === "code" ? result.source.ops : undefined),
     [result],
   );
+  // Models drilled before pockets seated flush get ONE offer per project to catch up —
+  // positions and diameters stay; only the legacy depth padding goes.
+  const flushOffered = useRef<string | null>(null);
+  useEffect(() => {
+    const pid = projectRef.current?.id;
+    if (!pid || !result || result.source.kind !== "code" || flushOffered.current === pid) return;
+    const legacy = legacyPocketFix(result.source.ops);
+    if (!legacy) return;
+    flushOffered.current = pid;
+    setMessages((m) => [...m, {
+      id: mid(), role: "assistant", text: "",
+      offer: {
+        kind: "flush",
+        text: `This model's ${legacy.n} magnet pocket${legacy.n === 1 ? " was" : "s were"} drilled before pockets seated flush — each was cut a little deeper than its magnet, which is why they sit sunken. One tap re-cuts them at exactly magnet depth: same positions, same diameters, only the extra depth goes.`,
+        yes: "Re-cut them flush",
+        no: "Leave them as drilled",
+      },
+    }]);
+  }, [result]);
 
   const modelBadge = useMemo(() => {
     if (!result) return null;
@@ -4140,6 +4159,7 @@ export default function App() {
     if (!accepted) return;
     if (o.kind === "inches") void inchRescue();
     else if (o.kind === "orient") void autoOrientDrop();
+    else if (o.kind === "flush") void flushPockets();
   }
   /** Convert an inch-unit import: 1 in = 25.4 mm, uniformly. */
   async function inchRescue() {
@@ -4148,6 +4168,39 @@ export default function App() {
     const r1 = (v: number) => Math.round(v * 25.4 * 10) / 10;
     appendMsg({ role: "assistant", text: `Converted from inches — the model is now ${before ? `${r1(before.x)} × ${r1(before.y)} × ${r1(before.z)} mm` : "25.4× bigger"}. Undo reverts it.` });
   }
+  /** Pockets drilled before flush seating carried padding in their depth — glue got
+   *  0.4 mm of well, press 0.1 — and the magnets sat sunken. The legacy fractions are
+   *  unambiguous (flush depths are whole millimetres, every catalogue height is an
+   *  integer), so the fix is exact and touches NOTHING else: same spot, same bore,
+   *  the padding goes. */
+  function legacyPocketFix(ops: readonly CadOp[] | undefined): { fixed: CadOp[]; n: number } | null {
+    let n = 0;
+    const fixed = (ops ?? []).map((op) => {
+      if (op.type !== "hole" || op.tag !== "magnet" || op.depth <= 0) return op;
+      const frac = Math.round((op.depth - Math.floor(op.depth)) * 10) / 10;
+      if (frac !== 0.4 && frac !== 0.1) return op;
+      n++;
+      return { ...op, depth: Math.floor(op.depth) };
+    });
+    return n ? { fixed, n } : null;
+  }
+  async function flushPockets() {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code" || !sel) return;
+    const legacy = legacyPocketFix(cur.source.ops);
+    if (!legacy) return;
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build({ kind: "code", code: cur.source.code, params: cur.source.params, ops: legacy.fixed });
+      applyResult(res, project?.name ?? "Model", `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} flush — same spots`, "flush pockets");
+      appendMsg({ role: "assistant", text: `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} flush — each is now exactly its magnet's height deep, in the same spot with the same diameter. The History entry is your receipt, and Undo reverts.` });
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't re-cut the pockets: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
+  }
+
   /** Import sizes that smell like inches: everything under ~half a foot when read as
    *  millimetres, i.e. a "part" smaller than a fingernail. Real millimetre models this
    *  small exist but are rare; inch-authored STLs land here every time. The band's top

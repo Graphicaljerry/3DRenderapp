@@ -2052,20 +2052,25 @@ export default function App() {
     () => pocketFacing(result?.source.kind === "code" ? result.source.ops : undefined),
     [result],
   );
-  // Models drilled before pockets seated flush get ONE offer per project to catch up —
-  // positions and diameters stay; only the legacy depth padding goes.
+  // Models drilled with an older pocket recipe get ONE offer per project to catch up —
+  // positions and diameters stay; only the depth moves. Asked once EVER per project
+  // (localStorage), so a deliberate Recessed choice is never nagged about.
   const flushOffered = useRef<string | null>(null);
   useEffect(() => {
     const pid = projectRef.current?.id;
     if (!pid || !result || result.source.kind !== "code" || flushOffered.current === pid) return;
+    const askedKey = "moldable_flush_asked";
+    const asked: string[] = (() => { try { return JSON.parse(localStorage.getItem(askedKey) ?? "[]"); } catch { return []; } })();
+    if (asked.includes(pid)) return;
     const legacy = legacyPocketFix(result.source.ops);
     if (!legacy) return;
     flushOffered.current = pid;
+    localStorage.setItem(askedKey, JSON.stringify([...asked, pid]));
     setMessages((m) => [...m, {
       id: mid(), role: "assistant", text: "",
       offer: {
         kind: "flush",
-        text: `This model's ${legacy.n} magnet pocket${legacy.n === 1 ? " was" : "s were"} drilled before pockets seated flush — each was cut a little deeper than its magnet, which is why they sit sunken. One tap re-cuts them at exactly magnet depth: same positions, same diameters, only the extra depth goes.`,
+        text: `This model's ${legacy.n} magnet pocket${legacy.n === 1 ? " was" : "s were"} cut with an older recipe that runs a touch too deep — printed, the magnet sits a hair below the surface and the hold suffers. One tap re-cuts them a hair shallower so they print flush: same positions, same diameters, only the depth changes.`,
         yes: "Re-cut them flush",
         no: "Leave them as drilled",
       },
@@ -3274,6 +3279,10 @@ export default function App() {
     await rebuildWithOps(ops, he.family === "magnet" ? "Moved the magnet pocket" : "Moved the screw hole", "move hole");
   }
 
+  /** Receipt wording for the seat, named by the printed outcome — same words as the flyout. */
+  const seatWord = (seat: number) =>
+    seat === 0.2 ? "cut extra shallow so it prints slightly raised" : seat > 0 ? "cut a hair shallow so it prints flush" : "exactly magnet-deep, prints a hair recessed";
+
   /** Resize the selected magnet pocket to the tool's (possibly just-changed) preset. */
   async function editMagnetApply(next: { size?: MagnetSize; fit?: MagnetFit; seat?: number }) {
     const t = magnetToolRef.current;
@@ -3286,7 +3295,7 @@ export default function App() {
     const { diameter, depth } = magnetPocket(size, fit, seat);
     const ops = [...(cur.source.ops ?? [])];
     ops[he.index] = { ...(ops[he.index] as HoleOp), diameter, depth };
-    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm — ${seat > 0 ? `sits ${seat} mm proud` : "seats flush"})${boreNote()}`, "resize magnet");
+    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm — ${seatWord(seat)})${boreNote()}`, "resize magnet");
   }
 
   /** Resize/refit the selected screw hole to the tool's (possibly just-changed) preset. */
@@ -3381,7 +3390,7 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
-      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, ⌀${diameter} × ${depth} mm — ${t.seat > 0 ? `sits ${t.seat} mm proud for guaranteed contact` : "seats flush"})${boreNote()}${pairNote}`;
+      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, ⌀${diameter} × ${depth} mm — ${seatWord(t.seat)})${boreNote()}${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
       // One receipt for the whole run, counting up as you place: a far-side pocket is
       // invisible from this angle and a skipped pair (thin wall) would fail silently, so
@@ -4173,19 +4182,20 @@ export default function App() {
     const r1 = (v: number) => Math.round(v * 25.4 * 10) / 10;
     appendMsg({ role: "assistant", text: `Converted from inches — the model is now ${before ? `${r1(before.x)} × ${r1(before.y)} × ${r1(before.z)} mm` : "25.4× bigger"}. Undo reverts it.` });
   }
-  /** Pockets drilled before flush seating carried padding in their depth — glue got
-   *  0.4 mm of well, press 0.1 — and the magnets sat sunken. The legacy fractions are
-   *  unambiguous (flush depths are whole millimetres, every catalogue height is an
-   *  integer), so the fix is exact and touches NOTHING else: same spot, same bore,
-   *  the padding goes. */
+  /** Older pocket recipes are unambiguous by their depth fraction (catalogue magnet
+   *  heights are whole millimetres): .4/.1 = the padded era (glue well / press pad),
+   *  a whole integer = the dead-flush era, which still prints a hair recessed.
+   *  Today's cut is a hair shallower (.9/.8 fractions), so the printed magnet lands
+   *  flush. The fix re-cuts old depths to today's default and touches NOTHING else:
+   *  same spot, same bore, only the depth moves. */
   function legacyPocketFix(ops: readonly CadOp[] | undefined): { fixed: CadOp[]; n: number } | null {
     let n = 0;
     const fixed = (ops ?? []).map((op) => {
       if (op.type !== "hole" || op.tag !== "magnet" || op.depth <= 0) return op;
       const frac = Math.round((op.depth - Math.floor(op.depth)) * 10) / 10;
-      if (frac !== 0.4 && frac !== 0.1) return op;
+      if (frac !== 0.4 && frac !== 0.1 && frac !== 0) return op;
       n++;
-      return { ...op, depth: Math.floor(op.depth) };
+      return { ...op, depth: Math.round((Math.floor(op.depth) - 0.1) * 100) / 100 };
     });
     return n ? { fixed, n } : null;
   }
@@ -4197,8 +4207,8 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: cur.source.code, params: cur.source.params, ops: legacy.fixed });
-      applyResult(res, project?.name ?? "Model", `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} flush — same spots`, "flush pockets");
-      appendMsg({ role: "assistant", text: `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} flush — each is now exactly its magnet's height deep, in the same spot with the same diameter. The History entry is your receipt, and Undo reverts.` });
+      applyResult(res, project?.name ?? "Model", `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} to print flush — same spots`, "flush pockets");
+      appendMsg({ role: "assistant", text: `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} a hair shallower so the magnets print flush — same spots, same diameters. The History entry is your receipt, and Undo reverts.` });
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't re-cut the pockets: " + String(err?.message ?? err), error: true }]);
     } finally {

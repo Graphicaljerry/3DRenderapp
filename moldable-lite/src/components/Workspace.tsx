@@ -2914,22 +2914,21 @@ export function Workspace(p: Props) {
                           <div className="paint-lbl">How it's held in</div>
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="How the magnet is held in">
                             <button className={p.magnetCtl.tool.fit === "glue" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "glue"}
-                              title="The pocket is cut 0.25 mm wider than the magnet and exactly as deep, so it seats flush with the surface — full contact, full pull. A small drop of super glue in the bottom squeezes up into the side ring and locks it. The safe choice, and the default."
+                              title="The pocket is cut 0.25 mm wider than the magnet. A small drop of super glue in the bottom squeezes up into the side ring and locks it. The safe choice, and the default."
                               onClick={() => { p.magnetCtl.patch({ fit: "glue" }); p.magnetCtl.editApply({ fit: "glue" }); }}>Glued in</button>
                             <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
-                              title="The pocket is cut just 0.1 mm wider and exactly as deep — the magnet presses in flush with thumb pressure and friction holds it. No glue needed, but a hard knock can pop it out."
+                              title="The pocket is cut just 0.1 mm wider — the magnet presses in with thumb pressure and friction holds it. No glue needed, but a hard knock can pop it out."
                               onClick={() => { p.magnetCtl.patch({ fit: "press" }); p.magnetCtl.editApply({ fit: "press" }); }}>Push fit</button>
                           </div>
-                          <div className="paint-lbl">How it sits</div>
-                          {/* Dead-flush design meets two real-world minuses (magnets run a
-                              whisker under nominal, printed tops land a whisker low) and
-                              leaves a hair of recess — the gap that weakens the pull. A
-                              touch proud is the prop-maker fix: the bump vanishes into the
-                              joint and the magnets are guaranteed to touch. */}
+                          <div className="paint-lbl">How it sits when printed</div>
+                          {/* Options are named by the PRINTED outcome, not the cut. Printed
+                              pockets always land a hair too deep (magnets run under nominal,
+                              printed tops sag), so "Flush" secretly cuts 0.1 mm shallow to
+                              cancel that out. The mm compensation stays backstage. */}
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="Magnet seat">
-                            {[{ v: 0.1, l: "0.1 proud", t: "The pocket is cut 0.1 mm shallower, so the magnet stands 0.1 mm out of the surface — mating magnets touch for certain, and the bump disappears into the joint. The default, and the prop-maker standard." },
-                              { v: 0.2, l: "0.2 proud", t: "0.2 mm proud — for printers that consistently swallow more, or when the mating side is bare plastic." },
-                              { v: 0, l: "Flush", t: "Exactly magnet-deep. Dead smooth surface, but real prints often leave a hairline recess — pick this only where the surface must slide." }].map((o) => (
+                            {[{ v: 0.1, l: "Flush", t: "The magnet lands even with the surface and touches whatever it grabs. Printed pockets always come out a hair too deep, so this cuts the pocket a hair shallow to cancel that out. The default." },
+                              { v: 0.2, l: "Raised", t: "The magnet stands just above the surface — extra insurance if Flush still leaves a tiny gap on your printer." },
+                              { v: 0, l: "Recessed", t: "The pocket is exactly magnet-deep, so the printed magnet ends up a hair below the surface. Only for faces that must slide past each other." }].map((o) => (
                               <button key={o.v} className={p.magnetCtl.tool!.seat === o.v ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool!.seat === o.v}
                                 title={o.t}
                                 onClick={() => { p.magnetCtl.patch({ seat: o.v }); p.magnetCtl.editApply({ seat: o.v }); }}>{o.l}</button>

@@ -1539,6 +1539,10 @@ interface Props {
     tool: {
       size: { d: number; h: number; note?: string };
       fit: "press" | "glue";
+      /** How far the magnet stands PROUD of the surface (mm): 0 = dead flush. A hair
+       *  proud is the prop-maker trick that guarantees magnet-to-magnet contact —
+       *  printed surfaces and magnet thickness both run a whisker under nominal. */
+      seat: number;
       pair: boolean;
       snap: number; // grid step in mm; 0 = freeform
       placed: { at: [number, number, number]; normal: [number, number, number] }[];
@@ -1550,7 +1554,7 @@ interface Props {
     place: (spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) => void;
     pocket: { diameter: number; depth: number } | null; // the current size+fit as a pocket
     edit: { moving: boolean } | null; // a placed pocket is selected for editing
-    editApply: (next: { size?: { d: number; h: number; note?: string }; fit?: "press" | "glue" }) => void;
+    editApply: (next: { size?: { d: number; h: number; note?: string }; fit?: "press" | "glue"; seat?: number }) => void;
     editMove: () => void;
     editDelete: () => void;
     editDone: () => void;
@@ -2915,6 +2919,21 @@ export function Workspace(p: Props) {
                             <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
                               title="The pocket is cut just 0.1 mm wider and exactly as deep — the magnet presses in flush with thumb pressure and friction holds it. No glue needed, but a hard knock can pop it out."
                               onClick={() => { p.magnetCtl.patch({ fit: "press" }); p.magnetCtl.editApply({ fit: "press" }); }}>Push fit</button>
+                          </div>
+                          <div className="paint-lbl">How it sits</div>
+                          {/* Dead-flush design meets two real-world minuses (magnets run a
+                              whisker under nominal, printed tops land a whisker low) and
+                              leaves a hair of recess — the gap that weakens the pull. A
+                              touch proud is the prop-maker fix: the bump vanishes into the
+                              joint and the magnets are guaranteed to touch. */}
+                          <div className="seg sm mode-seg" role="radiogroup" aria-label="Magnet seat">
+                            {[{ v: 0.1, l: "0.1 proud", t: "The pocket is cut 0.1 mm shallower, so the magnet stands 0.1 mm out of the surface — mating magnets touch for certain, and the bump disappears into the joint. The default, and the prop-maker standard." },
+                              { v: 0.2, l: "0.2 proud", t: "0.2 mm proud — for printers that consistently swallow more, or when the mating side is bare plastic." },
+                              { v: 0, l: "Flush", t: "Exactly magnet-deep. Dead smooth surface, but real prints often leave a hairline recess — pick this only where the surface must slide." }].map((o) => (
+                              <button key={o.v} className={p.magnetCtl.tool!.seat === o.v ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool!.seat === o.v}
+                                title={o.t}
+                                onClick={() => { p.magnetCtl.patch({ seat: o.v }); p.magnetCtl.editApply({ seat: o.v }); }}>{o.l}</button>
+                            ))}
                           </div>
                           <div className="paint-lbl">Placing</div>
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="Placement snapping">

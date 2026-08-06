@@ -3196,7 +3196,7 @@ export default function App() {
   // click to sink it. "Pair through the wall" also pockets the OPPOSITE face on the
   // same axis, so helmet-panel magnet pairs land coaxial. Placement runs the same
   // free CAD "hole" op the drill tool uses — no AI call.
-  type MagnetTool = { size: MagnetSize; fit: MagnetFit; pair: boolean; snap: number; placed: { at: [number, number, number]; normal: [number, number, number] }[] };
+  type MagnetTool = { size: MagnetSize; fit: MagnetFit; seat: number; pair: boolean; snap: number; placed: { at: [number, number, number]; normal: [number, number, number] }[] };
   const [magnetTool, setMagnetTool] = useState<MagnetTool | null>(null);
   const magnetToolRef = useRef(magnetTool);
   magnetToolRef.current = magnetTool;
@@ -3206,7 +3206,11 @@ export default function App() {
     dismissOverlays(); // one tool at a time — put down select/measure/paint/hole first
     // Glue by default: a press-fit that works loose drops a magnet inside a finished
     // part, and nobody re-prints a helmet for that. 8×3 is the cosplay-panel staple.
-    setMagnetTool({ size: MAGNET_SIZES[5], fit: "glue", pair: false, snap: 1, placed: [] });
+    // Seat default 0.1 mm proud — the prop-maker trick that closes the whisper of
+    // recess real prints leave, so mating magnets actually touch. Persisted: a
+    // printer's parts want the same seat every time.
+    const seat = ((): number => { const v = parseFloat(localStorage.getItem("moldable_magnet_seat") ?? ""); return v === 0 || v === 0.1 || v === 0.2 ? v : 0.1; })();
+    setMagnetTool({ size: MAGNET_SIZES[5], fit: "glue", seat, pair: false, snap: 1, placed: [] });
   }
   // ---- Non-destructive hole editing -------------------------------------------
   // Magnet pockets and screw holes are OPS in the parametric chain, never baked —
@@ -3271,17 +3275,18 @@ export default function App() {
   }
 
   /** Resize the selected magnet pocket to the tool's (possibly just-changed) preset. */
-  async function editMagnetApply(next: { size?: MagnetSize; fit?: MagnetFit }) {
+  async function editMagnetApply(next: { size?: MagnetSize; fit?: MagnetFit; seat?: number }) {
     const t = magnetToolRef.current;
     const he = holeEditRef.current;
     const cur = resultRef.current;
     if (!t || !he || he.family !== "magnet" || !cur || cur.source.kind !== "code") return;
     const size = next.size ?? t.size;
     const fit = next.fit ?? t.fit;
-    const { diameter, depth } = magnetPocket(size, fit);
+    const seat = next.seat ?? t.seat;
+    const { diameter, depth } = magnetPocket(size, fit, seat);
     const ops = [...(cur.source.ops ?? [])];
     ops[he.index] = { ...(ops[he.index] as HoleOp), diameter, depth };
-    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm — seats flush)${boreNote()}`, "resize magnet");
+    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm — ${seat > 0 ? `sits ${seat} mm proud` : "seats flush"})${boreNote()}`, "resize magnet");
   }
 
   /** Resize/refit the selected screw hole to the tool's (possibly just-changed) preset. */
@@ -3349,7 +3354,7 @@ export default function App() {
       return;
     }
     setHoleEdit(null); // drilling fresh — drop any lingering selection
-    const { diameter, depth } = magnetPocket(t.size, t.fit);
+    const { diameter, depth } = magnetPocket(t.size, t.fit, t.seat);
     const src = cur.source;
     const rc = cur.recenter ?? [0, 0, 0];
     const mkOp = (at: [number, number, number], normal: [number, number, number]) => ({
@@ -3376,7 +3381,7 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
-      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, ⌀${diameter} × ${depth} mm — seats flush)${boreNote()}${pairNote}`;
+      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, ⌀${diameter} × ${depth} mm — ${t.seat > 0 ? `sits ${t.seat} mm proud for guaranteed contact` : "seats flush"})${boreNote()}${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
       // One receipt for the whole run, counting up as you place: a far-side pocket is
       // invisible from this angle and a skipped pair (thin wall) would fail silently, so
@@ -5598,9 +5603,12 @@ export default function App() {
           canUse: activeKind === "replicad",
           sizes: MAGNET_SIZES,
           toggle: toggleMagnetTool,
-          patch: (patch) => setMagnetTool((t) => (t ? { ...t, ...patch } : t)),
+          patch: (patch) => {
+            if (typeof patch.seat === "number") { try { localStorage.setItem("moldable_magnet_seat", String(patch.seat)); } catch { /* private mode */ } }
+            setMagnetTool((t) => (t ? { ...t, ...patch } : t));
+          },
           place: (spot) => void placeMagnet(spot),
-          pocket: magnetTool ? magnetPocket(magnetTool.size, magnetTool.fit) : null,
+          pocket: magnetTool ? magnetPocket(magnetTool.size, magnetTool.fit, magnetTool.seat) : null,
           edit: holeEdit?.family === "magnet" ? { moving: holeEdit.moving } : null,
           editApply: (next) => void editMagnetApply(next),
           editMove: () => setHoleEdit((h) => (h ? { ...h, moving: !h.moving } : h)),

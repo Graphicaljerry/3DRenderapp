@@ -48,10 +48,16 @@ export type MagnetFit = "press" | "glue";
  *  The diameter goes through bore() so the printed pocket lands where the chart says;
  *  depth stays uncorrected — Z on an FDM machine is layer-accurate, and the coupon
  *  only measures XY holes. */
-export function magnetPocket(size: MagnetSize, fit: MagnetFit): { diameter: number; depth: number } {
+/** `seatProud` shaves the pocket SHALLOWER so the magnet stands that far out of the
+ *  surface. Dead-flush design meets two real-world minuses — magnets run a whisker
+ *  under nominal thickness, printed top surfaces land a whisker low — and the result
+ *  is a hair of recess and a weaker pull. The prop-maker fix is 0.1–0.2 mm proud:
+ *  the bump vanishes into the joint and the two magnets are guaranteed to touch. */
+export function magnetPocket(size: MagnetSize, fit: MagnetFit, seatProud = 0): { diameter: number; depth: number } {
+  const depth = Math.max(0.4, Math.round((size.h - seatProud) * 100) / 100);
   return fit === "press"
-    ? { diameter: bore(size.d + 0.1), depth: size.h }
-    : { diameter: bore(size.d + 0.25), depth: size.h };
+    ? { diameter: bore(size.d + 0.1), depth }
+    : { diameter: bore(size.d + 0.25), depth };
 }
 
 export const fmtMagnet = (s: MagnetSize) => `${s.d}×${s.h}`;

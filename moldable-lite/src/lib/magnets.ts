@@ -37,13 +37,21 @@ export const MAGNET_SIZES: MagnetSize[] = [
 export type MagnetFit = "press" | "glue";
 
 /** Pocket dimensions for a magnet + fit: press-in = friction hold, glue-in = room for CA.
- *  Press/glue is the user's intent and stays fixed; the diameter then goes through
- *  bore() so the printed pocket actually lands there. Depth is left alone — Z on an
- *  FDM machine is layer-accurate, and the coupon only measures XY holes. */
+ *
+ *  Depth = magnet height EXACTLY, both fits, so the magnet face lands flush with the
+ *  surface — that's what makes it actually grab: magnetic force falls off steeply with
+ *  distance, and every tenth of recess is air between the magnet and what it holds.
+ *  The fit difference lives in the DIAMETER alone; glue, when used, is a small drop in
+ *  the bottom that squeezes up into the side ring. Giving glue its own depth (+0.4)
+ *  was how magnets ended up sunk down their own wells, gripping nothing.
+ *
+ *  The diameter goes through bore() so the printed pocket lands where the chart says;
+ *  depth stays uncorrected — Z on an FDM machine is layer-accurate, and the coupon
+ *  only measures XY holes. */
 export function magnetPocket(size: MagnetSize, fit: MagnetFit): { diameter: number; depth: number } {
   return fit === "press"
-    ? { diameter: bore(size.d + 0.1), depth: size.h + 0.1 }
-    : { diameter: bore(size.d + 0.25), depth: size.h + 0.4 };
+    ? { diameter: bore(size.d + 0.1), depth: size.h }
+    : { diameter: bore(size.d + 0.25), depth: size.h };
 }
 
 export const fmtMagnet = (s: MagnetSize) => `${s.d}×${s.h}`;

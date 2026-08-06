@@ -2910,10 +2910,10 @@ export function Workspace(p: Props) {
                           <div className="paint-lbl">How it's held in</div>
                           <div className="seg sm mode-seg" role="radiogroup" aria-label="How the magnet is held in">
                             <button className={p.magnetCtl.tool.fit === "glue" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "glue"}
-                              title="The hole is cut 0.25 mm wider than the magnet, with a little extra depth, so a drop of super glue has somewhere to sit. The magnet can't work loose later — the safe choice, and the default."
+                              title="The pocket is cut 0.25 mm wider than the magnet and exactly as deep, so it seats flush with the surface — full contact, full pull. A small drop of super glue in the bottom squeezes up into the side ring and locks it. The safe choice, and the default."
                               onClick={() => { p.magnetCtl.patch({ fit: "glue" }); p.magnetCtl.editApply({ fit: "glue" }); }}>Glued in</button>
                             <button className={p.magnetCtl.tool.fit === "press" ? "on" : ""} role="radio" aria-checked={p.magnetCtl.tool.fit === "press"}
-                              title="The hole is cut just 0.1 mm wider, so the magnet seats with thumb pressure and is held by friction alone — no glue needed, but a hard knock can pop it out."
+                              title="The pocket is cut just 0.1 mm wider and exactly as deep — the magnet presses in flush with thumb pressure and friction holds it. No glue needed, but a hard knock can pop it out."
                               onClick={() => { p.magnetCtl.patch({ fit: "press" }); p.magnetCtl.editApply({ fit: "press" }); }}>Push fit</button>
                           </div>
                           <div className="paint-lbl">Placing</div>

@@ -3262,7 +3262,7 @@ export default function App() {
     const { diameter, depth } = magnetPocket(size, fit);
     const ops = [...(cur.source.ops ?? [])];
     ops[he.index] = { ...(ops[he.index] as HoleOp), diameter, depth };
-    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm)${boreNote()}`, "resize magnet");
+    await rebuildWithOps(ops, `Resized the magnet pocket — ${size.d}×${size.h} mm, ${fit === "press" ? "push fit" : "glued"} (⌀${diameter} × ${depth} mm — seats flush)${boreNote()}`, "resize magnet");
   }
 
   /** Resize/refit the selected screw hole to the tool's (possibly just-changed) preset. */
@@ -3357,7 +3357,7 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
-      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, hole ⌀${diameter} × ${depth} mm deep)${boreNote()}${pairNote}`;
+      const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, ⌀${diameter} × ${depth} mm — seats flush)${boreNote()}${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
       // One receipt for the whole run, counting up as you place: a far-side pocket is
       // invisible from this angle and a skipped pair (thin wall) would fail silently, so

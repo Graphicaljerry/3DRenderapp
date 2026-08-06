@@ -2171,7 +2171,7 @@ export default function App() {
   // both build. The ref is the truth; a commit arriving mid-build is REMEMBERED, not
   // dropped, so a fast second keystroke or click can't be silently lost.
   const paramBusy = useRef(false);
-  const paramPending = useRef<CadParams | null>(null);
+  const paramPending = useRef<{ values: CadParams; key?: string } | null>(null);
   const lastGoodParams = useRef<CadParams | null>(null);
   /** An adjustment is a real edit, so Undo has to cover it — it used to rebuild without
    *  recording anything, and undo skipped straight past every dimension change to the
@@ -2250,9 +2250,15 @@ export default function App() {
     }
     return null;
   }
-  async function applyParams(values: CadParams) {
+  async function applyParams(values: CadParams, editedKey?: string) {
     if (!sel || !result || result.source.kind !== "code") return;
-    if (paramBusy.current) { paramPending.current = values; return; }
+    // A commit that arrives mid-build waits its turn — but it must NOT be replayed
+    // verbatim later. The map was assembled from the values the user was LOOKING AT,
+    // and by the time it runs a radius rescue may have moved other params; replaying
+    // the stale copy would then read as the user editing the radius back up, which
+    // both fails and disqualifies it from rescue. Remember WHICH key they edited and
+    // rebase onto whatever is true when the turn comes.
+    if (paramBusy.current) { paramPending.current = { values, key: editedKey }; return; }
     paramBusy.current = true;
     const gen = ++paramGen.current;
     // The commit supersedes the drag: drop what's queued AND stop the live loop from
@@ -2311,7 +2317,11 @@ export default function App() {
       // A commit that arrived mid-build is applied now, so nothing is silently dropped.
       const queued = paramPending.current;
       paramPending.current = null;
-      if (queued) void applyParams(queued);
+      if (queued) {
+        const base = lastGoodParams.current;
+        const v = queued.key && base ? { ...base, [queued.key]: queued.values[queued.key] } : queued.values;
+        void applyParams(v, queued.key);
+      }
     }
   }
   // ---- Typed dimensions: set a measured distance by typing the number you want ----

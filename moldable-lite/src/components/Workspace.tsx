@@ -1704,7 +1704,7 @@ interface Props {
   onRerun: (edited: string) => void;
   cadDefaults: CadParams | null;
   paramValues: CadParams;
-  onApplyParams: (values: CadParams) => void;
+  onApplyParams: (values: CadParams, editedKey?: string) => void;
   onLiveParams: (values: CadParams) => void; // mid-scrub rebuilds — no status flip, no error bubbles
   onSaveParams: () => void;
   onOpenSlicer: (t: SlicerTarget) => void;
@@ -4569,7 +4569,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
   );
 }
 
-function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams) => void; onLive: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
+function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams, editedKey?: string) => void; onLive: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
   const [local, setLocal] = useState<CadParams>(values);
   const [editing, setEditing] = useState<Record<string, string>>({});
   // The scrub's pointermove/pointerup handlers outlive the render that attached them,
@@ -4584,7 +4584,27 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
   const draggingRef = useRef(false);
   // Set by Escape, read by the onBlur it triggers synchronously in the same turn.
   const cancelRef = useRef<string | null>(null);
-  useEffect(() => { if (!draggingRef.current) setLocal(values); }, [values]);
+  useEffect(() => {
+    if (draggingRef.current) return; // a drag is the authority on its own row
+    const q = outstanding.current;
+    const same = (a: CadParams, b: CadParams) => {
+      const ka = Object.keys(a), kb = Object.keys(b);
+      return ka.length === kb.length && ka.every((k) => a[k] === b[k]);
+    };
+    if (q.length && same(values, q[0])) {
+      // Our own commit coming back. If newer commits are still in flight, the panel
+      // already shows their numbers — adopting this older echo would flash the value
+      // BACKWARDS for a build's length (the rubber band), so hold what the user typed.
+      q.shift();
+      if (q.length) return;
+    } else if (q.length) {
+      // The app answered with something we didn't send — a rollback, a radius rescue,
+      // an undo. Its values are the truth now, and whatever we still had queued
+      // described a model that no longer exists.
+      q.length = 0;
+    }
+    setLocal(values);
+  }, [values]);
   // One scrub, two surfaces (the name AND the whole value meter): pointer capture keeps
   // the drag alive however far the cursor travels, the model rebuilds LIVE (throttled —
   // the live path never flips global status, so rows stay enabled mid-drag), and a tap
@@ -4638,7 +4658,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
       // Whatever was dragged is committed either way — it's real work the user did.
       // Only the no-movement case differs: a real release is a tap (focus the number),
       // an interrupted drag is not.
-      if (moved) commit({ ...localRef.current, [k]: latest });
+      if (moved) commit({ ...localRef.current, [k]: latest }, k);
       else if (tapCounts) o.onTap?.();
     };
     const finish = done(true);
@@ -4657,7 +4677,17 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
       </div>
     );
   }
-  const commit = (next: CadParams) => { if (!busy) onApply(next); };
+  // EVERY commit is sent — App queues one while a build runs and applies it after.
+  // The old `if (!busy)` guard silently swallowed a number typed during a build: the
+  // input showed it, the model never got it, and the next sync snapped the panel back.
+  // The outstanding list remembers what we sent, so the effect below can tell "echo of
+  // our own commit" from "the app moved the values itself".
+  const outstanding = useRef<CadParams[]>([]);
+  const commit = (next: CadParams, editedKey?: string) => {
+    outstanding.current.push({ ...next });
+    if (outstanding.current.length > 8) outstanding.current.shift(); // runaway guard
+    onApply(next, editedKey);
+  };
   const keys = Object.keys(defaults);
   const changed = keys.filter((k) => (local[k] ?? defaults[k]) !== defaults[k]).length;
 
@@ -4764,7 +4794,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
                     const nv = +((Number.isFinite(typed) ? typed : v) + d).toFixed(4);
                     setEditing({ ...editing, [k]: String(nv) });
                     const next = { ...local, [k]: isInt ? Math.round(nv) : nv };
-                    setLocal(next); commit(next);
+                    setLocal(next); commit(next, k);
                   }
                 }}
                 onBlur={() => {
@@ -4777,7 +4807,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
                   const q = isInt ? Math.round(parsed) : +parsed.toFixed(4);
                   if (q === v) return;
                   const next = { ...local, [k]: q };
-                  setLocal(next); commit(next);
+                  setLocal(next); commit(next, k);
                 }}
               />
               <span className="pf-unit">{isInt ? "" : "mm"}</span>
@@ -4798,7 +4828,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
                 setEditing((e) => { const n = { ...e }; delete n[k]; return n; });
                 const next = { ...local, [k]: def };
                 setLocal(next);
-                commit(next);
+                commit(next, k);
               }}
             >
               <IconReset />

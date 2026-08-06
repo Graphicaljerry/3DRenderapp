@@ -28,7 +28,7 @@ import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/scre
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
-import { fitClearance, fitCalibration, saveFitCalibration, boreNote, type FitId } from "./lib/fit";
+import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -1059,16 +1059,6 @@ export default function App() {
       const last = m[m.length - 1];
       if (last && last.role === msg.role && last.text === msg.text && !!last.error === !!msg.error) return m;
       return [...m, { id: mid(), ...msg }];
-    });
-  }
-  function postReceipt(key: string, render: (n: number) => string) {
-    setMessages((m) => {
-      const last = m[m.length - 1];
-      if (last && last.role === "assistant" && last.receipt === key) {
-        const n = (last.receiptCount ?? 1) + 1;
-        return [...m.slice(0, -1), { ...last, text: render(n), receiptCount: n }];
-      }
-      return [...m, { id: mid(), role: "assistant", text: render(1), receipt: key, receiptCount: 1 }];
     });
   }
   const renameAttachment = (id: string, name: string) => {
@@ -3264,8 +3254,9 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: cur.source.code, params: cur.source.params, ops: nextOps });
+      // The receipt lives in History (the summary is the version label) — chat stays
+      // for AI replies, offers and errors, per Jerry's standing rule.
       applyResult(res, project?.name ?? "Model", summary, prompt);
-      appendMsg({ role: "assistant", text: `${summary}. Undo reverts it.` });
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't rebuild after the hole edit: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
@@ -3291,6 +3282,41 @@ export default function App() {
   /** Receipt wording for the seat, named by the printed outcome — same words as the flyout. */
   const seatWord = (seat: number) =>
     seat === 0.2 ? "cut extra shallow so it prints slightly raised" : seat > 0 ? "cut a hair shallow so it prints flush" : "exactly magnet-deep, prints a hair recessed";
+
+  /** Read a stored pocket back into tool terms (size / fit / seat), so selecting a
+   *  pocket makes the flyout show what it actually is. Legacy padded depths
+   *  (+0.4 / +0.1) read as seat 0 — they print recessed, which is the honest answer. */
+  function magnetOpProfile(op: { diameter: number; depth: number }): { size?: MagnetSize; fit?: MagnetFit; seat?: number } {
+    const h = Math.round(op.depth);
+    const frac = Math.round((h - op.depth) * 100) / 100;
+    const seat = frac === 0.1 || frac === 0.2 ? frac : 0;
+    const raw = op.diameter - 2 * boreAllowance(); // undo the printed-hole correction
+    for (const s of MAGNET_SIZES) {
+      if (s.h !== h) continue;
+      if (Math.abs(raw - (s.d + 0.1)) < 0.03) return { size: s, fit: "press", seat };
+      if (Math.abs(raw - (s.d + 0.25)) < 0.03) return { size: s, fit: "glue", seat };
+    }
+    return { seat };
+  }
+
+  /** Apply the tool's current seat to EVERY magnet pocket — same spots, same
+   *  diameters, only the depth moves. The manual, always-findable version of the
+   *  one-time catch-up offer. */
+  async function recutAllPockets() {
+    const t = magnetToolRef.current;
+    const cur = resultRef.current;
+    if (!t || !cur || cur.source.kind !== "code") return;
+    let n = 0;
+    const ops = (cur.source.ops ?? []).map((op) => {
+      if (op.type !== "hole" || op.tag !== "magnet" || op.depth <= 0) return op;
+      const depth = Math.max(0.4, Math.round((Math.round(op.depth) - t.seat) * 100) / 100);
+      if (Math.abs(depth - op.depth) < 0.005) return op;
+      n++;
+      return { ...op, depth };
+    });
+    if (!n) return; // every pocket already sits this way
+    await rebuildWithOps(ops, `Re-cut ${n} magnet pocket${n === 1 ? "" : "s"} — ${seatWord(t.seat)}`, "recut pockets");
+  }
 
   /** Resize the selected magnet pocket to the tool's (possibly just-changed) preset. */
   async function editMagnetApply(next: { size?: MagnetSize; fit?: MagnetFit; seat?: number }) {
@@ -3367,8 +3393,12 @@ export default function App() {
     if (holeEditRef.current?.family === "magnet" && holeEditRef.current.moving) { await moveHoleTo(spot); return; }
     const hitIx = holeOpAt(spot.at, "magnet");
     if (hitIx >= 0) {
+      // The flyout becomes this pocket's inspector: show its true size/fit/seat.
+      const hit = (cur.source.ops ?? [])[hitIx] as { diameter: number; depth: number };
+      const prof = magnetOpProfile(hit);
+      setMagnetTool((d) => (d ? { ...d, ...prof } : d));
       setHoleEdit({ family: "magnet", index: hitIx, moving: false });
-      explainOnce("hole-edit", "That's an existing pocket, so you're now **editing** it: pick a different size/fit to resize it in place, **Move** to re-place it with your next click, or **Remove**. Click bare surface to drill a new one. Everything is undoable.", "Editing that pocket — resize, Move or Remove in the panel.");
+      explainOnce("hole-edit", "That's an existing pocket, so you're now **editing** it: the panel shows its size, fit and seat — change any of them to re-cut it in place, **Move** to re-place it with your next click, or **Remove**. Click bare surface to drill a new one. Everything is undoable.", "Editing that pocket — resize, Move or Remove in the panel.");
       return;
     }
     setHoleEdit(null); // drilling fresh — drop any lingering selection
@@ -3401,16 +3431,10 @@ export default function App() {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops] });
       const what = `${t.size.d}×${t.size.h} mm magnet pocket (${t.fit === "press" ? "press-fit" : "glued"}, ⌀${diameter} × ${depth} mm — ${seatWord(t.seat)})${boreNote()}${pairNote}`;
       applyResult(res, project?.name ?? "Model", `Added a ${what}`, `magnet ${t.size.d}×${t.size.h}`);
-      // One receipt for the whole run, counting up as you place: a far-side pocket is
-      // invisible from this angle and a skipped pair (thin wall) would fail silently, so
-      // the line has to exist — but it must not repeat itself nine times either. A note
-      // that DIFFERS (a declined pair) breaks the run and gets its own line, because
-      // that one is news.
-      const fitWord = t.fit === "press" ? "press-fit" : "glued in";
-      postReceipt(`magnet:${t.size.d}x${t.size.h}:${t.fit}:${pairNote}`, (n) =>
-        n === 1
-          ? `Added a ${what}.`
-          : `Added ${n} ${t.size.d}×${t.size.h} mm magnet pockets (${fitWord}, holes ⌀${diameter} × ${depth} mm deep)${pairNote}.`);
+      // The receipt lives in History (the `what` label). Chat only gets NEWS the
+      // canvas can't show: a paired pocket that could NOT be placed — that failure
+      // is invisible from this side of the wall and would otherwise pass silently.
+      if (pairNote.includes("no back pocket")) appendMsg({ role: "assistant", text: `Pocket placed, but${pairNote.replace(/^ — /, " ")}.`, error: true });
       setMagnetTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }, ...(ops.length > 1 && spot.back ? [{ at: spot.back.at, normal: spot.back.normal }] : [])] } : d));
       explainOnce("magnet", `Sunk a **magnet pocket** — free, no AI. The hole is cut a hair wider than the magnet so a drop of super glue holds it in flush, and it grips right through the plastic. Place another near this one and it snaps square with it — the dashed line shows what it lined up with. Want it exactly under the cursor instead? Set snapping to **Free** in the panel. Undo reverts it.`);
     } catch (err: any) {
@@ -3551,9 +3575,8 @@ export default function App() {
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), op] });
+      // Receipt in History only — chat is for AI replies, offers and errors.
       applyResult(res, project?.name ?? "Model", `Added a ${cut.what}`, `screw ${t.size.label}`);
-      postReceipt(`screw:${t.size.id}:${t.fit}:${t.countersink}`, (n) =>
-        n === 1 ? `Added a ${cut.what}.` : `Added ${n} ${cut.what.replace("hole", "holes").replace("pocket", "pockets")}.`);
       setScrewTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }] } : d));
       explainOnce("screw", `Cut a **screw hole** — free, no AI. "Bites in" bores the plastic tap size and ribs the wall at the thread pitch, so the screw cuts its own path and holds like a tapped hole; "Slides through" is a clearance bore (flush-head cone optional); "Heat-set insert" pockets the brass insert size. Placing another near this one snaps into line. Undo reverts it.`);
     } catch (err: any) {
@@ -5634,6 +5657,7 @@ export default function App() {
           editDelete: () => void deleteEditedHole(),
           editDone: () => setHoleEdit(null),
           removeAll: () => void removeAllHoles("magnet"),
+          recutAll: () => void recutAllPockets(),
           placedCount: familyOpCount("magnet"),
         }}
         screwCtl={{

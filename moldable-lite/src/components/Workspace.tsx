@@ -1559,6 +1559,7 @@ interface Props {
     editDelete: () => void;
     editDone: () => void;
     removeAll: () => void;
+    recutAll: () => void; // apply the current seat to every pocket, in place
     placedCount: number;
   };
   screwCtl: {
@@ -2958,15 +2959,20 @@ export function Workspace(p: Props) {
                                 <button className="ghost sm" onClick={p.magnetCtl.editDelete} title="Fill this pocket back in — the model rebuilds without it">Remove</button>
                                 <button className="ghost sm" onClick={p.magnetCtl.editDone} title="Stop editing — clicks place new pockets again">Done</button>
                               </div>
-                              <div className="magnet-hint">Size and fit above now change THIS pocket, in place. All undoable.</div>
+                              <div className="magnet-hint">The options above show THIS pocket — change any of them to re-cut it in place. All undoable.</div>
                             </>
                           ) : (
-                            <div className="magnet-hint">Hover the model, click to sink the pocket. Click an existing pocket to edit it — resize, move or remove, nothing is baked in. Place one near another and it lines up square with it.</div>
+                            <div className="magnet-hint">Hover the model, click to sink the pocket. Click an existing pocket to see and change it — resize, move or remove, nothing is baked in. Place one near another and it lines up square with it.</div>
                           )}
                           {p.magnetCtl.placedCount > 0 && !p.magnetCtl.edit && (
-                            <button className="ghost sm hole-clear" onClick={p.magnetCtl.removeAll} title="Fill every magnet pocket back in — the model rebuilds without them (undoable)">
-                              Remove all ({p.magnetCtl.placedCount})
-                            </button>
+                            <div className="hole-edit-actions">
+                              <button className="ghost sm" onClick={p.magnetCtl.recutAll} title="Re-drill every pocket at the seat chosen above — same spots, same widths, only the depth changes. Undoable.">
+                                Re-cut all ({p.magnetCtl.placedCount})
+                              </button>
+                              <button className="ghost sm" onClick={p.magnetCtl.removeAll} title="Fill every magnet pocket back in — the model rebuilds without them (undoable)">
+                                Remove all
+                              </button>
+                            </div>
                           )}
                           </>)}
                           {p.screwCtl.tool && (<>

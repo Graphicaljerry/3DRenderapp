@@ -2212,6 +2212,44 @@ export default function App() {
     persist(next);
     stampHeadThumb();
   }
+  /** Params whose value is a rounding/bevel size — the ones a shrinking part outgrows. */
+  const RADIUS_PARAM_RE = /rad|fillet|chamfer|round|bevel/i;
+  /** The #1 way an Adjust value "won't build": the user shrinks a dimension and a
+   *  LEFTOVER corner/fillet radius no longer fits it (a 30 mm width cannot carry the
+   *  22.5 mm corner round that suited 87). Refusing the size the user actually typed,
+   *  over a parameter they didn't touch, reads as a broken slider — so instead find
+   *  the largest radius the kernel accepts at the new size and apply both. The kernel
+   *  is the ground truth: binary-search real builds, no geometry guessing. */
+  async function rescueParams(values: CadParams, changed: string[]): Promise<{ res: EngineResult; key: string; safe: number } | null> {
+    if (!sel || !result || result.source.kind !== "code") return null;
+    const src = result.source;
+    const tryBuild = async (v: CadParams) => {
+      try { return await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops }); } catch { return null; }
+    };
+    // Only radii the user did NOT just type: their typed value is the intent, the
+    // leftover radius is the obstacle. Biggest first — it's the likeliest blocker.
+    const radii = Object.keys(values)
+      .filter((k) => RADIUS_PARAM_RE.test(k) && !changed.includes(k) && typeof values[k] === "number" && (values[k] as number) > 0.5)
+      .sort((a, b) => (values[b] as number) - (values[a] as number));
+    for (const key of radii) {
+      const orig = values[key] as number;
+      // Prove this radius IS the blocker before searching: near-zero must build.
+      const floor = 0.4;
+      if (!(await tryBuild({ ...values, [key]: floor }))) continue;
+      let lo = floor, hi = orig; // invariant: lo builds, hi doesn't
+      for (let i = 0; i < 6; i++) {
+        const mid = (lo + hi) / 2;
+        if (await tryBuild({ ...values, [key]: mid })) lo = mid; else hi = mid;
+      }
+      // Step back from the cliff edge — a radius AT the numeric limit builds but
+      // leaves knife-edge geometry — and land on a tidy 0.5 step someone might have
+      // chosen on purpose.
+      const safe = Math.max(floor, Math.floor(lo * 0.95 * 2) / 2);
+      const res = await tryBuild({ ...values, [key]: safe });
+      if (res) return { res, key, safe };
+    }
+    return null;
+  }
   async function applyParams(values: CadParams) {
     if (!sel || !result || result.source.kind !== "code") return;
     if (paramBusy.current) { paramPending.current = values; return; }
@@ -2240,14 +2278,32 @@ export default function App() {
         recordParamVersion(res, values);
       }
     } catch (err: any) {
+      // Before refusing, see if a leftover radius is what's really in the way — only
+      // when the user's own edit was a SIZE, not the radius itself (then the refusal
+      // is the honest answer: the value they want is impossible).
+      const rescue = changed.length && changed.some((k) => !RADIUS_PARAM_RE.test(k))
+        ? await rescueParams(values, changed)
+        : null;
       if (paramGen.current === gen) {
-        // Un-buildable values must NOT stick. Every commit sends the whole map, so a
-        // value left in place after a failure rode along on every later adjustment and
-        // failed them all — the panel became permanently stuck with no way back but
-        // guessing which row was at fault. Roll back and name the culprit.
-        setParamValues(prevValues);
-        const which = changed.length ? `${changed.map(humanizeParam).join(", ")} ` : "";
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${which}won't build at that value — kept the last one that worked. (${String(err?.message ?? err)})`, error: true }]);
+        if (rescue) {
+          const fixedVals = { ...values, [rescue.key]: rescue.safe };
+          lastGoodParams.current = fixedVals;
+          setParamValues(fixedVals);
+          applyResultNoCommit(rescue.res);
+          recordParamVersion(rescue.res, fixedVals);
+          setMessages((m) => [...m, {
+            id: mid(), role: "assistant",
+            text: `Done — ${changed.map(humanizeParam).join(", ")} applied. It needed one more change: the part can't carry a ${values[rescue.key]} mm ${humanizeParam(rescue.key).toLowerCase()} at this size, so that came down to ${rescue.safe} mm — the largest that still builds. Undo reverts both together.`,
+          }]);
+        } else {
+          // Un-buildable values must NOT stick. Every commit sends the whole map, so a
+          // value left in place after a failure rode along on every later adjustment and
+          // failed them all — the panel became permanently stuck with no way back but
+          // guessing which row was at fault. Roll back and name the culprit.
+          setParamValues(prevValues);
+          const which = changed.length ? `${changed.map(humanizeParam).join(", ")} ` : "";
+          setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${which}won't build at that value — kept the last one that worked. (${String(err?.message ?? err)})`, error: true }]);
+        }
       }
     } finally {
       setStatus("idle");

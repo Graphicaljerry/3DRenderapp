@@ -412,6 +412,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // a stop after a gesture, which is the observable the damping fix is defined by.
     if (import.meta.env.DEV) {
       (window as any).__viewerCam = () => [...camera.position.toArray(), controls.dampingFactor];
+      // The committed mesh's raw positions — the harnesses dissect real geometry
+      // (boundary extraction, cap capture) without simulating pixel-perfect picks.
+      (window as any).__viewerGeom = () => {
+        const g = st.current?.mesh?.geometry;
+        if (!g) return null;
+        const src = g.index ? g.toNonIndexed() : g;
+        return (src.getAttribute("position") as THREE.BufferAttribute).array;
+      };
     }
 
     // Right-CLICK (no drag) → quick-action context menu on whatever is under the cursor.
@@ -3984,18 +3992,40 @@ function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
 /** Boundary edges of a triangle soup (the selected face) as [ax,ay,az,bx,by,bz,…] — an edge
  *  shared by two triangles is interior; those touched once bound the face. Computed once per drag. */
 export function faceBoundary(cap: Float32Array): Float32Array {
-  const key = (i: number) => {
-    const x = Math.round(cap[i] * 100), y = Math.round(cap[i + 1] * 100), z = Math.round(cap[i + 2] * 100);
-    return `${x}_${y}_${z}`;
+  // WELD the cap's vertices first — genuinely, not by grid rounding. Rounding to a
+  // 0.01 mm grid splits two copies of the same seam vertex that happen to straddle a
+  // cell line (boolean seams jitter positions by a few microns), their shared edge
+  // then fails to pair, gets called "boundary", and the drag preview erects a wall
+  // from it — the tall fins seen when extruding a rim on a booleaned model. A spatial
+  // hash with neighbour-cell lookup makes "within 0.02 mm" mean exactly that.
+  const CELL = 0.02;
+  const reps: number[] = []; // canonical x,y,z triplets
+  const grid = new Map<string, number[]>();
+  const repOf = (x: number, y: number, z: number): number => {
+    const cx = Math.round(x / CELL), cy = Math.round(y / CELL), cz = Math.round(z / CELL);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const cell = grid.get(`${cx + dx}_${cy + dy}_${cz + dz}`);
+      if (cell) for (const ri of cell) {
+        if (Math.abs(reps[ri * 3] - x) < CELL && Math.abs(reps[ri * 3 + 1] - y) < CELL && Math.abs(reps[ri * 3 + 2] - z) < CELL) return ri;
+      }
+    }
+    const ri = reps.length / 3;
+    reps.push(x, y, z);
+    const k = `${cx}_${cy}_${cz}`;
+    const cell = grid.get(k);
+    if (cell) cell.push(ri); else grid.set(k, [ri]);
+    return ri;
   };
   const seen = new Map<string, { i: number; j: number; n: number }>();
   const tris = cap.length / 9;
   for (let t = 0; t < tris; t++) {
     const c = [t * 9, t * 9 + 3, t * 9 + 6];
+    const r = c.map((o) => repOf(cap[o], cap[o + 1], cap[o + 2]));
     for (let e = 0; e < 3; e++) {
       const a = c[e], b = c[(e + 1) % 3];
-      const ka = key(a), kb = key(b);
-      const ek = ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+      const ra = r[e], rb = r[(e + 1) % 3];
+      if (ra === rb) continue; // degenerate sliver edge — no wall from nothing
+      const ek = ra < rb ? `${ra}|${rb}` : `${rb}|${ra}`;
       const rec = seen.get(ek);
       if (rec) rec.n++;
       else seen.set(ek, { i: a, j: b, n: 1 });

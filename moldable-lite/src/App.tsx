@@ -1123,6 +1123,8 @@ export default function App() {
   const [report, setReport] = useState<PrintabilityReport | null>(null);
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
   const [status, setStatus] = useState<"idle" | "generating">("idle");
+  const statusRef = useRef<"idle" | "generating">("idle");
+  statusRef.current = status;
   const [streamingText, setStreamingText] = useState("");
   const [streamingThink, setStreamingThink] = useState(""); // live model reasoning (chat shows it while generating)
   const [codeBuffer, setCodeBuffer] = useState("");
@@ -5189,11 +5191,15 @@ export default function App() {
   const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } };
 
   const undo = () => {
+    // Time travel during a build is a race the user always loses: the in-flight
+    // result lands AFTER the undo and silently re-does it. Wait out the build.
+    if (statusRef.current === "generating") return;
     if (undoPaint()) return; // strokes come off first — they're the newest thing you did
     if (separatedRef.current) regroupParts(); // un-separate first; history stays untouched
     else void stepHead(-1);
   };
   const redo = () => {
+    if (statusRef.current === "generating") return;
     if (redoPaint()) return;
     void stepHead(1);
   };
@@ -5720,7 +5726,7 @@ export default function App() {
         splitCtl={{ pieces: splitPieces, exportPiece: busyExport(exportPiece), exportAll: busyExport(exportAllPieces), clear: () => setSplitPieces(null), toPlates: assignPiecePlates, plated: !!splitPieces?.some((pc) => pc.plate != null) }}
         versions={project?.versions ?? []}
         onRestore={restoreTo}
-        undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy }}
+        undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy || status === "generating" }}
         supportsStep={result?.supportsStep ?? false}
         canExport={(f) => (result?.kind === "generative" ? f === "stl" || f === "obj" || f === "3mf" /* = GenerativeEngine.canExport, inlined so the render path never loads the lazy engine */ : sel?.engine.canExport(f) ?? false)}
         onExport={busyExport(exportAs)}

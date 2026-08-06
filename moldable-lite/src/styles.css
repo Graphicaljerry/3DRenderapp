@@ -188,7 +188,7 @@ button { font-family: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :where(button, a, input, select, textarea):focus { outline: none; } /* rely on :focus-visible */
 .primary, .ghost, .chip, .send, .cta, .seg button, .x, .link, .mp-trigger, .lib-open { transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1); }
-.primary:active, .ghost:active, .chip:active, .send:active, .cta:active, .x:active, .seg button:active, .fit-chip:active { transform: scale(.97); }
+.primary:active, .ghost:active, .chip:active, .send:active, .cta:active, .x:active, .seg button:active { transform: scale(.97); }
 /* Hover affordance on every interactive control, so nothing feels inert. */
 .ghost:hover { background: var(--ctl-h); color: var(--ink); }
 .ghost.danger:hover { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
@@ -623,8 +623,8 @@ button { font-family: inherit; cursor: pointer; }
 .measure-confirm .mc-dist { font-size: 13px; font-weight: 700; color: var(--accent); white-space: nowrap; }
 .measure-confirm .mc-tip { font-size: 11px; color: var(--subt); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 700px) { .measure-confirm .mc-tip { display: none; } }
-.viewer-overlay { position: absolute; inset: 0; display: grid; place-items: center; align-content: center; gap: 6px; color: var(--ink2); font-size: 14px; text-align: center; pointer-events: none; }
-.viewer-overlay.muted { color: var(--subt); }
+.viewer-overlay { position: absolute; inset: 0 var(--dock-w, 0px) 0 0; display: grid; place-items: center; align-content: center; gap: 6px; color: var(--ink2); font-size: 14px; text-align: center; pointer-events: none; }
+.viewer-overlay.muted { color: color-mix(in srgb, var(--ink2) 72%, transparent); }
 .viewer-overlay small { color: var(--subt); font-size: 11px; }
 
 /* Mesh + print stats overlay, top-left of the 3D view (Meshy-style, print-framed). */
@@ -1127,12 +1127,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .or-rec.on { border-color: var(--accent); background: var(--accent-w); color: var(--accent-d); }
 .or-think { font-size: 9.5px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: var(--live); border: 1px solid color-mix(in srgb, var(--live) 45%, transparent); border-radius: var(--r-xs); padding: 0 4px; line-height: 1.5; }
 /* Fit tolerance — quiet segmented control, shown only in the guided flow. */
-/* Part fit, consolidated: one chip that cycles Loose → Snug → Press (the web-toggle's
-   pattern). The labelled three-way seg + mm readout crowded the composer stack for a
-   control most people set once; the tooltip carries the full story. */
-.fit-chip { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--mut); font-size: 12px; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
-.fit-chip b { font-weight: 600; color: var(--ink2); }
-.fit-chip:hover { border-color: var(--bord-strong); color: var(--ink2); }
+/* Build options trigger: Research · Plan · Fit folded behind one chip. It names
+   whatever is off its default (and takes the accent) so a folded-away setting that
+   is actually doing something still announces itself from the composer. */
+.opt-trigger.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
+.opt-trigger .web-state { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
 /* ---------- model picker (compact custom dropdown; replaces native select) ---------- */
 .modelpick2 { position: relative; }
 .mp-trigger { display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: 200px; padding: 0 8px 0 11px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--ink2); font-size: 12px; font-weight: 500; cursor: pointer; transition: background .15s ease, transform .16s ease-out; }
@@ -1557,6 +1556,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    is what ties content to list item across the distance — the list row says where you
    are, the body says what you are looking at. */
 .dock-list { display: flex; flex-direction: column; gap: 7px; flex: 0 0 auto; }
+/* Packed: seven named rows cost ~300px of a ~750px dock and clipped Printability's
+   own numbers off the bottom. One icon row keeps every section a single tap away
+   and hands the height back to the panel you actually opened. */
+.dock-list.icons { flex-direction: row; gap: 2px; justify-content: space-between; }
+.dock-list.icons .dock-item { width: auto; flex: 1 1 0; justify-content: center; padding: 8px 0; gap: 0; }
 .dock-item {
   flex: 0 0 auto; width: 100%; text-align: left; padding: 9px 12px; border-radius: var(--r-md);
   border: 1px solid transparent; background: none; font-size: 13px; color: var(--ink2);
@@ -1577,7 +1581,13 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   margin: 0; padding: 10px 10px 2px;
   font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
   color: var(--mut);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
 }
+.dock-names {
+  border: none; background: none; padding: 2px 4px; border-radius: var(--r-sm);
+  font: inherit; font-size: 10px; letter-spacing: .04em; color: var(--subt); cursor: pointer;
+}
+.dock-names:hover { background: var(--surf); color: var(--ink2); }
 .dock-panel { display: flex; flex-direction: column; gap: 8px; padding: 12px 10px; }
 .dock-sub { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--mut); }
 /* Grey wells on the white card, label then value reading left to right — the mock's
@@ -2082,6 +2092,13 @@ details.guide { margin-top: 10px; }
   .canvas-rail:hover { width: 176px; border-radius: 22px; }
   .canvas-rail:hover .rail-name { opacity: 1; transform: none; transition: opacity .16s ease .07s, transform .2s cubic-bezier(.22,1,.36,1) .07s; }
 }
+/* A tool panel is open: the rail stays at icon width. Expanded (176px) plus the
+   panel covered ~420px of canvas, and the names are redundant anyway once the
+   tool's own titled panel is on screen. */
+@media (hover: hover) and (pointer: fine) {
+  .canvas-rail:has(.rail-fly):hover { width: var(--rail-w, 47px); }
+  .canvas-rail:has(.rail-fly):hover .rail-name { opacity: 0; transform: translateX(-6px); transition: opacity .1s ease; }
+}
 .canvas-rail { transition: width .22s cubic-bezier(.22,1,.36,1), border-radius .22s ease; }
 @media (prefers-reduced-motion: reduce) { .canvas-rail, .canvas-rail .rail-name { transition: none; } }
 
@@ -2283,6 +2300,9 @@ details.guide { margin-top: 10px; }
   .canvas-rail .rail-fly { left: 6px; right: auto; top: auto; bottom: calc(100% + 10px); transform: none; max-width: calc(100vw - 24px); flex-wrap: wrap; }
   /* The view snaps shared that spot; orbit covers their job here. */
   .view-snaps { display: none; }
+  /* Same for the zoom cluster: it landed ON the horizontal tool row, and pinch
+     already zooms. Frame-the-model lives in View > Reset view. */
+  .zoom-ctl { display: none; }
   /* The snaps are gone on a phone, so the showcase scenes take their spot. */
   .showcase-bar { bottom: 12px; }
 
@@ -2374,3 +2394,25 @@ details.guide { margin-top: 10px; }
 .meas-input { width: 72px; font: inherit; font-size: 12.5px; padding: 2px 6px; border: 1px solid var(--accent); border-radius: var(--r-xs); background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums; }
 .meas-drivers { display: flex; flex-wrap: wrap; gap: 4px; }
 .meas-actions { display: flex; gap: 6px; }
+
+
+/* ---------- touch targets ----------
+   Keyed to a coarse pointer rather than a breakpoint: an iPad at 1024px is still a
+   finger. Measured before this block: the per-message actions were 16px tall and the
+   composer buttons 32px, against a 44px HIG floor. Hover-reveal is also meaningless
+   without a cursor, so the actions stop hiding. */
+@media (pointer: coarse) {
+  .msg-actions { opacity: 1; gap: 2px; margin-top: 0; }
+  .msg-act { min-height: 44px; padding: 0 10px; font-size: 12.5px; }
+  .attach, .mic, .improve { width: 44px; height: 44px; }
+  .chat-hide { min-height: 40px; padding: 0 10px; }
+  .sheet-grab { min-height: 32px; }
+  /* Segmented controls and chips: 40px is comfortable without the composer stack
+     growing a whole row taller. */
+  .seg button, .web-toggle, .mp-trigger, .pm-opt { min-height: 40px; }
+  .theme-toggle, .navlink { min-height: 44px; min-width: 44px; }
+  .zoom-ctl button { width: 40px; height: 40px; }
+  .view-snaps button { min-height: 40px; }
+  .dock-item { min-height: 44px; }
+  .dock-list.icons .dock-item { padding: 11px 0; }
+}

@@ -289,6 +289,64 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
   );
 }
 
+/** Research · Plan · Fit behind one button. All three are "how the NEXT build runs",
+ *  all three are set once and left alone, and as loose chips they cost a permanent
+ *  second row above the composer. The trigger names whatever is off its default, so
+ *  folding them away never hides a setting that is currently doing something. */
+function BuildOptions({ p }: { p: Props }) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const precise = p.mode === "precise";
+  const notes: string[] = [];
+  if (p.modePref !== "generative" && p.webMode !== "auto") notes.push(p.webMode === "on" ? "Research on" : "No research");
+  if (!p.planCtl.on) notes.push("No plan");
+  if (precise && p.fit !== "snug") notes.push(`Fit · ${p.fit === "loose" ? "Loose" : "Press"}`);
+  return (
+    <span>
+      <button ref={btn} type="button" className={`web-toggle opt-trigger${notes.length ? " on" : ""}`}
+        aria-haspopup="menu" aria-expanded={!!anchor}
+        title="How the next build runs — web research, plan-first, and how tightly parts fit together"
+        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
+        <IconSliders size={13} />
+        <span className="web-state">{notes.length ? notes.join(" · ") : "Build options"}</span>
+      </button>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={252}>
+          {p.modePref !== "generative" && (
+            <button role="menuitem" className="pmenu-item" onClick={p.onCycleWeb}>
+              <b>Research · {p.webMode}</b>
+              <span>{p.webMode === "auto" ? "Looks up named real-world products before building" : p.webMode === "on" ? "Always searches for real dimensions first" : "Never searches — builds from your words alone"}</span>
+            </button>
+          )}
+          {/* Plan first is on by default: a first model that is already right beats
+              four rounds of correcting one. "Just build it" stays one tap away. */}
+          <button role="menuitem" className="pmenu-item" onClick={() => p.planCtl.setOn(!p.planCtl.on)}>
+            <b>{p.planCtl.on ? "Plan first" : "Build straight away"}</b>
+            <span>{p.planCtl.on ? "You get a short spec to check and correct before anything is generated" : "Skips the spec. One cheap call saved, a rebuild often spent"}</span>
+          </button>
+          {precise && (
+            <>
+              <div className="pmenu-sep" />
+              <div className="pmenu-item pmenu-choice" role="none">
+                <b>Part fit</b>
+                <span>{FIT_OPTS.find((o) => o.id === p.fit)?.plain}{fitCalibration() != null ? " · measured on your printer" : ""}</span>
+                <div className="pmenu-opts" role="radiogroup" aria-label="Part fit">
+                  {FIT_OPTS.map((o) => (
+                    <button key={o.id} role="radio" aria-checked={p.fit === o.id} className={`pm-opt${p.fit === o.id ? " on" : ""}`}
+                      title={`${o.plain} — ${fitClearance(o.id)} mm gap. ${FIT_WHAT}`} onClick={() => p.onFit(o.id)}>
+                      {o.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </AnchoredMenu>
+      )}
+    </span>
+  );
+}
+
 /** One home for every display toggle — Dimensions, Wireframe, Stats, Units, Showcase —
     so the toolbar carries tools, not switches. */
 function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGray, plate, setPlate, stats, setStats, units, setUnits, showcase, setShowcase, overhangOn, toggleOverhang, onResetView }: {
@@ -1907,6 +1965,13 @@ export function Workspace(p: Props) {
   // you had seen the model at all. Measured once at mount — resizing later is the user's
   // own doing and should not slam their panel shut.
   const [dockOpen, setDockOpen] = useState(() => typeof window === "undefined" || window.innerWidth >= 760);
+  // Section list: named rows for a first visit (nothing to learn the icons from yet),
+  // packed to icons from the first pick onward — and the choice sticks after that.
+  const [navNames, setNavNamesState] = useState(() => localStorage.getItem("moldable_dock_names") !== "0");
+  const setNavNames = (v: boolean) => {
+    setNavNamesState(v);
+    try { localStorage.setItem("moldable_dock_names", v ? "1" : "0"); } catch { /* private mode */ }
+  };
   // Resizable like the chat: same clamp-ref-persist pattern, opposite edge. The layers
   // list and the parameter rows were designed into 262px; on a big screen there is no
   // reason the Inspector cannot have the room the chat gets.
@@ -1928,6 +1993,22 @@ export function Workspace(p: Props) {
   // "peek" is just the composer, and chatOpen flips peek <-> full instead of hiding
   // the panel behind a side rail.
   const phone = useMediaQuery("(max-width: 760px)");
+  // Phone: a build landing is the payoff, so the sheet drops back to its peek and
+  // hands the screen to the model — it had been keeping ~62% of a 844px phone for
+  // a two-line reply, leaving the 3D view a 240px strip. Swipe up to read on.
+  const lastGeom = useRef(p.geometry);
+  useEffect(() => {
+    if (phone && p.geometry && p.geometry !== lastGeom.current) {
+      setChatOpen(false);
+      // Re-frame after the sheet has finished collapsing: the canvas roughly
+      // triples in height, and a camera framed for the old strip leaves the part
+      // cropped against the edges.
+      const t = setTimeout(() => p.viewerRef.current?.resetView(), 340);
+      lastGeom.current = p.geometry;
+      return () => clearTimeout(t);
+    }
+    lastGeom.current = p.geometry;
+  }, [p.geometry, phone]);
   // While a finger is on the model, floating chrome steps back — the video-player
   // contract. Phone only: on desktop the pointer lives on the canvas half the time.
   const [stageBusy, setStageBusy] = useState(false);
@@ -2263,37 +2344,11 @@ export function Workspace(p: Props) {
                 ) : (
                   <EnginePicker provider={p.genProvider} model={p.genModel} hasKey={p.hasGenKey} onPick={p.onPickEngine} />
                 )}
-                {p.modePref !== "generative" && (
-                  <button
-                    type="button"
-                    className={`web-toggle web-${p.webMode}`}
-                    onClick={p.onCycleWeb}
-                    aria-label={`Look things up online: ${p.webMode}`}
-                    title="Web search for real dimensions before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
-                  >
-                    <IconGlobe size={13} />
-                    <span className="web-state">{p.webMode === "auto" ? "Research · auto" : p.webMode === "on" ? "Research · on" : "Research · off"}</span>
-                  </button>
-                )}
-                {/* Plan first. On by default because a first model that is already
-                    right beats four rounds of correcting one — but a direct "just
-                    build it" is one tap away and stays off until turned back on. */}
-                <button
-                  type="button"
-                  className={`web-toggle plan-toggle${p.planCtl.on ? " on" : ""}`}
-                  onClick={() => p.planCtl.setOn(!p.planCtl.on)}
-                  aria-pressed={p.planCtl.on}
-                  title={p.planCtl.on
-                    ? "Plan first: you get a short spec to check and correct before anything is generated. Click to build straight away instead."
-                    : "Building straight from your words. Click to get a plan to check first — it costs one cheap call and usually saves a rebuild."}
-                >
-                  <IconChecklist />
-                  <span className="web-state">{p.planCtl.on ? "Plan first" : "No plan"}</span>
-                </button>
-                {/* Fit rides HERE, not under the mode seg: measured, that row overflows
-                    by ~30px and pushed fit onto a line of its own, while this row has
-                    ~136px spare. Same family anyway — both are "how the next build runs". */}
-                {p.mode === "precise" && <FitControl fit={p.fit} onFit={p.onFit} />}
+                {/* Research, Plan and Fit are set-once-and-forget: three permanent
+                    chips wrapped this row onto a second line and stole ~40px above
+                    the input forever. They live behind one button now, which states
+                    how many are off their default so nothing hides silently. */}
+                <BuildOptions p={p} />
               </div>
               <div className="modebar-row">
                 <div className="seg">
@@ -3359,21 +3414,30 @@ export function Workspace(p: Props) {
                 <p className="dock-eyebrow">Inspector</p>
                 <button className="panel-collapse" aria-label="Hide inspector" title="Hide inspector" onClick={() => setDockOpen(false)}><IconChevron size={14} /></button>
               </div>
-              {/* Figma "Inspector dock": the section list, then one body underneath that
-                  reopens with the active section's name as an uppercase label. The label
-                  is what carries the list-to-content link across the distance. Still one
-                  at a time — `dockPanel` and everything that drives it (a pick, the
-                  Export button, Path to print, the canvas tab strip) are unchanged. */}
-              <div className="dock-list">
+              {/* The section switcher, then one body underneath labelled with the active
+                  section. Named rows cost ~300px — 40% of the dock — and pushed
+                  Printability's own numbers off the bottom of a 900px window, so the
+                  list packs down to a single icon row once you have picked a section.
+                  Switching stays one tap; the body's uppercase label is what names
+                  where you are. `dockPanel` and everything that drives it (a pick, the
+                  Export button, Path to print) are unchanged. */}
+              <div className={`dock-list${navNames ? "" : " icons"}`}>
                 {DOCK_ITEMS.map(({ key, label, icon }) => (
-                  <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key} onClick={() => setDockPanel(key)}>
+                  <button key={key} className={`dock-item${dockPanel === key ? " on" : ""}`} aria-pressed={dockPanel === key}
+                    title={navNames ? undefined : label} aria-label={label}
+                    onClick={() => { setDockPanel(key); if (navNames) setNavNames(false); }}>
                     <span className="dock-ico" aria-hidden>{icon}</span>
-                    {label}
+                    {navNames && label}
                   </button>
                 ))}
               </div>
               <div className="dock-body" role="region" aria-label={dockLabel}>
-                <p className="dock-sec-label">{dockLabel}</p>
+                <p className="dock-sec-label">
+                  {dockLabel}
+                  <button className="dock-names" aria-pressed={navNames} title={navNames ? "Pack the section list down to icons" : "Show the section names"} onClick={() => setNavNames(!navNames)}>
+                    {navNames ? "Icons" : "Names"}
+                  </button>
+                </p>
                 {dockPanel === "selection" && (
                   <DockSelection
                     feature={p.featureCtl.selected}
@@ -3583,26 +3647,6 @@ const FIT_OPTS: { id: FitId; label: string; plain: string }[] = [
   { id: "snug", label: "Snug", plain: "Goes together by hand and stays put" },
   { id: "press", label: "Press", plain: "Needs a firm push, holds without glue" },
 ];
-function FitControl({ fit, onFit }: { fit: FitId; onFit: (f: FitId) => void }) {
-  // One compact chip that CYCLES (the web-toggle's pattern), not a labelled
-  // three-way seg: fit is a set-and-forget preference, and its dedicated row was
-  // the most crowded-looking thing above the composer for the least-touched control.
-  const calibrated = fitCalibration() != null;
-  const cur = FIT_OPTS.find((o) => o.id === fit) ?? FIT_OPTS[1];
-  const next = FIT_OPTS[(FIT_OPTS.findIndex((o) => o.id === fit) + 1) % FIT_OPTS.length];
-  return (
-    <button
-      type="button"
-      className="fit-chip"
-      aria-label={`Part fit: ${cur.label}`}
-      title={`Part fit — ${cur.plain} (${fitClearance(fit)} mm gap${calibrated ? ", measured on your printer" : ", typical FDM"}). Click for ${next.label}. ${FIT_WHAT}`}
-      onClick={() => onFit(next.id)}
-    >
-      Fit · <b>{cur.label}</b>
-    </button>
-  );
-}
-
 // Group builders shared by the composer pickers AND the per-message retry menu.
 function brainValue(brain: { provider: LlmProviderId; model: string }): string {
   return brain.provider === "anthropic" ? `anthropic|${brain.model}` : `${brain.provider}|`;

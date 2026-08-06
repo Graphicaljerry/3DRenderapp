@@ -343,9 +343,11 @@ function stageEnv(renderer: THREE.WebGLRenderer): THREE.Texture {
 // stand off the background instead of floating on gridlines.
 function buildPlate(bed: { x: number; y: number; z?: number }, theme: "light" | "dark", colorOverride?: string | null): THREE.Group {
   const g = new THREE.Group();
-  // Dark slate in BOTH themes, like a real textured print plate (Bambu/Orca) —
-  // unless the user picked their own plate colour in Settings > Appearance.
-  const slate = theme === "dark" ? { top: 0x26282b, edge: 0x4b4e53 } : { top: 0x3a3d41, edge: 0x5f6368 };
+  // A textured print plate (Bambu/Orca), but the MODEL has to win the contrast
+  // fight: in light theme the plate sits mid-grey, clearly under the default
+  // filament (#c7ccd3) and clearly over nothing else. It used to be near-black,
+  // which made the floor the loudest object on screen.
+  const slate = theme === "dark" ? { top: 0x26282b, edge: 0x4b4e53 } : { top: 0x9298a0, edge: 0xaeb4ba };
   const c = colorOverride
     ? { top: new THREE.Color(colorOverride), edge: new THREE.Color(colorOverride).offsetHSL(0, 0, 0.16) }
     : { top: new THREE.Color(slate.top), edge: new THREE.Color(slate.edge) };
@@ -382,7 +384,10 @@ function buildPlate(bed: { x: number; y: number; z?: number }, theme: "light" | 
   }
   return g;
 }
-const THEME_GRID: Record<string, [number, number]> = { light: [0xc2c8cd, 0xdadfe2], dark: [0x4b4e53, 0x2b2d31] };
+// Grid lines read DARKER than the plate in both themes. Light used to run pale
+// (0xc2c8cd) over a near-black plate, which turned the floor into a bright
+// checkerboard that out-contrasted the part standing on it.
+const THEME_GRID: Record<string, [number, number]> = { light: [0x848b93, 0x9aa1a9], dark: [0x4b4e53, 0x2b2d31] };
 
 // Dimension-label size band, in screen pixels (≈ 12–40 pt).
 // On-screen size band for measurement/dimension label pills (sprite height in px).

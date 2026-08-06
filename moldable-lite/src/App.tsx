@@ -46,6 +46,7 @@ import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
 import { suggestOrientation, type OrientSuggestion } from "./print/orient";
+import { pocketFacing } from "./print/pockets";
 import type { ThinWallReport } from "./print/thinwalls";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine, costLabel, costUsd } from "./gen/registry";
@@ -2042,6 +2043,14 @@ export default function App() {
   // Objects-panel badge: which engine/AI produced the current model. Mesh engines are
   // color-coded per provider; deterministic sources (imports, SVG, split…) read plainly.
   // (Per-CAD-version LLM attribution isn't stored yet — CAD models show "CAD".)
+  // Which way the drilled pockets open in the current orientation — the export gate's
+  // "will the magnet actually seat" row. Recomputed whenever the model (and so its
+  // ops chain, rotations included) changes.
+  const pocketReport = useMemo(
+    () => pocketFacing(result?.source.kind === "code" ? result.source.ops : undefined),
+    [result],
+  );
+
   const modelBadge = useMemo(() => {
     if (!result) return null;
     if (result.source.kind === "gen") {
@@ -5552,6 +5561,7 @@ export default function App() {
         dims={dims}
         report={report}
         analysisOverlay={analysisOverlay}
+        pockets={pocketReport}
         printPrep={{
           overhangOn: overhangView,
           toggleOverhang: () => { setOverhangView((v) => !v); setThinShow(false); },

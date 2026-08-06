@@ -30,6 +30,7 @@ import type { SlicerTarget } from "../lib/slicer";
 import { IS_DESKTOP } from "../lib/desktopUpdate";
 import { watchDesktopUpdate, checkForUpdate, restartApp, openDownload, type UpdateState } from "../lib/desktopUpdate";
 import type { SplitPiece } from "../print/split";
+import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
 import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
@@ -1076,6 +1077,18 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
       {thin.report && thin.report.thinSamples > 0 && (
         <p className="fine">Thinnest ≈ {thin.report.minThicknessMM} mm — under {thin.report.thresholdMM} mm walls print fragile or vanish. <button className="link" onClick={thin.toggleShown}>{thin.shown ? "Hide them" : "Show them on the model"}</button></p>
       )}
+      {/* Magnet/screw pockets vs gravity: an up-facing pocket prints clean; sideways
+          or downward, the roof of the little cylinder droops without supports — and a
+          drooped roof is a magnet that won't seat. Design-time knowledge the slicer
+          only gets if the user remembers to ask for supports. */}
+      {p.pockets && (
+        <Check
+          ok={p.pockets.side + p.pockets.down === 0}
+          label={p.pockets.side + p.pockets.down === 0 ? "Pockets print clean" : "Pockets need supports"}
+          detail={p.pockets.side + p.pockets.down === 0 ? `all ${p.pockets.total} open upward` : `${p.pockets.side + p.pockets.down} of ${p.pockets.total} face sideways/down`}
+        />
+      )}
+      {p.pockets && pocketAdvice(p.pockets) && <p className="fine">{pocketAdvice(p.pockets)}</p>}
 
       {r && !tight && isMesh && (
         <button className="ghost sm" disabled={busy} onClick={p.onRepair}>Fix model — make it watertight</button>
@@ -1614,6 +1627,8 @@ interface Props {
   report: PrintabilityReport | null;
   analysisOverlay: { positions: Float32Array; colors: Float32Array } | null; // printability paint-on overlay
   printPrep: PrintPrepCtl;
+  /** Which way drilled pockets open in this orientation — null when there are none. */
+  pockets: PocketFacing | null;
   modelSelected: boolean;
   onModelSelect: (sel: boolean) => void;
   onScaleTo: (axis: "x" | "y" | "z", target: number) => void; // uniform-scale the part so `axis` hits target mm
@@ -3338,7 +3353,7 @@ export function Workspace(p: Props) {
                   <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onLive={p.onLiveParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
                 )}
                 {dockPanel === "print" && (
-                  <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} />
+                  <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} pockets={p.pockets} />
                 )}
                 {dockPanel === "code" && (
                   <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
@@ -4202,7 +4217,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep, nozzleMM }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl; nozzleMM: number }) {
+function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep, nozzleMM, pockets }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl; nozzleMM: number; pockets: PocketFacing | null }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const sug = prep.orient.suggestion;
   const thin = prep.thin.report;
@@ -4298,6 +4313,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
           )}
         </div>
       )}
+      {pockets && pocketAdvice(pockets) && <p className="fine">⚠️ Pockets: {pocketAdvice(pockets)}</p>}
       <p className="fine">Generated meshes are often not watertight — that's expected. Simplify when a slicer (e.g. Bambu Studio) chokes on the triangle count. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
     </div>
   );

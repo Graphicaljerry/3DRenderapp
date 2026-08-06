@@ -2259,6 +2259,33 @@ export default function App() {
     }
     return null;
   }
+  /** The OTHER way a slider wedges: a point-anchored op — a fillet on a picked edge,
+   *  a bevel on a picked face — whose geometry a size change moved out from under it.
+   *  The pick point no longer lands on an edge, the whole rebuild throws, and every
+   *  later adjustment fails on the same dead op, forever. When that happens, find the
+   *  smallest set of point-ops that no longer apply and rebuild without them: the size
+   *  the user just typed is the intent; a 2 mm cosmetic fillet is not worth a bricked
+   *  panel. The version records the reduced recipe, so Undo restores the fillet. */
+  async function rescueOps(values: CadParams): Promise<{ res: EngineResult; dropped: string[] } | null> {
+    if (!sel || !result || result.source.kind !== "code") return null;
+    const src = result.source;
+    const ops = src.ops ?? [];
+    const POINTY: Record<string, string> = { fillet: "edge rounding", chamfer: "edge bevel", "face-fillet": "face rounding", "face-chamfer": "face bevel", extrude: "push/pull" };
+    const idxs = ops.map((o, i) => (POINTY[o.type] ? i : -1)).filter((i) => i >= 0);
+    if (!idxs.length) return null;
+    const tryBuild = async (keep: (i: number) => boolean) => {
+      try { return await sel.engine.build({ kind: "code", code: src.code, params: values, ops: ops.filter((_, i) => keep(i)) }); } catch { return null; }
+    };
+    const label = (i: number) => { const o = ops[i] as PointOp; return `${o.size} mm ${POINTY[o.type] ?? o.type}`; };
+    // Newest first — the latest decoration is the likeliest to sit on moved geometry.
+    for (const i of [...idxs].reverse()) {
+      const res = await tryBuild((j) => j !== i);
+      if (res) return { res, dropped: [label(i)] };
+    }
+    const res = await tryBuild((j) => !POINTY[ops[j].type]);
+    if (res) return { res, dropped: idxs.map(label) };
+    return null;
+  }
   async function applyParams(values: CadParams, editedKey?: string) {
     if (!sel || !result || result.source.kind !== "code") return;
     // A commit that arrives mid-build waits its turn — but it must NOT be replayed
@@ -2293,12 +2320,14 @@ export default function App() {
         recordParamVersion(res, values);
       }
     } catch (err: any) {
-      // Before refusing, see if a leftover radius is what's really in the way — only
-      // when the user's own edit was a SIZE, not the radius itself (then the refusal
-      // is the honest answer: the value they want is impossible).
+      // Before refusing, see what's really in the way. First a leftover radius param —
+      // only when the user's own edit was a SIZE, not the radius itself (then the
+      // refusal is the honest answer: the value they want is impossible).
       const rescue = changed.length && changed.some((k) => !RADIUS_PARAM_RE.test(k))
         ? await rescueParams(values, changed)
         : null;
+      // Then a point-anchored fillet/bevel whose edge the size change moved away.
+      const shed = !rescue && changed.length ? await rescueOps(values) : null;
       if (paramGen.current === gen) {
         if (rescue) {
           const fixedVals = { ...values, [rescue.key]: rescue.safe };
@@ -2306,18 +2335,28 @@ export default function App() {
           setParamValues(fixedVals);
           applyResultNoCommit(rescue.res);
           recordParamVersion(rescue.res, fixedVals);
-          setMessages((m) => [...m, {
-            id: mid(), role: "assistant",
+          appendMsg({
+            role: "assistant",
             text: `Done — ${changed.map(humanizeParam).join(", ")} applied. It needed one more change: the part can't carry a ${values[rescue.key]} mm ${humanizeParam(rescue.key).toLowerCase()} at this size, so that came down to ${rescue.safe} mm — the largest that still builds. Undo reverts both together.`,
-          }]);
+          });
+        } else if (shed) {
+          lastGoodParams.current = values;
+          setParamValues(values);
+          applyResultNoCommit(shed.res);
+          recordParamVersion(shed.res, values);
+          appendMsg({
+            role: "assistant",
+            text: `Done — ${changed.map(humanizeParam).join(", ")} applied. The ${shed.dropped.join(" and the ")} you'd added couldn't follow: the spot it was picked on moved with the new size, so it was removed from the recipe. Undo brings it back, or re-apply it on the new shape with Select.`,
+          });
         } else {
           // Un-buildable values must NOT stick. Every commit sends the whole map, so a
           // value left in place after a failure rode along on every later adjustment and
           // failed them all — the panel became permanently stuck with no way back but
-          // guessing which row was at fault. Roll back and name the culprit.
+          // guessing which row was at fault. Roll back and name the culprit (once —
+          // appendMsg folds the identical bubble a second identical failure produces).
           setParamValues(prevValues);
           const which = changed.length ? `${changed.map(humanizeParam).join(", ")} ` : "";
-          setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${which}won't build at that value — kept the last one that worked. (${String(err?.message ?? err)})`, error: true }]);
+          appendMsg({ role: "assistant", text: `${which}won't build at that value — kept the last one that worked. (${String(err?.message ?? err)})`, error: true });
         }
       }
     } finally {

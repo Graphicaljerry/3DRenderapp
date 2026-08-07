@@ -33,7 +33,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconModify, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1886,6 +1886,11 @@ interface Props {
     liveMm: number | null;
     clear: () => void;
   };
+  /** Modify: arm an op (push/round/bevel) first, then every click applies it — Spline's flow. */
+  modifyCtl: {
+    op: { op: "push" | "round" | "bevel"; size: number } | null;
+    set: (v: { op: "push" | "round" | "bevel"; size: number } | null) => void;
+  };
   facesCtl: {
     faces: PickedFeature[];
     text: string;
@@ -2682,6 +2687,7 @@ export function Workspace(p: Props) {
                 selectedPin={p.pinCtl.active?.pin.id ?? null}
                 selectMode={p.featureCtl.mode}
                 selectKind={p.featureCtl.kind}
+                featureSelected={!!p.featureCtl.selected}
                 boxSelectionActive={p.facesCtl.faces.length > 0}
                 modelSelected={p.modelSelected}
                 onModelSelect={p.onModelSelect}
@@ -2851,25 +2857,26 @@ export function Workspace(p: Props) {
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
                   {(p.activeKind === "replicad" || p.separatedKind === "replicad") && (
+                    <>
                     <div className="rail-tool">
                       {/* Select feeds CAD feature edits (fillet/extrude/hole on picked faces/edges) —
                           meshes can't take those ops, so the tool hides for them. While a CAD model
                           is split into parts the canvas shows plain part meshes, but the tool stays
                           VISIBLE and disabled — vanishing mid-session read as a bug. */}
                       <button
-                        className={`ghost sm iconbtn${p.featureCtl.mode ? " on" : ""}`}
-                        aria-pressed={p.featureCtl.mode}
+                        className={`ghost sm iconbtn${p.featureCtl.mode && !p.modifyCtl.op ? " on" : ""}`}
+                        aria-pressed={p.featureCtl.mode && !p.modifyCtl.op}
                         aria-label="Select"
                         disabled={p.activeKind !== "replicad"}
                         title={p.activeKind !== "replicad"
                           ? "Select works on the whole CAD model — Regroup parts to use it"
                           : "Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"}
-                        onClick={p.featureCtl.toggleMode}
+                        onClick={() => { if (p.modifyCtl.op) p.modifyCtl.set(null); else p.featureCtl.toggleMode(); }}
                       >
                         <IconPointer />
                       <span className="rail-name">Select</span>
                     </button>
-                      {p.featureCtl.mode && p.activeKind === "replicad" && (
+                      {p.featureCtl.mode && !p.modifyCtl.op && p.activeKind === "replicad" && (
                         <div className="rail-fly">
                           <div className="seg sm mode-seg">
                             {SELECT_MODES.map((m, i) => (
@@ -2881,6 +2888,57 @@ export function Workspace(p: Props) {
                         </div>
                       )}
                     </div>
+                    <div className="rail-tool">
+                      {/* Modify inverts Select's flow: arm the operation FIRST, then every click
+                          applies it on the spot — so "round these four corners" is four clicks.
+                          It rides on Select's picking (arming it turns select mode on). */}
+                      <button
+                        className={`ghost sm iconbtn${p.modifyCtl.op ? " on" : ""}`}
+                        aria-pressed={!!p.modifyCtl.op}
+                        aria-label="Modify"
+                        disabled={p.activeKind !== "replicad"}
+                        title={p.activeKind !== "replicad"
+                          ? "Modify works on the whole CAD model — Regroup parts to use it"
+                          : "Modify tool: pick Push/Pull, Round or Bevel and a size, then click the model — each click applies it right there, no AI"}
+                        onClick={() => {
+                          if (p.modifyCtl.op) { p.modifyCtl.set(null); if (p.featureCtl.mode) p.featureCtl.toggleMode(); }
+                          else { p.modifyCtl.set({ op: "push", size: 2 }); if (!p.featureCtl.mode) p.featureCtl.toggleMode(); }
+                        }}
+                      >
+                        <IconModify />
+                      <span className="rail-name">Modify</span>
+                    </button>
+                      {p.modifyCtl.op && p.activeKind === "replicad" && (
+                        <div className="rail-fly modify-fly">
+                          <div className="seg sm">
+                            <button className={p.modifyCtl.op.op === "push" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "push", size: p.modifyCtl.op!.size })}>Push/Pull</button>
+                            <button className={p.modifyCtl.op.op === "round" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "round", size: p.modifyCtl.op!.size })}>Round</button>
+                            <button className={p.modifyCtl.op.op === "bevel" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "bevel", size: p.modifyCtl.op!.size })}>Bevel</button>
+                          </div>
+                          <label className="modify-size">
+                            <input
+                              type="number"
+                              step={0.5}
+                              value={p.modifyCtl.op.size}
+                              onChange={(e) => {
+                                const v = parseFloat(e.target.value);
+                                if (Number.isFinite(v)) p.modifyCtl.set({ op: p.modifyCtl.op!.op, size: v });
+                              }}
+                            />
+                            <span>mm</span>
+                          </label>
+                          <p className="fine">
+                            {p.modifyCtl.op.op === "push"
+                              ? "Click a face to push it out. A minus size pushes in."
+                              : p.modifyCtl.op.op === "round"
+                                ? "Click a face, edge or corner to round it. Keep clicking to do more."
+                                : "Click a face, edge or corner to bevel it. Keep clicking to do more."}
+                          </p>
+                          <p className="fine">Shell, revolve or patterns: select the spot with Select, then ask in chat.</p>
+                        </div>
+                      )}
+                    </div>
+                    </>
                   )}
                   <div className="rail-tool">
                     <button
@@ -3391,7 +3449,7 @@ export function Workspace(p: Props) {
                   <button className="x" aria-label="Clear selection" onClick={p.facesCtl.clear}><IconX /></button>
                 </ContextBar>
               )}
-              {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
+              {p.featureCtl.mode && !p.modifyCtl.op && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
                 <div className="box-hint">Shift-click faces to build a selection · shift-drag to box-select</div>
               )}
               {p.measureCtl.mode && !p.measureCtl.draft && (

@@ -105,6 +105,7 @@ interface Props {
   selectedPin: string | null;
   selectMode: boolean;
   selectKind: SelectKind;
+  featureSelected: boolean; // the app still holds the picked feature → keep its lock lit
   boxSelectionActive: boolean; // App still holds a box-selected face set → keep the overlay
   transformMode: TransformMode; // whole-body gizmo: off / rotate / scale
   /** Pen-cut tool: drag across the part to draw the line it gets sliced along. The
@@ -468,7 +469,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
@@ -2144,14 +2145,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // after an edit (kept off the per-edit critical path so model swaps feel instant).
       if (ensureTri(s2)) {
         const hit = rc.intersectObject(s2.mesh, false)[0];
+        // A locked selection OWNS the overlay. The highlight objects are shared, so
+        // hover-painting whatever is under the cursor erased the picked face the
+        // moment the mouse moved — the pick only looked selected with the pointer
+        // parked off the model (a real report). While locked: the pick stays lit,
+        // the cursor still promises a retargeting click.
+        if (s2.lockedHit) {
+          showFeature(s2, cb.current.selectKind === "auto" ? resolveAutoKind(s2.lockedHit.point) : cb.current.selectKind, s2.lockedHit.faceIndex, s2.lockedHit.point);
+          renderer.domElement.style.cursor = hit ? "crosshair" : "";
+          return;
+        }
         if (hit && hit.faceIndex != null) {
           showFeature(s2, cb.current.selectKind === "auto" ? resolveAutoKind(hit.point) : cb.current.selectKind, hit.faceIndex, hit.point);
           renderer.domElement.style.cursor = "crosshair";
           return;
         }
-        // Off the model — fall back to the locked feature, if any.
-        if (s2.lockedHit) showFeature(s2, cb.current.selectKind === "auto" ? resolveAutoKind(s2.lockedHit.point) : cb.current.selectKind, s2.lockedHit.faceIndex, s2.lockedHit.point);
-        else { s2.highlight.visible = false; s2.edgeHi.visible = false; s2.vertHi.visible = false; }
+        s2.highlight.visible = false; s2.edgeHi.visible = false; s2.vertHi.visible = false;
         renderer.domElement.style.cursor = "";
       }
     };
@@ -2741,6 +2750,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.controls.enabled = true;
     s.renderer.domElement.style.cursor = "";
   }, [selectMode]);
+
+  // The app dropped its picked feature (Clear button, arming Modify) — the lock must
+  // follow, or the persistent highlight would outlive the selection it stands for.
+  useEffect(() => {
+    const s = st.current;
+    if (!s || featureSelected || !s.lockedHit) return;
+    s.lockedHit = null;
+    s.highlight.visible = false;
+    s.edgeHi.visible = false;
+    s.vertHi.visible = false;
+  }, [featureSelected]);
 
   // When the app drops the box-selected face set, hide its overlay.
   useEffect(() => {

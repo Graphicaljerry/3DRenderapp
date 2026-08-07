@@ -3180,6 +3180,14 @@ export default function App() {
     setPinText("");
   }
 
+  // Modify tool: choose the OPERATION first, then click geometry — Spline's flow.
+  // While armed, every picked face/edge/corner applies the pending op immediately,
+  // so "round these four corners" is four clicks, not four dialogs.
+  const [modifyOp, setModifyOp] = useState<{ op: "push" | "round" | "bevel"; size: number } | null>(null);
+  const modifyOpRef = useRef(modifyOp);
+  modifyOpRef.current = modifyOp;
+  useEffect(() => { if (!selectMode) setModifyOp(null); }, [selectMode]);
+
   function pickFeature(f: PickedFeature) {
     // The hole tool is waiting for its alignment reference → this pick IS the reference
     // (click another hole's rim or inner wall; its centre becomes the datum).
@@ -3190,6 +3198,15 @@ export default function App() {
         (f.kind === "edge" && f.closed) || (f.kind === "face" && f.curved) ? [f.cx, f.cy, f.cz] : f.at ?? [f.cx, f.cy, f.cz];
       const refDia = f.kind === "edge" && f.closed && f.len ? Math.round((f.len / Math.PI) * 10) / 10 : undefined;
       setHoleDraft((d) => (d ? { ...d, picking: false, ref: { center: c, diameter: refDia } } : d));
+      return;
+    }
+    const mo = modifyOpRef.current;
+    if (mo && activeKind === "replicad") {
+      // Armed tool: the click IS the edit — apply and stay armed, never park a
+      // selection (its context bar would double the flyout's own controls).
+      if (mo.op === "push" && f.kind !== "face") return; // push needs a face; the hint says so
+      const type: PointOp["type"] = mo.op === "push" ? "extrude" : f.kind === "face" ? (mo.op === "round" ? "face-fillet" : "face-chamfer") : (mo.op === "round" ? "fillet" : "chamfer");
+      void applyDirectOp(type, mo.op === "push" ? mo.size : Math.abs(mo.size), f);
       return;
     }
     setSelectedFeature(f);
@@ -3749,8 +3766,8 @@ export default function App() {
 
   // Direct geometry op on the picked edge / corner / face — computed by replicad in
   // the worker with NO AI call (free). Commits a version so Undo works.
-  async function applyDirectOp(type: PointOp["type"], size: number) {
-    const f = selectedFeature;
+  async function applyDirectOp(type: PointOp["type"], size: number, feat?: PickedFeature) {
+    const f = feat ?? selectedFeature;
     if (!f || !size) return;
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
@@ -5815,6 +5832,7 @@ export default function App() {
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onKeepAside={keepVersionAside}
+        modifyCtl={{ op: modifyOp, set: (v) => { if (v) setSelectedFeature(null); setModifyOp(v); } }}
         exportPaint={{ on: exportPainted, set: setExportPainted, has: !!facePaint }}
         onEditFrozen={(id) => void editFrozen(id)}
         onCheckFit={(ids) => void checkFit(ids)}

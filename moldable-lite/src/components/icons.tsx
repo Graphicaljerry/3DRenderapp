@@ -107,6 +107,14 @@ export const IconPointer = ({ size = 15 }: { size?: number }) => (
     <path d="M5 3l7.4 17.5 2.2-7.2 7.2-2.4Z" />
   </svg>
 );
+/** Modify tool: a face pulled up out of a slab. */
+export const IconModify = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 15.5h16v5H4Z" />
+    <path d="M8.5 15.5v-4.5h7v4.5" />
+    <path d="M12 8V2.5M9.3 5.2 12 2.5l2.7 2.7" />
+  </svg>
+);
 /** Four-way move arrows — the transform tool. */
 export const IconTransform = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>

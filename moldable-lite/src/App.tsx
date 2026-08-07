@@ -3361,7 +3361,10 @@ export default function App() {
       }
     }, 250);
     return () => clearTimeout(h);
-  }, [textTool]);
+    // Keyed on the SHAPE of the spec, not the whole object: Angle is a pose the Viewer
+    // applies to the quaternion, so spinning the ghost must not re-run the font
+    // pipeline (a debounce, a fetch and a tessellation) for geometry that can't change.
+  }, [textTool && JSON.stringify({ ...textTool, roll: 0 })]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Commit the ghost's exact pose as a new text layer. The tool stays armed — placing
    *  a second line is another click, same as the Shape tool. */
   function placeText(at: [number, number, number], quat: [number, number, number, number]) {
@@ -3372,6 +3375,10 @@ export default function App() {
     const name = t.text.length > 18 ? `“${t.text.slice(0, 17)}…”` : `“${t.text}”`;
     setAttachments((a) => [...a, { id, geometry: g.clone(), name, text: { ...t }, place: { at, quat } }]);
     setTextEditId(id); // its numbers are right there to retype, like a just-dropped shape
+    // …and its handles are right there to grab. Dropping something and having it come up
+    // selected is the universal 3D-app gesture, and without it the only route to the
+    // gizmo was hunting for the layer's row in the Placed list.
+    selectAttach(id);
     explainOnce("text", `Text is its own **layer**: move or spin it with Transform, retype anything in the Text panel, and find it in **Objects**. Merge raises it off the surface; Engrave carves it in — both bake the model to a mesh, so do CAD edits first.`);
   }
   /** Re-run the pipeline for a placed text with its edited spec. The mesh keeps its
@@ -3383,6 +3390,13 @@ export default function App() {
     const spec: TextSpec = { ...cur.text, ...patch };
     const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
     setAttachments((l) => l.map((x) => (x.id === id ? { ...x, text: spec, name } : x)));
+    // Angle is a pose: spin the layer where it stands rather than rebuilding a font.
+    // Applied as a DELTA so it composes with any gizmo rotation instead of yanking the
+    // text back to a pose the user has since moved away from.
+    if (patch.roll !== undefined && patch.roll !== cur.text.roll) {
+      viewer.current?.rollAttachment(id, patch.roll - (cur.text.roll ?? 0));
+    }
+    if (Object.keys(patch).every((k) => k === "roll")) return; // nothing to re-tessellate
     const gen = (textEditGen.current.get(id) ?? 0) + 1;
     textEditGen.current.set(id, gen);
     try {

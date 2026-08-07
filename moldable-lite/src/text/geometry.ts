@@ -4,6 +4,7 @@
 import * as THREE from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import type { Font } from "opentype.js";
+import { reverseWinding } from "../three/winding";
 
 export interface TextSpec {
   text: string;
@@ -13,9 +14,13 @@ export interface TextSpec {
   depth: number;    // extrusion, mm
   bevel: number;    // bevel size AND depth, mm; 0 = crisp edge
   spacing: number;  // extra tracking between glyphs, mm
+  /** Spin about the face the text lies on, degrees. Pose, not shape — the builder
+   *  below ignores it; the Viewer folds it into the placement quaternion. It lives on
+   *  the spec so the panel can show it and so it survives retyping the words. */
+  roll: number;
 }
 
-export const TEXT_DEFAULT: TextSpec = { text: "Text", family: "Inter", size: 12, depth: 3, bevel: 0.4, spacing: 0 };
+export const TEXT_DEFAULT: TextSpec = { text: "Text", family: "Inter", size: 12, depth: 3, bevel: 0.4, spacing: 0, roll: 0 };
 
 /** Build the solid for a spec: lying in XY, extruding toward +Z, centred on the
  *  origin with its BASE at z = 0 — so placing it is "put the origin on the surface,
@@ -51,7 +56,13 @@ export function buildTextGeometry(font: Font, spec: TextSpec): THREE.BufferGeome
     curveSegments: 8,
   });
   // Font paths are y-down; flip to y-up, then centre XY and rest the base at z=0.
+  // The negative Y is a REFLECTION (det = -1), which reverses every triangle's winding
+  // — and computeVertexNormals() below would then bake inward-facing normals into the
+  // whole solid, so a FrontSide material shows you its interior shell. The SVG/logo
+  // path (svg/extrude.ts) does the same flip and repairs it the same way; the text
+  // path shipped without the repair.
   g.scale(1, -1, 1);
+  reverseWinding(g);
   g.computeBoundingBox();
   const bb = g.boundingBox!;
   g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);

@@ -3,6 +3,7 @@ import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { Evaluator, Brush, SUBTRACTION } from "three-bvh-csg";
 import { repairGeometry } from "../print/repair";
+import { reverseWinding } from "../three/winding";
 
 const csgMat = new THREE.MeshStandardMaterial();
 
@@ -77,20 +78,6 @@ export function extrudeSvg(svgText: string, opts: { sizeMm: number; heightMm: nu
   geom.boundingBox!.getSize(size);
   const r1 = (n: number) => Math.round(n * 10) / 10;
   return { geometry: geom, dims: { x: r1(size.x), y: r1(size.y), z: r1(size.z) } };
-}
-
-/** Swap two vertices of every triangle in a non-indexed buffer to reverse winding. */
-function reverseWinding(geom: THREE.BufferGeometry) {
-  const pos = geom.getAttribute("position") as THREE.BufferAttribute;
-  const a = pos.array as Float32Array;
-  for (let i = 0; i + 8 < a.length; i += 9) {
-    for (let k = 0; k < 3; k++) {
-      const t = a[i + 3 + k];
-      a[i + 3 + k] = a[i + 6 + k];
-      a[i + 6 + k] = t;
-    }
-  }
-  pos.needsUpdate = true;
 }
 
 /** Centre a Z-up geometry in XY and sit it flat on the bed; return its dims. */

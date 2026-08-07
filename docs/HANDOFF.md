@@ -1013,6 +1013,39 @@ resolve) is now `|sin·sin|` — real diamond bumps with printable flanks.
 Probe: `pattern.mjs`. `plook.mjs` shoots one image per pattern — worth re-running after
 any change to `patternUV`, since none of these failures showed up as an error.
 
+**Text orientation + free transform (build 373).** Two independent defects, both shipped
+in 371 and both found by measuring rather than reading:
+
+1. *The roll was never constrained.* `Viewer.tsx` posed text with
+   `setFromUnitVectors(+Z, faceNormal)` — the shortest arc between two vectors, which
+   pins +Z and lets the roll fall out of the arithmetic. On a box that put text upright
+   on the −Y wall, 90° on its side on both ±X walls, and upside down on +Y; on a curved
+   wall the roll just tracked the azimuth. Replaced with `faceDecalQuat(n, rollDeg)`,
+   which builds an explicit basis: +Z = the face normal, +Y = world-up projected into
+   the face plane (falling back to world +Y on a top/bottom face, which has no vertical
+   of its own), +X = up × n so the basis stays right-handed and glyphs are never
+   mirrored. Measured on all five reachable faces of a box and at four azimuths round a
+   curved wall: letters-up·worldZ = 1 everywhere.
+2. *The solid was inside-out.* `buildTextGeometry`'s `g.scale(1, -1, 1)` (opentype
+   outlines are y-down) is a det = −1 reflection that reverses triangle winding, and the
+   `computeVertexNormals()` after it baked inward normals into the whole solid — so a
+   FrontSide material drew its interior shell. `svg/extrude.ts` does the same flip for
+   logos and repairs it; the text path never did. `reverseWinding` moved to
+   `src/three/winding.ts` and both callers share it. Front-cap normal went −1 → +1.
+
+Also, from the same request: **Angle on the face** in the Text panel (a number plus
+Turn 90°) spins the ghost before placing and the layer after — applied as a delta via
+the new `ViewerHandle.rollAttachment`, so it composes with gizmo rotation instead of
+snapping the layer back. `roll` lives on `TextSpec`, and the ghost-rebuild effect is
+keyed on the spec minus roll so spinning never re-runs the font pipeline.
+**Placing now selects the layer**, so the transform handles are on it immediately, and
+`enterTransform`'s attach branch honours its `mode` argument — it hard-coded
+`setMode("translate")`, so the rail's Scale button had done nothing to a text or logo
+layer since the gizmo was written.
+
+Probe: `textorient.mjs` (per-face det / winding / up-vector, plus the Angle field and
+the gizmo), `tcup.mjs` (four azimuths on a curved wall).
+
 ## Build 360 — Shape tool (primitive booleans that stay parametric)
 
 New `SolidOp` in the op chain (`engine/types.ts`, executed in `worker/cad.worker.ts`):

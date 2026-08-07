@@ -39,6 +39,11 @@ export interface ViewerHandle {
   bakeAttachment: (id: string) => Float32Array | null;
   /** Settle a floating attachment back onto the build plate (bbox min z → 0). */
   dropAttachment: (id: string) => void;
+  /** Spin a placed attachment about its OWN facing axis by a delta, in degrees — the
+   *  Text panel's Angle field once the text is down. A delta rather than an absolute
+   *  angle so it composes with whatever the gizmo has already done instead of
+   *  snapping the layer back to a pose the user has since moved away from. */
+  rollAttachment: (id: string, deltaDeg: number) => void;
   /** Dolly toward (factor > 1) or away from (factor < 1) the orbit target. */
   zoomBy: (factor: number) => void;
   /** Screenshot the CURRENT camera view (what the user sees, minus UI overlays).
@@ -206,6 +211,8 @@ interface Props {
    *  geometry is prebuilt by App (fonts load async) — null means still loading. */
   textPlace: {
     geometry: THREE.BufferGeometry | null;
+    /** Extra spin about the face normal, degrees — the panel's Angle field. */
+    roll: number;
     onPlace: (at: [number, number, number], quat: [number, number, number, number]) => void;
   } | null;
 }
@@ -545,6 +552,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   const textIx = useRef<Props["textPlace"]>(textPlace);
   textIx.current = textPlace;
   const textGhost = useRef<THREE.Mesh | null>(null);
+  /** The face normal under the cursor at the last hover — so typing a new Angle can
+   *  re-spin the ghost where it already sits, without waiting for the mouse to twitch. */
+  const textNrm = useRef(new THREE.Vector3(0, 0, 1));
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
   // Set by the mount effect: "the scene changed, draw again" (see render-on-demand).
@@ -2210,8 +2220,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const hit = rc.intersectObject(s3.mesh, false)[0];
           if (hit?.face) {
             const wn = hit.face.normal.clone().transformDirection(s3.mesh.matrixWorld).normalize();
+            textNrm.current.copy(wn);
             g.position.copy(hit.point).addScaledVector(wn, 0.02); // a hair proud — no z-fight
-            g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), wn);
+            g.quaternion.copy(faceDecalQuat(wn, textIx.current.roll));
             g.visible = true;
           } else g.visible = false;
           renderer.domElement.style.cursor = hit?.face ? "crosshair" : "";
@@ -3416,6 +3427,15 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     invalidateRef.current(2);
   }, [textPlace?.geometry, !!textPlace]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Typing an Angle re-spins the ghost in place. Without this the panel looks broken:
+  // the ghost only re-poses on pointermove, so the number changed and nothing moved.
+  useEffect(() => {
+    const g = textGhost.current;
+    if (!g || !g.visible || !textPlace) return;
+    g.quaternion.copy(faceDecalQuat(textNrm.current, textPlace.roll));
+    invalidateRef.current(2);
+  }, [textPlace?.roll]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
   // Holding SHIFT overrides rotation to right-angle steps (90/180/270/360) for the
   // duration of the hold — the near-universal CAD/slicer convention.
@@ -3640,6 +3660,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       m.position.z -= bb.min.z;
       m.updateWorldMatrix(true, false);
       if (rearm) enterTransform(s, cb.current.transformMode as "move" | "rotate" | "scale", "attach");
+    },
+    rollAttachment(id, deltaDeg) {
+      const s = st.current;
+      const m = s?.attachMap.get(id);
+      if (!s || !m || !deltaDeg) return;
+      // Same release/re-arm dance as dropAttachment: while the gizmo owns the mesh it
+      // lives under a pivot group, so rotating it in place would be measured in the
+      // pivot's frame instead of its own.
+      const rearm = !!s.attachGroup && cb.current.transformMode !== "off";
+      releaseAttachGroup(s);
+      m.rotateZ(THREE.MathUtils.degToRad(deltaDeg)); // local Z = the face it is lying on
+      m.updateWorldMatrix(true, false);
+      if (rearm) enterTransform(s, cb.current.transformMode as "move" | "rotate" | "scale", "attach");
+      invalidateRef.current(2);
     },
     captureThumbnail() {
       return st.current ? captureThumbnail(st.current) : null;
@@ -4609,9 +4643,16 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
     s.scene.add(pivot);
     for (const m of meshes) pivot.attach(m);
     s.attachGroup = pivot;
-    s.tc.setMode("translate");
+    // Honour the mode the rail asked for. This branch used to hard-code "translate" and
+    // drop `mode` on the floor, so Scale did nothing at all to a text or logo layer —
+    // the only way to resize one was the bounding-box corner dots, which is not where
+    // anybody looks after pressing a button labelled Scale.
+    s.tc.setMode(mode === "scale" ? "scale" : mode === "rotate" ? "rotate" : "translate");
     s.tc.attach(pivot);
-    s.tcR.attach(pivot); // combined: arrows + rings together
+    // Same combined-handles rule as the model: in Move you get arrows AND rings, so
+    // sliding or spinning a placed word is one grab away.
+    if (mode === "move") s.tcR.attach(pivot);
+    else s.tcR.detach();
     return;
   }
   if (!s.mesh) { s.tc.detach(); s.tcR.detach(); return; }
@@ -4631,6 +4672,29 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
   // rotate is one grab away with zero mode switching (scale = the box anchors).
   if (mode === "move") s.tcR.attach(pivot);
   else s.tcR.detach();
+}
+
+/** The pose for something laid flat on a face — text today, any decal tomorrow: local
+ *  +Z out along the surface normal, local +Y as near world-up as that face allows, so
+ *  the letters stand up wherever you put them. Plus an optional spin about the normal.
+ *
+ *  `setFromUnitVectors(+Z, n)` — what this used to be — is the shortest arc between two
+ *  vectors, so it pins +Z and lets the roll fall out of the arithmetic. On a box that
+ *  put text upright on the -Y wall, flat on its side on both ±X walls, and upside down
+ *  on the +Y wall; on a cylinder the roll just tracked the azimuth. Naming the up
+ *  vector is the whole fix. */
+const WORLD_UP = new THREE.Vector3(0, 0, 1);
+function faceDecalQuat(n: THREE.Vector3, rollDeg = 0): THREE.Quaternion {
+  const up = WORLD_UP.clone().addScaledVector(n, -WORLD_UP.dot(n));
+  // A top or bottom face has no "up" inside its own plane. Read those from the front,
+  // which is the way you are looking at the part when you orbit over it.
+  if (up.lengthSq() < 1e-6) up.set(0, 1, 0).addScaledVector(n, -n.y);
+  up.normalize();
+  // right = up × n makes (right, up, n) right-handed, so the glyphs are never mirrored.
+  const right = new THREE.Vector3().crossVectors(up, n).normalize();
+  const q = new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(right, up, n));
+  if (rollDeg) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), (rollDeg * Math.PI) / 180));
+  return q;
 }
 
 /** Dissolve the multi-select pivot, baking each member's world transform back onto it. */

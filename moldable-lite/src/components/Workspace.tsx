@@ -1938,8 +1938,18 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
           </label>
         ))}
       </div>
+      {/* Which way is up on the face you're pointing at. Straight up is worked out for
+          you now, so this is for the times you want it sideways down a spine or along a
+          curve — not a repair job. */}
+      <div className="shape-lbl"><span>Angle on the face</span><span className="shape-unit">°</span></div>
+      <div className="text-angle">
+        <input type="number" step={15} value={spec.roll ?? 0} aria-label="Angle on the face"
+          onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v)) patch({ roll: v }); }} />
+        <button className="ghost sm" title="Quarter turn — the usual way to run text down the side of a part"
+          onClick={() => patch({ roll: ((((spec.roll ?? 0) + 90) % 360) + 360) % 360 })}>Turn 90°</button>
+      </div>
       {editing ? (
-        <p className="fine">Editing this one in place — its spot doesn't move. Use Move to slide or spin it.</p>
+        <p className="fine">Editing this one in place — its spot doesn't move. Drag the handles on it to move, spin or resize; the Transform rail switches which.</p>
       ) : (
         <p className="fine">The text rides the cursor — click the model to set it down. It lands as its own layer: movable, editable, in Objects.</p>
       )}
@@ -3232,7 +3242,7 @@ export function Workspace(p: Props) {
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
                   : null}
                 onModelDblClick={() => { setDockPanel("params"); setDockOpen(true); }}
-                textPlace={p.textCtl.tool ? { geometry: p.textCtl.ghost, onPlace: p.textCtl.place } : null}
+                textPlace={p.textCtl.tool ? { geometry: p.textCtl.ghost, roll: p.textCtl.tool.roll ?? 0, onPlace: p.textCtl.place } : null}
                 magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
                   ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, snap: p.magnetCtl.tool.snap, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
                   : p.screwCtl.tool && p.screwCtl.cut

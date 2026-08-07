@@ -7,6 +7,10 @@ import { installBVH, ensureBoundsTree } from "../three/bvh";
 
 installBVH();
 
+/** Touch pointers need a bigger hit ring than a mouse. Read live rather than cached —
+ *  an iPad with a trackpad attached switches between the two. */
+const coarsePointer = () => typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+
 /** A point-to-point measurement on the model (display coords). */
 export type Measurement = { id: string; a: [number, number, number]; b: [number, number, number] };
 
@@ -1509,7 +1513,24 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!tri || !tri.edges.length) return "face";
       const vh = canvasRect().height || 1;
       const wpp = (2 * camera.position.distanceTo(hit) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / vh;
-      const edgeTol = 7 * wpp, vertTol = 11 * wpp;
+      // The ring around the cursor that counts as "on the edge", in SCREEN pixels — so it
+      // already tracked zoom. What it didn't track is how big the PART is on screen: 7 px
+      // is a comfortable target on a part filling the view and an impossible one on a part
+      // 120 px across, which is exactly when people complain edges won't catch. Grow the
+      // ring as the part shrinks, and cap it at a fraction of the part so faces stay
+      // pickable at any zoom. A finger needs more room than a mouse.
+      let spanPx = 600;
+      if (s2?.mesh) {
+        const bb = s2.mesh.geometry.boundingBox ?? (s2.mesh.geometry.computeBoundingBox(), s2.mesh.geometry.boundingBox);
+        if (bb) {
+          const sz = bb.getSize(new THREE.Vector3());
+          spanPx = Math.max(sz.x, sz.y, sz.z) / wpp;
+        }
+      }
+      const base = coarsePointer() ? 13 : 9;
+      const grow = THREE.MathUtils.clamp(420 / Math.max(spanPx, 1), 1, 2.4);
+      const edgePx = Math.min(base * grow, Math.max(spanPx * 0.06, base));
+      const edgeTol = edgePx * wpp, vertTol = edgePx * 1.5 * wpp;
       const e = tri.edges;
       const a = new THREE.Vector3(), b2 = new THREE.Vector3(), c = new THREE.Vector3();
       const seg = new THREE.Line3();

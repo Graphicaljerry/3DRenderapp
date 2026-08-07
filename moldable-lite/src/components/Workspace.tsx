@@ -34,7 +34,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -45,16 +45,6 @@ import { PROVIDERS, costLabel } from "../gen/registry";
 
 // The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
 // Each carries an icon so the label can collapse on narrow viewer columns (iPad).
-export const SELECT_MODES: { kind: SelectKind; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
-  // Auto is the default: the cursor decides — an edge when you're riding one, a
-  // corner at its end, the face otherwise. The explicit modes remain as overrides
-  // for when a crowded spot needs the intent pinned down.
-  { kind: "auto", label: "Auto", icon: IconSparkle },
-  { kind: "face", label: "Face", icon: IconFaceSel },
-  { kind: "edge", label: "Edge", icon: IconEdgeSel },
-  { kind: "vertex", label: "Corner", icon: IconCornerSel },
-  { kind: "point", label: "Point", icon: IconPointSel },
-];
 
 // gen: true routes the chip to the free Generative engine instead of Precise CAD.
 const SUGGESTIONS: { text: string; gen?: boolean }[] = [
@@ -1461,16 +1451,16 @@ function HelpSheet({ onClose }: { onClose: () => void }) {
     { icon: <IconCube />, text: "Orbit: drag rotates, pinch or scroll zooms, middle- or right-drag (two fingers) pans." },
     { icon: <IconPointer />, text: "Right-click the model, a part, or empty space for quick actions — rename, duplicate, clearance tools, plates." },
     { icon: <IconLayers />, text: "Objects panel: double-click any name (or a plate tab) to rename it." },
-    { icon: <IconPointer />, text: "Select: pick Face, Edge, Corner or Point (keys 1–4), then tap the model to choose a spot to edit." },
+    { icon: <IconModify />, text: "Modify: hover the model — it picks the face, edge or corner under the cursor — then Push/Pull, Rounded or Angled it (keys 1–3)." },
     { icon: <IconEdgeSel />, text: "Drag the blue arrow to extrude a face or round an edge — the model updates live; type an exact mm in the quick-edit box instead if you prefer." },
     { icon: <IconCheck />, text: "If a size doesn't fit the geometry, Moldable applies the largest that does and tells you both numbers." },
-    { icon: <IconFaceSel />, text: "Shift-drag (with Select on) box-selects many faces at once." },
+    { icon: <IconFaceSel />, text: "Shift-drag (with Modify on) box-selects many faces at once." },
     { icon: <IconTransform />, text: "Transform: move, rotate or scale the whole part — rotate is how you set print orientation." },
     { icon: <IconRuler />, text: "Measure: tap two points to read the distance between them." },
-    { icon: <IconFaceSel />, text: "Drill holes: Select a face → Hole… — type exact offsets, snap to a magnet grid, or align with another hole (pick its rim, then zero a Δ or type the spacing)." },
+    { icon: <IconFaceSel />, text: "Drill holes: click a face → Hole… — type exact offsets, snap to a magnet grid, or align with another hole (pick its rim, then zero a Δ or type the spacing)." },
     { icon: <IconMarker />, text: "Mark: draw around a part of the model — the marked screenshot attaches to the chat, so \"make this thicker\" needs no coordinates." },
     { icon: <IconUndo />, text: "Undo ⌘/Ctrl+Z · Redo ⇧⌘Z or Ctrl+Y — including paint strokes. Every edit is a restorable version in History." },
-    { icon: <IconPointer />, text: "Keys: V Select · G Transform · M Measure · B Paint · F re-frame the model · 1–4 pick Face/Edge/Corner/Point." },
+    { icon: <IconPointer />, text: "Keys: V Modify · N Note · G Transform · M Measure · B Paint · F re-frame the model · 1–3 pick the Modify operation." },
     { icon: <IconX />, text: "Esc — or a click on empty canvas — puts the current tool down and closes any open panel." },
     { icon: <IconPrinter />, text: "The bottom bar shows your printer's plate — tap it to switch printers or bed size." },
   ];
@@ -1574,6 +1564,11 @@ function PathToPrint({ hasModel, report, onOpenCheck }: {
 function ModifyFly({ ctl, featureCtl }: { ctl: Props["modifyCtl"]; featureCtl: Props["featureCtl"] }) {
   const op = ctl.op!;
   const sel = ctl.editIndex != null ? ctl.edges.find((e) => e.index === ctl.editIndex) ?? null : null;
+  // What this spot can actually take. Push/Pull runs both ways (in cuts, out adds);
+  // a rounding only ever goes outward from zero.
+  const arrow = featureCtl.pushArrow;
+  const lo = op.op === "push" ? (arrow?.min ?? -Infinity) : 0.05;
+  const hi = arrow?.max ?? Infinity;
   const OPS = [
     { k: "push" as const, label: "Push/Pull", Icon: IconPushPull, tip: "Move a flat face along its own direction — out adds material, in cuts it away" },
     { k: "round" as const, label: "Rounded", Icon: IconEdgeRound, tip: "Take the corner off as a curve (a fillet) — kinder on hands and stronger in print" },
@@ -1589,16 +1584,20 @@ function ModifyFly({ ctl, featureCtl }: { ctl: Props["modifyCtl"]; featureCtl: P
           </button>
         ))}
       </div>
-      {/* Mid-drag the box mirrors the live value; typing still works between drags. */}
+      {/* Mid-drag the box mirrors the live value; typing still works between drags.
+          The limits come from the same computation that stops the drag arrow, so the
+          typed path and the dragged path agree — you can't type a number the drag
+          wouldn't reach, which is where the "errors when rounding edges" came from. */}
       <label className="modify-size">
         <input
           type="number"
           step={0.5}
-          min={0.05}
+          min={lo}
+          max={hi}
           value={featureCtl.liveMm ?? op.size}
           onChange={(e) => {
             const v = parseFloat(e.target.value);
-            if (Number.isFinite(v)) ctl.set({ op: op.op, size: v });
+            if (Number.isFinite(v)) ctl.set({ op: op.op, size: Math.min(hi, Math.max(lo, v)) });
           }}
         />
         <span>mm</span>
@@ -1609,6 +1608,9 @@ function ModifyFly({ ctl, featureCtl }: { ctl: Props["modifyCtl"]; featureCtl: P
           onClick={ctl.apply}
         >Apply</button>
       </label>
+      {featureCtl.selected && hi < Infinity && (
+        <p className="fine modify-range">Anything from {fmtMm(lo)} to {fmtMm(hi)} fits here.</p>
+      )}
       {featureCtl.liveStop ? (
         <p className="fine modify-stop">
           {featureCtl.liveStop === "max"
@@ -1799,6 +1801,13 @@ function ShapeFly({ ctl, units }: { ctl: Props["shapeCtl"]; units: "mm" | "in" }
       )}
     </div>
   );
+}
+
+/** A limit, in mm, trimmed to something readable ("−12.4", "8"). */
+function fmtMm(v: number): string {
+  if (!Number.isFinite(v)) return "any";
+  const r = Math.round(v * 10) / 10;
+  return `${r} mm`;
 }
 
 /** One length in the chosen unit, for inline readouts. */
@@ -2144,6 +2153,8 @@ interface Props {
     toggleMode: () => void;
     kind: SelectKind;
     setKind: (k: SelectKind) => void;
+    /** Arm/disarm the Note (pin) tool — the one survivor of the old kind row. */
+    togglePin: () => void;
     selected: PickedFeature | null;
     text: string;
     setText: (s: string) => void;
@@ -3158,36 +3169,11 @@ export function Workspace(p: Props) {
                 <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
                   {(p.activeKind === "replicad" || p.separatedKind === "replicad") && (
                     <>
-                    <div className="rail-tool">
-                      {/* Select feeds CAD feature edits (fillet/extrude/hole on picked faces/edges) —
-                          meshes can't take those ops, so the tool hides for them. While a CAD model
-                          is split into parts the canvas shows plain part meshes, but the tool stays
-                          VISIBLE and disabled — vanishing mid-session read as a bug. */}
-                      <button
-                        className={`ghost sm iconbtn${p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool ? " on" : ""}`}
-                        aria-pressed={p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool}
-                        aria-label="Select"
-                        disabled={p.activeKind !== "replicad"}
-                        title={p.activeKind !== "replicad"
-                          ? "Select works on the whole CAD model — Regroup parts to use it"
-                          : "Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"}
-                        onClick={() => { if (p.modifyCtl.op || p.shapeCtl.tool) { p.modifyCtl.set(null); p.shapeCtl.set(null); } else p.featureCtl.toggleMode(); }}
-                      >
-                        <IconPointer />
-                      <span className="rail-name">Select</span>
-                    </button>
-                      {p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool && p.activeKind === "replicad" && (
-                        <div className="rail-fly">
-                          <div className="seg sm mode-seg kind-seg">
-                            {SELECT_MODES.map((m, i) => (
-                              <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
-                                <m.icon /><span className="btn-label">{m.label}</span>
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    {/* Select used to live here. It picked a face/edge/corner and then you
+                        reached for Modify to do something with it — two tools for one
+                        motion, and a five-way "what am I picking" row on top. Modify does
+                        the whole thing now: hover picks whatever is under the cursor, click
+                        holds it, and the operation is already on the panel. */}
                     <div className="rail-tool">
                       {/* Shape: the "I know exactly where I want this lump/hole" tool.
                           Placing is a click; being EXACT is the number fields under it. */}
@@ -3574,6 +3560,27 @@ export function Workspace(p: Props) {
                       }}
                     />
                   </div>
+                  {/* Point/pin: mark an exact spot and write a note for the AI. It was the
+                      fifth option in Select's "what am I picking" row — sitting beside four
+                      that pick geometry while doing something else entirely. With that row
+                      gone it gets its own entry rather than disappearing. */}
+                  {(p.activeKind === "replicad" || p.separatedKind === "replicad") && (
+                    <div className="rail-tool">
+                      <button
+                        className={`ghost sm iconbtn${p.featureCtl.mode && p.featureCtl.kind === "point" ? " on" : ""}`}
+                        aria-pressed={p.featureCtl.mode && p.featureCtl.kind === "point"}
+                        aria-label="Note"
+                        disabled={p.activeKind !== "replicad"}
+                        title={p.activeKind !== "replicad"
+                          ? "Notes work on the whole CAD model — Regroup parts to use it"
+                          : "Note tool: click an exact spot to pin a marker there, then write what should change — the AI gets the coordinates, not a description"}
+                        onClick={p.featureCtl.togglePin}
+                      >
+                        <IconPointSel size={19} />
+                        <span className="rail-name">Note</span>
+                      </button>
+                    </div>
+                  )}
                   <div className="rail-tool">
                     <button
                       className={`ghost sm iconbtn${markMode ? " on" : ""}`}

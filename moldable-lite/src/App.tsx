@@ -5697,8 +5697,14 @@ export default function App() {
    *  let Cut and Fasteners (say) be lit together, each expecting the next click. */
   const selectModeRef = useRef(selectMode);
   selectModeRef.current = selectMode;
+  const selectKindRef = useRef(selectKind);
+  selectKindRef.current = selectKind;
   function standDownTools() {
     setSelectMode(false);
+    // Back to automatic picking. The Note tool is the only thing that sets a kind now,
+    // and without this its "point" mode leaked into the next tool armed after it — the
+    // rail lit Note and Shape together and Shape's clicks dropped pins.
+    setSelectKind("auto");
     setSelectedFeature(null);
     setSelectedFaces([]);
     setModifyOp(null);
@@ -5734,7 +5740,21 @@ export default function App() {
   const toggleModifyTool = () => {
     const on = !modifyOpRef.current;
     standDownTools();
-    if (on) { setModifyOp({ op: "push", size: 2 }); setSelectMode(true); }
+    // Modify absorbed Select, so it owns picking outright — and picking is always
+    // automatic now. The old Auto/Face/Edge/Corner row asked people to declare intent
+    // before they'd even hovered anything; the cursor already knows which of the three
+    // it's on, and the four explicit modes existed to correct a proximity test that has
+    // since been widened to be reliable.
+    if (on) { setModifyOp({ op: "push", size: 2 }); setSelectKind("auto"); setSelectMode(true); }
+  };
+  /** Point/pin: mark an exact spot and write a note about it, for the AI to act on.
+   *  It used to be the fifth entry in Select's kind row — a "what am I picking" option
+   *  sitting beside four that pick geometry, when it does something else entirely. With
+   *  that row gone it gets its own rail entry rather than quietly disappearing. */
+  const togglePinTool = () => {
+    const on = selectKindRef.current !== "point" || !selectModeRef.current;
+    standDownTools(); // resets the kind to auto, so the "off" branch needs nothing more
+    if (on) { setSelectKind("point"); setSelectMode(true); }
   };
   const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } else setMeasurePending(null); return next; });
   const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } };
@@ -5791,17 +5811,17 @@ export default function App() {
       if (e.metaKey || e.ctrlKey || e.altKey) return; // leave every other combo to the OS
       // Escape mirrors clicking empty canvas: put the tool down, close what's open.
       if (e.key === "Escape") { dismissOverlays(); return; }
-      // 1–4 switch the Select tool's mode (Face / Edge / Corner / Point) while it's on.
-      if (selectMode && ["1", "2", "3", "4"].includes(e.key)) {
-        const k = (["face", "edge", "vertex", "point"] as SelectKind[])[Number(e.key) - 1];
-        setSelectKind(k);
-        if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); }
+      // 1–3 pick the Modify operation. They used to switch what KIND of thing you were
+      // picking (Face/Edge/Corner/Point) — a question the cursor now answers on its own.
+      if (modifyOpRef.current && ["1", "2", "3"].includes(e.key)) {
+        setModifyOp({ op: (["push", "round", "bevel"] as const)[Number(e.key) - 1], size: modifyOpRef.current.size });
         return;
       }
       // Single-key tools, like every 3D app. Each toggles, and the setters below
       // already enforce one-tool-at-a-time.
       switch (e.key.toLowerCase()) {
-        case "v": toggleSelectTool(); break;
+        case "v": toggleModifyTool(); break; // Select folded into Modify; V still opens the editing tool
+        case "n": togglePinTool(); break;
         case "g": toggleTransformTool(); break;
         case "m": toggleMeasureTool(); break;
         case "b": setPaintMode(!paintMode); break;
@@ -6367,6 +6387,7 @@ export default function App() {
           kind: selectKind,
           // Switching mode clears the other kind's selection so only one edit target is live.
           setKind: (k) => { setSelectKind(k); setSelectedFaces([]); if (k === "point") setSelectedFeature(null); else { setActivePinId(null); setPinText(""); } },
+          togglePin: togglePinTool,
           selected: selectedFeature,
           text: faceText,
           setText: setFaceText,

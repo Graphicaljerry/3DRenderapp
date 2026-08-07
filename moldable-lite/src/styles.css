@@ -1107,6 +1107,36 @@ button:disabled { cursor: default; }
 /* 234px: the widest row is the screw tool's Bites in / Slides through / Heat-set seg
    at 204px + pill padding — 208px clipped "Heat-set" at the panel edge. */
 .magnet-fly { width: 234px; }
+/* Pattern tool: two tabs over one grid of swatches. The swatch IS the label — a word
+   like "Voronoi" or "Basket" can't tell you what will land on your print, and this is
+   a tool people pick by eye. Same tile language as the Shape picker. */
+.pattern-fly { display: flex; flex-direction: column; gap: 12px; width: 244px; }
+.fx-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; background: var(--ctl); border-radius: var(--r-md); }
+.fx-grid button {
+  display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 7px 2px 6px; border: none; background: none; border-radius: var(--r-sm);
+  color: var(--mut); font-size: 10.5px; font-weight: 500; line-height: 1; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1);
+}
+.fx-grid button:hover { color: var(--ink2); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.fx-grid button:active { transform: scale(.97); }
+.fx-grid button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
+/* The swatch draws in the label's colour, so selection reads on the pattern itself
+   rather than only on the tile behind it. */
+.fx-swatch { display: block; color: var(--mut); opacity: .8; }
+.fx-grid button.on .fx-swatch { color: var(--accent-d); opacity: 1; }
+.fx-grid button:hover .fx-swatch { opacity: 1; }
+.fx-slider { display: flex; flex-direction: column; gap: 4px; font-size: 11.5px; color: var(--ink2); }
+.fx-slider input[type="range"] { width: 100%; }
+.fx-slider b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+/* Which tabs are carrying something, readable without switching to them. */
+.fx-dot { width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: var(--accent); flex: none; }
+.pattern-fly .fine { margin: 0; line-height: 1.45; }
+.fx-busy { color: var(--accent-d); }
+/* A treatment is live but the panel is shut — the rail says so without lighting up as
+   if the tool were armed. */
+.canvas-rail .rail-tool > button.fx-live { color: var(--accent-d); }
+
 /* Add Logo: the formats and what-happens-next are visible BEFORE the file picker. */
 .logo-fly { width: 236px; }
 .logo-fly .fine { margin: 0; line-height: 1.45; }

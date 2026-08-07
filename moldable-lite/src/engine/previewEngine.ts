@@ -60,9 +60,42 @@ export async function growMesh(positions: Float32Array, delta: number): Promise<
   return r.ok ? r.positions : null;
 }
 
-/** Physical surface texture: subdivide + displace the mesh in the preview worker. */
-/** Every physical surface pattern the texture tool offers (real displaced geometry). */
-export type SurfacePattern = "knurl" | "honeycomb" | "noise" | "wave" | "voronoi" | "diamond" | "fuzzy";
+/** Physical surface treatment: subdivide + displace the mesh in the preview worker.
+ *  Two families, one machinery — TEXTURES are micro surface feel (grip, hiding layer
+ *  lines), PATTERNS are decorative geometry you read from across the room. */
+export type SurfacePattern =
+  | "knurl" | "honeycomb" | "noise" | "wave" | "voronoi" | "diamond" | "fuzzy"
+  | "scales" | "chevron" | "weave" | "dots" | "grid" | "ripple";
+export const TEXTURE_KINDS = ["knurl", "honeycomb", "noise", "wave", "voronoi", "diamond", "fuzzy"] as const;
+export const PATTERN_KINDS = ["scales", "chevron", "weave", "dots", "grid", "ripple"] as const;
+
+/** One treatment: what it is, how big a repeat, and how far it stands off the surface
+ *  (negative = carved in). Two of these — one pattern, one texture — can ride at once. */
+export type SurfFxSlot = { kind: SurfacePattern; scale: number; depth: number };
+
+/** Named for what the printed surface looks like, not for the maths behind it. */
+export const FX_LABEL: Record<SurfacePattern, string> = {
+  knurl: "Knurl", honeycomb: "Hex", noise: "Noise", wave: "Wave",
+  voronoi: "Voronoi", diamond: "Diamond", fuzzy: "Fuzzy",
+  scales: "Scales", chevron: "Chevron", weave: "Basket", dots: "Studs",
+  grid: "Waffle", ripple: "Ripple",
+};
+
+export const FX_TIP: Record<SurfacePattern, string> = {
+  knurl: "Crosshatched diamonds, like a tool handle — the classic printed grip.",
+  honeycomb: "Hex cells. Reads as engineered; hides layer lines on big flat panels.",
+  noise: "Fine random roughness — the cheapest way to kill a shiny, plasticky face.",
+  wave: "Soft parallel swells. Gentle on the hand, easy to print at any angle.",
+  voronoi: "Irregular organic cells — stone, coral, bone.",
+  diamond: "Sharp raised diamonds. Grippier than knurl, and it prints crisper.",
+  fuzzy: "Dense micro-bumps. Matte, suede-like, hides everything.",
+  scales: "Overlapping dragon scales — armour, fish, creature props.",
+  chevron: "Bold zigzag bands. Directional and graphic from across the room.",
+  weave: "Basket weave — alternating over-under bars, like woven cane.",
+  dots: "Staggered domed studs. Toy-brick energy, and a real thumb grip.",
+  grid: "Raised waffle lines. Structural, technical, panel-like.",
+  ripple: "Concentric rings spreading from the middle, like water.",
+};
 
 export async function displaceMesh(positions: Float32Array, opts: { pattern: SurfacePattern; scale: number; depth: number }): Promise<Float32Array | null> {
   const r = await ensure().displace(positions, opts);

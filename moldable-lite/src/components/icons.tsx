@@ -1,5 +1,6 @@
 // Central minimal line-icon set — the app's entire iconography (no emojis).
 // 24px grid, 1.8px stroke, currentColor.
+import { useId, type ReactNode } from "react";
 
 const base = {
   fill: "none",
@@ -417,3 +418,47 @@ export const IconChecklist = ({ size = 13 }: { size?: number }) => (
     <path d="M13 7h7M13 18h7" />
   </svg>
 );
+/** Pattern tool — a tile of relief repeating across a surface. */
+export const IconPattern = ({ size = 19 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base}>
+    <path d="M3.6 8.4c1.6-2.2 3.2-2.2 4.8 0s3.2 2.2 4.8 0 3.2-2.2 4.8 0 2.4 1.1 2.4 1.1" />
+    <path d="M3.6 14c1.6-2.2 3.2-2.2 4.8 0s3.2 2.2 4.8 0 3.2-2.2 4.8 0 2.4 1.1 2.4 1.1" />
+    <path d="M3.6 19.6c1.6-2.2 3.2-2.2 4.8 0" opacity=".55" />
+    <path d="M4 4.6h16" opacity=".45" />
+  </svg>
+);
+
+// ---- Pattern swatches: each tile literally draws its own pattern, so a name like
+// "Voronoi" never has to carry the explanation on its own. SVG <pattern> tiles, so
+// they stay crisp at any size and cost one node each.
+const SW: Record<string, { tile: number; body: ReactNode }> = {
+  knurl: { tile: 8, body: <path d="M-2 6 6 -2M2 10 10 2M-2 2 2 -2M6 10 10 6M-2 2 6 10M2 -2 10 6M-2 6 2 10M6 -2 10 2" /> },
+  honeycomb: { tile: 14, body: <path d="M7 1.4 11 3.7v4.6L7 10.6 3 8.3V3.7zM11 3.7l4-2.3M11 8.3l4 2.3M3 3.7-1 1.4M3 8.3-1 10.6" /> },
+  noise: { tile: 12, body: <g>{[[2,3],[7,1.5],[10,5],[4.5,7],[1,9],[8.5,9.5],[5.5,4],[11,10.5]].map(([x, y], i) => <circle key={i} cx={x} cy={y} r=".8" fill="currentColor" stroke="none" />)}</g> },
+  wave: { tile: 12, body: <path d="M0 4c3-3 3 3 6 0s3 3 6 0M0 10c3-3 3 3 6 0s3 3 6 0" /> },
+  voronoi: { tile: 16, body: <path d="M0 5 4 2.5 8.5 4.5 8 9 3.5 10.5 0 8.5M8.5 4.5 13 1 16 4 15 8.5 8 9M8 9 9.5 14 5 16 3.5 10.5M15 8.5 16 13 9.5 14" /> },
+  diamond: { tile: 10, body: <path d="M5 0 10 5 5 10 0 5zM5 2.6 7.4 5 5 7.4 2.6 5z" /> },
+  fuzzy: { tile: 10, body: <path d="M2 2v2M5.5 1v2M8.5 3v2M1 6v2M4 6.5v2M7 7v2M9 7.5v2M3.5 4v1.5M6.5 3.5V5" /> },
+  scales: { tile: 12, body: <g><path d="M-6 6a6 6 0 0 1 12 0" /><path d="M6 6a6 6 0 0 1 12 0" /><path d="M0 12a6 6 0 0 1 12 0" /><path d="M-6 0a6 6 0 0 1 12 0" /><path d="M6 0a6 6 0 0 1 12 0" /></g> },
+  chevron: { tile: 12, body: <path d="M0 4 3 1 6 4 9 1 12 4M0 10 3 7 6 10 9 7 12 10" /> },
+  weave: { tile: 12, body: <g><path d="M1 1h4v4h-4zM7 7h4v4h-4z" /><path d="M7 1v4M9 1v4M3 7v4M5 7v4" opacity=".7" /></g> },
+  dots: { tile: 12, body: <g><circle cx="3" cy="3" r="2" /><circle cx="9" cy="9" r="2" /><circle cx="9" cy="3" r="2" opacity=".45" /><circle cx="3" cy="9" r="2" opacity=".45" /></g> },
+  grid: { tile: 9, body: <path d="M0 4.5h9M4.5 0v9" /> },
+  ripple: { tile: 22, body: <g><circle cx="11" cy="11" r="2.5" /><circle cx="11" cy="11" r="6" /><circle cx="11" cy="11" r="9.5" /></g> },
+};
+
+/** A square of one pattern, tiled — the picker tile's whole job. */
+export const PatternSwatch = ({ kind, size = 34 }: { kind: string; size?: number }) => {
+  const id = useId().replace(/:/g, "");
+  const s = SW[kind] ?? SW.grid;
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" aria-hidden="true" className="fx-swatch">
+      <defs>
+        <pattern id={id} width={s.tile} height={s.tile} patternUnits="userSpaceOnUse">
+          <g fill="none" stroke="currentColor" strokeWidth={1.1} strokeLinecap="round" strokeLinejoin="round">{s.body}</g>
+        </pattern>
+      </defs>
+      <rect width="40" height="40" rx="7" fill={`url(#${id})`} />
+    </svg>
+  );
+};

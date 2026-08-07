@@ -8,7 +8,7 @@ import { geometryToSTL } from "./print/stl";
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, ShowcaseScene, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfacePattern } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfFxSlot } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import type { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp, SolidOp } from "./engine/types";
@@ -674,8 +674,30 @@ export default function App() {
   /** Analyse + auto-repair once, ahead of ANY export. Every download path runs this —
       shipping an unchecked mesh out of one menu and a checked one out of another is
       how a user ends up printing a hole they were told didn't exist. */
-  function prepareExport() {
+  function prepareExport(format?: ExportFormat) {
     if (!result) return null;
+    // A surface pattern/texture lives on the DISPLAY mesh, not in the recipe. Mesh
+    // formats must export what's on screen or the file silently loses the surface;
+    // STEP is the exception — it's the CAD hand-off, and a displaced mesh has no
+    // B-rep to give it, so it exports the smooth solid (exportAs says so in chat).
+    const fx = fxCache.current;
+    const useFx = !!fx && !!(surfFx.pattern || surfFx.texture) && geometry === fx.geom && format !== "step";
+    if (useFx) {
+      fx.geom.computeBoundingBox();
+      const sz = fx.geom.boundingBox!.getSize(new THREE.Vector3());
+      const src: EngineResult = {
+        kind: "generative",
+        geometry: fx.geom,
+        dims: { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 },
+        source: { kind: "gen", provider: "texture", model: "surface" },
+        supportsStep: false,
+        glb: geometryToSTL(fx.geom),
+      };
+      // No applyResult here even if preflight repairs: the treated mesh is transient
+      // export material — writing it into the project would bake the fx, the exact
+      // thing this tool exists not to do.
+      return preflightExport(src, printer);
+    }
     const pf = preflightExport(result, printer);
     if (pf.repaired) {
       const rr = pf.result.kind === "generative" ? { ...pf.result, glb: geometryToSTL(pf.result.geometry), meshXform: undefined } : pf.result;
@@ -689,6 +711,13 @@ export default function App() {
   function paintCaveat(format: string): string {
     if (format === "3mf" || !facePaint?.some((v) => v)) return "";
     return `Your painted colours are not in this file — ${format.toUpperCase()} has nowhere to put them. Export 3MF to keep them.`;
+  }
+  /** Only STEP loses the surface treatment — every mesh format exports the displaced
+      geometry. Someone handing a STEP to a machinist should know the knurl they can
+      see on screen isn't in the file. */
+  function fxStepCaveat(): string {
+    if (!surfFx.pattern && !surfFx.texture) return "";
+    return "The surface pattern isn't in this STEP — STEP carries the smooth CAD solid. Export 3MF or STL for the patterned surface.";
   }
   /** What a repeat of the same export still needs to say: nothing, unless something
       actually happened to the file (paint dropped, mesh repaired). */
@@ -4402,38 +4431,85 @@ export default function App() {
 
   /** Physical surface texture: subdivide + displace the current model's mesh (any kind).
    *  CAD models become meshes here — precision-edit first, texture last (History keeps both). */
-  async function applySurfaceTexture(pattern: SurfacePattern, scale: number, depth: number) {
-    if (!geometry || !result) return;
-    setStatus("generating");
-    try {
-      const src = geometry.index ? geometry.toNonIndexed() : geometry;
-      const positions = new Float32Array(src.getAttribute("position").array as Float32Array);
-      if (src !== geometry) src.dispose();
-      const pos = await displaceMesh(positions, { pattern, scale, depth });
-      if (!pos) throw new Error("this mesh couldn't be welded into a closed solid");
-      const g = new THREE.BufferGeometry();
-      g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-      g.computeVertexNormals();
-      g.computeBoundingBox();
-      const sz = g.boundingBox!.getSize(new THREE.Vector3());
-      const dims = { x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 };
-      const res: EngineResult = {
-        kind: "generative",
-        geometry: g,
-        dims,
-        source: { kind: "gen", provider: "texture", model: pattern },
-        supportsStep: false,
-        glb: geometryToSTL(g),
-      };
-      const wasCad = activeKind === "replicad";
-      applyResult(res, project?.name ?? deriveName("Textured part"), `${pattern} surface texture (${depth} mm) — ${dims.x} × ${dims.y} × ${dims.z} mm`, `texture ${pattern}`);
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Applied a **${pattern}** surface texture (${depth} mm ${depth >= 0 ? "raised" : "engraved"}, ${scale} mm cells) — it's real printable geometry now.${wasCad ? " The model became a mesh (STL/3MF; the parametric CAD version stays in History/Undo)." : ""}` }]);
-    } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't texture this model: ${String(err?.message ?? err)}`, error: true }]);
-    } finally {
-      setStatus("idle");
-    }
+  // ---- Surface patterns & textures, NONDESTRUCTIVELY. The old tool baked the
+  // displacement (a CAD model became a mesh, permanently). Now the treatment is a SPEC:
+  // two slots — a decorative pattern and a micro texture, mergeable — recomputed from
+  // the untouched base geometry whenever the base or a slot changes. Turn a slot off
+  // and the base is exactly what it was; Adjust still works and the fx re-applies on
+  // top of every rebuild. Works on CAD and mesh models alike (it's pure triangles).
+  const [surfFx, setSurfFx] = useState<{ pattern: SurfFxSlot | null; texture: SurfFxSlot | null }>({ pattern: null, texture: null });
+  const [fxBusy, setFxBusy] = useState(false);
+  const fxCache = useRef<{ key: string; geom: THREE.BufferGeometry } | null>(null);
+  const fxGen = useRef(0);
+  /** Re-run printability against whatever surface is actually on screen. Same idle +
+   *  job-token dance as the build path, because a treated mesh is 100× the triangles. */
+  function restat(geo: THREE.BufferGeometry) {
+    const job = ++reportJob.current;
+    scheduleIdle(() => {
+      if (reportJob.current !== job) return;
+      setReport(computeReport(geo));
+    });
   }
+  useEffect(() => {
+    const base = result?.geometry ?? null;
+    const active = !!(surfFx.pattern || surfFx.texture);
+    if (!base) return;
+    if (!active) {
+      fxGen.current++;
+      setFxBusy(false);
+      const old = fxCache.current;
+      if (old) {
+        fxCache.current = null;
+        if (geometry === old.geom) setGeometry(base);
+        old.geom.dispose();
+        restat(base);
+      }
+      return;
+    }
+    const key = `${base.uuid}|${JSON.stringify(surfFx)}`;
+    if (fxCache.current?.key === key) {
+      // Someone restored the plain base (a preview ending, an op failing) — put the
+      // treated surface back. A geometry that is NEITHER base nor fx is a live preview
+      // mid-flight: leave it alone, the fx snaps back when the base returns.
+      if (geometry !== fxCache.current.geom && geometry === base) setGeometry(fxCache.current.geom);
+      return;
+    }
+    const gen = ++fxGen.current;
+    setFxBusy(true);
+    void (async () => {
+      try {
+        const src = base.index ? base.toNonIndexed() : base;
+        let pos = new Float32Array(src.getAttribute("position").array as Float32Array);
+        if (src !== base) src.dispose();
+        // Texture first, pattern on top — the decorative shape rides over the grip.
+        for (const slot of [surfFx.texture, surfFx.pattern]) {
+          if (!slot) continue;
+          const r = await displaceMesh(pos, { pattern: slot.kind, scale: slot.scale, depth: slot.depth });
+          if (gen !== fxGen.current) return;
+          if (!r) throw new Error("this mesh couldn't be welded into a closed solid");
+          pos = new Float32Array(r);
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+        g.computeVertexNormals();
+        g.computeBoundingBox();
+        const old = fxCache.current;
+        fxCache.current = { key, geom: g };
+        setGeometry(g);
+        if (old && old.geom !== g) old.geom.dispose();
+        // Triangles, volume and watertightness all change when the surface does — and
+        // the treated mesh is what gets exported, so the pill must describe THAT, not
+        // the smooth solid underneath it.
+        restat(g);
+      } catch (err: any) {
+        if (gen !== fxGen.current) return;
+        setSurfFx({ pattern: null, texture: null }); // a spec that can't build must not stick
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't put that on the surface: ${String(err?.message ?? err)}`, error: true }]);
+      } finally {
+        if (gen === fxGen.current) setFxBusy(false);
+      }
+    })();
+  }, [result, surfFx, geometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Inspector edit: uniform-scale the part so the given axis hits `target` mm. */
   function scaleToDim(axis: "x" | "y" | "z", target: number) {
@@ -5675,16 +5751,21 @@ export default function App() {
 
   async function exportAs(format: ExportFormat) {
     if (!result) return;
-    const engine = result.kind === "generative" ? await getGenEngine() : sel?.engine;
-    if (!engine) return;
     try {
       // Print-ready by default: analyse, auto-repair meshes, sanity-check scale/bed.
-      const pf = prepareExport();
+      // The engine choice follows prepareExport's result — an active surface pattern
+      // turns a CAD export into a mesh export for every format except STEP.
+      const pf = prepareExport(format);
       if (!pf) return;
+      const engine = pf.result.kind === "generative" ? await getGenEngine() : sel?.engine;
+      if (!engine) return;
       const made = format === "3mf" ? await build3MF(pf.result.geometry) : null;
       downloadBlob(made?.blob ?? (await engine.export(pf.result, format)), safeFileName(exportBase(), format));
       // STEP is a CAD hand-off, not a print file — skip the print-readiness line.
-      if (format !== "step") {
+      if (format === "step") {
+        const lost = fxStepCaveat();
+        if (lost) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Exported STEP. ${lost}` }]);
+      } else {
         const named = made && made.parts > 1 ? ` All ${made.parts} objects are in the one file, named.` : "";
         const caveat = paintCaveat(format);
         const label = `Exported ${format.toUpperCase()}.`;
@@ -6478,7 +6559,11 @@ export default function App() {
         plateColor={plateColor}
         gridOpacity={gridOpacity}
         modelBadge={modelBadge}
-        onApplySurface={(pat, sc, d) => { void applySurfaceTexture(pat, sc, d); }}
+        surfaceCtl={{
+          fx: surfFx,
+          set: (slot, v) => setSurfFx((s) => ({ ...s, [slot]: v })),
+          busy: fxBusy,
+        }}
         printer={printer}
         onOpenPrinterSettings={() => { setSettingsPane("printer"); setShowSettings(true); }}
         wireframe={wireframe}

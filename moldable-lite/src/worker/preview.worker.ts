@@ -53,14 +53,23 @@ function vnoise(u: number, v: number): number {
   return a + (b - a) * su + (c - a) * sv + (a - b - c + d) * su * sv;
 }
 
-/** Pattern value in [0,1] at a point, evaluated tri-planar-style: the two coordinates
- *  orthogonal to the vertex normal's dominant axis, so it reads right on every face. */
+/** Pattern value in [0,1] at a point, blended across all three planar projections.
+ *  Picking only the normal's DOMINANT axis meant the projection flipped the instant a
+ *  surface crossed 45°, and the pattern tore itself apart along every edge of the part
+ *  — visible as ragged spikes on each corner. Weighting by |n|⁴ keeps flat faces
+ *  essentially pure and blends only through the rounded band near an edge. */
 function patternAt(kind: string, px: number, py: number, pz: number, nx: number, ny: number, nz: number, s: number): number {
-  const ax = Math.abs(nx), ay = Math.abs(ny), az = Math.abs(nz);
-  let u: number, v: number;
-  if (az >= ax && az >= ay) { u = px; v = py; }
-  else if (ax >= ay) { u = py; v = pz; }
-  else { u = px; v = pz; }
+  const ax = nx * nx * nx * nx, ay = ny * ny * ny * ny, az = nz * nz * nz * nz;
+  const w = ax + ay + az || 1;
+  let out = 0;
+  if (az > 1e-4) out += (az / w) * patternUV(kind, px, py, s);
+  if (ax > 1e-4) out += (ax / w) * patternUV(kind, py, pz, s);
+  if (ay > 1e-4) out += (ay / w) * patternUV(kind, px, pz, s);
+  return out;
+}
+
+/** The pattern's own height field, on a flat plane. */
+function patternUV(kind: string, u: number, v: number, s: number): number {
   if (kind === "noise") return vnoise(u / s, v / s) * 0.7 + vnoise(u / (s * 0.5), v / (s * 0.5)) * 0.3;
   if (kind === "honeycomb") {
     // Ridged tri-lattice → hexagonal cells.
@@ -87,10 +96,64 @@ function patternAt(kind: string, px: number, py: number, pz: number, nx: number,
     // skin, but real geometry that survives any slicer).
     return vnoise(u / (s * 0.18), v / (s * 0.18));
   }
-  // knurl: crisp diamond checker.
+  // ---- Decorative patterns (the Pattern tab): shapes you read from across the room,
+  // as opposed to the micro-textures above that you feel in the hand.
+  if (kind === "scales") {
+    // Overlapping fish scales: staggered rows of dome caps, each row half a cell over.
+    const row = Math.floor(v / s);
+    const fu = u / s + (row % 2 ? 0.5 : 0) - Math.floor(u / s + (row % 2 ? 0.5 : 0));
+    const fv = v / s - row;
+    const r = Math.hypot((fu - 0.5) * 2, fv * 1.7);
+    return Math.max(0, 1 - r * r);
+  }
+  if (kind === "chevron") {
+    // Parallel V-bands. A sawtooth fed into a sawtooth (the obvious way to write this)
+    // makes the phase jump at every cell boundary and reads as crumpled rock; marching
+    // a SMOOTH ridge's phase back and forth along v bends the bands at 45° instead.
+    const tri = (x: number) => 1 - Math.abs(2 * (x - Math.floor(x)) - 1);
+    return 0.5 + 0.5 * Math.cos((2 * Math.PI * (u + tri(v / (4 * s)) * 2 * s)) / s);
+  }
+  if (kind === "weave") {
+    // Basket weave: strands run UNBROKEN in both directions and cross everywhere, and
+    // a checkerboard decides which one is on top in each cell. Giving each cell its own
+    // isolated pad (the obvious reading of "alternate cells carry a strand") just made
+    // a quilted pillow — a weave needs the strand to continue past the crossing.
+    const iu = Math.floor(u / s), iv = Math.floor(v / s);
+    const bar = (x: number) => Math.sqrt(Math.max(0, 1 - (2 * x - 1) * (2 * x - 1)));
+    const across = bar(v / s - iv); // strand running along u, sectioned across v
+    const along = bar(u / s - iu);
+    return (iu + iv) % 2 === 0 ? Math.max(across, along * 0.4) : Math.max(along, across * 0.4);
+  }
+  if (kind === "dots") {
+    // Round studs on a staggered grid — smooth paraboloid domes.
+    const row = Math.floor(v / s);
+    const fu = u / s + (row % 2 ? 0.5 : 0);
+    const cu = fu - Math.floor(fu) - 0.5, cv = v / s - row - 0.5;
+    const r = Math.hypot(cu, cv) / 0.36;
+    return Math.max(0, 1 - r * r);
+  }
+  if (kind === "grid") {
+    // Raised waffle lines. A clamped linear ramp creases at the shoulder of every
+    // ridge, and no amount of subdivision resolves a crease — it came out spiky. A
+    // raised-cosine shoulder is smooth all the way down.
+    const ridge = (x: number) => {
+      const f = x - Math.floor(x);
+      const d = Math.min(f, 1 - f) / 0.2;
+      return d >= 1 ? 0 : 0.5 + 0.5 * Math.cos(Math.PI * d);
+    };
+    return Math.max(ridge(u / s), ridge(v / s));
+  }
+  if (kind === "ripple") {
+    // Concentric rings spreading from the projection origin (the part's middle).
+    return 0.5 + 0.5 * Math.sin((2 * Math.PI * Math.hypot(u, v)) / s);
+  }
+  // knurl: diamond bumps from two crossed sine ridges. This used to be a hard 0/1
+  // checker — vertical walls that the subdivision could only approximate as a jagged
+  // staircase, so a real tool handle's crisp diamonds printed as gravel. The product
+  // of the two sines gives the same diamond lattice with printable flanks.
   const a = Math.sin((Math.PI * (u + v)) / s);
   const b = Math.sin((Math.PI * (u - v)) / s);
-  return a * b > 0 ? 1 : 0;
+  return Math.abs(a * b);
 }
 
 /** Worley/cellular noise: distance to the nearest (f1) and 2nd-nearest (f2) hashed
@@ -120,7 +183,7 @@ export interface PreviewApi {
   preview(prism: Float32Array, op: "add" | "cut" | "intersect"): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
   /** Physical surface texture: weld → subdivide until edges suit the pattern scale →
    *  displace along vertex normals. Returns a closed triangle soup. */
-  displace(positions: Float32Array, opts: { pattern: "knurl" | "honeycomb" | "noise" | "wave" | "voronoi" | "diamond" | "fuzzy"; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
+  displace(positions: Float32Array, opts: { pattern: string; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
   /** Uniform outward surface offset (~delta mm): weld, then displace every vertex along
    *  its area-weighted normal. Correct on non-convex shapes (interior steps move OUT,
    *  where bbox scaling would pull them in) — powers "Make it fit" clearance. */

@@ -982,6 +982,37 @@ Also: **Move (Transform) now leads the rail** — first tool, the universal conv
 and `toggleMeasureTool`/`toggleTransformTool` were rewired through `standDownTools`
 (each had a hand-rolled stand-down list that new tools kept slipping through).
 
+**Pattern tool shipped (build 372).** Rail tool `Pattern`, a two-tab flyout built the
+way Fasteners is: **Pattern** (scales · chevron · basket · studs · waffle · ripple —
+decorative relief) and **Texture** (knurl · hex · noise · wave · voronoi · diamond ·
+fuzzy — micro surface feel). Each tab owns its own slot and both can be live at once,
+so a knurl grip runs under a scale pattern.
+
+The big change is that it is **nondestructive**, where the old `applySurfaceTexture`
+baked the displacement and turned a CAD model permanently into a mesh. The treatment is
+now a spec — `surfFx: { pattern: SurfFxSlot | null; texture: SurfFxSlot | null }` in
+App.tsx — and an effect re-displaces from the untouched `result.geometry` whenever the
+base or a slot changes (texture first, pattern over it), caching the result in `fxCache`
+and guarding races with `fxGen`. Clear both slots and the base geometry returns
+identical; Adjust, the op chain and every CAD tool keep working underneath, and the fx
+re-applies on top of each rebuild. Works on mesh models for free — it is pure triangles.
+`prepareExport(format)` substitutes the treated mesh for every format except STEP (no
+B-rep to give it; `fxStepCaveat()` says so in chat), and `restat()` re-runs printability
+so the stats pill describes the surface you can actually see and export.
+
+Three field functions were wrong and are fixed in `preview.worker.ts`: `patternAt` now
+blends **all three planar projections** weighted by |n|⁴ instead of hard-switching on
+the dominant normal axis — the switch tore the pattern apart along every edge of a part.
+`chevron` was a sawtooth fed into a sawtooth (read as crumpled rock) and is now a smooth
+ridge whose phase marches along v; `weave` gave each cell an isolated pad (a quilted
+pillow) and now runs unbroken strands both ways with a checkerboard deciding which is on
+top; `grid`'s clamped linear ramp creased into spikes and now uses a raised-cosine
+shoulder; and `knurl`'s hard 0/1 checker (a jagged staircase no subdivision could
+resolve) is now `|sin·sin|` — real diamond bumps with printable flanks.
+
+Probe: `pattern.mjs`. `plook.mjs` shoots one image per pattern — worth re-running after
+any change to `patternUV`, since none of these failures showed up as an error.
+
 ## Build 360 — Shape tool (primitive booleans that stay parametric)
 
 New `SolidOp` in the op chain (`engine/types.ts`, executed in `worker/cad.worker.ts`):

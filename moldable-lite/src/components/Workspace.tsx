@@ -11,7 +11,7 @@ import type { PrintabilityReport, PrinterDefaults } from "../print/printability"
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
 import { FASTENER_GROUPS, findFastener, insertBossHint, fastenerHole, fastenerLabel, fastenerFor, fastenerCalNote } from "../cad/fasteners";
-import type { SurfacePattern } from "../engine/previewEngine";
+import { TEXTURE_KINDS, PATTERN_KINDS, FX_LABEL, FX_TIP, type SurfacePattern, type SurfFxSlot } from "../engine/previewEngine";
 
 /** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
  *  wall-thickness check, elephant-foot chamfer. All local geometry — no AI calls. */
@@ -35,7 +35,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -737,46 +737,85 @@ function MaterialMenu({ appearance, setAppearance }: { appearance: { color: stri
   );
 }
 
-/** Physical surface texture: knurl / honeycomb / noise / wave / voronoi / diamond /
- *  fuzzy skin as REAL printable geometry. */
-function SurfaceMenu({ disabled, isCad, onApply }: { disabled: boolean; isCad: boolean; onApply: (pattern: SurfacePattern, scale: number, depth: number) => void }) {
-  const [open, setOpen] = useState(false);
-  const [pattern, setPattern] = useState<SurfacePattern>("knurl");
-  const [scale, setScale] = useState(3);
-  const [depth, setDepth] = useState(0.4);
-  const [raised, setRaised] = useState(true);
-  const LABELS: Record<SurfacePattern, string> = { knurl: "Knurl", honeycomb: "Hex", noise: "Noise", wave: "Wave", voronoi: "Voronoi", diamond: "Diamond", fuzzy: "Fuzzy" };
+/** The Pattern tool's panel. Two tabs, two independent slots, both live at once: a
+ *  PATTERN is decorative relief you read from across the room, a TEXTURE is micro
+ *  surface feel. Nothing here is destructive — every control edits a spec that is
+ *  re-displaced from the untouched model, so turning a tab off gives the model back
+ *  exactly as it was and Adjust keeps working underneath. */
+function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
+  const [tab, setTab] = useState<"pattern" | "texture">("pattern");
+  const slot = ctl.fx[tab];
+  const kinds: readonly SurfacePattern[] = tab === "pattern" ? PATTERN_KINDS : TEXTURE_KINDS;
+  // Sliders write on every pixel of the drag; each write is a full re-displace. Show
+  // the drag immediately, commit it a beat after the hand stops.
+  const [draft, setDraft] = useState<{ scale: number; depth: number } | null>(null);
+  const timer = useRef<number | null>(null);
+  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
+  const scale = draft?.scale ?? slot?.scale ?? 4;
+  const depth = Math.abs(draft?.depth ?? slot?.depth ?? 0.6);
+  const raised = (draft?.depth ?? slot?.depth ?? 1) >= 0;
+  const commit = (next: { scale: number; depth: number }) => {
+    setDraft(next);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => { setDraft(null); if (slot) ctl.set(tab, { ...slot, ...next }); }, 260);
+  };
+  const other = tab === "pattern" ? ctl.fx.texture : ctl.fx.pattern;
   return (
-    <div style={{ position: "relative", display: "inline-flex" }}>
-      <button className="ghost sm iconbtn has-modes" aria-label="Surface texture" aria-expanded={open} title="Surface texture — knurl, hex, noise, wave, voronoi, diamond or fuzzy skin as real printable geometry" onClick={() => setOpen((v) => !v)}>
-        <IconTexturize />
-      <span className="rail-name">Texture</span></button>
-      {open && (
-        <div className="snap-menu" role="menu">
-          <div className="snap-row"><span>Pattern</span>
-            <div className="seg sm" style={{ flexWrap: "wrap" }}>
-              {(Object.keys(LABELS) as SurfacePattern[]).map((pp) => (
-                <button key={pp} className={pattern === pp ? "on" : ""} onClick={() => setPattern(pp)}>{LABELS[pp]}</button>
-              ))}
-            </div>
-          </div>
-          <div className="snap-row"><span>Cell size</span>
-            <div className="seg sm">{[2, 3, 5, 8].map((v) => <button key={v} className={scale === v ? "on" : ""} onClick={() => setScale(v)}>{v}mm</button>)}</div>
-          </div>
-          <div className="snap-row"><span>Depth</span>
-            <div className="seg sm">{[0.2, 0.4, 0.8, 1.5].map((v) => <button key={v} className={depth === v ? "on" : ""} onClick={() => setDepth(v)}>{v}</button>)}</div>
-          </div>
-          <div className="snap-row"><span>Direction</span>
-            <div className="seg sm">
-              <button className={raised ? "on" : ""} onClick={() => setRaised(true)}>Raised</button>
-              <button className={!raised ? "on" : ""} onClick={() => setRaised(false)}>Engraved</button>
-            </div>
-          </div>
-          <button className="primary sm" style={{ width: "100%", marginTop: 8 }} disabled={disabled} onClick={() => { setOpen(false); onApply(pattern, scale, raised ? depth : -depth); }}>
-            Apply to model
+    <div className="rail-fly pattern-fly">
+      {/* Both slots stay armed while you flip tabs — that's how you stack a knurl
+          under scales without a "merge" button to hunt for. */}
+      <div className="seg sm mode-seg" role="radiogroup" aria-label="Kind of surface treatment">
+        {(["pattern", "texture"] as const).map((t) => (
+          <button key={t} className={tab === t ? "on" : ""} role="radio" aria-checked={tab === t}
+            title={t === "pattern" ? "Decorative relief — scales, chevrons, studs" : "Micro surface feel — grip, roughness, hiding layer lines"}
+            onClick={() => { setDraft(null); setTab(t); }}>
+            <span className="btn-label">{t === "pattern" ? "Pattern" : "Texture"}</span>
+            {ctl.fx[t] && <i className="fx-dot" aria-label="on" />}
           </button>
-          <div className="ins-note">{isCad ? "Real geometry — the model becomes a mesh (CAD version stays in History)." : "Real geometry, applied to the mesh."}</div>
-        </div>
+        ))}
+      </div>
+      <div className="fx-grid" role="radiogroup" aria-label={tab === "pattern" ? "Pattern" : "Texture"}>
+        {kinds.map((k) => (
+          <button key={k} role="radio" aria-checked={slot?.kind === k} className={slot?.kind === k ? "on" : ""}
+            title={FX_TIP[k]}
+            onClick={() => { setDraft(null); ctl.set(tab, slot?.kind === k ? null : { kind: k, scale, depth: raised ? depth : -depth }); }}>
+            <PatternSwatch kind={k} />
+            <span>{FX_LABEL[k]}</span>
+          </button>
+        ))}
+      </div>
+      {slot ? (
+        <>
+          <label className="fx-slider">
+            <span>Size <b>{scale} mm</b></span>
+            <input type="range" min={1.5} max={20} step={0.5} value={scale} aria-label="Pattern size"
+              onChange={(e) => commit({ scale: parseFloat(e.target.value), depth: raised ? depth : -depth })} />
+          </label>
+          <label className="fx-slider">
+            <span>Relief <b>{depth} mm</b></span>
+            <input type="range" min={0.1} max={3} step={0.1} value={depth} aria-label="Pattern relief"
+              onChange={(e) => { const d = parseFloat(e.target.value); commit({ scale, depth: raised ? d : -d }); }} />
+          </label>
+          <div className="seg sm mode-seg" role="radiogroup" aria-label="Direction">
+            <button className={raised ? "on" : ""} role="radio" aria-checked={raised} title="The pattern stands out from the surface"
+              onClick={() => ctl.set(tab, { ...slot, depth: Math.abs(slot.depth) })}>Raised</button>
+            <button className={!raised ? "on" : ""} role="radio" aria-checked={!raised} title="The pattern is carved into the surface"
+              onClick={() => ctl.set(tab, { ...slot, depth: -Math.abs(slot.depth) })}>Carved</button>
+          </div>
+          <button className="ghost sm" onClick={() => ctl.set(tab, null)}
+            title={`Take the ${tab} back off — the surface returns to exactly what it was`}>
+            Remove {tab}
+          </button>
+        </>
+      ) : (
+        <p className="fine">Pick one — it wraps the whole outer shell. Works on Precise and mesh models alike.</p>
+      )}
+      {ctl.busy && <p className="fine fx-busy">Wrapping the surface…</p>}
+      {slot && other && !ctl.busy && (
+        <p className="fine">Both on: {FX_LABEL[other.kind]} underneath, {FX_LABEL[slot.kind]} riding over it.</p>
+      )}
+      {(ctl.fx.pattern || ctl.fx.texture) && !ctl.busy && (
+        <p className="fine">STL, 3MF and OBJ carry this. STEP stays the smooth original — it has no way to hold a million facets.</p>
       )}
     </div>
   );
@@ -2196,7 +2235,12 @@ interface Props {
     hasPaint: boolean;
   };
   texture: THREE.Texture | null;
-  onApplySurface: (pattern: SurfacePattern, scale: number, depth: number) => void;
+  surfaceCtl: {
+    /** The live spec: at most one decorative pattern and one micro texture. */
+    fx: { pattern: SurfFxSlot | null; texture: SurfFxSlot | null };
+    set: (slot: "pattern" | "texture", v: SurfFxSlot | null) => void;
+    busy: boolean;
+  };
   printer: PrinterDefaults;
   onOpenPrinterSettings: () => void;
   wireframe: boolean;
@@ -2422,6 +2466,7 @@ export function Workspace(p: Props) {
   const [dragOverCanvas, setDragOverCanvas] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
   const [logoOpen, setLogoOpen] = useState(false);
+  const [patternOpen, setPatternOpen] = useState(false);
   const [logoOver, setLogoOver] = useState(false);
   // Open beside the stage on desktop; on a phone the sheet starts in PEEK, because the
   // first thing a phone user should see is their model, not an empty transcript.
@@ -3662,6 +3707,23 @@ export function Workspace(p: Props) {
                     {p.textCtl.tool && <TextFly ctl={p.textCtl} />}
                   </div>
                   <div className="rail-tool">
+                    {/* Patterns and textures are the same machinery — one displacement
+                        of the outer shell — so they share one rail slot and split by tab,
+                        the way magnets and screws share Fasteners. */}
+                    <button
+                      className={`ghost sm iconbtn${patternOpen ? " on" : ""}${!patternOpen && (p.surfaceCtl.fx.pattern || p.surfaceCtl.fx.texture) ? " fx-live" : ""}`}
+                      aria-pressed={patternOpen}
+                      aria-label="Pattern"
+                      disabled={!p.geometry || p.tab !== "3d" || p.status === "generating"}
+                      title="Pattern tool: wrap the outer surface in real printable relief — scales, chevrons, studs, knurl. Nondestructive, so you can change or remove it any time."
+                      onClick={() => setPatternOpen((v) => !v)}
+                    >
+                      <IconPattern />
+                    <span className="rail-name">Pattern</span>
+                    </button>
+                    {patternOpen && <PatternFly ctl={p.surfaceCtl} />}
+                  </div>
+                  <div className="rail-tool">
                     {/* Add Logo: opens a panel rather than a bare file dialog, so the
                         accepted formats and the "what happens next" step are visible
                         BEFORE the picker, and a file can be dropped straight onto it. */}
@@ -3843,7 +3905,6 @@ export function Workspace(p: Props) {
                   </div>
                   <div className="rail-sep" aria-hidden="true" />
                   <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
-                  <SurfaceMenu disabled={!p.geometry || p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplySurface} />
                 </div>
               )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (p.attachments.length > 0 || p.plateCtl.count > 1) && (

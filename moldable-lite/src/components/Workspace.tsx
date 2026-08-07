@@ -694,6 +694,18 @@ function MicButton({ value, onChange }: { value: string; onChange: (t: string) =
 }
 
 /** Display material: filament colour + finish. Visual only — prints don't change. */
+/** How many spools this print needs as painted: the base filament plus every slot
+ *  used on a face. The answer a slicer only gives you three screens later. */
+function FilamentCount({ facePaint }: { facePaint: Uint8Array | null }) {
+  const n = useMemo(() => {
+    if (!facePaint) return 1;
+    const used = new Set<number>();
+    for (const v of facePaint) if (v) used.add(v);
+    return used.size + 1; // + the base colour
+  }, [facePaint]);
+  return <div className="paint-count">Prints with <b>{n}</b> filament{n === 1 ? "" : "s"}</div>;
+}
+
 function MaterialMenu({ appearance, setAppearance }: { appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void }) {
   const [open, setOpen] = useState(false);
   const COLORS = ["#c7ccd3", "#f4f4f2", "#2b2b2e", "#d94040", "#f28c28", "#ecc94b", "#48a860", "#3b82f6", "#8b5cf6", "#14b8a6"];
@@ -1724,7 +1736,8 @@ interface Props {
   separatedKind: EngineKind | null; // engine kind of the model the split came from (Select shows disabled, not gone)
   onSeparateParts: () => void;
   onRegroup: () => void;
-  onKeepAside: () => void; // freeze the current model on a new plate, then iterate
+  onKeepAside: () => void; // duplicate the current model onto a new plate, then iterate
+  onEditFrozen: (id: string) => void; // swap a duplicated version back to being the live editable model
   onCheckFit: (ids: string[]) => void;
   onMakeFit: (ids: string[]) => void;
   onDropToPlate: (ids: string[]) => void;
@@ -1768,6 +1781,7 @@ interface Props {
     angle: number; setAngle: (n: number) => void;
     brushSize: number; setBrushSize: (n: number) => void;
     palette: string[];
+    setSlotColor: (index: number, hex: string) => void; // recolour a filament slot to an exact hex
     facePaint: Uint8Array | null;
     onStroke: (tc: Uint8Array) => void;
     onEraseAll: () => void;
@@ -2111,7 +2125,7 @@ export function Workspace(p: Props) {
                   {p.geometry && (
                     <button className="ghost sm lp-keep" title="Freeze a copy of the model on its own build plate, beside the live one — then ask for the next variant without losing this version"
                       onClick={p.onKeepAside}>
-                      Keep this version aside
+                      Duplicate
                     </button>
                   )}
                   {(() => {
@@ -2127,6 +2141,10 @@ export function Workspace(p: Props) {
                           <ColorSwatch label={a.name} color={p.partColors[a.id]} fallback="#7fc4b9" onPick={(hex) => p.setPartColor(a.id, hex)} />
                           <EditableName name={a.name} className="lp-name" editing={renaming === a.id} onStartEdit={() => setRenaming(a.id)} onRename={(v) => p.onRenameAttachment(a.id, v)} onDone={() => setRenaming(null)} />
                           <PlateMenu value={p.plateFor(a.id)} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign(a.id, n)} onNewPlate={() => p.plateCtl.assign(a.id, p.plateCtl.add())} />
+                          {(a as { frozenSource?: unknown }).frozenSource != null && (
+                            <button className="lp-edit" title="Edit this version — it becomes the live model; the current live model is duplicated in its place"
+                              onClick={(e) => { e.stopPropagation(); p.onEditFrozen(a.id); }}>Edit</button>
+                          )}
                           <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
                         </div>
                       );
@@ -2774,7 +2792,7 @@ export function Workspace(p: Props) {
                         <Item label="Adjust size & shape" hint="Free sliders — every dimension, no AI" onClick={() => { setDockPanel("params"); setDockOpen(true); }} />
                         <div className="pmenu-sep" />
                         <Item label="Rename" onClick={() => { setShowLayers(true); setRenaming("model"); }} />
-                        <Item label="Duplicate" hint="A movable copy beside it" onClick={() => p.clipboardCtl.duplicate({ kind: "model" })} />
+                        <Item label="Duplicate" hint="A copy on its own plate — then iterate the live model" onClick={p.onKeepAside} />
                         <Item label="Copy" onClick={() => p.clipboardCtl.copy({ kind: "model" })} />
                         <div className="pmenu-sep" />
                         {p.separated ? (
@@ -2782,7 +2800,6 @@ export function Workspace(p: Props) {
                         ) : p.partCount > 1 ? (
                           <Item label={`Separate ${p.partCount} parts`} hint="Move each solid on its own" onClick={p.onSeparateParts} />
                         ) : null}
-                        <Item label="Keep this version aside" hint="A copy on its own plate — then iterate the live model" onClick={p.onKeepAside} />
                         {t.normal && (
                           <Item label="This face on the plate" hint="Rotate so the clicked face sits flat" onClick={() => p.printPrep.orient.face(t.normal!)} />
                         )}
@@ -3196,10 +3213,6 @@ export function Workspace(p: Props) {
                             <input type="checkbox" checked={p.paintCtl.mirror} onChange={(e) => p.paintCtl.setMirror(e.target.checked)} />
                             <span>Mirror both sides</span>
                           </label>
-                          <div className="param-actions" style={{ marginTop: 0 }}>
-                            <button className="ghost sm" title="Every painted region spreads outward by one ring of triangles — tidy up a fill that stopped just short" onClick={() => p.viewerRef.current?.growPaint(1)}>Grow</button>
-                            <button className="ghost sm" title="Every painted region pulls back by one ring of triangles" onClick={() => p.viewerRef.current?.growPaint(-1)}>Shrink</button>
-                          </div>
                           <div className="paint-lbl">Filament</div>
                           <div className="paint-swatches" role="radiogroup" aria-label="Filament">
                             {p.paintCtl.palette.map((c, i) => (
@@ -3223,6 +3236,13 @@ export function Workspace(p: Props) {
                               onClick={() => p.paintCtl.setSlot(0)}
                             ><IconX size={11} /></button>
                           </div>
+                          {p.paintCtl.slot > 0 && (
+                            <label className="paint-hex" title="Set this filament to an exact colour — match the spool you'll actually load. Regions already painted with it follow.">
+                              <input type="color" value={p.paintCtl.palette[p.paintCtl.slot - 1]} onChange={(e) => p.paintCtl.setSlotColor(p.paintCtl.slot - 1, e.target.value)} aria-label={`Exact colour for filament ${p.paintCtl.slot}`} />
+                              <span>Filament {p.paintCtl.slot} · <b className="hex">{p.paintCtl.palette[p.paintCtl.slot - 1].toUpperCase()}</b></span>
+                            </label>
+                          )}
+                          <FilamentCount facePaint={p.paintCtl.facePaint} />
                           {p.paintCtl.tool === "fill" ? (
                             <label className="paint-angle">
                               <span>Smart-fill angle — {p.paintCtl.angle}°</span>

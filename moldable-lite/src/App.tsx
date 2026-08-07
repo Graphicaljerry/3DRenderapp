@@ -543,7 +543,7 @@ export default function App() {
   const geometryRef = useRef<THREE.BufferGeometry | null>(null);
   geometryRef.current = geometry;
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
-  const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string; tint?: string }[]>([]); // free-floating objects (logos, badges, parts…)
+  const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string; tint?: string; frozenSource?: BuildInput }[]>([]); // free-floating objects (logos, badges, parts…); frozenSource = a kept model version that can be swapped back to live
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
   // Build plates: every object (the model = "model", attachments by id) lives on a plate.
   // Bambu-Studio-style: any number of plates, assignment via menu, saved with the project.
@@ -629,7 +629,7 @@ export default function App() {
           g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);
           return { geometry: g, name: `Part ${i + 1}`, plate: pc.plate ?? 1, color: pc.color, paint: undefined as Uint8Array | undefined, paintPalette: undefined as string[] | undefined };
         })
-      : [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model"), paint: modelPaint, paintPalette: modelPaint ? FILAMENT_SWATCHES : undefined }];
+      : [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model"), paint: modelPaint, paintPalette: modelPaint ? palette : undefined }];
     for (const a of attachments) {
       const baked = viewer.current?.bakeAttachment(a.id);
       if (!baked) continue;
@@ -1118,10 +1118,37 @@ export default function App() {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     g.computeVertexNormals();
-    const v = project?.versions.length ?? 0;
-    const id = addAttachment(g, `${snap.name} · v${v}`);
+    // Named for the History step it froze at; a second freeze of the same step
+    // (swap out, swap back) gets a .2 so no two copies ever share a name.
+    const base = `${snap.name} · v${project?.versions.length ?? 0}`;
+    let name = base;
+    for (let k = 2; attachments.some((a) => a.name === name); k++) name = `${base}.${k}`;
+    const id = addAttachment(g, name);
     assignPlate(id, addPlate());
-    explainOnce("keep-aside", `Kept **${snap.name} · v${v}** on its own build plate, beside the live model. Now ask for the variant — "make it smaller with one 4-inch hole", say — and the live model changes while the kept copy stays put. The Plates bar (bottom of the canvas) switches between them or shows all; each plate exports separately from Export.`);
+    // A CAD model's source is the whole recipe (code + params + ops) — keep it with
+    // the copy so Edit can rebuild this version as the live model later. Mesh models
+    // stay a visual copy: their recipe is a paid generation, not a formula.
+    const src = resultRef.current?.source;
+    if (src?.kind === "code") setAttachments((a) => a.map((x) => (x.id === id ? { ...x, frozenSource: src } : x)));
+    explainOnce("keep-aside", `Duplicated **${name}** onto its own build plate, beside the live model. Now ask for the variant — "make it smaller with one 4-inch hole", say — and the live model changes while the duplicate stays put. Tap **Edit** on a duplicate in Objects to swap it back to being the editable model. Plates switch at the bottom of the canvas; each exports separately.`);
+  }
+  /** Make a duplicated version the LIVE editable model again: the current live
+   *  model is duplicated in its place first (nothing is lost), then the chosen
+   *  copy's stored recipe rebuilds as the live model — full Adjust/AI editing back. */
+  async function editFrozen(id: string) {
+    const a = attachments.find((x) => x.id === id);
+    if (!a?.frozenSource || !sel) return;
+    keepVersionAside();
+    removeAttachment(id);
+    setStatus("generating");
+    try {
+      const res = await sel.engine.build(a.frozenSource);
+      applyResult(res, a.name.replace(/ · v\d+$/, ""), `Editing ${a.name} again — swapped in as the live model`, "activate version");
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't reopen ${a.name} for editing: ` + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
+    }
   }
   const removeAttachment = (id: string) => {
     setAttachments((a) => a.filter((x) => x.id !== id));
@@ -1131,6 +1158,21 @@ export default function App() {
       return next;
     });
   };
+  // Filament palette: the swatch set is a starting point, not a rule — any slot can
+  // be recoloured to an exact hex (matching real spools). Painted regions follow
+  // live: the paint overlay rebuilds from the palette, and exports carry it.
+  const [palette, setPaletteState] = useState<string[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("moldable_palette") ?? "null");
+      if (Array.isArray(v) && v.length === FILAMENT_SWATCHES.length && v.every((c) => /^#[0-9a-fA-F]{6}$/.test(c))) return v;
+    } catch { /* fall through */ }
+    return FILAMENT_SWATCHES;
+  });
+  const setSlotColor = (i: number, hex: string) => setPaletteState((pal) => {
+    const next = pal.map((c, k) => (k === i ? hex : c));
+    try { localStorage.setItem("moldable_palette", JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+  });
   const [appearance, setAppearanceState] = useState<{ color: string; finish: "matte" | "satin" | "glossy" | "metal" }>(() => {
     try { return { color: "#c7ccd3", finish: "matte", ...JSON.parse(localStorage.getItem("moldable_appearance") ?? "{}") }; } catch { return { color: "#c7ccd3", finish: "matte" }; }
   });
@@ -5762,6 +5804,7 @@ export default function App() {
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onKeepAside={keepVersionAside}
+        onEditFrozen={(id) => void editFrozen(id)}
         onCheckFit={(ids) => void checkFit(ids)}
         onMakeFit={(ids) => void makeItFit(ids)}
         onDropToPlate={dropToPlate}
@@ -5811,7 +5854,8 @@ export default function App() {
           setAngle: setPaintAngle,
           brushSize,
           setBrushSize,
-          palette: FILAMENT_SWATCHES,
+          palette,
+          setSlotColor,
           facePaint,
           onStroke: onPaintStroke,
           onEraseAll: () => viewer.current?.eraseFacePaint(),

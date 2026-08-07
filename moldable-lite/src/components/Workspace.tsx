@@ -3516,7 +3516,7 @@ export function Workspace(p: Props) {
               )}
               {p.measureCtl.mode && !p.measureCtl.draft && (
                 <div className="box-hint">
-                  {p.measureCtl.pending ? "Click the second point to measure the distance" : "Click two points, or press and drag a tape line — ends snap to corners, edges, hole centres and rims. Click a circular rim once for its true diameter; hole-to-hole clicks measure centre to centre. Tap a label to delete that measure."}
+                  {p.measureCtl.pending ? "Click the second point. Hover the opposite face and it snaps square across the part — the true wall-to-wall width." : "Click two points, or press and drag a tape line — ends snap to corners, edges, hole centres and rims. Click a circular rim once for its true diameter; hole-to-hole clicks measure centre to centre. Tap a label to delete that measure."}
                 </div>
               )}
               {p.measureCtl.mode && p.measureCtl.draft && (() => {

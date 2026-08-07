@@ -439,7 +439,7 @@ interface Internals {
   highlight: THREE.Mesh; // translucent overlay for the hovered/selected face
   multiHi: THREE.Mesh; // overlay for a box-selected SET of faces
   edgeHi: THREE.Mesh; // solid marker for a hovered/selected edge (a thin cylinder)
-  vertHi: THREE.Mesh; // solid marker for a hovered/selected vertex (a small sphere)
+  vertHi: THREE.Sprite; // corner pick marker — a screen-constant anchor dot // solid marker for a hovered/selected vertex (a small sphere)
   markR: number; // marker radius, scaled to the model
   tri: TriData | null;
   lockedHit: { faceIndex: number; point: THREE.Vector3 } | null; // click-locked feature
@@ -646,14 +646,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     scene.add(measures);
     // Measure-mode hover dot: shows WHERE a click would land after snapping — teal on a
     // real feature (centre/rim/vertex), gray when free — so anchors stop being guesswork.
-    const measHoverDot = new THREE.Mesh(
-      new THREE.SphereGeometry(1, 12, 8),
-      new THREE.MeshBasicMaterial({ color: 0x0d9488, depthTest: false, transparent: true, opacity: 0.95 }),
-    );
-    measHoverDot.visible = false;
-    measHoverDot.renderOrder = 6;
-    measHoverDot.raycast = () => {};
-    scene.add(measHoverDot);
+    const measHoverDot = makeAnchor("#0d9488", 11);
+    const measHoverFree = makeAnchor("#8a9099", 9); // off a feature: smaller and grey
+    measHoverDot.visible = measHoverFree.visible = false;
+    measHoverDot.raycast = measHoverFree.raycast = () => {};
+    scene.add(measHoverDot, measHoverFree);
 
     // Push-pull handle: an arrow (shaft + cone) drawn along a selected flat face's normal;
     // drag it to extrude the face. Local +Y is the normal; oriented/positioned per prop.
@@ -697,7 +694,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // drawn over the model so they read clearly like a CAD selection.
     const markMat = new THREE.MeshBasicMaterial({ color: 0x2563eb, depthTest: false, transparent: true, opacity: 0.95 });
     const edgeHi = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), markMat);
-    const vertHi = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), markMat);
+    const vertHi = makeAnchor("#2563eb", 11);
     edgeHi.visible = vertHi.visible = false;
     edgeHi.renderOrder = vertHi.renderOrder = 3;
     scene.add(edgeHi, vertHi);
@@ -1041,6 +1038,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           o.scale.set(h * o.userData.aspect, h, 1);
         }
       }
+      // Anchor dots hold a constant on-screen size — a model-scaled dot became a blob
+      // the moment you zoomed in on the corner you were trying to point at.
+      if (s) {
+        sizeAnchors([s.vertHi], camera, vpH, tan);
+        if (s.measures) sizeAnchors(s.measures.children, camera, vpH, tan);
+        if (s.selBox) sizeAnchors(s.selBox.children, camera, vpH, tan);
+      }
       renderer.render(scene, camera);
       // Corner orientation gizmo: counter-rotate so it mirrors the world axes on screen.
       axGroup.quaternion.copy(camera.quaternion).invert();
@@ -1151,7 +1155,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // then tessellation vertices and triangle edges. Curved surfaces tessellate with
     // their vertices ON the true surface, so everything here is exact, not "wherever
     // the pixel landed". ----
-    type MeasureSnap = { p: [number, number, number]; kind: "center" | "rim" | "vertex" | "edge" | "free"; circle?: EdgeCircle | null };
+    type MeasureSnap = { p: [number, number, number]; kind: "center" | "rim" | "vertex" | "edge" | "across" | "free"; circle?: EdgeCircle | null };
     const snapMeasure2 = (hit: THREE.Intersection): MeasureSnap => {
       const s2 = st.current;
       const p = hit.point;
@@ -1172,6 +1176,22 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         return [((v.x + 1) / 2) * (el.clientWidth || 1), ((1 - v.y) / 2) * (el.clientHeight || 1)];
       };
       const hitPx = toPx(p);
+      // 0. STRAIGHT ACROSS. With a first point already down, the thing you almost always
+      //    want on the far side is the point square opposite it — the true wall-to-wall
+      //    or outside width, not a diagonal a few degrees off. Drop the first point on
+      //    the near face, hover the far one, and this lands the second point on the
+      //    perpendicular from the first. It wins over every other magnet because it is
+      //    the only one that makes the MEASUREMENT (not just the point) exact.
+      const pend = cb.current.measurePending;
+      if (pend) {
+        const n = hit.face.normal.clone().applyNormalMatrix(new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld)).normalize();
+        const a = new THREE.Vector3(pend[0], pend[1], pend[2]);
+        // A projected onto the hovered face's plane, along that face's normal.
+        const q = a.clone().sub(n.clone().multiplyScalar(a.clone().sub(p).dot(n)));
+        const qPx = toPx(q);
+        if (Math.hypot(qPx[0] - hitPx[0], qPx[1] - hitPx[1]) < 26 && q.distanceTo(a) > 1e-3)
+          return { p: [q.x, q.y, q.z], kind: "across" };
+      }
       // 1. Circle CENTRE magnet — anywhere in the middle ~55% of a hole reads as "the
       //    centre" (capped at 40 px so huge bores don't hijack clicks, floored at 12 px
       //    so tiny holes still snap).
@@ -2134,20 +2154,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         renderer.domElement.style.cursor = mh ? "crosshair" : "";
         if (mh) {
           const snap = snapMeasure2(mh);
-          const snapped = snap.kind === "center" || snap.kind === "rim" || snap.kind === "vertex";
-          measHoverDot.visible = true;
-          measHoverDot.position.set(snap.p[0], snap.p[1], snap.p[2]);
-          const wpp = (2 * camera.position.distanceTo(measHoverDot.position) * Math.tan((camera.fov * Math.PI) / 360)) / (el.clientHeight || 1);
-          measHoverDot.scale.setScalar((snapped ? 4.5 : 3) * wpp);
-          const mat = measHoverDot.material as THREE.MeshBasicMaterial;
-          mat.color.set(snapped ? 0x0d9488 : 0x9aa0a6);
-          mat.opacity = snapped ? 0.95 : 0.55;
+          const snapped = snap.kind === "center" || snap.kind === "rim" || snap.kind === "vertex" || snap.kind === "across";
+          // Two dots, not one recoloured: teal-on-white when the click will land on a
+          // real feature, small and grey when it's free on a surface.
+          measHoverDot.visible = snapped;
+          measHoverFree.visible = !snapped;
+          const dot = snapped ? measHoverDot : measHoverFree;
+          dot.position.set(snap.p[0], snap.p[1], snap.p[2]);
+          sizeAnchors([dot], camera, el.clientHeight || 1, Math.tan((camera.fov * Math.PI) / 360));
         } else {
-          measHoverDot.visible = false;
+          measHoverDot.visible = measHoverFree.visible = false;
         }
         return;
       }
-      if (measHoverDot.visible) measHoverDot.visible = false; // left measure mode
+      if (measHoverDot.visible || measHoverFree.visible) measHoverDot.visible = measHoverFree.visible = false; // left measure mode
       if (!cb.current.selectMode || !s2.mesh) return;
       // Point mode: just a crosshair over the model (click to drop a marker).
       if (cb.current.selectKind === "point") {
@@ -2179,7 +2199,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
     };
     const onLeave = () => {
-      measHoverDot.visible = false;
+      measHoverDot.visible = measHoverFree.visible = false;
       setHover(null);
       // Cursor left mid-hover: park the drill ghost back on the draft's committed spot.
       const g = holeIx.current.ghost;
@@ -2559,14 +2579,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     helper.renderOrder = 4;
     group.add(helper);
     // Corner anchor dots, Spline-style — read as "this object is selected".
-    const size = box.getSize(new THREE.Vector3());
-    const r = Math.max(0.5, Math.max(size.x, size.y, size.z) * 0.012);
-    const dotGeo = new THREE.SphereGeometry(r, 10, 8);
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0x498a6f, depthTest: false });
     for (const fx of [box.min.x, box.max.x]) for (const fy of [box.min.y, box.max.y]) for (const fz of [box.min.z, box.max.z]) {
-      const d = new THREE.Mesh(dotGeo, dotMat.clone());
+      const d = makeAnchor("#498a6f", 12);
       d.position.set(fx, fy, fz);
-      d.renderOrder = 5;
       d.userData.anchor = true; // draggable: corner-drag = uniform scale
       group.add(d);
     }
@@ -2592,15 +2607,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (s.mesh) { s.mesh.geometry.computeBoundingBox(); const sz = s.mesh.geometry.boundingBox!.getSize(new THREE.Vector3()); modelSize = Math.max(sz.x, sz.y, sz.z) || 40; }
     // Anchors: small teal dots on a white halo — visible on any surface without
     // covering the very feature being measured (they used to be 50% bigger).
-    const markR = Math.max(0.28, modelSize * 0.008);
     const lineMat = new THREE.LineBasicMaterial({ color: 0x0d9488, transparent: true, opacity: 0.95, depthTest: false });
-    const dotMat = new THREE.MeshBasicMaterial({ color: 0x0d9488, depthTest: false, transparent: true });
-    const haloMat = new THREE.MeshBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.85 });
     const addDot = (p: [number, number, number]) => {
-      const h = new THREE.Mesh(new THREE.SphereGeometry(markR * 1.6, 12, 8), haloMat);
-      h.position.set(p[0], p[1], p[2]); h.renderOrder = 4; h.raycast = () => {}; s.measures.add(h);
-      const m = new THREE.Mesh(new THREE.SphereGeometry(markR, 12, 8), dotMat);
-      m.position.set(p[0], p[1], p[2]); m.renderOrder = 5; m.raycast = () => {}; s.measures.add(m);
+      const m = makeAnchor("#0d9488", 10);
+      m.position.set(p[0], p[1], p[2]); m.raycast = () => {}; s.measures.add(m);
     };
     // Bare number in the current units (no suffix) — for the axis-delta breakdown.
     const bare = (mm: number) => (units === "in" ? (mm / 25.4).toFixed(2) : String(Math.round(mm * 10) / 10));
@@ -4198,7 +4208,7 @@ function selectFacesInBox(
 function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: number, hit: THREE.Vector3): FeatureInfo | null {
   const tri = ensureTri(s);
   if (!tri) return null;
-  const showOnly = (m: THREE.Mesh) => { s.highlight.visible = m === s.highlight; s.edgeHi.visible = m === s.edgeHi; s.vertHi.visible = m === s.vertHi; };
+  const showOnly = (m: THREE.Object3D) => { s.highlight.visible = m === s.highlight; s.edgeHi.visible = m === s.edgeHi; s.vertHi.visible = m === s.vertHi; };
 
   if (kind === "face") {
     // Fast path: cursor still inside the cached region → nothing to rebuild.
@@ -4273,7 +4283,6 @@ function showFeature(s: Internals, kind: "face" | "edge" | "vertex", faceIndex: 
   if (s.selCache?.key === `vertex:${vId}` && s.selCache.info.kind === "vertex") { showOnly(s.vertHi); return s.selCache.info; }
   const nv = new THREE.Vector3(tri.vpos[vId * 3], tri.vpos[vId * 3 + 1], tri.vpos[vId * 3 + 2]);
   s.vertHi.position.copy(nv);
-  s.vertHi.scale.setScalar(s.markR * 1.8);
   const info: FeatureInfo = { kind: "vertex", pos: nv };
   s.selCache = { key: `vertex:${vId}`, info, region: null };
   showOnly(s.vertHi);
@@ -4541,6 +4550,44 @@ function buildGhost(cap: Float32Array, bnd: Float32Array, n: [number, number, nu
   }
   void capTris;
   return out;
+}
+
+/** Illustrator-style anchor: a white core inside a coloured ring, on a sprite so it
+ *  always faces the camera. One texture per colour, built once and shared. */
+const ANCHOR_TEX: Record<string, THREE.Texture> = {};
+function anchorTex(hex: string): THREE.Texture {
+  const hit = ANCHOR_TEX[hex];
+  if (hit) return hit;
+  const N = 64;
+  const c = document.createElement("canvas");
+  c.width = c.height = N;
+  const g = c.getContext("2d")!;
+  g.fillStyle = hex;
+  g.beginPath(); g.arc(N / 2, N / 2, N / 2 - 2, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#fff";
+  g.beginPath(); g.arc(N / 2, N / 2, N / 2 - 11, 0, Math.PI * 2); g.fill();
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace; // untagged, it reads as linear and goes muddy
+  t.anisotropy = 4;
+  ANCHOR_TEX[hex] = t;
+  return t;
+}
+/** px = the on-screen DIAMETER it holds at any zoom. */
+function makeAnchor(hex: string, px: number): THREE.Sprite {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: anchorTex(hex), depthTest: false, transparent: true, sizeAttenuation: true }));
+  sp.userData.anchorPx = px;
+  sp.renderOrder = 7;
+  return sp;
+}
+/** Hold every anchor sprite at its pixel size, undoing any scale on its parent group. */
+function sizeAnchors(objs: Iterable<THREE.Object3D>, camera: THREE.PerspectiveCamera, vpH: number, tan: number) {
+  for (const o of objs) {
+    const px = o.userData.anchorPx as number | undefined;
+    if (!px || !o.visible) continue;
+    const world = (2 * camera.position.distanceTo(o.getWorldPosition(new THREE.Vector3())) * tan) / vpH;
+    const parent = o.parent?.scale.x || 1;
+    o.scale.setScalar((px * world) / parent);
+  }
 }
 
 function modelSizeOf(s: Internals): number {

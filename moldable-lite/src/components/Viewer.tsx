@@ -2539,7 +2539,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     // The crease-edge overlay is a main-thread EdgesGeometry pass — heavy on dense
     // models. Live-drag preview geometry (userData.preview) skips it: many swaps per
     // second, and the drag reads fine shaded-only. The commit re-adds it.
-    if (!geometry.userData.preview) {
+    //
+    // A surface treatment (userData.textured) skips it for a different reason: it draws
+    // the model's CAD creases, and a knurled or fluted skin has a crease at every rib.
+    // On a fluted vase that was 33,000 line segments scribbled down the valleys — it
+    // read as dashed cracks in the surface, and cost an EdgesGeometry pass over a
+    // million triangles to produce.
+    if (!geometry.userData.preview && !geometry.userData.textured) {
       const edges = new THREE.LineSegments(
         new THREE.EdgesGeometry(geometry, 30),
         new THREE.LineBasicMaterial({ color: "#2a2e35" }),

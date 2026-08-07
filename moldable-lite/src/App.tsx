@@ -4507,6 +4507,7 @@ export default function App() {
         g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
         g.computeVertexNormals();
         g.computeBoundingBox();
+        g.userData.textured = true; // tells the Viewer not to draw CAD creases on a rib
         const old = fxCache.current;
         fxCache.current = { key, geom: g };
         setGeometry(g);

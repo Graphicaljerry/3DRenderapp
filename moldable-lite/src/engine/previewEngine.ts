@@ -65,9 +65,19 @@ export async function growMesh(positions: Float32Array, delta: number): Promise<
  *  lines), PATTERNS are decorative geometry you read from across the room. */
 export type SurfacePattern =
   | "knurl" | "honeycomb" | "noise" | "wave" | "voronoi" | "diamond" | "fuzzy"
-  | "scales" | "chevron" | "weave" | "dots" | "grid" | "ripple";
+  | "scales" | "chevron" | "weave" | "dots" | "grid" | "ripple"
+  | "flute" | "reed" | "twist" | "pleat" | "ribwave" | "ring";
 export const TEXTURE_KINDS = ["knurl", "honeycomb", "noise", "wave", "voronoi", "diamond", "fuzzy"] as const;
+/** Wrapped AROUND the part's upright axis rather than stamped over its whole skin —
+ *  the Japandi vase/planter language. They get cylindrical coordinates, a whole number
+ *  of ribs so the seam closes, and no ribbing on the top and bottom faces. */
+export const RIB_KINDS = ["flute", "reed", "twist", "pleat", "ribwave", "ring"] as const;
 export const PATTERN_KINDS = ["scales", "chevron", "weave", "dots", "grid", "ripple"] as const;
+export const isRib = (k: SurfacePattern): boolean => (RIB_KINDS as readonly string[]).includes(k);
+/** Ribs want a finer pitch and more relief than an all-over pattern: 3 mm ribs about
+ *  1 mm proud is the proportion on every printed vase in the reference photos. */
+export const FX_START = (k: SurfacePattern): { scale: number; depth: number } =>
+  isRib(k) ? { scale: 3, depth: 1 } : { scale: 4, depth: 0.6 };
 
 /** One treatment: what it is, how big a repeat, and how far it stands off the surface
  *  (negative = carved in). Two of these — one pattern, one texture — can ride at once. */
@@ -79,6 +89,8 @@ export const FX_LABEL: Record<SurfacePattern, string> = {
   voronoi: "Voronoi", diamond: "Diamond", fuzzy: "Fuzzy",
   scales: "Scales", chevron: "Chevron", weave: "Basket", dots: "Studs",
   grid: "Waffle", ripple: "Ripple",
+  flute: "Fluted", reed: "Reeded", twist: "Twisted", pleat: "Pleated",
+  ribwave: "Waved", ring: "Ringed",
 };
 
 export const FX_TIP: Record<SurfacePattern, string> = {
@@ -95,6 +107,12 @@ export const FX_TIP: Record<SurfacePattern, string> = {
   dots: "Staggered domed studs. Toy-brick energy, and a real thumb grip.",
   grid: "Raised waffle lines. Structural, technical, panel-like.",
   ripple: "Concentric rings spreading from the middle, like water.",
+  flute: "Soft vertical ribs all the way round — the modern planter and vase look. Prints upright with no supports.",
+  reed: "Crisp half-round rods with a flat gap between, like reeded glass. Sharper than Fluted.",
+  twist: "Ribs spiralling round at about 45°. Catches light differently as you walk past it.",
+  pleat: "Fine, deep, folded pleats — the paper-fan planter. Densest of the six.",
+  ribwave: "Vertical ribs that meander as they climb. Organic rather than machined.",
+  ring: "Horizontal rings stacked up the body, the way a coiled pot reads.",
 };
 
 export async function displaceMesh(positions: Float32Array, opts: { pattern: SurfacePattern; scale: number; depth: number }): Promise<Float32Array | null> {

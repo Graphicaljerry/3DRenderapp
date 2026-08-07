@@ -1046,6 +1046,47 @@ layer since the gizmo was written.
 Probe: `textorient.mjs` (per-face det / winding / up-vector, plus the Angle field and
 the gizmo), `tcup.mjs` (four azimuths on a curved wall).
 
+**Ribbed patterns + adaptive refinement (build 374).** Six new patterns in the Pattern
+tab, in their own labelled **Ribbed** group: Fluted, Reeded, Twisted, Pleated, Waved,
+Ringed — the Japandi vase/planter language from Jerry's references. They are NOT
+triplanar like the all-over patterns; `ribAt()` in `preview.worker.ts` uses cylindrical
+coordinates about the part's upright axis, and three rules make them come out clean:
+
+- **A whole number of ribs.** The count comes from the requested pitch at the widest
+  radius and is then fixed, so the pattern meets itself exactly at the seam behind the
+  part (a fixed mm pitch would leave a visible mismatch) and ribs converge as the body
+  narrows, the way a turned vase does at its neck.
+- **Outer surfaces only** (`n · r̂ > 0`). A shelled pot's inner wall is a surface too;
+  ribbing it buries invisible detail and doubles the triangles, and carving it eats into
+  a 2.5 mm wall from the inside.
+- **A plain band at the foot and rim** (smoothstep over ~one pitch, capped at a tenth of
+  the height) plus a `(1−|n_z|)²` wall weight. Without these a vase gets radial spokes
+  across its rim and a scalloped base that won't lay a clean first layer.
+
+The subdivision in `displace()` is now **adaptive**. It used to split every triangle
+into four every pass, which is the wrong distribution on a CAD part — an already-fine
+fillet gets refined into oblivion while the big flat wall beside it is still coarse when
+the budget runs out (ribs came out as a staircase with 290k triangles spent). It now
+marks EDGES longer than the target and emits 2 / 3 / 4 children for triangles with 1 / 2
+/ 3 marked edges; because the mark is per-edge, neighbours always agree and no
+T-junctions open up (verified watertight, zero flipped or degenerate triangles).
+
+That change exposed a long-standing lie: the all-over target of `scale * 0.45` only ever
+looked acceptable because the uniform pass blew straight past it. Honest targets are now
+0.08 of the feature for all-over (2-D, hard-rimmed), 0.22 of the finest rib pitch for
+ribs (1-D), 0.05 for fuzzy. Rib budget is 2M triangles, everything else 700k.
+
+Also fixed here: the **crease-edge overlay** (`EdgesGeometry(geometry, 30)` in
+Viewer.tsx) was rebuilding from the displaced mesh and scribbling 33,000 line segments
+down the flute valleys — it read as dashed cracks in the surface. Geometry carrying
+`userData.textured` now skips it, which also saves an EdgesGeometry pass over a million
+triangles. And `pleat` used to run at double density, quietly making "Rib pitch 3 mm"
+mean 1.5 mm for that one pattern; Pleated is the sharp profile, not the dense one.
+
+Probe: `ribs.mjs` shoots all six on a round body and reports triangles/watertight;
+`ribdiag2.mjs` counts flipped triangles. Re-run `plook.mjs` after ANY change to
+`detail` — facets show up in pixels long before they show up in a number.
+
 ## Build 360 — Shape tool (primitive booleans that stay parametric)
 
 New `SolidOp` in the op chain (`engine/types.ts`, executed in `worker/cad.worker.ts`):

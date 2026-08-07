@@ -445,6 +445,14 @@ const SW: Record<string, { tile: number; body: ReactNode }> = {
   dots: { tile: 12, body: <g><circle cx="3" cy="3" r="2" /><circle cx="9" cy="9" r="2" /><circle cx="9" cy="3" r="2" opacity=".45" /><circle cx="3" cy="9" r="2" opacity=".45" /></g> },
   grid: { tile: 9, body: <path d="M0 4.5h9M4.5 0v9" /> },
   ripple: { tile: 22, body: <g><circle cx="11" cy="11" r="2.5" /><circle cx="11" cy="11" r="6" /><circle cx="11" cy="11" r="9.5" /></g> },
+  // The ribbed family. Drawn tighter than the all-over patterns because that density
+  // IS the look — a fluted vase reads as fine lines, not as stripes.
+  flute: { tile: 4, body: <path d="M2 -1v42" /> },
+  reed: { tile: 5, body: <g><path d="M1.6 -1v42" /><path d="M3.4 -1v42" opacity=".45" /></g> },
+  twist: { tile: 6, body: <path d="M-3 9 9 -3M0 12 12 0M3 15 15 3" /> },
+  pleat: { tile: 3, body: <path d="M1.5 -1v42" /> },
+  ribwave: { tile: 6, body: <path d="M2 0c2.6 3.3 2.6 6.7 0 10s-2.6 6.7 0 10 2.6 6.7 0 10 -2.6 6.7 0 10" /> },
+  ring: { tile: 4, body: <path d="M-1 2h42" /> },
 };
 
 /** A square of one pattern, tiled — the picker tile's whole job. */

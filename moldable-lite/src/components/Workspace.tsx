@@ -11,7 +11,7 @@ import type { PrintabilityReport, PrinterDefaults } from "../print/printability"
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
 import { FASTENER_GROUPS, findFastener, insertBossHint, fastenerHole, fastenerLabel, fastenerFor, fastenerCalNote } from "../cad/fasteners";
-import { TEXTURE_KINDS, PATTERN_KINDS, FX_LABEL, FX_TIP, type SurfacePattern, type SurfFxSlot } from "../engine/previewEngine";
+import { TEXTURE_KINDS, PATTERN_KINDS, RIB_KINDS, FX_LABEL, FX_TIP, FX_START, isRib, type SurfacePattern, type SurfFxSlot } from "../engine/previewEngine";
 
 /** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
  *  wall-thickness check, elephant-foot chamfer. All local geometry — no AI calls. */
@@ -745,7 +745,16 @@ function MaterialMenu({ appearance, setAppearance }: { appearance: { color: stri
 function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
   const [tab, setTab] = useState<"pattern" | "texture">("pattern");
   const slot = ctl.fx[tab];
-  const kinds: readonly SurfacePattern[] = tab === "pattern" ? PATTERN_KINDS : TEXTURE_KINDS;
+  // The Pattern tab holds two families that behave differently enough to label: ribbed
+  // ones wrap around the upright axis (and leave the rim flat), all-over ones are
+  // stamped across the whole skin. Two named groups beat one anonymous grid of twelve.
+  const groups: { label: string; note: string; kinds: readonly SurfacePattern[] }[] =
+    tab === "pattern"
+      ? [
+          { label: "Ribbed", note: "wraps around the body", kinds: RIB_KINDS },
+          { label: "All over", note: "covers every face", kinds: PATTERN_KINDS },
+        ]
+      : [{ label: "", note: "", kinds: TEXTURE_KINDS }];
   // Sliders write on every pixel of the drag; each write is a full re-displace. Show
   // the drag immediately, commit it a beat after the hand stops.
   const [draft, setDraft] = useState<{ scale: number; depth: number } | null>(null);
@@ -774,20 +783,33 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           </button>
         ))}
       </div>
-      <div className="fx-grid" role="radiogroup" aria-label={tab === "pattern" ? "Pattern" : "Texture"}>
-        {kinds.map((k) => (
-          <button key={k} role="radio" aria-checked={slot?.kind === k} className={slot?.kind === k ? "on" : ""}
-            title={FX_TIP[k]}
-            onClick={() => { setDraft(null); ctl.set(tab, slot?.kind === k ? null : { kind: k, scale, depth: raised ? depth : -depth }); }}>
-            <PatternSwatch kind={k} />
-            <span>{FX_LABEL[k]}</span>
-          </button>
-        ))}
-      </div>
+      {groups.map((g) => (
+        <div key={g.label || "all"}>
+          {g.label && <div className="shape-lbl"><span>{g.label}</span><span className="shape-unit">{g.note}</span></div>}
+          <div className="fx-grid" role="radiogroup" aria-label={g.label || (tab === "pattern" ? "Pattern" : "Texture")}>
+            {g.kinds.map((k) => (
+              <button key={k} role="radio" aria-checked={slot?.kind === k} className={slot?.kind === k ? "on" : ""}
+                title={FX_TIP[k]}
+                onClick={() => {
+                  setDraft(null);
+                  // A rib wants a finer pitch and more relief than a stamped pattern, so
+                  // switching family carries its own starting proportions rather than
+                  // inheriting numbers that were right for the other one.
+                  const keep = slot && isRib(slot.kind) === isRib(k);
+                  const st = keep ? { scale, depth } : FX_START(k);
+                  ctl.set(tab, slot?.kind === k ? null : { kind: k, scale: st.scale, depth: raised ? st.depth : -st.depth });
+                }}>
+                <PatternSwatch kind={k} />
+                <span>{FX_LABEL[k]}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
       {slot ? (
         <>
           <label className="fx-slider">
-            <span>Size <b>{scale} mm</b></span>
+            <span>{isRib(slot.kind) ? "Rib pitch" : "Size"} <b>{scale} mm</b></span>
             <input type="range" min={1.5} max={20} step={0.5} value={scale} aria-label="Pattern size"
               onChange={(e) => commit({ scale: parseFloat(e.target.value), depth: raised ? depth : -depth })} />
           </label>

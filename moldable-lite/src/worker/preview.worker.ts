@@ -58,7 +58,8 @@ function vnoise(u: number, v: number): number {
  *  surface crossed 45°, and the pattern tore itself apart along every edge of the part
  *  — visible as ragged spikes on each corner. Weighting by |n|⁴ keeps flat faces
  *  essentially pure and blends only through the rounded band near an edge. */
-function patternAt(kind: string, px: number, py: number, pz: number, nx: number, ny: number, nz: number, s: number): number {
+function patternAt(kind: string, px: number, py: number, pz: number, nx: number, ny: number, nz: number, s: number, rib: RibFrame | null): number {
+  if (rib) return ribAt(kind, px, py, pz, nx, ny, nz, s, rib);
   const ax = nx * nx * nx * nx, ay = ny * ny * ny * ny, az = nz * nz * nz * nz;
   const w = ax + ay + az || 1;
   let out = 0;
@@ -66,6 +67,76 @@ function patternAt(kind: string, px: number, py: number, pz: number, nx: number,
   if (ax > 1e-4) out += (ax / w) * patternUV(kind, py, pz, s);
   if (ay > 1e-4) out += (ay / w) * patternUV(kind, px, pz, s);
   return out;
+}
+
+/** Everything the rib family needs that a single vertex can't know: where the upright
+ *  axis is, and how many ribs go round. */
+interface RibFrame { cx: number; cy: number; n: number; z0: number; z1: number; fade: number }
+
+/** Ribs, flutes and rings — wrapped around the part's upright axis.
+ *
+ *  These can't use the triplanar projection the all-over patterns use. A vertical rib
+ *  is a function of the ANGLE about the axis, and stamping one from three flat planes
+ *  gives you interference fringes instead of ribs. Two things make them come out clean:
+ *
+ *  1. The rib count is a whole number, so the pattern meets itself exactly at the seam
+ *     behind the part. A fixed pitch in millimetres would leave a visible mismatch there.
+ *     Because the count is fixed and the angle isn't, ribs converge as the body narrows
+ *     — which is exactly what a turned or printed vase does at its neck.
+ *  2. Amplitude falls off as a face turns to point up or down, so the ribs live on the
+ *     walls and the top rim and base stay flat. Without it a vase gets radial spokes
+ *     across its rim and won't sit down properly. */
+function ribAt(kind: string, px: number, py: number, pz: number, nx: number, ny: number, nz: number, s: number, rib: RibFrame): number {
+  const dx = px - rib.cx, dy = py - rib.cy;
+  const theta = Math.atan2(dy, dx);
+  const phase = theta * rib.n; // whole turns → the seam closes
+  const wall = 1 - Math.abs(nz); // 1 on a vertical wall, 0 on a flat top or bottom
+  if (wall < 0.02) return 0;
+  // OUTER surfaces only. On a shelled part — a vase, a planter, a pen pot — the inner
+  // wall is a surface too, and ribbing it buries detail nobody will ever see inside the
+  // pot while doubling the triangles. Carving it would be worse: it eats into a 2.5 mm
+  // wall from the inside. A surface belongs to the outside when its normal leans away
+  // from the upright axis.
+  const rl = Math.hypot(dx, dy);
+  if (rl > 1e-6 && (nx * dx + ny * dy) / rl < 0.02) return 0;
+  // Ribs also stop short of the foot and the rim. Running them right off the bottom
+  // edge leaves a scalloped base that won't lay a clean first layer, and a rim that
+  // reads as ragged rather than turned. Every printed vase in the reference photos has
+  // this plain band; here it is also what makes the part sit flat.
+  const band = Math.min(pz - rib.z0, rib.z1 - pz) / rib.fade;
+  if (band <= 0) return 0;
+  const ends = band >= 1 ? 1 : band * band * (3 - 2 * band);
+  const cyc = (x: number) => x - Math.floor(x); // 0..1 within one rib
+  const bar = (x: number) => Math.sqrt(Math.max(0, 1 - (2 * x - 1) * (2 * x - 1)));
+  let v: number;
+  if (kind === "reed") {
+    // Half-round rods with a flat land between them: the rod occupies 70% of the pitch.
+    const f = cyc(phase / (2 * Math.PI));
+    v = f < 0.7 ? bar(f / 0.7) : 0;
+  } else if (kind === "twist") {
+    // One full pitch of rise per pitch around, i.e. a 45° helix at the widest radius.
+    v = 0.5 + 0.5 * Math.cos(phase + (2 * Math.PI * pz) / s);
+  } else if (kind === "pleat") {
+    // Folded paper: a triangle wave, with the crease knocked off just enough that the
+    // subdivision can resolve it instead of spiking. It used to run at double density,
+    // which quietly made "Rib pitch 3 mm" mean 1.5 mm for this one pattern and pushed it
+    // past what the mesh could carry. Pleated is the SHARP profile, not the dense one —
+    // wind the pitch down if you want more of them.
+    const f = cyc(phase / (2 * Math.PI));
+    const tri = 1 - Math.abs(2 * f - 1);
+    v = tri * tri * (3 - 2 * tri);
+  } else if (kind === "ribwave") {
+    // The rib's phase meanders as it climbs — organic, not machined.
+    v = 0.5 + 0.5 * Math.cos(phase + 1.6 * Math.sin((2 * Math.PI * pz) / (s * 7)));
+  } else if (kind === "ring") {
+    // Horizontal rings: a function of height alone, so it needs no seam handling.
+    v = 0.5 + 0.5 * Math.cos((2 * Math.PI * pz) / s);
+  } else {
+    v = 0.5 + 0.5 * Math.cos(phase); // flute: plain round ribs
+  }
+  // Square the falloff so the wall keeps full relief and only the last few degrees
+  // before the rim taper out — a linear fade visibly weakened the whole upper body.
+  return v * wall * wall * ends;
 }
 
 /** The pattern's own height field, on a flat plane. */
@@ -191,6 +262,11 @@ export interface PreviewApi {
 }
 
 const MAX_TRIS = 700_000; // displacement subdivision budget
+// Ribs get a bigger one. They are fine, regular and read against a curved silhouette,
+// so anywhere the refinement stops short shows up as a visible seam down the wall —
+// where an organic texture would just look slightly softer there. A ribbed vase is a
+// small part, and a couple of million triangles of it still slices in seconds.
+const MAX_TRIS_RIB = 2_000_000;
 
 const api: PreviewApi = {
   async displace(positions, opts) {
@@ -209,38 +285,122 @@ const api: PreviewApi = {
         for (let i = 0; i < nVert; i++) { v3[i * 3] = verts[i * np]; v3[i * 3 + 1] = verts[i * np + 1]; v3[i * 3 + 2] = verts[i * np + 2]; }
         verts = v3;
       }
+      // Ribs wrap around the part's upright axis, so they need that axis and a whole
+      // number of ribs before anything can be evaluated. The axis is the centre of the
+      // footprint; the count comes from the requested pitch at the WIDEST radius, so the
+      // pitch you asked for is the pitch you get on the broadest part of the body.
+      const RIBS = new Set(["flute", "reed", "twist", "pleat", "ribwave", "ring"]);
+      let rib: RibFrame | null = null;
+      let ribPitchMin = opts.scale;
+      if (RIBS.has(opts.pattern)) {
+        let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+        for (let i = 0; i < verts.length; i += 3) {
+          if (verts[i] < x0) x0 = verts[i];
+          if (verts[i] > x1) x1 = verts[i];
+          if (verts[i + 1] < y0) y0 = verts[i + 1];
+          if (verts[i + 1] > y1) y1 = verts[i + 1];
+        }
+        const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        let rMax = 0, z0 = Infinity, z1 = -Infinity;
+        for (let i = 0; i < verts.length; i += 3) {
+          const r = Math.hypot(verts[i] - cx, verts[i + 1] - cy);
+          if (r > rMax) rMax = r;
+          if (verts[i + 2] < z0) z0 = verts[i + 2];
+          if (verts[i + 2] > z1) z1 = verts[i + 2];
+        }
+        // A band about one rib pitch deep, but never more than a tenth of the height —
+        // on a shallow tray a fixed band would swallow the whole wall.
+        const fade = Math.min(Math.max(1, opts.scale), (z1 - z0) * 0.1);
+        rib = { cx, cy, n: Math.max(3, Math.round((2 * Math.PI * rMax) / Math.max(0.5, opts.scale))), z0, z1, fade: Math.max(0.2, fade) };
+        // The rib COUNT is fixed, so the pitch on the ground is smallest wherever the
+        // body is narrowest — on a 87×60 part that is 2 mm, not the 3 mm asked for. The
+        // mesh has to be fine enough for the tightest ribs on the part or those come out
+        // with crests of uneven height, which reads as random dark streaks down the wall.
+        ribPitchMin = (2 * Math.PI * Math.max(1, Math.min(x1 - x0, y1 - y0) / 2)) / rib.n;
+      }
       // Subdivide (1 tri → 4) until edges are fine enough to carry the pattern.
       // Fuzzy skin's effective wavelength is a fraction of the cell size — go finer.
-      const targetEdge = Math.max(0.3, opts.scale * (opts.pattern === "fuzzy" ? 0.12 : 0.45));
-      for (let pass = 0; pass < 6; pass++) {
-        let maxE = 0;
+      // Ribs need finer still: at ~2 samples per rib the crests alias into a lumpy mess,
+      // and "clean ribs" is the entire point of the family.
+      // Samples per feature. A rib is a 1-D wave — fine across, needs almost nothing
+      // along — so ~4 samples of its pitch is plenty. An all-over pattern is 2-D and
+      // most of them have a hard rim (a stud's dome, a scale's cap), so they need three
+      // times that. 0.45 was in here for a long time and looked fine only because the
+      // old subdivision split EVERY triangle every pass and blew straight past it; with
+      // refinement that actually stops at the target, 0.45 shows as visible facets.
+      const detail = opts.pattern === "fuzzy" ? 0.05 : rib ? 0.22 : 0.08;
+      const targetEdge = Math.max(0.18, (rib ? ribPitchMin : opts.scale) * detail);
+      // ADAPTIVE refinement: split only the edges that are still too long.
+      //
+      // This used to split every triangle into four, every pass. On a CAD part that is
+      // exactly the wrong distribution — a fillet arrives already finely tessellated and
+      // gets refined into oblivion, while the big flat wall next to it is still coarse
+      // when the triangle budget runs out. Ribs on a 60 mm body came out as a staircase
+      // with 290k triangles already spent.
+      //
+      // The split decision is a property of the EDGE, not the triangle, so the two
+      // triangles sharing an edge always agree and the surface cannot crack open into
+      // T-junctions. A triangle with 1, 2 or 3 of its edges marked emits 2, 3 or 4
+      // children respectively; one with none is passed through untouched.
+      const ekey = (i: number, j: number) => (i < j ? `${i}_${j}` : `${j}_${i}`);
+      for (let pass = 0; pass < 12; pass++) {
+        const need = new Set<string>();
         for (let t = 0; t < tris.length; t += 3) {
           for (let e = 0; e < 3; e++) {
-            const a = tris[t + e] * 3, b = tris[t + ((e + 1) % 3)] * 3;
-            const d = Math.hypot(verts[a] - verts[b], verts[a + 1] - verts[b + 1], verts[a + 2] - verts[b + 2]);
-            if (d > maxE) maxE = d;
+            const i = tris[t + e], j = tris[t + ((e + 1) % 3)];
+            const a = i * 3, b = j * 3;
+            if (Math.hypot(verts[a] - verts[b], verts[a + 1] - verts[b + 1], verts[a + 2] - verts[b + 2]) > targetEdge) need.add(ekey(i, j));
           }
         }
-        if (maxE <= targetEdge || (tris.length / 3) * 4 > MAX_TRIS) break;
+        if (!need.size) break;
+        // Cost this pass before paying for it, so the budget stops us between passes
+        // rather than halfway through building an array.
+        let out = 0;
+        for (let t = 0; t < tris.length; t += 3) {
+          const a = tris[t], b = tris[t + 1], c = tris[t + 2];
+          const m = (need.has(ekey(a, b)) ? 1 : 0) + (need.has(ekey(b, c)) ? 1 : 0) + (need.has(ekey(c, a)) ? 1 : 0);
+          out += m + 1;
+        }
+        if (out > (rib ? MAX_TRIS_RIB : MAX_TRIS)) break;
         const mid = new Map<string, number>();
         const nv: number[] = [];
         const midOf = (i: number, j: number): number => {
-          const key = i < j ? `${i}_${j}` : `${j}_${i}`;
-          let m2 = mid.get(key);
+          const k = ekey(i, j);
+          let m2 = mid.get(k);
           if (m2 === undefined) {
             m2 = verts.length / 3 + nv.length / 3;
             nv.push((verts[i * 3] + verts[j * 3]) / 2, (verts[i * 3 + 1] + verts[j * 3 + 1]) / 2, (verts[i * 3 + 2] + verts[j * 3 + 2]) / 2);
-            mid.set(key, m2);
+            mid.set(k, m2);
           }
           return m2;
         };
-        const nt = new Uint32Array(tris.length * 4);
+        const nt = new Uint32Array(out * 3);
         let o = 0;
+        const push = (x: number, y: number, z: number) => { nt[o++] = x; nt[o++] = y; nt[o++] = z; };
         for (let t = 0; t < tris.length; t += 3) {
-          const a = tris[t], b = tris[t + 1], c = tris[t + 2];
-          const ab = midOf(a, b), bc = midOf(b, c), ca = midOf(c, a);
-          nt.set([a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca], o);
-          o += 12;
+          let a = tris[t], b = tris[t + 1], c = tris[t + 2];
+          let s0 = need.has(ekey(a, b)), s1 = need.has(ekey(b, c)), s2 = need.has(ekey(c, a));
+          const n = (s0 ? 1 : 0) + (s1 ? 1 : 0) + (s2 ? 1 : 0);
+          if (n === 0) { push(a, b, c); continue; }
+          if (n === 3) {
+            const m0 = midOf(a, b), m1 = midOf(b, c), m2 = midOf(c, a);
+            push(a, m0, m2); push(m0, b, m1); push(m2, m1, c); push(m0, m1, m2);
+            continue;
+          }
+          // Rotate the triangle so the marked edges sit in a canonical place: for one
+          // split that is ab, for two it is ab and bc. Rotation preserves winding.
+          for (let r = 0; r < 3; r++) {
+            if (n === 1 ? s0 : s0 && s1) break;
+            const ta = a; a = b; b = c; c = ta;
+            const t0 = s0; s0 = s1; s1 = s2; s2 = t0;
+          }
+          if (n === 1) {
+            const m0 = midOf(a, b);
+            push(a, m0, c); push(m0, b, c);
+          } else {
+            const m0 = midOf(a, b), m1 = midOf(b, c);
+            push(a, m0, c); push(m0, m1, c); push(m0, b, m1);
+          }
         }
         const merged = new Float32Array(verts.length + nv.length);
         merged.set(verts, 0);
@@ -261,7 +421,7 @@ const api: PreviewApi = {
       for (let i = 0; i < verts.length; i += 3) {
         const l = Math.hypot(nrm[i], nrm[i + 1], nrm[i + 2]) || 1;
         const nx = nrm[i] / l, ny = nrm[i + 1] / l, nz = nrm[i + 2] / l;
-        const d = opts.depth * patternAt(opts.pattern, verts[i], verts[i + 1], verts[i + 2], nx, ny, nz, opts.scale);
+        const d = opts.depth * patternAt(opts.pattern, verts[i], verts[i + 1], verts[i + 2], nx, ny, nz, opts.scale, rib);
         verts[i] += nx * d; verts[i + 1] += ny * d; verts[i + 2] += nz * d;
       }
       // Expand back to a soup for the app's standard pipeline.

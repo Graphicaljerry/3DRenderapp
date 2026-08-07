@@ -917,6 +917,37 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 355–357 — Modify tool, spatial plates, History rework
+
+- **Modify tool** (rail, CAD only): arm Push/Pull / Round / Bevel, click a face,
+  edge or corner, then drag the anchor. Live value + live status-bar dims; drags
+  clamp at real limits (bed fit out, cut-through in, radius cap) and say which
+  one they hit. Typed size + Apply is the no-drag path. Shell/revolve/patterns
+  still go through Select + the chat — there is no local op for them.
+- **Selection highlights persist** until deselected (hover used to repaint the
+  shared overlay), and the Viewer takes a `featureSelected` prop so the lock
+  clears when the app drops its pick.
+- **Build plates are spatial now**: one slab per plate, each centred under its
+  own objects (empty plates park a bed-and-a-bit over, the `bed.x * 1.2` stride
+  the multi-plate 3MF export already used). Switching plates frames that plate.
+  Objects are NOT moved by plate assignment — the slab finds them, not the other
+  way round, so nothing perturbs pick/ops coordinates.
+- **History**: `Current` follows `headId` rather than the newest row; the row IS
+  the restore control (a Restore button left ~70px for the label in the 262px
+  dock); restore is guarded against mid-build races and double-fires and shows a
+  loading row. **`MAX_VERSIONS = 60`** in `store/versions.ts` — versions carry a
+  whole snapshot (code, ops, and `glb`/`importFile` blobs for generated or
+  imported parts), so the list is now capped on both the append and restore
+  paths. `persist()` writes `projectRef.current` eagerly; two commits in one
+  React tick used to drop a version.
+- **Magnet pockets**: `Re-cut all` applies size + fit + seat (it only ever moved
+  the depth, so choosing a new magnet looked broken). The panel lists every
+  pocket from the op chain — click to edit, ✕ to remove.
+- **Profile photo**: `moldable_avatar` in localStorage, a 160px square WebP data
+  URL capped at 48 KB. It rides the settings blob (any `moldable_*` key not in
+  `LOCAL_ONLY_KEYS` syncs), mirroring `moldable_user_tint`. No schema change, no
+  new bucket, works signed out. Picker: Settings → Appearance.
+
 Still open from the audit: the naming problem — Plates / Pieces / Attachments /
 Objects are four words for containers, and users can't tell which is which; the
 invisible-state list (fit chip visibility, printer preset reach, silent PLA

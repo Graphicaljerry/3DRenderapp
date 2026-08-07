@@ -3,6 +3,9 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { mergeGeometries, toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { installBVH, ensureBoundsTree } from "../three/bvh";
+
+installBVH();
 
 /** A point-to-point measurement on the model (display coords). */
 export type Measurement = { id: string; a: [number, number, number]; b: [number, number, number] };
@@ -563,6 +566,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       };
       // Raw internals for scene-debugging harnesses (lights, materials, stage).
       (window as any).__viewerS = () => st.current;
+      // three itself, so a harness can build its own raycaster against the live scene —
+      // the picking-cost benchmark needs to compare tree vs no-tree on one geometry.
+      (window as any).__three = THREE;
     }
 
     // Right-CLICK (no drag) → quick-action context menu on whatever is under the cursor.
@@ -2402,6 +2408,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.material.needsUpdate = true;
     const mesh = new THREE.Mesh(geometry, s.material);
     s.content.add(mesh);
+    // The model is the thing every hover raycasts against — give it a bounds tree the
+    // moment it exists, not on the first pick.
+    ensureBoundsTree(geometry);
     // NOTE: s.tri (the welded adjacency map for face/edge picking) is built lazily on the
     // first hover/box-select in select mode — see ensureTri. Building it here would run a
     // heavy weld pass on the main thread on EVERY edit, stalling the orbit for ~1s even
@@ -2520,6 +2529,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       // Separated model parts keep the model's grey (tint) — only true foreign objects
       // (imports, logos, pasted copies) get the distinguishing teal.
       const m = new THREE.Mesh(a.geometry, new THREE.MeshStandardMaterial({ color: a.tint ?? "#7fc4b9", metalness: 0.1, roughness: 0.6 }));
+      ensureBoundsTree(a.geometry); // attachments are raycast on every hover too
       // Start resting on top of the model (or the bed) at its centre, ready to be placed —
       // stagger extras a little so stacked drops don't hide each other.
       a.geometry.computeBoundingBox();
@@ -2779,9 +2789,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
       }
       if (s.mesh.geometry !== g) s.mesh.geometry = g;
+      ensureBoundsTree(g);
     } else if (s.mesh.geometry !== geometry) {
       s.mesh.geometry = geometry;
-    }
+      ensureBoundsTree(geometry);
+    } else ensureBoundsTree(geometry);
   }, [clay, geometry]);
 
   // Putting the paint tool down (or switching to the eyedropper) drops the hover

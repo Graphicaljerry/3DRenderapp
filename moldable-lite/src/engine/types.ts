@@ -11,11 +11,23 @@ export type ExportFormat = "stl" | "3mf" | "step" | "obj";
 //    by the transform gizmo. These preview instantly in three.js and commit as one op.
 export type Vec3 = [number, number, number];
 
-/** Point-anchored op on a picked edge/corner/face. */
+/** Point-anchored op on a picked edge/corner/face.
+ *
+ *  `at` alone is only durable while nothing moves it. Change a parameter — make the
+ *  bracket wider — and the whole surface slides out from under the recorded point; the
+ *  finder then misses, the rebuild throws, and the op gets shed with "the spot it was
+ *  picked on moved with the new size". `rel` fixes the common case: the same point
+ *  expressed as a FRACTION of the part's bounding box, so it rides a resize. `dir` (for
+ *  edges) breaks ties when the relocated anchor has several edges near it, so a
+ *  horizontal rounding can't jump onto the vertical edge it meets at a corner. */
 export interface PointOp {
   type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude";
   at: Vec3;
   size: number; // fillet radius / chamfer size / extrude distance (signed: +out, -in), mm
+  rel?: Vec3;   // `at` as a 0..1 fraction of the bounding box when it was picked
+  dir?: Vec3;   // unit direction of the picked edge (engine coords)
+  /** What the user picked, so the panel can name it without re-deriving from `type`. */
+  pick?: "edge" | "corner" | "face";
 }
 /** Drill a round hole into a face: at a point ON the face, along −normal.
  *  depth 0 = through everything; otherwise a flat-bottom pocket that deep. */

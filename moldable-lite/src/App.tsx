@@ -3224,6 +3224,58 @@ export default function App() {
   const modifyOpRef = useRef(modifyOp);
   modifyOpRef.current = modifyOp;
   useEffect(() => { if (!selectMode) setModifyOp(null); }, [selectMode]);
+  // ---- Roundings and bevels as an editable LIST, the way magnet pockets already are.
+  // They used to be append-only: applied, then only reachable through Undo, and shed
+  // entirely the first time a parameter moved the edge under them. Durable anchors
+  // (PointOp.rel/dir) made them survive; this makes them editable.
+  const [shapeOpEdit, setShapeOpEdit] = useState<number | null>(null);
+  const EDGE_OP_NAME: Record<string, string> = {
+    fillet: "Rounded", chamfer: "Angled", "face-fillet": "Rounded", "face-chamfer": "Angled",
+  };
+  /** Every rounding/bevel currently in the recipe, newest last, with the op-chain index
+   *  the edit/remove calls need. */
+  function edgeOpList() {
+    if (!result || result.source.kind !== "code") return [];
+    return (result.source.ops ?? []).flatMap((o, index) => {
+      const name = EDGE_OP_NAME[o.type];
+      if (!name) return [];
+      const p = o as PointOp;
+      const what = p.pick === "corner" ? "corner" : p.type.startsWith("face-") ? "face" : "edge";
+      return [{ index, name, what, size: Math.round(Math.abs(p.size) * 100) / 100 }];
+    });
+  }
+  /** Retype a rounding's size in place. The op keeps its anchor, so this is a true edit
+   *  rather than "delete it and pick the edge again". */
+  async function editEdgeOp(index: number, size: number) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code" || !(size > 0)) return;
+    const ops = [...(cur.source.ops ?? [])];
+    const op = ops[index];
+    if (!op || !EDGE_OP_NAME[op.type]) return; // the chain moved under this row — do nothing
+    ops[index] = { ...op, size } as CadOp;
+    await rebuildWithOps(ops, `${EDGE_OP_NAME[op.type]} edge → ${size} mm`, "edit edge op");
+  }
+  async function removeEdgeOp(index: number) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = [...(cur.source.ops ?? [])];
+    const op = ops[index];
+    if (!op || !EDGE_OP_NAME[op.type]) return;
+    ops.splice(index, 1);
+    setShapeOpEdit(null); // removing shifts every later index
+    await rebuildWithOps(ops, `Removed the ${EDGE_OP_NAME[op.type].toLowerCase()} edge`, "remove edge op");
+  }
+  /** Take every rounding and bevel back off in one go — the "reset" half of the ask.
+   *  Undo restores them all together, so it costs nothing to try. */
+  async function resetEdgeOps() {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = (cur.source.ops ?? []).filter((o) => !EDGE_OP_NAME[o.type]);
+    const n = (cur.source.ops ?? []).length - ops.length;
+    if (!n) return;
+    setShapeOpEdit(null);
+    await rebuildWithOps(ops, `Reset ${n} rounded edge${n > 1 ? "s" : ""}`, "reset edge ops");
+  }
   // ---- Shape tool: drop a primitive exactly where you point, then type its numbers.
   // The whole point is the case where describing it in words is slower and less exact
   // than placing it — so nothing here touches the AI, and every value is editable after.
@@ -3884,7 +3936,7 @@ export default function App() {
     const rc = result.recenter ?? [0, 0, 0];
     const ops: PointOp[] = selectedFaces.map((f) => {
       const at = f.at ?? [f.cx, f.cy, f.cz];
-      return { type: "extrude", at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]], size };
+      return { type: "extrude", at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]], size, ...durableAnchor(at, f) };
     });
     const n = ops.length;
     setSelectedFaces([]);
@@ -3951,6 +4003,31 @@ export default function App() {
 
   // Direct geometry op on the picked edge / corner / face — computed by replicad in
   // the worker with NO AI call (free). Commits a version so Undo works.
+  /** The part of a point-anchored op that lets it survive a parameter change: where the
+   *  pick sat as a fraction of the bounding box, and (for edges) which way the edge ran.
+   *  Both are computed from DISPLAY coords, which is fine — `recenter` is a pure
+   *  translation, and a translation doesn't move a point within its own box.
+   *  Returns nothing usable on a degenerate part, and the op falls back to `at` alone. */
+  function durableAnchor(p: readonly number[], f: PickedFeature): Partial<PointOp> {
+    const g = result?.geometry;
+    if (!g) return {};
+    if (!g.boundingBox) g.computeBoundingBox();
+    const bb = g.boundingBox;
+    if (!bb) return {};
+    const span = [bb.max.x - bb.min.x, bb.max.y - bb.min.y, bb.max.z - bb.min.z];
+    const out: Partial<PointOp> = { pick: f.kind === "vertex" ? "corner" : f.kind };
+    if (span.every((s) => s > 1e-6)) {
+      out.rel = [(p[0] - bb.min.x) / span[0], (p[1] - bb.min.y) / span[1], (p[2] - bb.min.z) / span[2]];
+    }
+    // Edge direction is recenter-invariant (it's a difference of two points), so the
+    // display-space endpoints give the engine-space direction unchanged.
+    if (f.kind === "edge" && f.ax != null && f.bx != null) {
+      const v = [f.bx - f.ax, (f.by ?? 0) - (f.ay ?? 0), (f.bz ?? 0) - (f.az ?? 0)];
+      const L = Math.hypot(v[0], v[1], v[2]);
+      if (L > 1e-6) out.dir = [v[0] / L, v[1] / L, v[2] / L];
+    }
+    return out;
+  }
   async function applyDirectOp(type: PointOp["type"], size: number, feat?: PickedFeature) {
     const f = feat ?? selectedFeature;
     if (!f || !size) return;
@@ -3963,7 +4040,12 @@ export default function App() {
     // (the display is recentred on the bed) so the finder hits the real edge/face.
     const p = f.at ?? [f.cx, f.cy, f.cz];
     const rc = result.recenter ?? [0, 0, 0];
-    const op: PointOp = { type, at: [p[0] + rc[0], p[1] + rc[1], p[2] + rc[2]], size };
+    const op: PointOp = {
+      type,
+      at: [p[0] + rc[0], p[1] + rc[1], p[2] + rc[2]],
+      size,
+      ...durableAnchor(p, f),
+    };
     setSelectedFeature(null);
     setSelectedFaces([]);
     setStatus("generating");
@@ -6140,6 +6222,14 @@ export default function App() {
             setModifyOp(v);
           },
           toggle: toggleModifyTool,
+          // Roundings and bevels, editable after the fact — same shape of control as the
+          // magnet pocket list, because it's the same promise: nothing you apply is stuck.
+          edges: edgeOpList(),
+          editIndex: shapeOpEdit,
+          select: (i) => setShapeOpEdit(i),
+          edit: (i, size) => void editEdgeOp(i, size),
+          remove: (i) => void removeEdgeOp(i),
+          reset: () => void resetEdgeOps(),
           apply: () => {
             const f = selectedFeature;
             const mo = modifyOp;

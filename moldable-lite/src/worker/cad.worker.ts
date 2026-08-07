@@ -2,8 +2,8 @@ import opencascade from "replicad-opencascadejs/src/replicad_single.js";
 import opencascadeWasm from "replicad-opencascadejs/src/replicad_single.wasm?url";
 import * as replicad from "replicad";
 import { setOC } from "replicad";
-import { expose } from "comlink";
-import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, WorkerOp } from "./workerMessages";
+import { expose, transfer } from "comlink";
+import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, RawFaceMesh, WorkerOp } from "./workerMessages";
 
 // ---- OCCT boot. locateFile MUST return the ?url import so emscripten fetches the hashed wasm. ----
 let ocReady: Promise<void> | null = null;
@@ -35,6 +35,18 @@ function kernelError(e: any): Error {
   );
 }
 
+/** Boxed number arrays → typed arrays, ready to be transferred rather than cloned.
+ *  Uint32 for the index unconditionally: three picks Uint16 vs Uint32 by scanning for
+ *  the max value, and paying for that scan to maybe save 2 bytes a triangle is a bad
+ *  trade when the array is about to be adopted as-is. */
+function packFaces(raw: RawFaceMesh): FaceMesh {
+  return {
+    vertices: Float32Array.from(raw.vertices),
+    triangles: Uint32Array.from(raw.triangles),
+    normals: raw.normals?.length ? Float32Array.from(raw.normals) : undefined,
+    faceGroups: raw.faceGroups,
+  };
+}
 const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
 // Live-drag previews trade a little surface fidelity for rebuild speed.
 const MESH_OPTS_COARSE = { tolerance: 0.2, angularTolerance: 0.6 };
@@ -61,6 +73,32 @@ let importedShape: any = null;
 // so direct ops failed on any rounded geometry. Match within a small distance instead. The
 // tolerance is a few× the mesh deviation, still far below the wall spacing on real parts.
 const PICK_TOL = 0.25;
+type Vec3 = [number, number, number];
+/** Where a point-anchored op should look, best guess first.
+ *
+ *  The absolute point is exact while the geometry under it hasn't moved. Once a
+ *  parameter resizes the part it points into thin air — which is precisely what made
+ *  every fillet and chamfer append-only and disposable: the rebuild threw and the app
+ *  shed the op. `rel` is the same spot as a fraction of the bounding box, so it moves
+ *  WITH the part. It gets a tolerance scaled to the part's size, because a non-uniform
+ *  resize (wider but not taller) leaves the anchor near its edge rather than dead on it,
+ *  and a nearest-edge search only needs near. */
+function anchorsFor(shape: any, op: { at: Vec3; rel?: Vec3 }): { at: Vec3; tol: number }[] {
+  const out = [{ at: op.at, tol: PICK_TOL }];
+  if (!op.rel) return out;
+  try {
+    const [min, max] = shape.boundingBox.bounds as [number[], number[]];
+    const span: Vec3 = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    const p: Vec3 = [min[0] + op.rel[0] * span[0], min[1] + op.rel[1] * span[1], min[2] + op.rel[2] * span[2]];
+    // 3% of the diagonal, floored at the exact tolerance — enough to absorb a resize,
+    // tight enough that it can't wander onto an unrelated feature.
+    const tol = Math.max(PICK_TOL, 0.03 * Math.hypot(span[0], span[1], span[2]));
+    if (Math.hypot(p[0] - op.at[0], p[1] - op.at[1], p[2] - op.at[2]) > 1e-6) out.push({ at: p, tol });
+  } catch {
+    // No usable bounding box on this shape — the absolute point is all there is.
+  }
+  return out;
+}
 
 /** Run a finder, treating replicad's throw-on-no/ambiguous-match as "not found". */
 function tryFind(f: () => any): any {
@@ -132,21 +170,48 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       // all edges by sampled distance to the anchor and keep only the winner — plus
       // genuine ties, which is what makes a CORNER pick work: the vertex sits at
       // distance ~0 from all three of its edges, and rounding them together is the op.
-      const distTo = (edge: any): number => {
+      const distTo = (edge: any, a: Vec3): number => {
         let d = Infinity;
         try {
           for (let i = 0; i <= 8; i++) {
             const q = edge.pointAt(i / 8);
-            d = Math.min(d, Math.hypot(q.x - op.at[0], q.y - op.at[1], q.z - op.at[2]));
+            d = Math.min(d, Math.hypot(q.x - a[0], q.y - a[1], q.z - a[2]));
           }
         } catch { /* unmeasurable edge — stays Infinity */ }
         return d;
       };
+      // Try the exact point first, then the bbox-relative one. The relative anchor gets
+      // a tolerance scaled to the part, because a resize that isn't uniform leaves it
+      // near the edge rather than dead on it — and near is all a nearest-edge search needs.
+      const cands = anchorsFor(shape, op);
+      let at: Vec3 | null = null;
       let best = Infinity;
-      for (const ed of shape.edges) best = Math.min(best, distTo(ed));
-      if (best > PICK_TOL) throw new Error("couldn't find an edge at that point — try picking it again");
+      for (const c of cands) {
+        let d = Infinity;
+        for (const ed of shape.edges) d = Math.min(d, distTo(ed, c.at));
+        if (d <= c.tol) { at = c.at; best = d; break; }
+        if (d < best) best = d; // remember the closest miss for the error message
+      }
+      if (!at) throw new Error("couldn't find an edge at that point — try picking it again");
       const CO_TOL = 0.02; // ties this close to the winner are the same pick (a corner)
-      const filter = (e: any) => e.when(({ element }: any) => distTo(element) <= best + CO_TOL);
+      // A corner pick WANTS every edge through the point. An edge pick does not: after a
+      // resize the anchor can drift toward a corner, and without this the rounding would
+      // silently spread onto the two perpendicular edges meeting there. `dir` says which
+      // one was actually picked, so ties are settled by direction, not by luck.
+      const near = (e: any) => distTo(e, at!) <= best + CO_TOL;
+      const along = (e: any): boolean => {
+        if (!op.dir || op.pick === "corner") return true;
+        try {
+          const a = e.startPoint, b = e.endPoint;
+          const v = [b.x - a.x, b.y - a.y, b.z - a.z];
+          const L = Math.hypot(v[0], v[1], v[2]);
+          if (L < 1e-9) return true; // a closed loop has no direction to compare
+          return Math.abs((v[0] * op.dir[0] + v[1] * op.dir[1] + v[2] * op.dir[2]) / L) > 0.7;
+        } catch {
+          return true;
+        }
+      };
+      const filter = (e: any) => e.when(({ element }: any) => near(element) && along(element));
       attempt = (size) => (op.type === "fillet" ? shape.fillet(size, filter) : shape.chamfer(size, filter));
       return attempt(op.size);
     }
@@ -241,16 +306,25 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
     // tolerance, and replicad's unique:true THROWS (rather than returning null) when it
     // misses — so each lookup is wrapped, or the tolerant fallbacks would never run and
     // every curved-face op would die with "Finder has not found a unique solution".
-    const face =
-      tryFind(() => new R.FaceFinder().containsPoint(op.at).find(shape, { unique: true })) ??
-      tryFind(() => new R.FaceFinder().withinDistance(PICK_TOL, op.at).find(shape, { unique: true })) ??
-      tryFind(() => new R.FaceFinder().withinDistance(PICK_TOL, op.at).find(shape)[0]); // several this close → take the hit
+    // Same durability as the edge ops: the exact point first, then the bbox-relative one
+    // so a parameter that resized the part doesn't strand the face anchor in mid-air.
+    let face: any = null;
+    let faceAt: Vec3 = op.at;
+    for (const c of anchorsFor(shape, op)) {
+      face =
+        tryFind(() => new R.FaceFinder().containsPoint(c.at).find(shape, { unique: true })) ??
+        tryFind(() => new R.FaceFinder().withinDistance(c.tol, c.at).find(shape, { unique: true })) ??
+        tryFind(() => new R.FaceFinder().withinDistance(c.tol, c.at).find(shape)[0]); // several this close → take the hit
+      if (face) { faceAt = c.at; break; }
+    }
     if (!face) throw new Error("couldn't resolve the face at that point");
     if (op.type === "extrude") {
       // Extrude the face (holes preserved) along its outward normal by the distance;
       // positive fuses (push out), negative cuts (pull in).
       const extrude = (size: number) => {
-        const vec = face.normalAt(op.at).normalized().multiply(size);
+        // Sample the normal at the anchor that actually FOUND this face — after a resize
+        // that's the relocated one, and op.at may no longer lie on the surface at all.
+        const vec = face.normalAt(faceAt).normalized().multiply(size);
         const prism = R.basicFaceExtrusion(face, vec);
         return size >= 0 ? shape.fuse(prism) : shape.cut(prism);
       };
@@ -417,9 +491,17 @@ const api: CadWorkerApi = {
       // NOTE: no meshEdges() here — the viewer derives its edge overlay from the face mesh
       // itself, so tessellating the B-rep edges on every build was pure wasted time.
       // Live-drag previews mesh coarser (the commit re-meshes at full quality).
-      const faces = shape.mesh(opts?.coarse ? MESH_OPTS_COARSE : MESH_OPTS) as FaceMesh;
+      const raw = shape.mesh(opts?.coarse ? MESH_OPTS_COARSE : MESH_OPTS) as RawFaceMesh;
       const dims = dimsOf(shape);
-      return { ok: true, faces, dims };
+      const faces = packFaces(raw);
+      // Hand the buffers over rather than cloning them. After this the worker's copies
+      // are detached — which is fine, `raw` is a fresh tessellation each build and
+      // nothing here reads it again.
+      // `.buffer` is typed ArrayBufferLike (it could be shared); these come from
+      // Float32Array.from, so they never are.
+      const xfer = [faces.vertices.buffer, faces.triangles.buffer] as ArrayBuffer[];
+      if (faces.normals) xfer.push(faces.normals.buffer as ArrayBuffer);
+      return transfer({ ok: true, faces, dims }, xfer);
     } catch (e: any) {
       const err = kernelError(e);
       return {

@@ -473,8 +473,29 @@ button:disabled { cursor: default; }
 .cut-fly .fine { margin: 0; }
 /* Modify flyout: the armed op, its size, and what the next click will do. A real
    panel (not a bare seg row) because it stacks controls over two lines of hint. */
-.modify-fly { width: 208px; }
+.modify-fly { width: 236px; gap: 7px; } /* three named tiles + the applied-edges list */
 .modify-fly .fine { margin: 0; }
+.modify-fly .pocket-pick { align-items: center; gap: 6px; }
+.modify-fly .pocket-pick svg { flex: none; color: var(--subt); }
+.modify-fly .pocket-row.on .pocket-pick svg { color: var(--accent-d); }
+.modify-fly .pocket-where { margin-left: auto; }
+/* What to do, as three tiles with the edge PROFILE above each name — "Round" and
+   "Bevel" were words you had to already know, and the glyph is the difference itself. */
+.modify-ops { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; background: var(--ctl); border-radius: var(--r-md); }
+.modify-ops button {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 2px 7px; border: none; background: none; border-radius: var(--r-sm);
+  color: var(--mut); font-size: 11px; font-weight: 500; line-height: 1;
+  transition: background-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1);
+}
+.modify-ops button svg { flex: none; }
+.modify-ops button:hover { color: var(--ink2); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.modify-ops button:active { transform: scale(.97); }
+.modify-ops button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
+/* A text action sitting on a section label (Reset all) — not a button-shaped control,
+   because it's secondary to the list it heads. */
+.link-sm { border: none; background: none; padding: 0; font: inherit; font-size: 11px; font-weight: 600; color: var(--mut); text-decoration: underline; text-underline-offset: 2px; }
+.link-sm:hover { color: var(--accent-d); }
 .modify-size { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2); }
 .modify-size input { width: 64px; }
 .modify-size button { margin-left: auto; }

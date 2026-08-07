@@ -116,6 +116,30 @@ export const IconShapes = ({ size = 15 }: { size?: number }) => (
     <path d="M15.3 15.1c0-1 1.3-1.8 2.9-1.8s2.9.8 2.9 1.8v4.2c0 1-1.3 1.8-2.9 1.8s-2.9-.8-2.9-1.8Z" />
   </svg>
 );
+/* Edge treatments, drawn as the PROFILE you'd see looking down the edge — a square
+   corner with the piece taken off it. "Round" and "Bevel" are words a designer has to
+   learn; a quarter-circle next to a diagonal is the thing itself. The faint square is
+   the original corner, so you can see what each one removes. */
+export const IconEdgeRound = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 20h16" opacity={0.35} /><path d="M20 20V4" opacity={0.35} />
+    <path d="M4 20h6a10 10 0 0 0 10-10V4" />
+  </svg>
+);
+export const IconEdgeAngle = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M4 20h16" opacity={0.35} /><path d="M20 20V4" opacity={0.35} />
+    <path d="M4 20h6L20 10V4" />
+  </svg>
+);
+/** Push/Pull: a face lifted off the body along its normal. */
+export const IconPushPull = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M3.5 19h17" opacity={0.35} />
+    <path d="M6.5 15.5h11v-4h-11Z" />
+    <path d="M12 8.5V2.5M9.4 5.1 12 2.5l2.6 2.6" />
+  </svg>
+);
 /* The three primitives the Shape tool drops. Drawn as SOLIDS in the same isometric
    projection, not as flat squares and circles: the panel is asking "which lump", and a
    plain circle beside a plain square reads as a 2D sketch palette. */

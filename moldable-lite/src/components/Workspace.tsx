@@ -34,7 +34,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1564,6 +1564,119 @@ function PathToPrint({ hasModel, report, onOpenCheck }: {
   );
 }
 
+/** Modify panel: the operation, its size, and — new — every rounding and bevel already
+ *  on the part as an editable list.
+ *
+ *  "Round" and "Bevel" are gone as words. Both were jargon the panel expected you to
+ *  already know; the profile glyph beside each one shows the corner being taken off,
+ *  which is the actual difference, and "Rounded"/"Angled" name the RESULT rather than
+ *  the operation. */
+function ModifyFly({ ctl, featureCtl }: { ctl: Props["modifyCtl"]; featureCtl: Props["featureCtl"] }) {
+  const op = ctl.op!;
+  const sel = ctl.editIndex != null ? ctl.edges.find((e) => e.index === ctl.editIndex) ?? null : null;
+  const OPS = [
+    { k: "push" as const, label: "Push/Pull", Icon: IconPushPull, tip: "Move a flat face along its own direction — out adds material, in cuts it away" },
+    { k: "round" as const, label: "Rounded", Icon: IconEdgeRound, tip: "Take the corner off as a curve (a fillet) — kinder on hands and stronger in print" },
+    { k: "bevel" as const, label: "Angled", Icon: IconEdgeAngle, tip: "Take the corner off as a flat slope (a chamfer) — the classic lead-in for a screw or a lid" },
+  ];
+  return (
+    <div className="rail-fly modify-fly">
+      <div className="modify-ops" role="radiogroup" aria-label="What to do">
+        {OPS.map((o) => (
+          <button key={o.k} className={op.op === o.k ? "on" : ""} role="radio" aria-checked={op.op === o.k}
+            title={o.tip} onClick={() => ctl.set({ op: o.k, size: op.size })}>
+            <o.Icon size={18} /><span>{o.label}</span>
+          </button>
+        ))}
+      </div>
+      {/* Mid-drag the box mirrors the live value; typing still works between drags. */}
+      <label className="modify-size">
+        <input
+          type="number"
+          step={0.5}
+          min={0.05}
+          value={featureCtl.liveMm ?? op.size}
+          onChange={(e) => {
+            const v = parseFloat(e.target.value);
+            if (Number.isFinite(v)) ctl.set({ op: op.op, size: v });
+          }}
+        />
+        <span>mm</span>
+        <button
+          className="ghost sm"
+          disabled={!featureCtl.selected}
+          title={featureCtl.selected ? "Apply this size to the selected spot" : "Click a spot on the model first"}
+          onClick={ctl.apply}
+        >Apply</button>
+      </label>
+      {featureCtl.liveStop ? (
+        <p className="fine modify-stop">
+          {featureCtl.liveStop === "max"
+            ? op.op === "push"
+              ? "That's the limit — any further won't fit the printer."
+              : "That's the limit — as big as fits here."
+            : "That's the limit — any deeper cuts through."}
+        </p>
+      ) : ctl.note ? (
+        <p className="fine modify-stop">{ctl.note}</p>
+      ) : featureCtl.selected ? (
+        <p className="fine">
+          {op.op === "push"
+            ? "Now drag the arrow — out adds, in cuts. Or type a size and press Apply."
+            : "Now drag the arrow to set the size by eye — or type it and press Apply."}
+        </p>
+      ) : (
+        <p className="fine">
+          {op.op === "push"
+            ? "Click a flat face to give it a drag arrow."
+            : "Click a face, edge or corner to give it a drag arrow."}
+        </p>
+      )}
+      {/* Everything already applied, still editable. This is the difference between a
+          decoration you can only Undo and a feature you own. */}
+      {ctl.edges.length > 0 && (
+        <>
+          <div className="shape-lbl">
+            <span>Rounded edges</span>
+            <button className="link-sm" onClick={ctl.reset} title="Take every rounding and bevel back off — one Undo brings them all back">Reset all</button>
+          </div>
+          <div className="pocket-list">
+            {ctl.edges.map((e) => (
+              <div key={e.index} className={`pocket-row${ctl.editIndex === e.index ? " on" : ""}`}>
+                <button className="pocket-pick" title="Edit this one — retype its size below"
+                  onClick={() => ctl.select(ctl.editIndex === e.index ? null : e.index)}>
+                  {e.name === "Rounded" ? <IconEdgeRound size={14} /> : <IconEdgeAngle size={14} />}
+                  <span className="pocket-size">{e.name} {e.what}</span>
+                  <span className="pocket-where">{e.size} mm</span>
+                </button>
+                <button className="x" aria-label="Remove this edge treatment" title="Take it back off — undoable" onClick={() => ctl.remove(e.index)}><IconX /></button>
+              </div>
+            ))}
+          </div>
+          {sel && (
+            <label className="modify-size">
+              <input type="number" step={0.5} min={0.05} defaultValue={sel.size} key={`${sel.index}:${sel.size}`}
+                onKeyDown={(ev) => {
+                  if (ev.key !== "Enter") return;
+                  const v = parseFloat((ev.target as HTMLInputElement).value);
+                  if (Number.isFinite(v) && v > 0) ctl.edit(sel.index, v);
+                }} />
+              <span>mm</span>
+              <button className="ghost sm" title="Rebuild this edge at the new size"
+                onClick={(ev) => {
+                  const inp = (ev.currentTarget.parentElement as HTMLElement).querySelector("input") as HTMLInputElement;
+                  const v = parseFloat(inp.value);
+                  if (Number.isFinite(v) && v > 0) ctl.edit(sel.index, v);
+                }}>Set</button>
+            </label>
+          )}
+        </>
+      )}
+      <p className="fine">Shell, revolve or patterns: select the spot, then ask in chat.</p>
+    </div>
+  );
+}
+
 /** Shape tool panel: what to drop, whether it adds or cuts, and — once something is
  *  placed — its exact size and centre. Clicking puts it roughly where you point; these
  *  boxes are what make it exact, which is the whole reason not to describe it in words. */
@@ -2065,6 +2178,13 @@ interface Props {
     /** Arm or put down, standing every other tool down and turning picking on. */
     toggle: () => void;
     apply: () => void; // apply the typed size to the selected feature (the no-drag path)
+    /** Every rounding/bevel already on the part — editable, removable, resettable. */
+    edges: { index: number; name: string; what: string; size: number }[];
+    editIndex: number | null;
+    select: (i: number | null) => void;
+    edit: (i: number, size: number) => void;
+    remove: (i: number) => void;
+    reset: () => void;
   };
   facesCtl: {
     faces: PickedFeature[];
@@ -3103,58 +3223,7 @@ export function Workspace(p: Props) {
                         <IconModify />
                       <span className="rail-name">Modify</span>
                     </button>
-                      {p.modifyCtl.op && p.activeKind === "replicad" && (
-                        <div className="rail-fly modify-fly">
-                          <div className="seg sm">
-                            <button className={p.modifyCtl.op.op === "push" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "push", size: p.modifyCtl.op!.size })}>Push/Pull</button>
-                            <button className={p.modifyCtl.op.op === "round" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "round", size: p.modifyCtl.op!.size })}>Round</button>
-                            <button className={p.modifyCtl.op.op === "bevel" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "bevel", size: p.modifyCtl.op!.size })}>Bevel</button>
-                          </div>
-                          {/* Mid-drag the box mirrors the live value; typing still works between drags. */}
-                          <label className="modify-size">
-                            <input
-                              type="number"
-                              step={0.5}
-                              value={p.featureCtl.liveMm ?? p.modifyCtl.op.size}
-                              onChange={(e) => {
-                                const v = parseFloat(e.target.value);
-                                if (Number.isFinite(v)) p.modifyCtl.set({ op: p.modifyCtl.op!.op, size: v });
-                              }}
-                            />
-                            <span>mm</span>
-                            <button
-                              className="ghost sm"
-                              disabled={!p.featureCtl.selected}
-                              title={p.featureCtl.selected ? "Apply this size to the selected spot" : "Click a spot on the model first"}
-                              onClick={p.modifyCtl.apply}
-                            >Apply</button>
-                          </label>
-                          {p.featureCtl.liveStop ? (
-                            <p className="fine modify-stop">
-                              {p.featureCtl.liveStop === "max"
-                                ? p.modifyCtl.op.op === "push"
-                                  ? "That's the limit — any further won't fit the printer."
-                                  : "That's the limit — as big as fits here."
-                                : "That's the limit — any deeper cuts through."}
-                            </p>
-                          ) : p.modifyCtl.note ? (
-                            <p className="fine modify-stop">{p.modifyCtl.note}</p>
-                          ) : p.featureCtl.selected ? (
-                            <p className="fine">
-                              {p.modifyCtl.op.op === "push"
-                                ? "Now drag the arrow — out adds, in cuts. Or type a size and press Apply."
-                                : "Now drag the arrow to set the size by eye — or type it and press Apply."}
-                            </p>
-                          ) : (
-                            <p className="fine">
-                              {p.modifyCtl.op.op === "push"
-                                ? "Click a flat face to give it a drag arrow."
-                                : "Click a face, edge or corner to give it a drag arrow."}
-                            </p>
-                          )}
-                          <p className="fine">Shell, revolve or patterns: select the spot with Select, then ask in chat.</p>
-                        </div>
-                      )}
+                      {p.modifyCtl.op && p.activeKind === "replicad" && <ModifyFly ctl={p.modifyCtl} featureCtl={p.featureCtl} />}
                     </div>
                     </>
                   )}

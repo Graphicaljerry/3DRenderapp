@@ -1,12 +1,23 @@
-import { BufferGeometry } from "three";
-import { syncFaces } from "replicad-threejs-helper";
+import { BufferGeometry, BufferAttribute } from "three";
 import type { FaceMesh } from "../worker/workerMessages";
 
-/** replicad face payload -> BufferGeometry, recentred to sit on the bed (min z -> 0). */
+/** replicad face payload -> BufferGeometry, recentred to sit on the bed (min z -> 0).
+ *
+ *  The attributes wrap the worker's TRANSFERRED buffers directly — this function does
+ *  not copy the mesh. (It replaces replicad-threejs-helper's syncFaces, which took a
+ *  boxed number[] and copied it into a Float32Array; with the buffers already typed and
+ *  handed over, that copy was the last of three.) */
 export function facesToGeometry(faces: FaceMesh): BufferGeometry {
   const g = new BufferGeometry();
-  syncFaces(g, faces as any);
-  if (!faces.normals || faces.normals.length === 0) g.computeVertexNormals();
+  g.setIndex(new BufferAttribute(faces.triangles, 1));
+  g.setAttribute("position", new BufferAttribute(faces.vertices, 3));
+  if (faces.normals?.length) g.setAttribute("normal", new BufferAttribute(faces.normals, 3));
+  else g.computeVertexNormals();
+  // Face groups drive B-rep face picking (see buildTriData). syncFaces used to both
+  // stash them on userData AND register draw groups; the second material slot they
+  // switched between was never wired up here, so only the userData copy earns its keep.
+  if (faces.faceGroups?.length) g.userData.faceGroups = faces.faceGroups;
+  g.addGroup(0, faces.triangles.length, 0);
   g.computeBoundingBox();
   const bb = g.boundingBox;
   // Recentre for display, but record the offset so picked points (which are in these
@@ -23,4 +34,3 @@ export function facesToGeometry(faces: FaceMesh): BufferGeometry {
   g.computeBoundingBox();
   return g;
 }
-

@@ -461,6 +461,7 @@ interface Internals {
   selBox: THREE.Group | null; // selection chrome: bounding box + corner anchor dots
   analysisMesh: THREE.Mesh | null; // printability overlay (child of `mesh`, follows its transform)
   paintMesh: THREE.Mesh | null; // per-face MMU paint overlay (de-indexed, vertex RGBA), child of `mesh`
+  paintPrev: THREE.Mesh | null; // hover preview: the region the next Fill click / Brush dab would paint
   triColor: Uint8Array | null; // per-triangle paint palette index (0 = unpainted), 1:1 with the model triangles
   axScene: THREE.Scene; // corner orientation gizmo (Blender-style): its own tiny scene…
   axCam: THREE.OrthographicCamera; // …rendered through an ortho cam into a corner viewport
@@ -1320,6 +1321,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         const slot = cb.current.paintSlot ?? 1;
         for (const t of region) s2.triColor[t] = slot;
         updatePaintTris(s2, region, cb.current.paintPalette ?? []);
+        hidePaintPrev(); // the real paint is down — the tint on top would double it
         cb.current.onPaintStroke?.(s2.triColor.slice());
         return;
       }
@@ -1464,6 +1466,75 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     let paintPending: PointerEvent | null = null;
     let hoverTick = -1;
     let hoverPending: PointerEvent | null = null;
+    // Paint hover preview: tint the EXACT region the next Fill click (or Brush dab)
+    // would colour, in the chosen filament, before anything commits. Recomputed only
+    // when the hovered spot actually changes — the flood is cheap on CAD shells but
+    // not free on AI meshes.
+    let paintPrevKey = "";
+    const hidePaintPrev = () => {
+      paintPrevKey = "";
+      if (st.current?.paintPrev) st.current.paintPrev.visible = false;
+    };
+    const paintHoverAt = (clientX: number, clientY: number) => {
+      const s2 = st.current;
+      if (!s2 || !s2.mesh || !ensureTri(s2) || !s2.tri) return;
+      const rect = canvasRect();
+      rc.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1), camera);
+      const hit = rc.intersectObject(s2.mesh, false)[0];
+      if (!hit || hit.faceIndex == null) {
+        hidePaintPrev();
+        renderer.domElement.style.cursor = "";
+        return;
+      }
+      renderer.domElement.style.cursor = "crosshair";
+      const tool = cb.current.paintTool ?? "fill";
+      const slot = cb.current.paintSlot ?? 1;
+      const key = tool === "brush"
+        ? `b:${hit.faceIndex}:${hit.point.x.toFixed(1)}:${hit.point.y.toFixed(1)}:${hit.point.z.toFixed(1)}:${slot}:${cb.current.brushSize}:${cb.current.paintMirror}`
+        : `f:${hit.faceIndex}:${slot}:${cb.current.paintAngle}:${cb.current.paintMirror}`;
+      if (key === paintPrevKey && s2.paintPrev?.visible) return;
+      paintPrevKey = key;
+      let region: number[];
+      if (tool === "brush") {
+        s2.mesh.geometry.computeBoundingBox();
+        const sz = s2.mesh.geometry.boundingBox!.getSize(new THREE.Vector3());
+        const radius = (Math.max(sz.x, sz.y, sz.z) || 40) * (cb.current.brushSize ?? 8) / 100;
+        region = brushRegion(s2.tri, hit.faceIndex, s2.mesh.worldToLocal(hit.point.clone()), radius);
+      } else {
+        region = paintFillRegion(s2.tri, hit.faceIndex, cb.current.paintAngle ?? 30);
+      }
+      if (cb.current.paintMirror) {
+        const map = mirrorMapOf(s2.tri, s2.mesh.geometry);
+        region = region.concat(region.map((t) => map[t]).filter((t) => t >= 0));
+      }
+      const { pos, idx } = s2.tri;
+      const out = new Float32Array(region.length * 9);
+      const v = new THREE.Vector3();
+      for (let i = 0; i < region.length; i++) {
+        for (let k = 0; k < 3; k++) {
+          v.fromBufferAttribute(pos, idx ? idx.getX(region[i] * 3 + k) : region[i] * 3 + k);
+          out.set([v.x, v.y, v.z], i * 9 + k * 3);
+        }
+      }
+      if (!s2.paintPrev) {
+        s2.paintPrev = new THREE.Mesh(
+          new THREE.BufferGeometry(),
+          // polygonOffset pulls the tint in front of the surface it duplicates —
+          // without it the preview z-fights the model into shimmer.
+          new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.45, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }),
+        );
+        s2.paintPrev.renderOrder = 3;
+        scene.add(s2.paintPrev);
+      }
+      s2.paintPrev.geometry.dispose();
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(out, 3));
+      s2.paintPrev.geometry = g;
+      // Slot 0 is the eraser — preview in white (what unpainting reveals is the base).
+      const hex = slot > 0 ? (cb.current.paintPalette?.[slot - 1] ?? "#ffffff") : "#ffffff";
+      (s2.paintPrev.material as THREE.MeshBasicMaterial).color.set(hex);
+      s2.paintPrev.visible = true;
+    };
     const brushPaintAt = (clientX: number, clientY: number) => {
       const s2 = st.current;
       if (!s2 || !s2.mesh || !s2.tri || !s2.triColor) return;
@@ -1543,6 +1614,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (hit) {
           if (!s2.paintMesh) rebuildPaintMesh(s2, cb.current.paintPalette ?? []);
           paintDrag = e.pointerId;
+          hidePaintPrev(); // the stroke itself is the feedback now
           controls.enabled = false;
           e.preventDefault();
           try { renderer.domElement.setPointerCapture?.(e.pointerId); } catch { /* unsupported */ }
@@ -1940,6 +2012,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (hoverTick === frame) { hoverPending = e; return; }
       hoverTick = frame;
       hoverPending = null;
+      // Paint armed: show what the click/dab would colour before it commits. The
+      // eyedropper is the exception — it reads, it doesn't paint.
+      if (cb.current.paintMode && cb.current.paintTool !== "pick") {
+        paintHoverAt(e.clientX, e.clientY);
+        return;
+      }
+      if (st.current?.paintPrev?.visible) hidePaintPrev(); // left paint mode with the tint still up
       // Hole hover-placement: slide the drill ghost (and its guide lines) along the
       // target plane under the cursor. Purely imperative — the draft's position only
       // commits on click, so hovering costs no React re-renders.
@@ -2120,7 +2199,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, paintMesh: null, triColor: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
+    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, paintMesh: null, paintPrev: null, triColor: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -2183,6 +2262,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       (highlight.material as THREE.Material).dispose();
       multiHi.geometry.dispose();
       (multiHi.material as THREE.Material).dispose();
+      if (st.current?.paintPrev) {
+        st.current.paintPrev.geometry.dispose();
+        (st.current.paintPrev.material as THREE.Material).dispose();
+      }
       edgeHi.geometry.dispose();
       vertHi.geometry.dispose();
       markMat.dispose();
@@ -2591,6 +2674,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       s.mesh.geometry = geometry;
     }
   }, [clay, geometry]);
+
+  // Putting the paint tool down (or switching to the eyedropper) drops the hover
+  // tint — the pointermove path that normally clears it stops running with the mode.
+  useEffect(() => {
+    const s = st.current;
+    if (!s?.paintPrev) return;
+    if (!paintMode || paintTool === "pick") s.paintPrev.visible = false;
+  }, [paintMode, paintTool]);
 
   // Leaving select mode clears the highlight + locked feature.
   useEffect(() => {

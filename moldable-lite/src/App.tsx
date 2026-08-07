@@ -29,6 +29,7 @@ import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
+import { reloadIfStaleChunk } from "./lib/staleChunk";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { repairGeometry } from "./print/repair";
 import { preflightExport, preflightSummary } from "./print/preflight";
@@ -98,6 +99,7 @@ function scheduleIdle(fn: () => void): void {
 
 export type ChatMessage = {
   id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode;
+  ts?: number; // when it was said (epoch ms) — older saved chats predate the field
   model?: string; // which AI produced this reply (shown small under the bubble)
   // While streaming, the bubble is a step timeline: `steps` are the COMPLETED stages
   // (checked off, connector line drawn) and `text` is the ACTIVE one — so in-place
@@ -741,7 +743,7 @@ export default function App() {
     if (!geometry || !result || status === "generating" || separatedRef.current) return;
     const pieces = splitConnectedParts(geometry);
     if (pieces.length < 2) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model is already one connected part — nothing to separate." }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "This model is already one connected part — nothing to separate." }]);
       return;
     }
     const [main, ...rest] = pieces;
@@ -806,7 +808,7 @@ export default function App() {
         carvedNames.push(a.name);
       }
       if (!g) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Nothing to carve — the selected part isn't overlapping the model. Move it to where it should nest (so they collide), then tap Cut to fit." }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Nothing to carve — the selected part isn't overlapping the model. Move it to where it should nest (so they collide), then tap Cut to fit." }]);
         return;
       }
       g.computeVertexNormals();
@@ -829,7 +831,7 @@ export default function App() {
         text: `Carved **${names}**'s shape out of the model with **${CLEARANCE} mm clearance** per side — it can nest there now. Tap **Check clearance** to confirm (it should pass), and slide the part in and out to eyeball it. ${separatedRef.current ? "**Merge all into model** makes this permanent; **Undo** / **Regroup parts** restores the original." : "Undo restores the un-carved model."}`,
       }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Cut to fit failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Cut to fit failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -863,10 +865,10 @@ export default function App() {
       }
       if (lines.length) {
         lines.push("A clean pass means no collision at this exact position — how snug it prints still comes from the clearance designed between the mating faces.");
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: lines.join("\n\n") }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: lines.join("\n\n") }]);
       }
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Fit check failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Fit check failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -997,7 +999,7 @@ export default function App() {
     setPending(null);
     pendingRef.current = null;
     setGeometry(pc.prevGeometry);
-    if (!silent) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Discarded — the model is unchanged. (The proposal is gone; re-ask any time.)" }]);
+    if (!silent) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Discarded — the model is unchanged. (The proposal is gone; re-ask any time.)" }]);
   }
   // A follow-up ask that involves the held proposal can't run in the same tick — the
   // send path closes over `result`/`geometry` state, which only reflect the promote
@@ -1058,7 +1060,7 @@ export default function App() {
     setMessages((m) => {
       const last = m[m.length - 1];
       if (last && last.role === msg.role && last.text === msg.text && !!last.error === !!msg.error) return m;
-      return [...m, { id: mid(), ...msg }];
+      return [...m, { id: mid(), ts: Date.now(), ...msg }];
     });
   }
   const renameAttachment = (id: string, name: string) => {
@@ -1918,7 +1920,7 @@ export default function App() {
         setThinReport(rep);
         setThinShow(rep.thinSamples > 0);
       } catch (err: any) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Wall-thickness check failed: " + String(err?.message ?? err), error: true }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Wall-thickness check failed: " + String(err?.message ?? err), error: true }]);
       } finally {
         setThinBusy(false);
       }
@@ -2021,7 +2023,7 @@ export default function App() {
   /** Elephant-foot guard: chamfer every bed-plane edge of the CAD solid. */
   async function applyChamferBottom(size: number) {
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The elephant-foot chamfer edits the real CAD solid, so it works on Precise (CAD) models.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "The elephant-foot chamfer edits the real CAD solid, so it works on Precise (CAD) models.", error: true }]);
       return;
     }
     const src = result.source;
@@ -2035,7 +2037,7 @@ export default function App() {
         `Elephant-foot chamfer ${size} mm applied.`,
       );
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't chamfer the bottom edges: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't chamfer the bottom edges: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -2568,7 +2570,7 @@ export default function App() {
       dims: result.dims,
     });
     persist(next);
-    setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
+    setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
   }
 
   /** One-click mesh repair: weld seams, drop bad triangles, fill holes, fix winding. */
@@ -2593,7 +2595,7 @@ export default function App() {
         },
       ]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Repair failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Repair failed: " + String(err?.message ?? err), error: true }]);
     }
   }
 
@@ -2620,7 +2622,7 @@ export default function App() {
         },
       ]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Simplify failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Simplify failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -2654,7 +2656,7 @@ export default function App() {
       const { penCut, strokeSites, addConnectors, repack } = await import("./print/cut");
       const out = penCut(result.geometry, pendingCut, { kerf: 0.2 });
       if (!out) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "That line didn't separate the model — draw all the way across it (start and finish outside the part) and try again.", error: true }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "That line didn't separate the model — draw all the way across it (start and finish outside the part) and try again.", error: true }]);
         return;
       }
       let pieces = out.pieces;
@@ -2700,7 +2702,7 @@ export default function App() {
           : `Cut along your line into ${pieces.length} parts.${opts && pieces.length > 2 ? " Pins are only fitted when the line makes exactly two pieces — this one made more." : opts ? " There was nowhere thick enough for a pin even at the smallest size, so the faces are plain." : ""}`,
       }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Cut failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Cut failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -2715,7 +2717,7 @@ export default function App() {
       const { splitToFitBed } = await import("./print/split"); // CSG splitter loads on demand
       const out = splitToFitBed(result.geometry, bed, 5, connectorOpts());
       if (out.parts <= 1) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "This model already fits the bed — no split needed." }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "This model already fits the bed — no split needed." }]);
         return;
       }
       // The split output is a plain mesh of parts — treat it as a generative result
@@ -2749,7 +2751,8 @@ export default function App() {
         },
       ]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Split failed: " + String(err?.message ?? err), error: true }]);
+      if (reloadIfStaleChunk(err)) return; // a fresh deploy took the old chunk — the reload fixes it
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Split failed: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -2813,7 +2816,7 @@ export default function App() {
       const label = `Exported all ${splitPieces.length} pieces as separate ${format.toUpperCase()} files in one zip.`;
       explainOnce("export-pieces", `${label} ${preflightSummary(pf)}${caveat ? " " + caveat : ""}`, exportBrief(label, pf, caveat));
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
     }
   }
 
@@ -2838,9 +2841,9 @@ export default function App() {
           : hand.how === "deeplink"
             ? `Sent to ${app}.${target === "bambu" ? " Bambu may ask “not from a trusted site — open anyway?” — that's expected for a file that didn't come from MakerWorld; click yes." : ""} If nothing opened, ${app} may not be installed — the download button works too.`
             : "Downloaded the 3MF — double-click it and it opens in your default slicer. The desktop app opens it directly, and remembers the file so you can reload it there after an edit.";
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: said + " " + preflightSummary(pf) }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: said + " " + preflightSummary(pf) }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't prepare the file: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't prepare the file: " + String(err?.message ?? err), error: true }]);
     }
   }
 
@@ -2903,7 +2906,7 @@ export default function App() {
         // then Merge in the Objects panel fuses it into one printable solid.
         const { geometry: g, dims: d } = extrudeSvg(svgDraft.text, { sizeMm: prm.sizeMm, heightMm: prm.heightMm });
         addAttachment(g, svgDraft.name);
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added **${svgDraft.name}** (${d.x} × ${d.y} × ${d.z} mm) as a movable object on the model. Drag the arrows/rings to place it, corner dots to size it, then press **Merge** in the Objects panel (layers icon) to make it part of the case. Merging produces a mesh — do CAD edits first.` }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Added **${svgDraft.name}** (${d.x} × ${d.y} × ${d.z} mm) as a movable object on the model. Drag the arrows/rings to place it, corner dots to size it, then press **Merge** in the Objects panel (layers icon) to make it part of the case. Merging produces a mesh — do CAD edits first.` }]);
         URL.revokeObjectURL(svgDraft.url);
         setSvgDraft(null);
         return;
@@ -2926,10 +2929,10 @@ export default function App() {
       setMode("generative");
       setMessages((m) => [
         ...m,
-        { id: mid(), role: "assistant", text: `${verb} ${svgDraft.name}.svg to a solid (${dims.x} × ${dims.y} × ${dims.z} mm). Check Printability, then export — or drop the SVG again for a different result.` },
+        { id: mid(), ts: Date.now(), role: "assistant", text: `${verb} ${svgDraft.name}.svg to a solid (${dims.x} × ${dims.y} × ${dims.z} mm). Check Printability, then export — or drop the SVG again for a different result.` },
       ]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't build from that SVG: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't build from that SVG: " + String(err?.message ?? err), error: true }]);
     } finally {
       if (svgDraft) URL.revokeObjectURL(svgDraft.url);
       setSvgDraft(null);
@@ -2949,9 +2952,9 @@ export default function App() {
         const { geometry: g, dims: d } = await loadAnyMesh(f);
         const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
         addAttachment(g, cleanName);
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Added **${cleanName}** (${d.x} × ${d.y} × ${d.z} mm) as a new object on the canvas — it's in the Objects panel. Position it with the gizmo, **Merge** to fuse it into the model, or ✕ to remove. (To open it on its own instead, start a + New chat first.)` }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Added **${cleanName}** (${d.x} × ${d.y} × ${d.z} mm) as a new object on the canvas — it's in the Objects panel. Position it with the gizmo, **Merge** to fuse it into the model, or ✕ to remove. (To open it on its own instead, start a + New chat first.)` }]);
       } catch (err: any) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that mesh file: " + String(err?.message ?? err), error: true }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't read that mesh file: " + String(err?.message ?? err), error: true }]);
       } finally {
         setStatus("idle");
       }
@@ -2961,7 +2964,7 @@ export default function App() {
     if (/\.shapr$/i.test(f.name)) {
       setMessages((m) => [
         ...m,
-        { id: mid(), role: "assistant", text: "Shapr3D's native .shapr format is proprietary and can't be read here. In Shapr3D: Export → STEP, then drop that file in — it imports as a fully editable CAD solid.", error: true },
+        { id: mid(), ts: Date.now(), role: "assistant", text: "Shapr3D's native .shapr format is proprietary and can't be read here. In Shapr3D: Export → STEP, then drop that file in — it imports as a fully editable CAD solid.", error: true },
       ]);
       return;
     }
@@ -2977,7 +2980,7 @@ export default function App() {
       const s = sel ?? (await ensureEngine());
       const asCad = isStep ? ("step" as const) : s.kind === "replicad" && s.engine.setImport ? ("stl" as const) : null;
       if (asCad === "step" && (s.kind !== "replicad" || !s.engine.setImport)) {
-        setMessages((m) => [...m, { id: mid(), role: "assistant", text: "STEP import needs the OpenCascade engine, which failed to boot on this device (the app fell back to the primitive engine).", error: true }]);
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "STEP import needs the OpenCascade engine, which failed to boot on this device (the app fell back to the primitive engine).", error: true }]);
         return;
       }
       if (asCad) {
@@ -3013,13 +3016,13 @@ export default function App() {
         } catch (err: any) {
           setStatus("idle");
           if (asCad !== "stl") {
-            setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
+            setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't read that STEP file: " + String(err?.message ?? err), error: true }]);
             return;
           }
           // STL that OCCT couldn't solidify → import it as a plain mesh instead (below).
           try { await s.engine.setImport!(null); } catch { /* worker may have respawned */ }
           importFileRef.current = null;
-          setMessages((m) => [...m, { id: mid(), role: "assistant", text: "That STL couldn't be converted to an editable solid — importing it as a plain mesh instead (measure, repair, resize, export still work)." }]);
+          setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "That STL couldn't be converted to an editable solid — importing it as a plain mesh instead (measure, repair, resize, export still work)." }]);
         }
       }
     }
@@ -3040,14 +3043,14 @@ export default function App() {
       applyResult(res, cleanName, `Imported ${f.name} — ${d.x} × ${d.y} × ${d.z} mm`, `import ${f.name}`);
       setMessages((m) => [
         ...m,
-        { id: mid(), role: "assistant", text: `Imported ${f.name} (${d.x} × ${d.y} × ${d.z} mm). Measure it, run Printability/repair, resize, and export or send to your slicer — like any generated model.` },
+        { id: mid(), ts: Date.now(), role: "assistant", text: `Imported ${f.name} (${d.x} × ${d.y} × ${d.z} mm). Measure it, run Printability/repair, resize, and export or send to your slicer — like any generated model.` },
       ]);
       maybeOfferInches(d);
       // Only when the size is trusted: an inch-suspect model gets units settled first —
       // orientation advice on a part that's about to grow 25× would describe the wrong part.
       if (Math.max(d.x, d.y, d.z) > 13) maybeOfferOrientation(g);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't read that 3D file: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't read that 3D file: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3168,7 +3171,7 @@ export default function App() {
   async function applyHole() {
     const d = holeRef.current;
     if (!d || !result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      if (d) setMessages((m) => [...m, { id: mid(), role: "assistant", text: "The hole tool works on Precise (CAD) models.", error: true }]);
+      if (d) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "The hole tool works on Precise (CAD) models.", error: true }]);
       setHoleDraft(null);
       return;
     }
@@ -3189,7 +3192,7 @@ export default function App() {
       applyResult(res, project?.name ?? "Model", `Drilled a ${what}`, `hole ${d.diameter}`);
       explainOnce("hole", `Drilled a **${what}** — free, no AI. Undo reverts it; it also rides along when sliders rebuild the model.`);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't drill there: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't drill there: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3258,7 +3261,7 @@ export default function App() {
       // for AI replies, offers and errors, per Jerry's standing rule.
       applyResult(res, project?.name ?? "Model", summary, prompt);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't rebuild after the hole edit: ${String(err?.message ?? err)}`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild after the hole edit: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3383,7 +3386,7 @@ export default function App() {
     // that op chain drops it.
     const cur = resultRef.current;
     if (!cur || cur.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Magnet pockets work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Magnet pockets work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
       setMagnetTool(null);
       return;
     }
@@ -3438,7 +3441,7 @@ export default function App() {
       setMagnetTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }, ...(ops.length > 1 && spot.back ? [{ at: spot.back.at, normal: spot.back.normal }] : [])] } : d));
       explainOnce("magnet", `Sunk a **magnet pocket** — free, no AI. The hole is cut a hair wider than the magnet so a drop of super glue holds it in flush, and it grips right through the plastic. Place another near this one and it snaps square with it — the dashed line shows what it lined up with. Want it exactly under the cursor instead? Set snapping to **Free** in the panel. Undo reverts it.`);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't sink a magnet pocket there: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't sink a magnet pocket there: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3462,7 +3465,7 @@ export default function App() {
         const { traceBitmap, outlinesToSvg, bitmapToImageData } = await import("./svg/trace");
         const report = traceBitmap(await bitmapToImageData(file));
         if (report.quality === "unusable") {
-          setMessages((m) => [...m, { id: mid(), role: "assistant", error: true, text:
+          setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", error: true, text:
             `**${file.name}** can't become a clean logo:\n${report.notes.map((x) => `- ${x}`).join("\n")}\n\nFor a crisp result: solid dark shapes on a light background (or a transparent PNG), hard edges rather than soft gradients, and ~600 px or more on the short side. An SVG traced from the original art is best of all.` }]);
           return;
         }
@@ -3473,11 +3476,11 @@ export default function App() {
       const { geometry: g, dims: d } = extrudeSvg(svgText, { sizeMm: 25, heightMm: 1.2 });
       addAttachment(g, name);
       const caveats = traceNotes.length ? `\n\n_${traceNotes.join(" ")}_` : "";
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text:
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text:
         `Added **${name}** (${d.x} × ${d.y} × ${d.z} mm) as its own layer. Drag it onto any face with the arrows/rings, corner dots resize it. Then in **Objects**: **Merge** raises it off the surface (embossed), **Engrave** carves it in. Both turn the model into a mesh — do CAD edits first.${caveats}` }]);
       explainOnce("logo", `Logos work best as **SVG** (exact curves). PNG/JPG get **traced**: the app finds the ink's outline, so solid, hard-edged, dark-on-light art comes out clean — photos, gradients and fine hairlines don't survive, and the app will say so rather than build a blob.`);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't turn ${file.name} into a logo: ${String(err?.message ?? err)}`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't turn ${file.name} into a logo: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3519,9 +3522,9 @@ export default function App() {
       const gone = new Set(targets.map((t) => t.id));
       setAttachments((a) => a.filter((x) => !gone.has(x.id)));
       setSelAttachIds([]);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Engraved **${names}** into the surface — the shape is carved in wherever it overlapped. Undo brings the layer back to adjust.` }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Engraved **${names}** into the surface — the shape is carved in wherever it overlapped. Undo brings the layer back to adjust.` }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't engrave: ${String(err?.message ?? err)}`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't engrave: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3547,7 +3550,7 @@ export default function App() {
     if (!t) return;
     const cur = resultRef.current;
     if (!cur || cur.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Screw holes work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Screw holes work on Precise (CAD) models — mesh models can't be drilled. Rebuild the part in Precise mode first.", error: true }]);
       setScrewTool(null);
       return;
     }
@@ -3580,7 +3583,7 @@ export default function App() {
       setScrewTool((d) => (d ? { ...d, placed: [...d.placed, { at: spot.at, normal: spot.normal }] } : d));
       explainOnce("screw", `Cut a **screw hole** — free, no AI. "Bites in" bores the plastic tap size and ribs the wall at the thread pitch, so the screw cuts its own path and holds like a tapped hole; "Slides through" is a clearance bore (flush-head cone optional); "Heat-set insert" pockets the brass insert size. Placing another near this one snaps into line. Undo reverts it.`);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't cut a screw hole there: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't cut a screw hole there: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3603,7 +3606,7 @@ export default function App() {
   async function applyDirectOpFaces(size: number) {
     if (!selectedFaces.length || !size) return;
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
       return;
     }
     const src = result.source;
@@ -3618,9 +3621,9 @@ export default function App() {
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops], preview: false });
       applyResult(res, project?.name ?? "Model", `Extruded ${n} faces by ${size} mm`, `extrude ${n} faces ${size} mm`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Extruded **${n} face${n > 1 ? "s" : ""}** by ${size} mm — free, no AI. Undo reverts all of them at once.` }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Extruded **${n} face${n > 1 ? "s" : ""}** by ${size} mm — free, no AI. Undo reverts all of them at once.` }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't extrude all ${n} faces by ${size} mm — ${String(err?.message ?? err)}. Try a smaller amount, or apply faces one at a time.`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't extrude all ${n} faces by ${size} mm — ${String(err?.message ?? err)}. Try a smaller amount, or apply faces one at a time.`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3681,7 +3684,7 @@ export default function App() {
     const f = selectedFeature;
     if (!f || !size) return;
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Direct edits work on Precise (CAD) models.", error: true }]);
       return;
     }
     const src = result.source;
@@ -3703,7 +3706,7 @@ export default function App() {
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
       // Plain successes stay out of the chat (History records them); clamped sizes DO get
       // a message — the user asked for a number they didn't get.
-      if (note) setMessages((m) => [...m, { id: mid(), role: "assistant", text: `${label}${note}` }]);
+      if (note) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `${label}${note}` }]);
     };
     try {
       await runOp(op);
@@ -3720,7 +3723,7 @@ export default function App() {
           return;
         } catch { /* even the probed max failed in-chain — fall through to the original error */ }
       }
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err).replace(/ \(max=[\d.]+\)/, ""), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err).replace(/ \(max=[\d.]+\)/, ""), error: true }]);
       setGeometry(result.geometry); // the op failed — clear any lingering live-drag preview
     } finally {
       setStatus("idle");
@@ -3834,7 +3837,7 @@ export default function App() {
    *  extrude it, and drop it on the model as a movable attachment — position, then Merge. */
   async function aiLogoToAttachment(request: string) {
     const ph = mid();
-    setMessages((m) => [...m, { id: mid(), role: "user", text: request }, { id: ph, role: "assistant", text: "Drawing the logo as clean vector paths…", streaming: true }]);
+    setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "user", text: request }, { id: ph, ts: Date.now(), role: "assistant", text: "Drawing the logo as clean vector paths…", streaming: true }]);
     setStatus("generating");
     try {
       let effLlm: LlmSettings = llm.provider === "anthropic" ? { ...llm, model } : llm;
@@ -3906,7 +3909,7 @@ export default function App() {
       setModelSelected(false);
       explainOnce("merge", `Merged **${names}** into the model — one printable solid now (mesh: STL/3MF; STEP needs the pre-merge version in History). Undo brings the pieces back.`);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't merge: ${String(err?.message ?? err)}`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't merge: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -3939,9 +3942,9 @@ export default function App() {
       };
       const wasCad = activeKind === "replicad";
       applyResult(res, project?.name ?? deriveName("Textured part"), `${pattern} surface texture (${depth} mm) — ${dims.x} × ${dims.y} × ${dims.z} mm`, `texture ${pattern}`);
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Applied a **${pattern}** surface texture (${depth} mm ${depth >= 0 ? "raised" : "engraved"}, ${scale} mm cells) — it's real printable geometry now.${wasCad ? " The model became a mesh (STL/3MF; the parametric CAD version stays in History/Undo)." : ""}` }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Applied a **${pattern}** surface texture (${depth} mm ${depth >= 0 ? "raised" : "engraved"}, ${scale} mm cells) — it's real printable geometry now.${wasCad ? " The model became a mesh (STL/3MF; the parametric CAD version stays in History/Undo)." : ""}` }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Couldn't texture this model: ${String(err?.message ?? err)}`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't texture this model: ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -4021,7 +4024,7 @@ export default function App() {
       applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `transform ${commit.kind}`);
       // Routine transforms stay out of the chat — History and the status bar record them.
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -4054,7 +4057,7 @@ export default function App() {
     if (!result) return;
     const f = fitToBedFactor(result.dims, printer.bed);
     if (f >= 1) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Already fits — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm in a ${printer.bed.x} × ${printer.bed.y} × ${printer.bed.z} mm build volume.` }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Already fits — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm in a ${printer.bed.x} × ${printer.bed.y} × ${printer.bed.z} mm build volume.` }]);
       return;
     }
     await resizeModel([f, f, f]);
@@ -4242,7 +4245,7 @@ export default function App() {
       applyResult(res, project?.name ?? "Model", `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} to print flush — same spots`, "flush pockets");
       appendMsg({ role: "assistant", text: `Re-cut ${legacy.n} magnet pocket${legacy.n === 1 ? "" : "s"} a hair shallower so the magnets print flush — same spots, same diameters. The History entry is your receipt, and Undo reverts.` });
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Couldn't re-cut the pockets: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't re-cut the pockets: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -4376,8 +4379,8 @@ export default function App() {
     const preRefThumbs = refs.length ? await Promise.all(refs.map((r) => blobToDataURL(r.blob))) : undefined;
     setInput("");
     setMessages((m) => [...m,
-      { id: userMsgId, role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
-      { id: placeholderId, role: "assistant", text: "Reading your request…", streaming: true },
+      { id: userMsgId, ts: Date.now(), role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
+      { id: placeholderId, ts: Date.now(), role: "assistant", text: "Reading your request…", streaming: true },
     ]);
     // Advancing to a new stage checks the current one off into `steps` (the timeline
     // draws its connector line); writing `text` directly instead updates the active
@@ -4583,7 +4586,7 @@ export default function App() {
             setWebState(placeholderId, { query: p.slice(0, 90), done: true, found: !!rr, sources: rr?.sources ?? [] });
             if (rr) {
               genPrompt = `${genPrompt}\n\nReal-world reference (researched online):\n${rr.text}`;
-              setMessages((m) => [...m, { id: mid(), role: "assistant", text: `Found online:\n${rr.text}`, sources: rr.sources, images: rr.images }]);
+              setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Found online:\n${rr.text}`, sources: rr.sources, images: rr.images }]);
             }
           } catch { /* research is best-effort */ }
         }
@@ -4842,7 +4845,7 @@ export default function App() {
       && (webMode === "on" || (webMode === "auto" && productNamed && (!visionImage || guided)));
     if (wantWeb && webMode === "on" && !canResearch(researchKeys)) {
       // Forced on but no browsing-capable key — tell the user rather than silently skip.
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Web search needs a Google Gemini (free), Claude, or OpenRouter key — add one in Settings → AI brain, or switch the Web toggle to Auto/Off.", error: true }]);
     } else if (wantWeb) {
       pushStep("Searching the web for the product's real dimensions…");
       // …and say so in its own right: the globe block below the timeline pulses for
@@ -4859,7 +4862,7 @@ export default function App() {
         // any product photos it found, so the product can be eyeballed.
         setMessages((m) => {
           const idx = m.findIndex((x) => x.id === placeholderId);
-          const note = { id: mid(), role: "assistant" as const, text: `Measurements found online:\n${researched}`, sources: researchSources, images: researchImages };
+          const note = { id: mid(), ts: Date.now(), role: "assistant" as const, text: `Measurements found online:\n${researched}`, sources: researchSources, images: researchImages };
           return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
         });
       }
@@ -5042,7 +5045,7 @@ export default function App() {
           pushStep("Cloud brain unreachable — switching to the on-device model…");
           setMessages((m) => {
             const idx = m.findIndex((x) => x.id === placeholderId);
-            const note = { id: mid(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
+            const note = { id: mid(), ts: Date.now(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
             return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
           });
           raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
@@ -5097,9 +5100,9 @@ export default function App() {
       const bi: BuildInput = kind === "replicad" ? { kind: "code", code: edited } : { kind: "spec", spec: parseSpec(edited) };
       const res = await sel.engine.build(bi);
       applyResult(res, project?.name ?? deriveName("Edited part"), `Manual edit — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, "(manual edit)");
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Re-ran your edited " + (kind === "replicad" ? "code" : "spec") + "." }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Re-ran your edited " + (kind === "replicad" ? "code" : "spec") + "." }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -5129,7 +5132,7 @@ export default function App() {
     setMode("precise");
     const s = await ensureEngine();
     if (s.kind !== "replicad") {
-      setMessages([{ id: mid(), role: "assistant", text: "Templates need the full CAD kernel, which couldn't load in this browser — try reloading the page.", error: true }]);
+      setMessages([{ id: mid(), ts: Date.now(), role: "assistant", text: "Templates need the full CAD kernel, which couldn't load in this browser — try reloading the page.", error: true }]);
       return;
     }
     setStatus("generating");
@@ -5145,9 +5148,9 @@ export default function App() {
       });
       projectRef.current = snap; // the chat-sync effect must append to THIS project, not spawn a shell
       persist(snap);
-      setMessages([{ id: mid(), role: "assistant", text: t.summary }]);
+      setMessages([{ id: mid(), ts: Date.now(), role: "assistant", text: t.summary }]);
     } catch (err: any) {
-      setMessages([{ id: mid(), role: "assistant", text: `Couldn't build the ${t.name} template: ` + String(err?.message ?? err), error: true }]);
+      setMessages([{ id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't build the ${t.name} template: ` + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -5162,9 +5165,9 @@ export default function App() {
       const bi: BuildInput = s.kind === "replicad" ? { kind: "code", code: EXAMPLE_REPLICAD } : { kind: "spec", spec: EXAMPLE_SPEC };
       const res = await s.engine.build(bi);
       applyResult(res, "Example L-bracket", EXAMPLE_SPEC.summary ?? "Example model.", "Show me the example");
-      setMessages([{ id: mid(), role: "assistant", text: EXAMPLE_SPEC.summary ?? "Loaded the example L-bracket." }]);
+      setMessages([{ id: mid(), ts: Date.now(), role: "assistant", text: EXAMPLE_SPEC.summary ?? "Loaded the example L-bracket." }]);
     } catch (err: any) {
-      setMessages([{ id: mid(), role: "assistant", text: "Couldn't build the example: " + String(err?.message ?? err), error: true }]);
+      setMessages([{ id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't build the example: " + String(err?.message ?? err), error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -5188,7 +5191,7 @@ export default function App() {
         explainOnce("export", `${label} ${preflightSummary(pf)}${named}${caveat ? " " + caveat : ""}`, exportBrief(label, pf, caveat));
       }
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
     }
   }
 
@@ -5249,7 +5252,7 @@ export default function App() {
       // sixteen identical lines that buried the actual conversation (a real report).
       // Failures still speak up — those are news.
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
     }
   }
 
@@ -5275,7 +5278,7 @@ export default function App() {
       await rebuildHead(next);
       stampHeadThumb(true); // older versions from before thumbnails existed fill in lazily
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: (dir < 0 ? "Undo" : "Redo") + " failed to rebuild: " + String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: (dir < 0 ? "Undo" : "Redo") + " failed to rebuild: " + String(err?.message ?? err), error: true }]);
     } finally {
       setNavBusy(false);
     }
@@ -5392,7 +5395,7 @@ export default function App() {
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
-    setMessages((p.chat ?? []).map((c) => ({ id: mid(), role: c.role, text: c.text, error: c.error, image: c.image })));
+    setMessages((p.chat ?? []).map((c) => ({ id: mid(), ts: Date.now(), role: c.role, text: c.text, error: c.error, image: c.image })));
     setPins(p.pins ?? []);
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);
@@ -5429,7 +5432,7 @@ export default function App() {
       }
       // Say WHY the viewer is empty (mesh missing on this device, kernel error…) —
       // a silently blank canvas read as "the app can't open my project" (Mac audit).
-      setMessages((m) => [...m, { id: mid(), role: "assistant", text: String(err?.message ?? err), error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     } finally {
       // Prompt sync: if the account doesn't hold this project's mesh yet, the next
       // push uploads it now — not whenever the 45 s interval happens to fire.
@@ -5588,7 +5591,7 @@ export default function App() {
             setAccountEmail(null);
             setCloudOffline(false);
             pulledRef.current = false;
-            setMessages((mm) => [...mm, { id: mid(), role: "assistant", text: "Signed out. This device keeps its own copy; sign in anywhere to sync again." }]);
+            setMessages((mm) => [...mm, { id: mid(), ts: Date.now(), role: "assistant", text: "Signed out. This device keeps its own copy; sign in anywhere to sync again." }]);
           });
         }}
         mode={mode}

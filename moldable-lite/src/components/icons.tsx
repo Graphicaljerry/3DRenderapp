@@ -137,10 +137,15 @@ export const IconBadge = ({ size = 15 }: { size?: number }) => (
     <path d="M8.5 14 7 22l5-3 5 3-1.5-8" />
   </svg>
 );
+/** Two anchor points joined by a distance line — what the tool actually does
+ *  (tap two points, read the span). The old diagonal ruler's tick marks turned
+ *  to mush at rail size. */
 export const IconRuler = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
-    <path d="M3.5 16.5 16.5 3.5 20.5 7.5 7.5 20.5Z" />
-    <path d="m8.5 12.5 1.8 1.8M11.5 9.5l1.8 1.8M14.5 6.5l1.8 1.8" />
+    <circle cx="5.6" cy="18.4" r="2.5" />
+    <circle cx="18.4" cy="5.6" r="2.5" />
+    <path d="M7.6 16.4 16.4 7.6" />
+    <path d="m10.2 10.8 1.5 1.5M12.8 8.2l1.5 1.5" opacity=".55" />
   </svg>
 );
 /** A dimension line with end ticks. */
@@ -252,10 +257,13 @@ export const IconPaint = ({ size = 15 }: { size?: number }) => (
   </svg>
 );
 
+/** A checkerboard swatch — the 3D convention for "texture". The old zigzag lines
+ *  read as a broken image icon. */
 export const IconTexturize = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <rect x="3.5" y="3.5" width="17" height="17" rx="3" />
-    <path d="M7 12l2.5-2.5L12 12l2.5-2.5L17 12M7 16.5 9.5 14l2.5 2.5L14.5 14 17 16.5" />
+    <path d="M12 3.5v17M3.5 12h17" opacity=".6" />
+    <path d="M4.5 4.5h7v7h-7zM12.5 12.5h7v7h-7z" fill="currentColor" fillOpacity=".22" stroke="none" />
   </svg>
 );
 
@@ -270,6 +278,16 @@ export const IconMagnet = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <path d="M5 4v7a7 7 0 0 0 14 0V4" />
     <path d="M5 4h5v5H5zM14 4h5v5h-5z" fill="currentColor" fillOpacity=".18" />
+  </svg>
+);
+
+/** A hex nut — the umbrella glyph for the Fasteners tool (magnets AND screws).
+ *  The horseshoe stays on Snap and the Magnet sub-tool; alone on the rail it
+ *  promised only magnets. */
+export const IconFastener = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M12 2.8l7.6 4.4v9.6L12 21.2 4.4 16.8V7.2Z" />
+    <circle cx="12" cy="12" r="3.4" />
   </svg>
 );
 
@@ -309,10 +327,14 @@ export const IconGoogle = () => (
   </svg>
 );
 /** Pen cut — a blade drawing its own line across the part. */
+/** Scissors — "cut" at a glance. The old pen nib + dashed curve read as a second
+ *  marker tool next to Mark. */
 export const IconCut = () => (
   <svg width="17" height="17" viewBox="0 0 24 24" {...base}>
-    <path d="M3 18c3.5 0 5-9 9-9s5.5 5 9 5" strokeDasharray="3 2.6" />
-    <path d="M15.5 3.5 20 8l-8.2 8.2-5.2.9.9-5.2Z" />
+    <circle cx="6" cy="6.2" r="2.7" />
+    <circle cx="6" cy="17.8" r="2.7" />
+    <path d="M8.4 7.6 20.5 16M8.4 16.4 20.5 8" />
+    <circle cx="12.6" cy="12" r=".9" fill="currentColor" stroke="none" />
   </svg>
 );
 /** Plan mode — a short checked list. */

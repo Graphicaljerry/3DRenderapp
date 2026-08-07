@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type ShowcaseScene, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
 import { Markdown } from "./Markdown";
@@ -33,7 +33,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -700,7 +700,13 @@ function MaterialMenu({ appearance, setAppearance }: { appearance: { color: stri
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
       <button className="ghost sm iconbtn has-modes" aria-label="Material" aria-expanded={open} title="Display material — filament colour & finish (visual only)" onClick={() => setOpen((v) => !v)}>
-        <span className="mat-dot" style={{ background: appearance.color }} />
+        {/* A shaded sphere in the chosen colour — the 3D-app convention for "material",
+            where the flat dot read as an empty circle on pale filaments. */}
+        <svg className="mat-ball" width="17" height="17" viewBox="0 0 24 24" aria-hidden>
+          <circle cx="12" cy="12" r="8.8" fill={appearance.color} stroke="rgba(0,0,0,.35)" strokeWidth="1.4" />
+          <path d="M19.6 15.1a8.8 8.8 0 0 1-12.4 4.4A8.8 8.8 0 0 0 19.6 15Z" fill="rgba(0,0,0,.18)" stroke="none" />
+          <ellipse cx="8.8" cy="8.2" rx="2.6" ry="1.9" fill="rgba(255,255,255,.75)" stroke="none" transform="rotate(-32 8.8 8.2)" />
+        </svg>
       <span className="rail-name">Material</span></button>
       {open && (
         <div className="snap-menu" role="menu">
@@ -1257,12 +1263,16 @@ function DockRow({ k, v }: { k: string; v: string }) {
 /* Reads whatever is currently selected. Three truthful states rather than one
    invented one: a picked feature, the whole body, or nothing picked yet — the
    empty state is where the selection-driven model gets taught. */
-function DockSelection({ feature, dims, units, modelSelected, ask }: {
+function DockSelection({ feature, dims, units, modelSelected, ask, onRestFace }: {
   feature: PickedFeature | null;
   dims: { x: number; y: number; z: number } | null;
   units: "mm" | "in";
   modelSelected: boolean;
   ask?: { text: string; setText: (v: string) => void; onAsk: () => void; onClear: () => void; canAsk: boolean; busy: boolean; placeholder: string; count?: number };
+  /** Rotate the whole part so this face's normal points down at the plate. Also in
+   *  the right-click menu — but right-click doesn't exist on an iPad, so the face
+   *  panel is the findable home. */
+  onRestFace?: (normal: [number, number, number]) => void;
 }) {
   const n = (v: number) => (units === "in" ? (v / 25.4).toFixed(2) : String(Math.round(v * 10) / 10));
   const u = units === "in" ? "in" : "mm";
@@ -1278,6 +1288,12 @@ function DockSelection({ feature, dims, units, modelSelected, ask }: {
         <DockRow k={kind} v={detail} />
         {size && <DockRow k="Size" v={size} />}
         <DockRow k="Position" v={`X ${n(feature.cx)}   Y ${n(feature.cy)}   Z ${n(feature.cz)}`} />
+        {feature.kind === "face" && feature.nx != null && onRestFace && (
+          <button className="ghost sm" title="Rotate the whole part so this face lies flat on the build plate — the printing orientation"
+            onClick={() => onRestFace([feature.nx!, feature.ny!, feature.nz!])}>
+            Rest this face on the plate
+          </button>
+        )}
         <p className="dock-note">
           {feature.kind === "face"
             ? "Round, Bevel and Push / Pull are on the toolbar at the selection — free, no AI. A negative value pulls the face in, or drag the blue arrow."
@@ -2936,7 +2952,7 @@ export function Workspace(p: Props) {
                         else (lastFastener === "screw" ? p.screwCtl : p.magnetCtl).toggle();
                       }}
                     >
-                      {lastFastener === "screw" ? <IconScrew /> : <IconMagnet />}
+                      <IconFastener />
                     <span className="rail-name">Fasteners</span>
                     </button>
                     {(p.magnetCtl.tool || p.screwCtl.tool) && (
@@ -3444,6 +3460,7 @@ export function Workspace(p: Props) {
                     dims={p.dims}
                     units={p.units}
                     modelSelected={p.modelSelected}
+                    onRestFace={(normal) => p.printPrep.orient.face(normal)}
                     ask={
                       p.facesCtl.faces.length > 0
                         ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
@@ -3805,8 +3822,18 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
         </div>
       )}
       {messages.map((m, i) => (
+        <Fragment key={m.id}>
+          {/* Day separator wherever the calendar date changes between stamped
+              messages — the transcript spans weeks of a project's life. */}
+          {m.ts != null && new Date(m.ts).toDateString() !== new Date(messages[i - 1]?.ts ?? 0).toDateString() && (
+            <div className="day-sep" role="separator">
+              {new Date(m.ts).toLocaleDateString([], {
+                month: "long", day: "numeric",
+                year: new Date(m.ts).getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+              })}
+            </div>
+          )}
         <MessageRow
-          key={m.id}
           m={m}
           // Only replies that ARRIVE while you're watching get the type-on reveal.
           // Everything already in the transcript at mount (a reopened project, a
@@ -3829,6 +3856,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
           selected={selecting?.has(m.id) ?? false}
           api={rowApi}
         />
+        </Fragment>
       ))}
       <div ref={endRef} />
       {/* Enlarged photo, portal'd to the body so no card transform can clip it. */}
@@ -4019,7 +4047,14 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
         >
           {/* In select mode the WHOLE row is the tap target — the mark just shows state. */}
           {selectMode && <span className="sel-mark" aria-hidden="true">{selected && <IconCheck size={11} />}</span>}
-          <span className="who">{m.role === "user" ? "You" : "Moldable"}</span>
+          <span className="who">
+            {m.role === "user" ? "You" : "Moldable"}
+            {m.ts != null && (
+              <time className="msg-time" dateTime={new Date(m.ts).toISOString()}>
+                {new Date(m.ts).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </time>
+            )}
+          </span>
           {m.plan ? (
             <PlanCard msgId={m.id} st={m.plan} busy={busy} api={api} />
           ) : m.clarify ? (

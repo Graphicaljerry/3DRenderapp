@@ -13,6 +13,36 @@
 
 export const MAX_IMAGE_DIM = 1568; // Anthropic's ceiling; comfortably ≥ everyone's tiles
 
+/** A square profile photo as a small data URL. Centre-crops to a square (the disc is
+ *  round, so the corners were never going to show), then ALWAYS re-encodes — a tiny
+ *  but multi-megabyte PNG would otherwise pass straight through and this string is
+ *  bound for localStorage, which the settings sync carries wholesale. */
+export async function squareAvatar(file: Blob, size = 160): Promise<string | null> {
+  let bmp: ImageBitmap;
+  try {
+    bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    return null; // a format this browser can't decode — the caller says so out loud
+  }
+  try {
+    const side = Math.min(bmp.width, bmp.height);
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#fff"; // JPEG fallback has no alpha; a black disc would be worse
+    ctx.fillRect(0, 0, size, size);
+    ctx.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, size, size);
+    for (const [type, q] of [["image/webp", 0.82], ["image/jpeg", 0.82]] as const) {
+      const url = canvas.toDataURL(type, q);
+      if (url.startsWith(`data:${type}`)) return url; // a browser without webp returns png here
+    }
+    return canvas.toDataURL("image/jpeg", 0.7);
+  } finally {
+    bmp.close();
+  }
+}
+
 export async function downscaleImage(file: Blob, maxDim = MAX_IMAGE_DIM): Promise<Blob> {
   let bmp: ImageBitmap;
   try {

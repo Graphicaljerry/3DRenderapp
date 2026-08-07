@@ -43,6 +43,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
   const kept = project.versions.slice(0, headIndex(project) + 1); // drop any redo branch past HEAD
   return {
     ...project,
+    versions: trimVersions([...kept, v]),
     engine: snap.engine,
     code: snap.code,
     params: snap.params,
@@ -54,9 +55,19 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     meshXform: snap.meshXform,
     genSource: snap.genSource,
     updatedAt: Date.now(),
-    versions: [...kept, v],
     headId: v.id,
   };
+}
+
+/** How many steps back History keeps. Each version carries a whole snapshot —
+ *  code, ops, and for imported or generated parts the source STEP/mesh blob — so
+ *  an unbounded list is what turns a long session's project into tens of MB and
+ *  makes the panel crawl. The oldest steps fall off the end. */
+export const MAX_VERSIONS = 60;
+
+function trimVersions(list: Version[]): Version[] {
+  if (list.length <= MAX_VERSIONS) return list;
+  return list.slice(list.length - MAX_VERSIONS);
 }
 
 /** Rewrite the HEAD version in place, keeping its id (so redo branches stay valid).
@@ -136,7 +147,7 @@ export function restoreVersion(project: Project, versionId: string): Project {
     meshXform: t.meshXform,
     genSource: t.genSource,
     updatedAt: Date.now(),
-    versions: [...project.versions, v],
+    versions: trimVersions([...project.versions, v]),
     headId: v.id,
   };
 }

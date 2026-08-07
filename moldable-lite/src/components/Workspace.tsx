@@ -22,6 +22,7 @@ export interface PrintPrepCtl {
   chamfer: { can: boolean; done: boolean; apply: (size: number) => void };
 }
 import type { Version } from "../store/types";
+import { MAX_VERSIONS } from "../store/versions";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
 import { fmtTok, fmtUSD } from "../llm/pricing";
@@ -1547,6 +1548,11 @@ function PathToPrint({ hasModel, report, onOpenCheck }: {
   );
 }
 
+/** One length in the chosen unit, for inline readouts. */
+function fmtLen(mm: number, units: "mm" | "in"): string {
+  return units === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${Math.round(mm * 10) / 10} mm`;
+}
+
 /** Format overall W×D×H in the chosen unit (unit shown once). */
 function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): string {
   if (units === "in") {
@@ -1579,6 +1585,7 @@ interface Props {
   onWallMesh?: () => void;
   booting: boolean;
   accountEmail: string | null;
+  avatar: string | null; // profile photo data URL, or null for the initial
   onOpenProfile: () => void;
   /** First focus of the chat composer — App uses it for the one-time sign-in nudge. */
   onComposerFocus?: () => void;
@@ -1662,8 +1669,13 @@ interface Props {
     editDelete: () => void;
     editDone: () => void;
     removeAll: () => void;
-    recutAll: () => void; // apply the current seat to every pocket, in place
+    recutAll: () => void; // re-cut every pocket to the current size + fit + seat
     placedCount: number;
+    /** Every pocket on the model, read back out of the op chain (nothing is baked in). */
+    pockets: { index: number; label: string; fit: string; up: number }[];
+    editIndex: number | null; // which pocket the panel is currently editing
+    selectPocket: (index: number) => void;
+    removePocket: (index: number) => void;
   };
   screwCtl: {
     tool: {
@@ -1850,6 +1862,8 @@ interface Props {
     clear: () => void;
   };
   versions: Version[];
+  headId?: string; // which version the model is actually showing
+  restoringId: string | null; // a restore is rebuilding this one right now
   onRestore: (id: string) => void;
   undoCtl: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean; busy: boolean };
   supportsStep: boolean;
@@ -2285,12 +2299,14 @@ export function Workspace(p: Props) {
               aria-label="Account menu"
               aria-expanded={profileMenu}
             >
-              {p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span> : <IconUser />}
+              {p.avatar ? <span className="avatar"><img src={p.avatar} alt="" /></span>
+                : p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span>
+                  : <IconUser />}
             </button>
             {profileMenu && p.accountEmail && (
               <div className="profile-menu" onMouseLeave={() => setProfileMenu(false)}>
                 <div className="pm-head">
-                  <span className="pm-avatar">{p.accountEmail[0].toUpperCase()}</span>
+                  <span className="pm-avatar">{p.avatar ? <img src={p.avatar} alt="" /> : p.accountEmail[0].toUpperCase()}</span>
                   <span className="pm-who">
                     <span className="pm-label">Signed in</span>
                     <span className="pm-email">{p.accountEmail}</span>
@@ -2700,6 +2716,7 @@ export function Workspace(p: Props) {
                 attachments={p.attachments}
                 selAttachIds={p.selAttachIds}
                 visiblePlate={p.activePlate}
+                plateCount={p.plateCtl.count}
                 plateFor={p.plateFor}
                 showcase={p.showcase}
                 showcaseScene={p.showcaseScene}
@@ -3155,10 +3172,32 @@ export function Workspace(p: Props) {
                           ) : (
                             <div className="magnet-hint">Hover the model, click to sink the pocket. Click an existing pocket to see and change it — resize, move or remove, nothing is baked in. Place one near another and it lines up square with it.</div>
                           )}
+                          {/* The pockets themselves, newest-highest first: clicking a 3 mm
+                              circle on the model is fiddly, and "take the top two off" is
+                              a list job. Every row is an op, so all of this is undoable. */}
+                          {p.magnetCtl.pockets.length > 0 && (
+                            <>
+                              <div className="paint-lbl">On the model · highest first</div>
+                              <div className="pocket-list">
+                                {[...p.magnetCtl.pockets].sort((a, b) => b.up - a.up).map((k) => (
+                                  <div key={k.index} className={`pocket-row${p.magnetCtl.editIndex === k.index ? " on" : ""}`}>
+                                    <button className="pocket-pick" title="Edit this pocket — the settings above become its own, so changing one re-cuts it in place"
+                                      onClick={() => p.magnetCtl.selectPocket(k.index)}>
+                                      <span className="pocket-size">{k.label}</span>
+                                      <span className="pocket-where">{k.fit ? `${k.fit} · ` : ""}{fmtLen(k.up, p.units)} up</span>
+                                    </button>
+                                    <button className="x" aria-label={`Remove the ${k.label} pocket`} title="Fill this pocket back in — undoable"
+                                      onClick={() => p.magnetCtl.removePocket(k.index)}><IconX /></button>
+                                  </div>
+                                ))}
+                              </div>
+                            </>
+                          )}
                           {p.magnetCtl.placedCount > 0 && !p.magnetCtl.edit && (
                             <div className="hole-edit-actions">
-                              <button className="ghost sm" onClick={p.magnetCtl.recutAll} title="Re-drill every pocket at the seat chosen above — same spots, same widths, only the depth changes. Undoable.">
-                                Re-cut all ({p.magnetCtl.placedCount})
+                              <button className="ghost sm" onClick={p.magnetCtl.recutAll}
+                                title={`Re-cut every pocket to ${p.magnetCtl.tool.size.d}×${p.magnetCtl.tool.size.h} mm, ${p.magnetCtl.tool.fit === "press" ? "push fit" : "glued"}, at the seat chosen above — same spots, new bore. Undoable.`}>
+                                Re-cut all ({p.magnetCtl.placedCount}) to {p.magnetCtl.tool.size.d}×{p.magnetCtl.tool.size.h}
                               </button>
                               <button className="ghost sm" onClick={p.magnetCtl.removeAll} title="Fill every magnet pocket back in — the model rebuilds without them (undoable)">
                                 Remove all
@@ -3604,7 +3643,7 @@ export function Workspace(p: Props) {
                 {dockPanel === "code" && (
                   <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
                 )}
-                {dockPanel === "history" && <VersionHistory versions={p.versions} onRestore={p.onRestore} />}
+                {dockPanel === "history" && <VersionHistory versions={p.versions} headId={p.headId} restoringId={p.restoringId} onRestore={p.onRestore} />}
                 {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
               </div>
             </aside>
@@ -4588,12 +4627,21 @@ function whenLabel(ts: number): string {
   return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestore: (id: string) => void }) {
+const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore }: {
+  versions: Version[];
+  headId?: string; // where the model actually IS — undo moves this without touching the list
+  restoringId: string | null;
+  onRestore: (id: string) => void;
+}) {
   if (versions.length === 0) return <div className="panel muted">No versions yet — each change is saved here.</div>;
   // Newest first, the way every history panel works — and each row carries its step
   // NUMBER counted from the first version, so "which came before which" is readable
   // without doing arithmetic on timestamps.
   const list = versions.map((v, i) => ({ v, step: i + 1 })).reverse();
+  // "Current" is HEAD, not the newest row. After an undo those differ, and marking
+  // the tip current put a Restore button on the state you were already in — press it
+  // and the model rebuilds to exactly what's on screen, which reads as a dead button.
+  const head = headId && versions.some((v) => v.id === headId) ? headId : versions[versions.length - 1]?.id;
   return (
     <div className="panel vhistory">
       <div className="vhead">
@@ -4601,37 +4649,44 @@ function VersionHistory({ versions, onRestore }: { versions: Version[]; onRestor
         <span className="fine">{versions.length} step{versions.length === 1 ? "" : "s"} · newest first</span>
       </div>
       <div className="vlist">
-        {list.map(({ v, step }, i) => {
+        {list.map(({ v, step }) => {
           const { text, restored } = versionLabel(v.summary);
+          const isHead = v.id === head;
+          const busy = restoringId === v.id;
+          const meta = `${step} · ${whenLabel(v.createdAt)}${v.dims ? ` · ${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : ` · ${v.engine}`}`;
+          // The ROW is the control. A separate Restore button next to a big thumbnail
+          // left about seventy pixels for the summary in a 262px dock, which clipped
+          // every label to two characters — and "click the version you want" is what
+          // people try first anyway.
           return (
-            <div key={v.id} className={`vrow${i === 0 ? " current" : ""}`}>
-              <span className="vstep">{step}</span>
+            <button
+              key={v.id}
+              type="button"
+              className={`vrow${isHead ? " current" : ""}${busy ? " loading" : ""}`}
+              disabled={isHead || !!restoringId}
+              title={isHead ? `${text} — this is what you're looking at` : `Go back to: ${text}`}
+              onClick={() => onRestore(v.id)}
+            >
               {v.thumb
-                ? <img className="vthumb" src={v.thumb} alt="" aria-hidden />
+                ? <img className="vthumb" src={v.thumb} alt="" aria-hidden loading="lazy" decoding="async" />
                 : <span className="vthumb vthumb-empty" aria-hidden />}
-              <div className="vbody">
-                <div className="vsum" title={text}>{text}</div>
-                <div className="vmeta">
-                  {whenLabel(v.createdAt)}
-                  {v.dims ? ` · ${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : ` · ${v.engine}`}
-                </div>
-              </div>
-              {i === 0
-                ? <span className="vtag now">Current</span>
-                : (
-                  <>
-                    {restored && <span className="vtag">restored</span>}
-                    <button className="ghost sm" onClick={() => onRestore(v.id)}>Restore</button>
-                  </>
-                )}
-            </div>
+              <span className="vbody">
+                <span className="vsum">{text}</span>
+                <span className="vmeta">{meta}</span>
+                <span className="vstate">
+                  {isHead ? <span className="vtag now">Current</span>
+                    : busy ? <span className="vtag">Loading…</span>
+                      : <><span className="vgo">Go back to this</span>{restored && <span className="vtag">restored</span>}</>}
+                </span>
+              </span>
+            </button>
           );
         })}
       </div>
-      <p className="fine">Restoring adds a step rather than deleting any — nothing is lost.</p>
+      <p className="fine">Restoring adds a step rather than deleting any — nothing is lost. The oldest steps drop off past {MAX_VERSIONS}.</p>
     </div>
   );
-}
+});
 /** Hole tool: exact placement (typed offsets + magnet snap) and alignment against an
     existing hole — pick its rim/wall, then zero a delta or type the exact spacing. */
 function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {

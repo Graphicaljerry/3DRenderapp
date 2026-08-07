@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Workspace, FILAMENT_SWATCHES } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
@@ -22,7 +22,7 @@ import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } fro
 import { draftPlan, planToPrompt, type BuildPlan } from "./llm/plan";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
-import { downscaleImage } from "./lib/downscale";
+import { downscaleImage, squareAvatar } from "./lib/downscale";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
@@ -42,7 +42,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe, IconSun, IconMoon } from "./components/icons";
+import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe, IconSun, IconMoon } from "./components/icons";
 import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
@@ -317,6 +317,28 @@ export default function App() {
   const [userTint, setUserTint] = useState<string>(() => localStorage.getItem("moldable_user_tint") || DEFAULT_USER_TINT);
   useEffect(() => { document.documentElement.style.setProperty("--user-tint", userTint); }, [userTint]);
   function saveUserTint(c: string) { setUserTint(c); try { localStorage.setItem("moldable_user_tint", c); } catch {} }
+  // Profile photo: a small square data URL beside the tint, so it rides the same
+  // settings sync to your other devices. Kept deliberately tiny — that blob has no
+  // size budget of its own, unlike the project images.
+  const [avatar, setAvatar] = useState<string | null>(() => localStorage.getItem("moldable_avatar"));
+  const AVATAR_BUDGET = 48 * 1024;
+  async function pickAvatar(file: File) {
+    const url = await squareAvatar(file).catch(() => null);
+    if (!url) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't read that image — try a JPG or PNG.", error: true }]);
+      return;
+    }
+    if (url.length > AVATAR_BUDGET) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "That photo won't shrink small enough to sync — try a simpler image.", error: true }]);
+      return;
+    }
+    setAvatar(url);
+    try { localStorage.setItem("moldable_avatar", url); } catch { /* private mode: this session only */ }
+  }
+  function clearAvatar() {
+    setAvatar(null);
+    try { localStorage.removeItem("moldable_avatar"); } catch { /* nothing to clear */ }
+  }
   const [syncState, setSyncState] = useState<"idle" | "syncing" | "synced">("idle");
   // When the last successful push/pull finished — shown in Settings → Sync and
   // persisted so it survives reloads.
@@ -1112,8 +1134,11 @@ export default function App() {
     const snap = copyObject({ kind: "model" });
     if (!snap) return;
     const pos = snap.pos.slice();
-    // Land it BESIDE the live model, not on top: its own width plus a hand's gap.
-    const shift = (dims?.x ?? 60) + 25;
+    const plate = addPlate();
+    // Land it on ITS OWN plate slab, not just beside the model: the viewer draws one
+    // slab per plate a bed-and-a-bit apart (the same stride the multi-plate 3MF uses),
+    // so a copy nudged over by its own width would have floated on plate 1's slab.
+    const shift = (plate - 1) * printer.bed.x * 1.2;
     for (let i = 0; i < pos.length; i += 3) pos[i] += shift;
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
@@ -1124,12 +1149,13 @@ export default function App() {
     let name = base;
     for (let k = 2; attachments.some((a) => a.name === name); k++) name = `${base}.${k}`;
     const id = addAttachment(g, name);
-    assignPlate(id, addPlate());
+    assignPlate(id, plate);
     // A CAD model's source is the whole recipe (code + params + ops) — keep it with
     // the copy so Edit can rebuild this version as the live model later. Mesh models
     // stay a visual copy: their recipe is a paid generation, not a formula.
     const src = resultRef.current?.source;
     if (src?.kind === "code") setAttachments((a) => a.map((x) => (x.id === id ? { ...x, frozenSource: src } : x)));
+    setActivePlate(plate); // the copy stands a bed away — go there, or the button looks dead
     explainOnce("keep-aside", `Duplicated **${name}** onto its own build plate, beside the live model. Now ask for the variant — "make it smaller with one 4-inch hole", say — and the live model changes while the duplicate stays put. Tap **Edit** on a duplicate in Objects to swap it back to being the editable model. Plates switch at the bottom of the canvas; each exports separately.`);
   }
   /** Make a duplicated version the LIVE editable model again: the current live
@@ -1518,6 +1544,11 @@ export default function App() {
   }
 
   function persist(next: Project) {
+    // The ref catches up in the render body, which is too late: the debounced
+    // savers below and applyResult all read projectRef.current, and two commits
+    // landing before React re-renders made the second spread a stale project —
+    // silently dropping the version the first one recorded.
+    projectRef.current = next;
     setProject(next);
     void putProject(next);
     scheduleSync();
@@ -3387,23 +3418,65 @@ export default function App() {
     return { seat };
   }
 
-  /** Apply the tool's current seat to EVERY magnet pocket — same spots, same
-   *  diameters, only the depth moves. The manual, always-findable version of the
-   *  one-time catch-up offer. */
+  /** Re-cut EVERY magnet pocket to the tool's current size, fit and seat — same
+   *  spots, new bore. This is the bulk version of selecting each pocket and
+   *  changing its preset, so it has to honour the size too: re-cutting used to
+   *  move only the depth, which made picking a new magnet size look broken. */
   async function recutAllPockets() {
     const t = magnetToolRef.current;
     const cur = resultRef.current;
     if (!t || !cur || cur.source.kind !== "code") return;
+    const { diameter, depth } = magnetPocket(t.size, t.fit, t.seat);
     let n = 0;
     const ops = (cur.source.ops ?? []).map((op) => {
       if (op.type !== "hole" || op.tag !== "magnet" || op.depth <= 0) return op;
-      const depth = Math.max(0.4, Math.round((Math.round(op.depth) - t.seat) * 100) / 100);
-      if (Math.abs(depth - op.depth) < 0.005) return op;
+      if (Math.abs(op.diameter - diameter) < 0.005 && Math.abs(op.depth - depth) < 0.005) return op;
       n++;
-      return { ...op, depth };
+      return { ...op, diameter, depth };
     });
-    if (!n) return; // every pocket already sits this way
-    await rebuildWithOps(ops, `Re-cut ${n} magnet pocket${n === 1 ? "" : "s"} — ${seatWord(t.seat)}`, "recut pockets");
+    // A button that visibly does nothing reads as broken — and "already like that"
+    // leaves no History entry to check, so this one belongs in the chat.
+    if (!n) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Every pocket is already ${t.size.d}×${t.size.h} mm, ${t.fit === "press" ? "push fit" : "glued"}, ${seatWord(t.seat)} — nothing to re-cut. Pick a different size, fit or seat above and press it again.` }]);
+      return;
+    }
+    await rebuildWithOps(
+      ops,
+      `Re-cut ${n} magnet pocket${n === 1 ? "" : "s"} to ${t.size.d}×${t.size.h} mm, ${t.fit === "press" ? "push fit" : "glued"} — ${seatWord(t.seat)}`,
+      "recut pockets",
+    );
+  }
+
+  /** Every magnet pocket the model currently carries, read back out of the op chain
+   *  in tool terms. This is the list the Fasteners panel shows — the ops ARE the
+   *  pockets, so nothing here is baked into the geometry. */
+  function magnetPocketList() {
+    if (!result || result.source.kind !== "code") return [];
+    const rc = result.recenter ?? [0, 0, 0];
+    return (result.source.ops ?? []).flatMap((o, index) => {
+      if (o.type !== "hole" || o.tag !== "magnet") return [];
+      const prof = magnetOpProfile(o);
+      return [{
+        index,
+        label: prof.size ? `${prof.size.d}×${prof.size.h} mm` : `⌀${Math.round(o.diameter * 10) / 10} × ${Math.round(o.depth * 10) / 10} mm`,
+        fit: prof.fit === "press" ? "push fit" : prof.fit === "glue" ? "glued" : "",
+        up: Math.round((o.at[2] - rc[2]) * 10) / 10, // height above the plate, display coords
+      }];
+    });
+  }
+
+  /** Fill one pocket back in, by its place in the op chain (the panel's ✕). */
+  async function removePocketAt(index: number) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = [...(cur.source.ops ?? [])];
+    // The index came from a render's op chain; if the model rebuilt since, it can point
+    // at a fillet or a screw hole. Only ever delete what the row claimed to be.
+    const op = ops[index];
+    if (!op || op.type !== "hole" || op.tag !== "magnet") return;
+    ops.splice(index, 1);
+    setHoleEdit(null); // removing shifts every later index — drop the stale selection
+    await rebuildWithOps(ops, "Removed the magnet pocket", "remove pocket");
   }
 
   /** Resize the selected magnet pocket to the tool's (possibly just-changed) preset. */
@@ -5341,10 +5414,26 @@ export default function App() {
     }
   }
 
+  /** Which version the restore is currently rebuilding — the row shows it, and it
+   *  blocks a second click from queueing another worker rebuild behind the first. */
+  const [restoringId, setRestoringId] = useState<string | null>(null);
+  // The History panel is memoised; a fresh restoreTo closure on every render would defeat it,
+  // so the panel gets this stable wrapper and the ref carries the live function.
+  const restoreRef = useRef<(id: string) => void>(() => {});
+  const onRestoreStable = useCallback((id: string) => restoreRef.current(id), []);
   async function restoreTo(versionId: string) {
-    if (!project) return;
+    const cur = projectRef.current;
+    if (!cur || restoringId) return;
+    // A restore that lands mid-build gets silently overwritten when that build's
+    // result arrives — the same race undo/redo already refuse to enter.
+    if (statusRef.current === "generating") {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Still building the last change — give it a moment, then pick that version again.", error: true }]);
+      return;
+    }
+    if (cur.headId === versionId) return; // already sitting on it; rebuilding changes nothing
+    setRestoringId(versionId);
     dissolveSeparation(); // restoring rebuilds the model — drop the sandbox's floating parts
-    const next = restoreVersion(project, versionId);
+    const next = restoreVersion(cur, versionId);
     persist(next);
     try {
       await rebuildHead(next);
@@ -5355,8 +5444,11 @@ export default function App() {
       // Failures still speak up — those are news.
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setRestoringId(null);
     }
   }
+  restoreRef.current = (id) => void restoreTo(id);
 
   // Undo/redo step HEAD back/forward over the append-only version history, without
   // appending — so a redo stays available until the next real edit.
@@ -5675,6 +5767,7 @@ export default function App() {
         booting={booting || (!sel && mode === "precise")}
         genProgress={genProgress}
         accountEmail={accountEmail}
+        avatar={avatar}
         theme={theme}
         onToggleTheme={() => setThemeState((t) => (t === "dark" ? "light" : "dark"))}
         onOpenProfile={() => {
@@ -5764,6 +5857,19 @@ export default function App() {
           removeAll: () => void removeAllHoles("magnet"),
           recutAll: () => void recutAllPockets(),
           placedCount: familyOpCount("magnet"),
+          pockets: magnetPocketList(),
+          editIndex: holeEdit?.family === "magnet" ? holeEdit.index : null,
+          selectPocket: (index: number) => {
+            // Selecting from the list is the same state a click on the model sets,
+            // so the size/fit/seat rows above become THIS pocket's settings.
+            const cur = resultRef.current;
+            if (cur?.source.kind !== "code") return;
+            const op = (cur.source.ops ?? [])[index];
+            if (!op || op.type !== "hole" || op.tag !== "magnet") return; // stale index — ignore
+            setMagnetTool((d) => (d ? { ...d, ...magnetOpProfile(op) } : d));
+            setHoleEdit({ family: "magnet", index, moving: false });
+          },
+          removePocket: (index: number) => void removePocketAt(index),
         }}
         screwCtl={{
           tool: screwTool,
@@ -5955,7 +6061,9 @@ export default function App() {
         onFitToPlate={() => void fitModelToPlate()}
         splitCtl={{ pieces: splitPieces, exportPiece: busyExport(exportPiece), exportAll: busyExport(exportAllPieces), clear: () => setSplitPieces(null), toPlates: assignPiecePlates, plated: !!splitPieces?.some((pc) => pc.plate != null) }}
         versions={project?.versions ?? []}
-        onRestore={restoreTo}
+        headId={project?.headId}
+        restoringId={restoringId}
+        onRestore={onRestoreStable}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy || status === "generating" }}
         supportsStep={result?.supportsStep ?? false}
         canExport={(f) => (result?.kind === "generative" ? f === "stl" || f === "obj" || f === "3mf" /* = GenerativeEngine.canExport, inlined so the render path never loads the lazy engine */ : sel?.engine.canExport(f) ?? false)}
@@ -6130,6 +6238,9 @@ export default function App() {
           onSaveAiApply={setAiApply}
           userTint={userTint}
           onSaveTint={saveUserTint}
+          avatar={avatar}
+          onPickAvatar={(f) => void pickAvatar(f)}
+          onClearAvatar={clearAvatar}
           theme={theme}
           onSaveTheme={setThemeState}
           clarifyOn={clarifyOn}
@@ -7349,6 +7460,9 @@ function SettingsModal({
   onSaveAiApply,
   userTint,
   onSaveTint,
+  avatar,
+  onPickAvatar,
+  onClearAvatar,
   theme,
   onSaveTheme,
   units,
@@ -7388,6 +7502,9 @@ function SettingsModal({
   onSaveAiApply: (v: "ask" | "auto") => void;
   userTint: string;
   onSaveTint: (c: string) => void;
+  avatar: string | null;
+  onPickAvatar: (f: File) => void;
+  onClearAvatar: () => void;
   theme: "light" | "dark";
   onSaveTheme: (t: "light" | "dark") => void;
   units: "mm" | "in";
@@ -7576,6 +7693,21 @@ function SettingsModal({
           <>
             <p className="pane-desc">How Moldable looks and measures.</p>
             <SGroup title="Look">
+              {/* Your photo sits with the chat colour, not behind the account: both are
+                  personal decoration stored the same way, and both follow you to your
+                  other devices once you sign in. The header disc shows it there. */}
+              <label>Your photo</label>
+              <div className="avatar-pick">
+                <span className="avatar-prev">{avatar ? <img src={avatar} alt="" /> : <IconUser />}</span>
+                <div className="avatar-pick-act">
+                  <label className="ghost sm avatar-btn">
+                    {avatar ? "Change photo" : "Add a photo"}
+                    <input type="file" accept="image/*" className="sr-file" aria-label="Profile photo" onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickAvatar(f); e.target.value = ""; }} />
+                  </label>
+                  {avatar && <button className="ghost sm" onClick={onClearAvatar}>Remove</button>}
+                  <p className="fine">Square-cropped to a thumbnail. It shows on your account button and syncs with your settings.</p>
+                </div>
+              </div>
               <label>Theme</label>
               <div className="seg sm" role="radiogroup" aria-label="Theme">
                 <button className={theme === "light" ? "on" : ""} onClick={() => onSaveTheme("light")}>Light</button>

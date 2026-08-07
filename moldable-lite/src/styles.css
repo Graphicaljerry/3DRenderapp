@@ -197,6 +197,20 @@ button { font-family: inherit; cursor: pointer; }
 .x:hover { color: var(--ink); }
 .link:hover { color: var(--accent); text-decoration: underline; }
 .profile:hover .avatar { filter: brightness(1.06); }
+.avatar img, .pm-avatar img, .avatar-prev img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; display: block; }
+.avatar:has(img), .pm-avatar:has(img) { background: none; }
+/* Settings: the photo picker next to a live preview of the disc it becomes. */
+.avatar-pick { display: flex; align-items: flex-start; gap: 12px; margin: 4px 0 2px; }
+.avatar-prev { width: 52px; height: 52px; flex: 0 0 52px; border-radius: 50%; background: var(--ink-invert); color: var(--on-invert); font-size: 20px; font-weight: 600; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.avatar-pick-act { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+.avatar-pick-act .fine { flex-basis: 100%; margin: 0; }
+.avatar-btn { display: inline-flex; align-items: center; position: relative; }
+/* Off-screen rather than `hidden`: a hidden input is not focusable, so the picker
+   was unreachable by keyboard. This keeps it in the tab order under its label. */
+/* pointer-events off so this 1px box can't steal clicks from the button beside it —
+   the label still forwards a click to it, and it stays focusable for the keyboard. */
+.sr-file { position: absolute; left: 0; top: 0; width: 1px; height: 1px; opacity: 0; overflow: hidden; pointer-events: none; }
+.avatar-btn:focus-within { border-color: var(--accent); }
 /* Display face for the brand + section headings — gives hierarchy a voice. */
 .wordmark, .empty-q, .card h1, .card h2, .panel h3, .side-head, .measure-head, .gc-title { font-family: var(--font-display); letter-spacing: -0.01em; }
 /* Numeric readouts align in columns. */
@@ -690,24 +704,34 @@ button { font-family: inherit; cursor: pointer; }
 .vhistory .vhead { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
 .vhistory .vhead h3 { margin: 0; }
 .vhistory .vlist { display: flex; flex-direction: column; gap: 6px; }
-.vstep {
-  flex: 0 0 auto; min-width: 20px; text-align: right;
-  font-family: var(--font-mono); font-size: 11px; font-variant-numeric: tabular-nums; color: var(--subt);
-}
 .vtag {
   flex: 0 0 auto; font-size: 10px; letter-spacing: .02em; color: var(--subt);
   background: var(--bg); border-radius: var(--r-full); padding: 2px 7px;
 }
 .vtag.now { color: var(--accent-d); background: color-mix(in srgb, var(--accent) 14%, transparent); font-weight: 600; }
-.vrow { display: flex; align-items: center; gap: 9px; padding: 8px 9px; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-md); }
+/* The whole row is the control: a big thumbnail beside a stacked label / meta / state.
+   The previous layout put a Restore button in the row next to the thumbnail, which in
+   a 262px dock left ~70px for the summary and clipped every label to two characters. */
+.vrow { display: flex; align-items: stretch; gap: 9px; width: 100%; padding: 7px 8px; text-align: left; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-md); cursor: pointer; }
+.vrow:not(:disabled):hover { border-color: var(--bord-strong); background: var(--surf); }
+.vrow:disabled { cursor: default; }
 /* Mini canvas capture per version — the model as it looked (pose included) when that
-   change landed. Old versions without one keep a quiet placeholder so rows align. */
-.vthumb { flex: 0 0 auto; width: 56px; height: 56px; border-radius: var(--r-md); border: 1px solid var(--bord); object-fit: cover; background: var(--canvas); }
+   change landed. It stretches to the row so it reads as a picture, not a stamp. Old
+   versions without one keep a quiet placeholder so rows align. */
+.vthumb { flex: 0 0 auto; align-self: stretch; width: 72px; height: auto; min-height: 72px; border-radius: var(--r-md); border: 1px solid var(--bord); object-fit: cover; background: var(--canvas); }
 .vthumb-empty { display: inline-block; }
-.vrow .vbody { flex: 1 1 auto; min-width: 0; }
+.vrow .vbody { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 2px; }
 .vrow.current { background: var(--accent-w); border-color: #cfe4e0; }
-.vsum { font-size: 13px; font-weight: 500; color: var(--ink); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.vmeta { font-size: 11px; color: var(--subt); margin-top: 3px; font-variant-numeric: tabular-nums; }
+/* A restore is a worker rebuild that can take seconds — the row it came from says so
+   rather than the panel sitting there looking untouched. */
+.vrow.loading { border-color: var(--accent); }
+.vrow.loading .vsum { opacity: .6; }
+.vsum { font-size: 12.5px; font-weight: 500; color: var(--ink); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.vmeta { font-size: 10.5px; color: var(--subt); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vstate { display: flex; align-items: center; gap: 5px; margin-top: 1px; min-height: 15px; }
+/* The affordance shows on the rows you can actually go to, on hover/focus. */
+.vgo { font-size: 10.5px; font-weight: 600; color: var(--accent-d); opacity: 0; transition: opacity .12s ease; }
+.vrow:hover .vgo, .vrow:focus-visible .vgo { opacity: 1; }
 
 /* ---------- statusbar + export ---------- */
 /* Wraps whole chips to the next line when narrow — the pieces themselves never
@@ -873,7 +897,12 @@ button { font-family: inherit; cursor: pointer; }
 .lp-export:disabled { opacity: .4; }
 
 /* ---------- build plates: Bambu-style tabs over the 3D view + assignment menus ---------- */
-.plate-bar { position: absolute; left: 12px; bottom: 12px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; max-width: min(46%, calc(100% - 24px)); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-full); box-shadow: var(--shadow-sm); }
+/* The plate bar gets its own centred row above the view-angle buttons at EVERY width.
+   It used to start in the bottom-left corner, 2px from the zoom pill and on the same
+   z-index — so the pill painted over "Plates" and the leading chip even on wide screens,
+   and at mid widths (canvas ~500px, where the old viewport-keyed media query hadn't
+   fired yet) the bar ALSO ran into the centred view snaps. One row each instead. */
+.plate-bar { position: absolute; left: 50%; transform: translateX(-50%); bottom: 52px; z-index: 6; display: flex; align-items: center; gap: 3px; padding: 4px 6px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-full); box-shadow: var(--shadow-sm); }
 .pb-tabs { display: flex; align-items: center; gap: 3px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .pb-tabs::-webkit-scrollbar { display: none; }
 .pb-tab { flex: 0 0 auto; }
@@ -969,6 +998,17 @@ button { font-family: inherit; cursor: pointer; }
 .magnet-pair { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--ink2); cursor: pointer; user-select: none; }
 .magnet-pair input { accent-color: var(--accent); }
 .magnet-hint { font-size: 11px; line-height: 1.45; color: var(--subt); }
+/* The pockets a model carries, as rows: pick one to edit it, ✕ to fill it back in.
+   Capped in height so a part with twenty magnets can't push the panel off screen. */
+.pocket-list { display: flex; flex-direction: column; gap: 3px; max-height: 168px; overflow-y: auto; }
+.pocket-row { display: flex; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: var(--r-sm); }
+.pocket-row.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pocket-pick { flex: 1; display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 5px 7px; border: 0; background: transparent; border-radius: var(--r-sm); text-align: left; cursor: pointer; }
+.pocket-row:not(.on) .pocket-pick:hover { background: var(--ctl); }
+.pocket-size { font-size: 11.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.pocket-where { font-size: 11px; color: var(--subt); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pocket-row .x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none; border: 0; background: transparent; color: var(--subt); border-radius: var(--r-sm); cursor: pointer; }
+.pocket-row .x:hover { background: var(--ctl); color: var(--ink); }
 .paint-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
 .paint-swatches .psw { width: 100%; aspect-ratio: 1; border-radius: var(--r-xs); border: none; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
 .paint-swatches .psw:hover { transform: scale(1.12); }
@@ -1661,8 +1701,9 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .pin-panel textarea { width: 100%; border: 1px solid var(--bord); border-radius: var(--r-md); padding: 8px 10px; font-size: 13px; font-family: inherit; resize: vertical; background: var(--bg); color: var(--ink); }
 .pin-panel .param-actions { margin-top: 10px; flex-wrap: wrap; }
 /* Split-pieces list: floats bottom-left so it clears the top-left pin/feature panel and top-right stats. */
-/* Sits above .plate-bar, which owns left:12px bottom:12px. Both render together
-   (a split model on a multi-plate project), and at bottom:12px they were exactly stacked. */
+/* Both render together on a split model in a multi-plate project, so it lifts clear of
+   the plate bar's row only when there IS one. */
+.viewer-body:has(.plate-bar) .split-panel { bottom: 98px; }
 .split-panel { position: absolute; left: 12px; bottom: 58px; z-index: 6; width: 290px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); padding: 12px; box-shadow: var(--shadow-md); }
 .split-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .split-list { max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
@@ -1858,11 +1899,6 @@ details.guide { margin-top: 10px; }
 }
 /* Narrow viewers (iPad portrait, phones): the plate bar can't share the bottom row with
    the view-angle buttons — stack it just above them, centred, full available width. */
-@media (max-width: 900px) {
-  .plate-bar { left: 50%; transform: translateX(-50%); bottom: 52px; max-width: calc(100% - 24px); }
-  /* plate bar moves up and centres here, so the split panel has to clear its new row */
-  .split-panel { bottom: 98px; }
-}
 /* Desktop: when the Parameters panel is docked (right, ~312px), open the export
    menu clear of it instead of stacking the two floating cards. */
 @media (min-width: 901px) {
@@ -2324,6 +2360,9 @@ details.guide { margin-top: 10px; }
   .zoom-ctl { display: none; }
   /* The snaps are gone on a phone, so the showcase scenes take their spot. */
   .showcase-bar { bottom: 12px; }
+  /* …and so does the plate bar, since nothing is left on the bottom row. */
+  .plate-bar { bottom: 12px; }
+  .viewer-body:has(.plate-bar) .split-panel { bottom: 58px; }
 
   /* A finger is on the model: floating chrome steps back (the video-player contract),
      and returns on release. */

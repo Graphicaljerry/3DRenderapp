@@ -127,6 +127,7 @@ interface Props {
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
   visiblePlate: number; // 0 = all; otherwise only objects on this build plate render
+  plateCount: number; // how many build plates to draw, laid out side by side
   plateFor: (key: string) => number; // which plate an object ("model" or attachment id) is on
   showcase: boolean; // presentation mode: clean stage, studio light, slow turntable
   showcaseScene: ShowcaseScene; // which stage the showcase is lit on
@@ -469,7 +470,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
@@ -2673,6 +2674,32 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     }
   }, [visiblePlate, plateFor, attachments, geometry]);
 
+  // Switching plates takes the view to that plate. The slabs stand a whole bed apart,
+  // so without this the plate you just picked is off screen — indistinguishable from
+  // it not existing. It frames the whole bed the way a slicer's plate tabs do: keeping
+  // a zoom set for a 60 mm part would land you nose-first on a 256 mm slab.
+  const plateAt = useRef<number[]>([0]);
+  const platePan = useRef<number | null>(null);
+  useEffect(() => {
+    const s = st.current;
+    if (!s || visiblePlate === 0) { platePan.current = null; return; } // "All" — remember nothing, so coming back re-frames
+    const want = plateAt.current[visiblePlate - 1] ?? (visiblePlate - 1) * bed.x * 1.2;
+    if (platePan.current !== null && Math.abs(want - platePan.current) < 1e-3) return;
+    platePan.current = want;
+    const c = new THREE.Vector3(want, 0, 0);
+    const r = Math.hypot(bed.x, bed.y) / 2;
+    const dist = (r / Math.sin((s.camera.fov * Math.PI) / 180 / 2)) * 0.85;
+    // Keep whatever angle the user is orbiting from; only the distance and centre move.
+    const dir = s.camera.position.clone().sub(s.controls.target).normalize();
+    if (dir.lengthSq() < 1e-6) dir.set(1, -1.3, 0.9).normalize();
+    s.camera.position.copy(c.clone().add(dir.multiplyScalar(dist)));
+    s.camera.near = dist / 100;
+    s.camera.far = dist * 100;
+    s.camera.updateProjectionMatrix();
+    s.controls.target.copy(c);
+    s.controls.update();
+  }, [visiblePlate, bed.x, bed.y, plateCount, attachments]);
+
   // Showcase: hide the workshop chrome and spin the turntable. Lighting and the
   // backdrop belong to the stage effect below, which owns them in EVERY mode so
   // the two never fight over the same lights.
@@ -2825,10 +2852,46 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const mat = (any as { material?: THREE.Material | THREE.Material[] }).material;
       if (mat) (Array.isArray(mat) ? mat : [mat]).forEach((x) => x.dispose());
     });
-    s.plate = buildPlate(bed, theme, plateColor);
+    // One slab per plate, and each slab goes UNDER ITS OWN OBJECTS rather than onto a
+    // fixed grid slot — objects never move to follow a plate, so a slab laid out by
+    // index would sit next to the parts it belongs to instead of beneath them. Empty
+    // plates (a plate you just added) park in the next free slot, a bed-and-a-bit over,
+    // which is the same stride the multi-plate 3MF export writes.
+    s.plate = new THREE.Group();
+    const stride = bed.x * 1.2;
+    const n = Math.max(1, plateCount);
+    const centre = new Array<number | null>(n).fill(null);
+    const bb = new THREE.Box3();
+    const add = (obj: THREE.Object3D | null, plate: number) => {
+      if (!obj || plate < 1 || plate > n) return;
+      bb.setFromObject(obj);
+      if (!bb.isEmpty()) centre[plate - 1] = ((centre[plate - 1] ?? 0) + (bb.min.x + bb.max.x) / 2) / (centre[plate - 1] == null ? 1 : 2);
+    };
+    add(s.mesh, plateFor("model"));
+    for (const [id, m] of s.attachMap) add(m, plateFor(id));
+    let free = 0; // next unused slot for a plate with nothing on it yet
+    const at: number[] = centre.map((c) => {
+      if (c != null) return c;
+      while (centre.some((k) => k != null && Math.abs(k - free * stride) < stride * 0.5)) free++;
+      return free++ * stride;
+    });
+    plateAt.current = at;
+    for (let i = 0; i < n; i++) {
+      const one = buildPlate(bed, theme, plateColor);
+      one.position.x = at[i];
+      // The plate you're working on reads normal; the others sit back, the way the
+      // objects on them already ghost.
+      if (visiblePlate !== 0 && i + 1 !== visiblePlate) {
+        one.traverse((o) => {
+          const m = (o as THREE.Mesh).material as THREE.Material | undefined;
+          if (m) { m.transparent = true; m.opacity = 0.35; }
+        });
+      }
+      s.plate.add(one);
+    }
     s.plate.visible = showPlate && !showcase;
     s.scene.add(s.plate);
-  }, [bed.x, bed.y, bed.z, theme, showPlate, showcase, plateColor]);
+  }, [bed.x, bed.y, bed.z, theme, showPlate, showcase, plateColor, plateCount, visiblePlate, plateFor, geometry, attachments]);
 
   // Showcase scenery — backdrop sweep, stage lights, ground decal, reflections —
   // swappable while the turntable runs. This effect owns the scene's lighting in

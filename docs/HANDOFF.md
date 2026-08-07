@@ -917,6 +917,24 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 360 — Shape tool (primitive booleans that stay parametric)
+
+New `SolidOp` in the op chain (`engine/types.ts`, executed in `worker/cad.worker.ts`):
+box / cylinder / sphere, fused or cut, centred on `at`. The rail tool **Shape** arms it;
+a click on the model places it (added shapes sit ON the surface, cut shapes sink IN, so
+the size you typed IS the pocket depth), then the flyout types its exact size and centre.
+Placed shapes are listed and removable, the way magnet pockets are.
+
+Why an op and not an attachment boolean: `mergeAttachments` / `engraveAttachments`
+(`App.tsx`) run Manifold against the display mesh and emit `kind: "generative"` — they
+collapse a CAD model to a mesh and kill Adjust. A `SolidOp` stays in the recipe, so the
+part is still parametric after a boolean (verified: Adjust rows survive two of them).
+
+Gotcha for anyone extending this: replicad's `makeBaseBox` grows from a CORNER at the
+origin, `makeSphere` is centred, and `makeCylinder` takes an explicit start point. The
+worker normalises all three so `at` always means the centre — which is what lets the size
+be retyped without the shape drifting off the spot it was placed on.
+
 ## Build 355–357 — Modify tool, spatial plates, History rework
 
 - **Modify tool** (rail, CAD only): arm Push/Pull / Round / Bevel, click a face,

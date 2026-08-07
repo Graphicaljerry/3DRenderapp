@@ -600,7 +600,10 @@ export default function App() {
       else delete next[key];
       return next;
     });
-  const plateFor = (key: string) => Math.min(plateOf[key] ?? 1, plateCount);
+  // Memoised on purpose: this is a Viewer prop, and a fresh identity on every render made the
+  // plate-rebuild effect dispose and reconstruct every slab's geometry and materials —
+  // on every AI token, every drag tick, every unrelated setState.
+  const plateFor = useCallback((key: string) => Math.min(plateOf[key] ?? 1, plateCount), [plateOf, plateCount]);
   // No upper clamp here: "move to a plate I just added" arrives before plateCount's
   // re-render, so the raw value is stored and plateFor() clamps on read instead.
   const assignPlate = (key: string, n: number) => setPlateOf((m) => ({ ...m, [key]: Math.max(1, n) }));
@@ -3422,7 +3425,8 @@ export default function App() {
   function toggleMagnetTool() {
     setHoleEdit(null); // tool change drops any hole-edit selection
     if (magnetToolRef.current) { setMagnetTool(null); return; }
-    dismissOverlays(); // one tool at a time — put down select/measure/paint/hole first
+    dismissOverlays();
+    standDownTools(); // one tool at a time — nothing else stays armed behind this
     // Glue by default: a press-fit that works loose drops a magnet inside a finished
     // part, and nobody re-prints a helmet for that. 8×3 is the cosplay-panel staple.
     // Seat default 0.1 mm proud — the prop-maker trick that closes the whisper of
@@ -3797,6 +3801,7 @@ export default function App() {
     setHoleEdit(null); // tool change drops any hole-edit selection
     if (screwToolRef.current) { setScrewTool(null); return; }
     dismissOverlays();
+    standDownTools();
     setScrewTool({ size: SCREW_SIZES[2], fit: "bite", countersink: true, snap: 1, placed: [] }); // M3 — the maker staple
   }
   async function placeScrew(spot: { at: [number, number, number]; normal: [number, number, number]; back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null }) {
@@ -5069,9 +5074,24 @@ export default function App() {
     };
     // Live panel shows ONLY the model's own reasoning — the harness steps already
     // read as the timeline above it, so mirroring them here would double them up.
+    // Tokens arrive far faster than a frame, and each setState re-rendered the whole
+    // app — Workspace, Viewer, forced redraws — which is what made the 3D view stutter
+    // while the model typed. Buffer and flush once per animation frame instead; text
+    // can't display faster than that anyway.
+    let thinkBuf: string | null = null;
+    let textBuf: string | null = null;
+    let flushRaf = 0;
+    const flushStream = () => {
+      flushRaf = 0;
+      if (textBuf !== null) { setStreamingText(textBuf); textBuf = null; }
+      if (thinkBuf !== null) { setStreamingThink(thinkBuf); thinkBuf = null; }
+    };
+    const schedule = () => { if (!flushRaf) flushRaf = requestAnimationFrame(flushStream); };
+    const onToken = (_t: string, full: string) => { textBuf = full; schedule(); };
     const onThink = (_t: string, full: string) => {
       lastThink = full;
-      setStreamingThink(full);
+      thinkBuf = full;
+      schedule();
     };
     if (visionImage) {
       pushStep(visionImage.markup
@@ -5263,7 +5283,7 @@ export default function App() {
         // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
         const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
         pushStep(`Writing the change with ${shortModelName(effLlm.model)} (edit mode — only the lines that change)…`);
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken, onThinking: onThink, onUsage }, effectiveProxy);
         finalRaw = raw;
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {
@@ -5307,7 +5327,7 @@ export default function App() {
           ? `Writing the ${kind === "replicad" ? "CAD program" : "model spec"} with ${shortModelName(effLlm.model)}…`
           : `Attempt ${attempt} — feeding the build error back so the model can fix its code…`);
         try {
-          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
+          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage }, effectiveProxy);
         } catch (err: any) {
           // Cloud brain unreachable + the on-device model is already on this machine →
           // answer locally instead of failing (works fully offline).
@@ -5319,7 +5339,7 @@ export default function App() {
             const note = { id: mid(), ts: Date.now(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
             return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
           });
-          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken: (_t, full) => setStreamingText(full), onThinking: onThink, onUsage }, effectiveProxy);
+          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage }, effectiveProxy);
         }
         finalRaw = raw;
         try {
@@ -5579,7 +5599,35 @@ export default function App() {
   // mesh (features can't be picked on one), but the keyboard had no such guard — V armed
   // the tool anyway, the Viewer started picking, and the button that would turn it back
   // off was not rendered. Silently doing nothing is the honest behaviour here.
-  const toggleSelectTool = () => { if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return; setSelectMode((m) => { const on = !m; if (on) { setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setPaintModeState(false); setMagnetTool(null); setScrewTool(null); } else { setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } return on; }); };
+  /** Put every canvas tool down. Arming any tool calls this first — the rail used to
+   *  let Cut and Fasteners (say) be lit together, each expecting the next click. */
+  const selectModeRef = useRef(selectMode);
+  selectModeRef.current = selectMode;
+  function standDownTools() {
+    setSelectMode(false);
+    setSelectedFeature(null);
+    setSelectedFaces([]);
+    setModifyOp(null);
+    setShapeTool(null);
+    setShapeEdit(null);
+    setActivePinId(null);
+    setPinText("");
+    setTransformMode("off");
+    setMeasureMode(false);
+    setMeasurePending(null);
+    setPaintModeState(false);
+    setMagnetTool(null);
+    setScrewTool(null);
+    setCutMode(false);
+    setPendingCut(null);
+    setHoleEdit(null);
+  }
+  const toggleSelectTool = () => {
+    if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return;
+    const on = !selectModeRef.current;
+    standDownTools();
+    setSelectMode(on);
+  };
   const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } else setMeasurePending(null); return next; });
   const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } };
 
@@ -6295,7 +6343,7 @@ export default function App() {
         genTexCtl={{ on: genTexture === "on", toggle: toggleGenTexture }}
         cutCtl={{
           mode: cutMode,
-          toggle: () => setCutMode(!cutMode),
+          toggle: () => { const on = !cutMode; standDownTools(); setCutMode(on); },
           pending: !!pendingCut,
           onStroke: setPendingCut,
           stroke: pendingCut,

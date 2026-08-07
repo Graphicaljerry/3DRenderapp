@@ -40,6 +40,7 @@
   --on-invert: #dcdcdc;   /* text on that fill */
   --live: #ff6a2c;        /* sparing orange — the ONE live/attention signal */
   --warn: #b7791f;
+  --info: #3D8ABD;   /* research / informational state — distinct from the green accent */
   --danger: #e5484d;
   /* Layered elevation (ambient + key), tinted to the ink hue — barely visible. */
   /* Tool-rail footprint: 19px icon + 9px*2 button padding + 1px*2 button border
@@ -110,25 +111,26 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
   --ink2: #c6c7c9;
   --mut: #8d8e90;
   --subt: #666769;
-  --chrome: #171718;      /* topbar + chat column */
+  --chrome: #131314;      /* topbar + chat column */
   --bubble-a: #2a2b2d;
   --bubble-a-ink: #d8d9db;
   --on-accent: #06120d;   /* text/icon on an accent fill */
   --ink-invert: #ececed;  /* active pill fill inverts in dark */
   --on-invert: #121212;
-  --bord: #2c2d2f;
-  --bord-subtle: #212123;
+  --bord: #292a2c;
+  --bord-subtle: #1d1d1f;
   --bord-strong: #3b3c3e;
-  --surf: oklch(15.5% 0.004 160);   /* recessed fills on dark cards */
-  --page: #121213;                  /* matches the pre-paint backdrop in index.html */
-  --canvas: #17181a;                /* must match THEME_SCENE.dark */
-  --launch-bg-page: oklch(13.5% 0.004 160);
-  --bg: #1c1c1e;          /* panels — lighter than surf: elevation by lightness */
+  --surf: oklch(12.8% 0.004 160);   /* recessed fills on dark cards */
+  --page: #0e0e0f;                  /* matches the pre-paint backdrop in index.html */
+  --canvas: #131416;                /* must match THEME_SCENE.dark */
+  --launch-bg-page: oklch(11% 0.004 160);
+  --bg: #171719;          /* panels — lighter than surf: elevation by lightness */
   --accent: #5aa082;      /* brand green, lifted for a dark background */
   --accent-d: #74b89a;    /* hover — brighter in dark, not darker */
-  --accent-w: #202124;    /* neutral wash (pills / assistant bubbles); green stays in the text/fill */
+  --accent-w: #1b1c1f;    /* neutral wash (pills / assistant bubbles); green stays in the text/fill */
   --live: #ff7a43;
   --warn: #d9a441;
+  --info: #5AA6D6;   /* lifted for a dark ground, same hue family as #3D8ABD */
   --danger: #ff7076;
   /* Dark elevates via surface lightness; keep only a soft cast under overlays. */
   --shadow-sm: none;
@@ -459,10 +461,11 @@ button { font-family: inherit; cursor: pointer; }
    settings, and the two ways out. Wider than the other flyouts because the pin
    sizes are a row of chips. */
 .cut-fly { width: 232px; }
-.cut-fly .fine { margin: 0 0 7px; }
+.cut-fly .cut-row, .cut-fly .cut-actions { margin-bottom: 0; }
+.cut-fly .fine { margin: 0; }
 /* Modify flyout: the armed op, its size, and what the next click will do. A real
    panel (not a bare seg row) because it stacks controls over two lines of hint. */
-.modify-fly { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; width: 208px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+.modify-fly { width: 208px; }
 .modify-fly .fine { margin: 0; }
 .modify-size { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2); }
 .modify-size input { width: 64px; }
@@ -470,7 +473,7 @@ button { font-family: inherit; cursor: pointer; }
 .modify-stop { color: var(--warn); font-weight: 500; }
 /* Shape tool: the same panel shape as Modify, with rows of typed numbers — the
    numbers ARE the feature, so they get the room. */
-.shape-fly { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; width: 226px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+.shape-fly { width: 226px; }
 .shape-fly .fine, .shape-fly .paint-lbl { margin: 0; }
 .shape-nums { display: flex; align-items: center; gap: 6px; }
 .shape-nums label { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1; }
@@ -575,6 +578,13 @@ button { font-family: inherit; cursor: pointer; }
 .viewer-head .viewer-tools .seg.sm, .viewer-head .viewer-tools .seg.sm button { border-radius: var(--r-full); }
 .viewer-head .viewer-tools .seg.sm .iconbtn { height: 100%; }
 .viewer-tools { display: flex; flex-wrap: wrap; gap: 8px; row-gap: 6px; justify-content: flex-end; }
+/* An armed tool in the horizontal pill row reads as INK, not accent green: the green
+   is the canvas's "this is live" language, and having two greens on screen at once
+   made the toolbar compete with the model. */
+.viewer-tools .ghost.sm.iconbtn.on, .viewer-head .viewer-tools .ghost.sm.iconbtn.on {
+  background: var(--ink-invert); color: var(--on-invert); border-color: var(--ink-invert);
+}
+.viewer-tools .ghost.sm.iconbtn.on:hover { filter: brightness(1.08); }
 /* The head cluster reads as one raised object, like the tab strip opposite it. */
 /* Same surface, same shadow, same radius as the vertical rail — they are one family
    of floating controls over the stage, and reading as two different materials made
@@ -992,14 +1002,29 @@ button { font-family: inherit; cursor: pointer; }
    slider used to sit directly on the 3D view, so light parts swallowed the text and
    the palette read as broken. (Its children carry their own fills; the WRAPPER had
    none.) */
-.paint-fly { display: flex; flex-direction: column; gap: 9px; padding: 10px; min-width: 176px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+.paint-fly { min-width: 190px; }
 .paint-lbl { font-size: 11px; font-weight: 600; color: var(--subt); }
 /* Magnet tool flyout: catalogue-size chips + fit + the pair-through-the-wall toggle. */
 /* 234px: the widest row is the screw tool's Bites in / Slides through / Heat-set seg
    at 204px + pill padding — 208px clipped "Heat-set" at the panel edge. */
-.magnet-fly { display: flex; flex-direction: column; gap: 9px; padding: 10px; width: 234px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
+.magnet-fly { width: 234px; }
+/* Add Logo: the formats and what-happens-next are visible BEFORE the file picker. */
+.logo-fly { width: 236px; }
+.logo-fly .fine { margin: 0; line-height: 1.45; }
+.logo-drop { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 16px 10px; border: 1.5px dashed var(--bord-strong); border-radius: var(--r-md); background: var(--ctl); color: var(--ink2); cursor: pointer; text-align: center; }
+.logo-drop:hover, .logo-drop:focus-visible { border-color: var(--accent); color: var(--ink); }
+.logo-drop.over { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent-d); }
+.logo-drop b { font-size: 12.5px; }
+.logo-drop span { font-size: 11px; color: var(--subt); }
 /* Belt and braces: a seg that ever outgrows the panel wraps instead of clipping. */
 .magnet-fly .mode-seg { flex-wrap: wrap; max-width: 100%; }
+/* Every seg inside a rail panel fills the panel and splits it evenly — the Magnet /
+   Screw tabs used to sit at their text width, hugging the left of a full-width pill. */
+/* …except Select's Auto/Face/Edge/Corner/Point, which pairs an icon WITH a word and
+   sizes to its content — forcing equal columns there collided the two. */
+.canvas-rail .rail-fly .seg:not(.kind-seg) { display: flex; width: 100%; }
+.canvas-rail .rail-fly .seg:not(.kind-seg) > button { flex: 1 1 0; min-width: 0; justify-content: center; }
+.canvas-rail .rail-fly .kind-seg { width: max-content; max-width: 100%; }
 .magnet-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
 .magnet-sizes .msize { padding: 5px 0; border: 1px solid var(--bord); border-radius: var(--r-sm); background: var(--ctl); color: var(--ink2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
 .magnet-sizes .msize:hover { border-color: var(--bord-strong); color: var(--ink); }
@@ -1198,7 +1223,9 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* Build options trigger: Research · Plan · Fit folded behind one chip. It names
    whatever is off its default (and takes the accent) so a folded-away setting that
    is actually doing something still announces itself from the composer. */
-.opt-trigger.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
+/* Build options read BLUE when something is switched on, so they can't be mistaken
+   for the green "this tool is armed" language the canvas uses. */
+.opt-trigger.on { border-color: var(--info); color: var(--info); background: color-mix(in srgb, var(--info) 12%, transparent); }
 .opt-trigger .web-state { max-width: 210px; overflow: hidden; text-overflow: ellipsis; }
 /* ---------- model picker (compact custom dropdown; replaces native select) ---------- */
 .modelpick2 { position: relative; }
@@ -2050,20 +2077,40 @@ details.guide { margin-top: 10px; }
 }
 .canvas-rail .btn-label { display: none; } /* icon-only rail; titles carry the words */
 .canvas-rail > .rail-tool { position: relative; display: flex; }
+/* Every rail flyout is a PANEL: a column with a card around it. It used to be a bare
+   flex ROW, so any panel that didn't override the direction laid its paragraphs out
+   side by side and wrapped them one character per line (the pen-cut panel did exactly
+   that). Column-by-default means a new tool can't inherit that bug. */
 .canvas-rail .rail-fly {
   position: absolute;
   left: calc(100% + 10px);
   top: 0;
   display: flex;
-  gap: 6px;
-  align-items: center;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  width: max-content;
+  max-width: 248px;
+  padding: 10px;
+  background: var(--bg);
+  border: 1px solid var(--bord);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
   z-index: calc(var(--z-rail) + 1);
 }
 .canvas-rail .rail-fly .btn-label { display: inline; } /* flyouts keep their words */
 .canvas-rail .rail-sep { height: 1px; background: var(--bord-subtle); margin: 3px 4px; }
 .canvas-rail .ghost.sm.iconbtn { border-color: transparent; background: transparent; }
 .canvas-rail .ghost.sm.iconbtn:hover { border-color: var(--bord); background: var(--surf); }
-.canvas-rail .ghost.sm.iconbtn.on { border-color: var(--accent); }
+/* Armed rail tool: a ring around the icon. A rounded square read like a second
+   button chrome; a circle reads like a state. */
+.canvas-rail .ghost.sm.iconbtn.on { border-color: transparent; background: transparent; position: relative; color: var(--ink); }
+.canvas-rail .ghost.sm.iconbtn.on::before {
+  content: ""; position: absolute; left: 50%; top: 50%; width: 30px; height: 30px;
+  transform: translate(-50%, -50%); border: 1.5px solid var(--accent); border-radius: 50%; pointer-events: none;
+}
+/* On a phone/tablet the buttons are bigger, so the ring grows with them. */
+@media (pointer: coarse) { .canvas-rail .ghost.sm.iconbtn.on::before { width: 36px; height: 36px; } }
 /* (top-right canvas cluster retired — undo/View/Objects/Help live in the header again) */
 
 /* Rail popovers (Material / Surface / Snap / Resize) open to the RIGHT of the

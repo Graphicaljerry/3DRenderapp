@@ -215,7 +215,7 @@ const ROTATE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
 const clayCache = new WeakMap<THREE.BufferGeometry, THREE.BufferGeometry>(); // grayscale display copies
 // Must match --canvas in styles.css: the scene IS the canvas card's surface, and any
 // difference shows as a colour seam inside the rounded corners.
-const THEME_SCENE = { light: "#d5d6d7", dark: "#17181a" } as const; // dark: neutral, no blue cast
+const THEME_SCENE = { light: "#d5d6d7", dark: "#131416" } as const; // dark: neutral, no blue cast
 
 // ---- Showcase stages -------------------------------------------------------
 // A stage = backdrop sweep (seamless studio paper), a soft world ambient, a light

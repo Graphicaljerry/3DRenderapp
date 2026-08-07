@@ -303,8 +303,8 @@ function BuildOptions({ p }: { p: Props }) {
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const precise = p.mode === "precise";
   const notes: string[] = [];
-  if (p.modePref !== "generative" && p.webMode !== "auto") notes.push(p.webMode === "on" ? "Research on" : "No research");
-  if (!p.planCtl.on) notes.push("No plan");
+  if (p.modePref !== "generative" && p.webMode !== "auto") notes.push(p.webMode === "on" ? "Research On" : "No Research");
+  if (!p.planCtl.on) notes.push("No Plan");
   if (precise && p.fit !== "snug") notes.push(`Fit · ${p.fit === "loose" ? "Loose" : "Press"}`);
   return (
     <span>
@@ -1036,8 +1036,11 @@ function MeasureRow({ m, index, ctl, dimCtl, busy }: {
    draw over the panel it just opened (rail z-index 30 vs .pin-panel 6, same corner).
    Position is written straight to the node from a rAF loop so orbiting the model does
    not re-render React; the loop only runs while something is actually selected. */
-function ContextBar({ anchor, viewerRef, children }: {
+function ContextBar({ anchor, away, viewerRef, children }: {
   anchor: [number, number, number] | null;
+  /** A point further along the drag arrow. The bar is pushed the OPPOSITE way on
+   *  screen, so it can never sit on top of the handle you're about to grab. */
+  away?: [number, number, number] | null;
   viewerRef: React.RefObject<ViewerHandle | null>;
   children: React.ReactNode;
 }) {
@@ -1053,10 +1056,21 @@ function ContextBar({ anchor, viewerRef, children }: {
       const pt = viewerRef.current?.projectPoint(anchor[0], anchor[1], anchor[2]);
       if (!pt) return;
       el.style.visibility = pt.behind ? "hidden" : "visible";
+      // Direction the arrow leaves the pick, in screen space — the bar goes the other way.
+      let ox = 0, oy = -1;
+      if (away) {
+        const tip = viewerRef.current?.projectPoint(away[0], away[1], away[2]);
+        if (tip) {
+          const dx = tip.x - pt.x, dy = tip.y - pt.y;
+          const len = Math.hypot(dx, dy);
+          if (len > 4) { ox = -dx / len; oy = -dy / len; }
+        }
+      }
       // Keep the bar inside the canvas and clear of the Inspector dock — a selection
       // near the right edge would otherwise project underneath it and be unreachable.
       const host = el.parentElement;
-      let x = pt.x, y = pt.y;
+      const PUSH = 58; // clears the arrow's grab zone at any zoom
+      let x = pt.x + ox * PUSH, y = pt.y + oy * PUSH;
       if (host) {
         const half = el.offsetWidth / 2;
         const dock = host.querySelector(".inspector-dock") as HTMLElement | null;
@@ -1067,11 +1081,13 @@ function ContextBar({ anchor, viewerRef, children }: {
       if (Math.abs(x - lx) < 0.5 && Math.abs(y - ly) < 0.5) return; // no sub-pixel churn
       lx = x; ly = y;
       // centred on the pick and lifted clear of it, so the bar never covers what was clicked
-      el.style.transform = `translate(calc(${Math.round(x)}px - 50%), calc(${Math.round(y)}px - 100% - 14px))`;
+      // Centred on the offset point rather than hung above the pick: when the arrow
+      // runs sideways the bar moves sideways too, instead of overlapping it.
+      el.style.transform = `translate(calc(${Math.round(x)}px - 50%), calc(${Math.round(y)}px - 50%))`;
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [anchor, viewerRef]);
+  }, [anchor, away, viewerRef]);
   if (!anchor) return null;
   return <div className="ctxbar" ref={ref} role="toolbar" aria-label="Selection actions">{children}</div>;
 }
@@ -2110,6 +2126,8 @@ export function Workspace(p: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [dragOverCanvas, setDragOverCanvas] = useState(false);
   const [profileMenu, setProfileMenu] = useState(false);
+  const [logoOpen, setLogoOpen] = useState(false);
+  const [logoOver, setLogoOver] = useState(false);
   // Open beside the stage on desktop; on a phone the sheet starts in PEEK, because the
   // first thing a phone user should see is their model, not an empty transcript.
   const [chatOpen, setChatOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 760);
@@ -3015,7 +3033,7 @@ export function Workspace(p: Props) {
                     </button>
                       {p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool && p.activeKind === "replicad" && (
                         <div className="rail-fly">
-                          <div className="seg sm mode-seg">
+                          <div className="seg sm mode-seg kind-seg">
                             {SELECT_MODES.map((m, i) => (
                               <button key={m.kind} className={`iconbtn${p.featureCtl.kind === m.kind ? " on" : ""}`} aria-label={m.label} title={`${m.label} (${i + 1})`} onClick={() => p.featureCtl.setKind(m.kind)}>
                                 <m.icon /><span className="btn-label">{m.label}</span>
@@ -3411,17 +3429,51 @@ export function Workspace(p: Props) {
                     )}
                   </div>
                   <div className="rail-tool">
-                    {/* Logo: SVG exact, PNG/JPG traced — lands as a draggable layer. */}
+                    {/* Add Logo: opens a panel rather than a bare file dialog, so the
+                        accepted formats and the "what happens next" step are visible
+                        BEFORE the picker, and a file can be dropped straight onto it. */}
                     <button
-                      className="ghost sm iconbtn"
-                      aria-label="Logo"
+                      className={`ghost sm iconbtn${logoOpen ? " on" : ""}`}
+                      aria-pressed={logoOpen}
+                      aria-label="Add Logo"
                       disabled={!p.geometry || p.tab !== "3d"}
-                      title="Add a logo: SVG (exact) or PNG/JPG (auto-traced — solid dark-on-light art works best). It arrives as its own layer you drag onto any face, then Merge (raised) or Engrave (carved) from the Objects panel."
-                      onClick={() => logoFileRef.current?.click()}
+                      title="Add a logo or emblem: drop an SVG, PNG or JPG. It arrives as its own layer you drag onto any face, then Merge (raised) or Engrave (carved)."
+                      onClick={() => setLogoOpen((v) => !v)}
                     >
                       <IconBadge />
-                    <span className="rail-name">Logo</span>
+                    <span className="rail-name">Add Logo</span>
                     </button>
+                    {logoOpen && (
+                      <div className="rail-fly logo-fly">
+                        <div
+                          className={`logo-drop${logoOver ? " over" : ""}`}
+                          onDragOver={(e) => { e.preventDefault(); setLogoOver(true); }}
+                          onDragLeave={() => setLogoOver(false)}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            setLogoOver(false);
+                            const f = e.dataTransfer.files?.[0];
+                            if (f) { p.onAddLogo(f); setLogoOpen(false); }
+                          }}
+                          onClick={() => logoFileRef.current?.click()}
+                          role="button"
+                          tabIndex={0}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") logoFileRef.current?.click(); }}
+                        >
+                          <IconBadge size={20} />
+                          <b>Drop a logo here</b>
+                          <span>or click to choose a file</span>
+                        </div>
+                        <p className="fine">
+                          <b>SVG</b> comes through exactly. <b>PNG</b> and <b>JPG</b> get traced — solid
+                          dark art on a light background traces cleanest; photos and gradients don't.
+                        </p>
+                        <p className="fine">
+                          It lands as its own layer. Drag it onto any face, then <b>Merge</b> to raise it
+                          or <b>Engrave</b> to carve it in, from the Objects panel.
+                        </p>
+                      </div>
+                    )}
                     <input
                       ref={logoFileRef}
                       type="file"
@@ -3429,7 +3481,7 @@ export function Workspace(p: Props) {
                       hidden
                       onChange={(e) => {
                         const f = e.target.files?.[0];
-                        if (f) p.onAddLogo(f);
+                        if (f) { p.onAddLogo(f); setLogoOpen(false); }
                         e.currentTarget.value = "";
                       }}
                     />
@@ -3627,7 +3679,14 @@ export function Workspace(p: Props) {
                 </div>
               )}
               {p.featureCtl.selected && p.activeKind === "replicad" && !p.modifyCtl.op && (
-                <ContextBar anchor={[p.featureCtl.selected.cx, p.featureCtl.selected.cy, p.featureCtl.selected.cz]} viewerRef={p.viewerRef}>
+                <ContextBar
+                  anchor={[p.featureCtl.selected.cx, p.featureCtl.selected.cy, p.featureCtl.selected.cz]}
+                  away={p.featureCtl.pushArrow ? [
+                    p.featureCtl.pushArrow.center[0] + p.featureCtl.pushArrow.normal[0] * 10,
+                    p.featureCtl.pushArrow.center[1] + p.featureCtl.pushArrow.normal[1] * 10,
+                    p.featureCtl.pushArrow.center[2] + p.featureCtl.pushArrow.normal[2] * 10,
+                  ] : null}
+                  viewerRef={p.viewerRef}>
                   <DirectOpBar
                     kind={p.featureCtl.selected.kind}
                     busy={p.status === "generating"}

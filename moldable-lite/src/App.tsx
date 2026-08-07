@@ -3279,20 +3279,32 @@ export default function App() {
   }
 
   /** Retype a placed primitive's size or centre — the precision half of the tool. */
-  async function editShapeApply(index: number, patch: { size?: [number, number, number]; at?: [number, number, number]; cut?: boolean }) {
+  async function editShapeApply(index: number, patch: { shape?: SolidOp["shape"]; size?: [number, number, number]; at?: [number, number, number]; cut?: boolean }) {
     const cur = resultRef.current;
     if (!cur || cur.source.kind !== "code") return;
     const ops = [...(cur.source.ops ?? [])];
     const op = ops[index];
     if (!op || op.type !== "solid") return;
     const rc = cur.recenter ?? [0, 0, 0];
+    // Swapping kind keeps the footprint but re-squares the axes the new kind shares: a
+    // cylinder and a ball are round, so X and Y must match or the swap silently
+    // stretches them into something the panel can't even show a number for.
+    const shape = patch.shape ?? op.shape;
+    let size = patch.size ?? op.size;
+    if (patch.shape && patch.shape !== op.shape) {
+      const d = size[0];
+      if (shape === "sphere") size = [d, d, d];
+      else if (shape === "cylinder") size = [d, d, size[2]];
+    }
     ops[index] = {
       ...op,
-      size: patch.size ?? op.size,
+      shape,
+      size,
       cut: patch.cut ?? op.cut,
       at: patch.at ? [patch.at[0] + rc[0], patch.at[1] + rc[1], patch.at[2] + rc[2]] : op.at,
     };
-    await rebuildWithOps(ops, `Changed the ${op.shape === "sphere" ? "ball" : op.shape}`, "edit shape");
+    const name = shape === "sphere" ? "ball" : shape;
+    await rebuildWithOps(ops, patch.shape && patch.shape !== op.shape ? `Made it a ${name}` : `Changed the ${name}`, "edit shape");
   }
 
   async function removeShapeAt(index: number) {
@@ -5628,6 +5640,20 @@ export default function App() {
     standDownTools();
     setSelectMode(on);
   };
+  /** Shape and Modify ride on Select's picking, so arming either turns select mode on.
+   *  They need their OWN toggles rather than arming and then calling toggleSelectTool:
+   *  that stands every tool down — including the one that armed a line earlier — so the
+   *  two-step left select mode on and the tool itself null. */
+  const toggleShapeTool = () => {
+    const on = !shapeToolRef.current;
+    standDownTools();
+    if (on) { setShapeTool(SHAPE_DEFAULT); setSelectMode(true); }
+  };
+  const toggleModifyTool = () => {
+    const on = !modifyOpRef.current;
+    standDownTools();
+    if (on) { setModifyOp({ op: "push", size: 2 }); setSelectMode(true); }
+  };
   const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } else setMeasurePending(null); return next; });
   const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } };
 
@@ -6097,7 +6123,7 @@ export default function App() {
         shapeCtl={{
           tool: shapeTool,
           set: (v) => { if (v) setSelectedFeature(null); setShapeTool(v); if (!v) setShapeEdit(null); },
-          arm: () => { setShapeTool(SHAPE_DEFAULT); setModifyOp(null); setSelectedFeature(null); },
+          toggle: toggleShapeTool,
           shapes: shapeList(),
           editIndex: shapeEdit,
           select: (i) => setShapeEdit(i),
@@ -6113,6 +6139,7 @@ export default function App() {
             if (v && selectedFeature && v.op === "push" && selectedFeature.kind !== "face") setSelectedFeature(null);
             setModifyOp(v);
           },
+          toggle: toggleModifyTool,
           apply: () => {
             const f = selectedFeature;
             const mo = modifyOp;

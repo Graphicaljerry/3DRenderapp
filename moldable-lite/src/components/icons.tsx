@@ -116,6 +116,30 @@ export const IconShapes = ({ size = 15 }: { size?: number }) => (
     <path d="M15.3 15.1c0-1 1.3-1.8 2.9-1.8s2.9.8 2.9 1.8v4.2c0 1-1.3 1.8-2.9 1.8s-2.9-.8-2.9-1.8Z" />
   </svg>
 );
+/* The three primitives the Shape tool drops. Drawn as SOLIDS in the same isometric
+   projection, not as flat squares and circles: the panel is asking "which lump", and a
+   plain circle beside a plain square reads as a 2D sketch palette. */
+export const IconPrimBox = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.7}>
+    <path d="M12 2.8 20.6 7.4v9.2L12 21.2 3.4 16.6V7.4Z" />
+    <path d="M12 21.2V12M3.4 7.4 12 12l8.6-4.6" />
+  </svg>
+);
+export const IconPrimCylinder = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.7}>
+    <ellipse cx="12" cy="6.3" rx="8.3" ry="3.5" />
+    <path d="M3.7 6.3v11.4c0 1.93 3.72 3.5 8.3 3.5s8.3-1.57 8.3-3.5V6.3" />
+  </svg>
+);
+export const IconPrimBall = ({ size = 18 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.7}>
+    {/* A hair smaller than the cube's 17.2 span: at equal measured width a circle reads
+        bigger than a square, and the three tiles have to look the same size. */}
+    <circle cx="12" cy="12" r="8.6" />
+    {/* Near half of the equator only — a full ellipse makes it a globe. */}
+    <path d="M3.4 12a8.6 3.2 0 0 1 17.2 0" />
+  </svg>
+);
 /** Modify tool: a face pulled up out of a slab. */
 export const IconModify = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>

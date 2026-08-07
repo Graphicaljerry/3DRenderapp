@@ -163,6 +163,10 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
 html, body, #root { height: 100%; margin: 0; }
 body { background: var(--page); -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
 button { font-family: inherit; cursor: pointer; }
+/* A disabled control must not offer the hand. Every disabled state in the app used to
+   set this itself and most of them forgot, so undo/redo — disabled far more often than
+   not — showed a click cursor over a button that can't act. One rule, everywhere. */
+button:disabled { cursor: default; }
 
 /* ---------- craft: selection, focus, tactile press ----------
    ONE SEPARATION SIGNAL PER ELEMENT. A control gets a fill, OR a hairline, OR a
@@ -190,12 +194,16 @@ button { font-family: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 :where(button, a, input, select, textarea):focus { outline: none; } /* rely on :focus-visible */
 .primary, .ghost, .chip, .send, .cta, .seg button, .x, .link, .mp-trigger, .lib-open { transition: background-color .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1); }
-.primary:active, .ghost:active, .chip:active, .send:active, .cta:active, .x:active, .seg button:active { transform: scale(.97); }
+/* …and it must not press in. A disabled button still matches :active in Chrome, so the
+   undo/redo pair gave a full tactile "got it" on a click that did nothing. */
+.primary:not(:disabled):active, .ghost:not(:disabled):active, .chip:not(:disabled):active,
+.send:not(:disabled):active, .cta:not(:disabled):active, .x:not(:disabled):active,
+.seg button:not(:disabled):active { transform: scale(.97); }
 /* Hover affordance on every interactive control, so nothing feels inert. */
 .ghost:hover { background: var(--ctl-h); color: var(--ink); }
 .ghost.danger:hover { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .send:hover:not(:disabled) { background: var(--accent-d); }
-.seg button:hover:not(.on) { color: var(--ink2); }
+.seg button:not(:disabled):hover:not(.on) { color: var(--ink2); }
 .x:hover { color: var(--ink); }
 .link:hover { color: var(--accent); text-decoration: underline; }
 .profile:hover .avatar { filter: brightness(1.06); }
@@ -473,13 +481,36 @@ button { font-family: inherit; cursor: pointer; }
 .modify-stop { color: var(--warn); font-weight: 500; }
 /* Shape tool: the same panel shape as Modify, with rows of typed numbers — the
    numbers ARE the feature, so they get the room. */
-.shape-fly { width: 226px; }
-.shape-fly .fine, .shape-fly .paint-lbl { margin: 0; }
+.shape-fly { width: 232px; gap: 7px; }
+.shape-fly .fine { margin: 0; }
+/* The panel was four identical grey rows: what to drop, add or cut, the size, where
+   it lands. Everything looked equally important, so nothing led. These label rows
+   put the numbers under a name and let the tiles above them lead. */
+.shape-lbl { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 11px; font-weight: 600; color: var(--subt); margin-top: 1px; }
+.shape-unit { font-size: 11px; font-weight: 500; color: var(--subt); flex: none; }
+/* Which primitive you're dropping, as three tiles with the solid drawn above its
+   name — the shape is what the tool is FOR, and a word alone makes you read to pick. */
+.shape-kinds { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3px; padding: 3px; background: var(--ctl); border-radius: var(--r-md); }
+.shape-kinds button {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px;
+  padding: 9px 2px 7px; border: none; background: none; border-radius: var(--r-sm);
+  color: var(--mut); font-size: 11px; font-weight: 500; line-height: 1;
+  transition: background-color .15s ease, color .15s ease, box-shadow .15s ease, transform .14s cubic-bezier(.23,1,.32,1);
+}
+.shape-kinds button svg { flex: none; }
+.shape-kinds button:not(:disabled):hover { color: var(--ink2); background: color-mix(in srgb, var(--ink) 4%, transparent); }
+.shape-kinds button:not(:disabled):active { transform: scale(.97); }
+.shape-kinds button.on { background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm); }
 .shape-nums { display: flex; align-items: center; gap: 6px; }
 .shape-nums label { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1; }
 .shape-nums label span { font-size: 11px; color: var(--subt); font-weight: 600; }
 .shape-nums input { width: 100%; min-width: 0; padding: 4px 5px; font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.shape-unit { font-size: 11px; color: var(--subt); flex: none; }
+/* The placed-shape rows carry the same glyph as the tile that made them, so the list
+   and the picker read as one vocabulary. */
+.shape-fly .pocket-pick { align-items: center; gap: 6px; }
+.shape-fly .pocket-pick svg { flex: none; color: var(--subt); }
+.shape-fly .pocket-row.on .pocket-pick svg { color: var(--accent-d); }
+.shape-fly .pocket-where { margin-left: auto; }
 .cut-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; font-size: 12px; color: var(--ink2); }
 .cut-actions { display: flex; gap: 6px; }
 /* Live web lookup — its own block under the step timeline, the way the reasoning
@@ -602,6 +633,13 @@ button { font-family: inherit; cursor: pointer; }
    carries the "nothing to undo" message. */
 .viewer-head .viewer-tools .iconbtn { color: var(--ink2); }
 .viewer-head .viewer-tools .iconbtn:disabled { color: var(--subt); opacity: .55; }
+/* …and the live state needs a hover you can SEE. These sat at --ink2 while the generic
+   seg hover also resolves to --ink2, so hovering a working undo changed nothing at all
+   — the only feedback either button gave was a hand cursor, and that one showed up on
+   the disabled ones too. Exactly backwards. */
+.viewer-head .viewer-tools .seg.sm .iconbtn:not(:disabled):hover {
+  background: var(--bg); color: var(--ink); box-shadow: var(--shadow-sm);
+}
 /* The snapping control earns a word: a magnet glyph alone reads as the magnet TOOL. */
 .snap-btn { gap: 5px; padding-right: 9px; }
 .snap-btn .snap-name { font-size: 12px; font-weight: 500; line-height: 1; }

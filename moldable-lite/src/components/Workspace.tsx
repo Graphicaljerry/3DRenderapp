@@ -45,6 +45,10 @@ import { PROVIDERS, costLabel } from "../gen/registry";
 // The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
 // Each carries an icon so the label can collapse on narrow viewer columns (iPad).
 export const SELECT_MODES: { kind: SelectKind; label: string; icon: (props: { size?: number }) => JSX.Element }[] = [
+  // Auto is the default: the cursor decides — an edge when you're riding one, a
+  // corner at its end, the face otherwise. The explicit modes remain as overrides
+  // for when a crowded spot needs the intent pinned down.
+  { kind: "auto", label: "Auto", icon: IconSparkle },
   { kind: "face", label: "Face", icon: IconFaceSel },
   { kind: "edge", label: "Edge", icon: IconEdgeSel },
   { kind: "vertex", label: "Corner", icon: IconCornerSel },
@@ -1216,6 +1220,15 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
           );
         })}
       </div>
+      {p.exportPaint.has && (
+        <div className="snap-row" title="Painted writes the filament regions into the 3MF (STL never carries colour). Plain exports the same shape uncoloured — one model, both variations.">
+          <span>Colours</span>
+          <div className="seg sm">
+            <button className={p.exportPaint.on ? "on" : ""} onClick={() => p.exportPaint.set(true)}>Painted</button>
+            <button className={p.exportPaint.on ? "" : "on"} onClick={() => p.exportPaint.set(false)}>Plain</button>
+          </div>
+        </div>
+      )}
 
       {hasPlates && (
         <>
@@ -1737,6 +1750,7 @@ interface Props {
   onSeparateParts: () => void;
   onRegroup: () => void;
   onKeepAside: () => void; // duplicate the current model onto a new plate, then iterate
+  exportPaint: { on: boolean; set: (v: boolean) => void; has: boolean }; // colours in the exported file, or plain
   onEditFrozen: (id: string) => void; // swap a duplicated version back to being the live editable model
   onCheckFit: (ids: string[]) => void;
   onMakeFit: (ids: string[]) => void;

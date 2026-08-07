@@ -191,7 +191,7 @@ interface Props {
 
 // The Select tool's modes. "point" drops a surface marker (the old Pin); the rest
 // pick a face / edge / corner. One tool, one segmented control.
-export type SelectKind = "face" | "edge" | "vertex" | "point";
+export type SelectKind = "auto" | "face" | "edge" | "vertex" | "point";
 
 /** Showcase stages. "workshop" is the plain viewport; the rest swap backdrop + lights. */
 export type ShowcaseScene = "studio" | "daylight" | "dark" | "workshop";
@@ -1388,7 +1388,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const hit = rc.intersectObject(s2.mesh, false)[0];
       if (!hit || hit.faceIndex == null) return;
       s2.lockedHit = { faceIndex: hit.faceIndex, point: hit.point.clone() };
-      const info = showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
+      const kResolved = cb.current.selectKind === "auto" ? resolveAutoKind(hit.point) : cb.current.selectKind;
+      const info = showFeature(s2, kResolved as "face" | "edge" | "vertex", hit.faceIndex, hit.point);
       if (info) cb.current.onPickFeature(featureToPayload(info));
     };
     // Shift while the Select tool is on (and not Point mode) arms a marquee: orbit is
@@ -1466,6 +1467,33 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     let paintPending: PointerEvent | null = null;
     let hoverTick = -1;
     let hoverPending: PointerEvent | null = null;
+    /** Auto select resolves what the cursor MEANS by proximity, Shapr3D-style: a
+     *  corner when the hit rides a sharp-edge endpoint, an edge when it rides the
+     *  edge itself, the face otherwise. Tolerances are screen pixels converted
+     *  through camera distance, so zoom never makes edges unhittable. */
+    const resolveAutoKind = (hit: THREE.Vector3): "face" | "edge" | "vertex" => {
+      const s2 = st.current;
+      const tri = s2?.tri;
+      if (!tri || !tri.edges.length) return "face";
+      const vh = canvasRect().height || 1;
+      const wpp = (2 * camera.position.distanceTo(hit) * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))) / vh;
+      const edgeTol = 7 * wpp, vertTol = 11 * wpp;
+      const e = tri.edges;
+      const a = new THREE.Vector3(), b2 = new THREE.Vector3(), c = new THREE.Vector3();
+      const seg = new THREE.Line3();
+      let bestE = Infinity, bestV = Infinity;
+      for (let i = 0; i < e.length; i += 6) {
+        a.set(e[i], e[i + 1], e[i + 2]);
+        b2.set(e[i + 3], e[i + 4], e[i + 5]);
+        bestV = Math.min(bestV, a.distanceToSquared(hit), b2.distanceToSquared(hit));
+        seg.set(a, b2);
+        seg.closestPointToPoint(hit, true, c);
+        bestE = Math.min(bestE, c.distanceToSquared(hit));
+      }
+      if (bestV <= vertTol * vertTol) return "vertex";
+      if (bestE <= edgeTol * edgeTol) return "edge";
+      return "face";
+    };
     // Paint hover preview: tint the EXACT region the next Fill click (or Brush dab)
     // would colour, in the chosen filament, before anything commits. Recomputed only
     // when the hovered spot actually changes — the flood is cheap on CAD shells but
@@ -1829,7 +1857,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (Math.hypot(e.clientX - sx, e.clientY - sy) > 4) {
           const faces = selectFacesInBox(s2, camera, renderer, sx, sy, e.clientX, e.clientY);
           cb.current.onPickFaces(faces);
-        } else if (cb.current.selectKind === "face") {
+        } else if (cb.current.selectKind === "face" || cb.current.selectKind === "auto") {
           const added = addFaceToMultiSel(s2, camera, renderer, e.clientX, e.clientY);
           if (added) cb.current.onPickFaces([added], true);
         }
@@ -2117,12 +2145,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (ensureTri(s2)) {
         const hit = rc.intersectObject(s2.mesh, false)[0];
         if (hit && hit.faceIndex != null) {
-          showFeature(s2, cb.current.selectKind, hit.faceIndex, hit.point);
+          showFeature(s2, cb.current.selectKind === "auto" ? resolveAutoKind(hit.point) : cb.current.selectKind, hit.faceIndex, hit.point);
           renderer.domElement.style.cursor = "crosshair";
           return;
         }
         // Off the model — fall back to the locked feature, if any.
-        if (s2.lockedHit) showFeature(s2, cb.current.selectKind, s2.lockedHit.faceIndex, s2.lockedHit.point);
+        if (s2.lockedHit) showFeature(s2, cb.current.selectKind === "auto" ? resolveAutoKind(s2.lockedHit.point) : cb.current.selectKind, s2.lockedHit.faceIndex, s2.lockedHit.point);
         else { s2.highlight.visible = false; s2.edgeHi.visible = false; s2.vertHi.visible = false; }
         renderer.domElement.style.cursor = "";
       }
@@ -2595,12 +2623,30 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     if (st.current) st.current.material.wireframe = wireframe;
   }, [wireframe]);
 
-  // Build-plate filter: only the active plate's objects render (0 = everything).
+  // Build-plate filter, slicer-style: the active plate's objects render normally,
+  // every other plate's go pale ghost — still on the canvas, still placed, clearly
+  // not the ones being worked on (Bambu/Orca's dimmed inactive plates). 0 = all.
+  const modelGhostMat = useRef<THREE.MeshStandardMaterial | null>(null);
   useEffect(() => {
     const s = st.current;
     if (!s) return;
-    if (s.mesh) s.mesh.visible = visiblePlate === 0 || plateFor("model") === visiblePlate;
-    for (const [id, m] of s.attachMap) m.visible = visiblePlate === 0 || plateFor(id) === visiblePlate;
+    if (s.mesh) {
+      const on = visiblePlate === 0 || plateFor("model") === visiblePlate;
+      s.mesh.visible = true;
+      if (!modelGhostMat.current) modelGhostMat.current = new THREE.MeshStandardMaterial({ color: 0xb9bec5, transparent: true, opacity: 0.28, depthWrite: false });
+      // Swap materials rather than mutate: the live material carries colour/finish/
+      // paint state owned by other effects, and a ghosted model must not touch it.
+      s.mesh.material = on ? s.material : modelGhostMat.current;
+      if (s.paintMesh) s.paintMesh.visible = on;
+    }
+    for (const [id, m] of s.attachMap) {
+      const on = visiblePlate === 0 || plateFor(id) === visiblePlate;
+      m.visible = true;
+      const mat = m.material as THREE.MeshStandardMaterial;
+      mat.transparent = !on;
+      mat.opacity = on ? 1 : 0.28;
+      mat.depthWrite = on;
+    }
   }, [visiblePlate, plateFor, attachments, geometry]);
 
   // Showcase: hide the workshop chrome and spin the turntable. Lighting and the
@@ -2709,7 +2755,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const s = st.current;
     if (!s) return;
     s.multiHi.visible = false; // a box-selected set belongs to one mode; switching clears it
-    if (selectKind === "point") {
+    if (selectKind === "point" || selectKind === "auto") {
+      // Auto re-resolves on the next hover/click — a stale locked highlight from the
+      // previous explicit mode would promise the wrong pick.
       s.highlight.visible = false; s.edgeHi.visible = false; s.vertHi.visible = false;
       return;
     }

@@ -617,7 +617,7 @@ export default function App() {
     // The model's per-face paint rides along only when its triangle count still matches
     // (a CAD edit reshuffles triangles → drop the stale paint rather than mispaint).
     const triCount = geometry.index ? geometry.index.count / 3 : geometry.getAttribute("position").count / 3;
-    const modelPaint = facePaint && facePaint.length === triCount ? facePaint : undefined;
+    const modelPaint = exportPainted && facePaint && facePaint.length === triCount ? facePaint : undefined;
     // Split pieces sent to their own plates replace the single model entry: each is
     // re-CENTRED on its plate (the tiled layout was for showing them together).
     const plated = splitPieces?.length && splitPieces.some((pc) => pc.plate != null) ? splitPieces : null;
@@ -1173,6 +1173,13 @@ export default function App() {
     try { localStorage.setItem("moldable_palette", JSON.stringify(next)); } catch { /* private mode */ }
     return next;
   });
+  // Export colour choice: painted (3MF carries the filament regions) or plain —
+  // one model, both variations, without touching the paint itself.
+  const [exportPainted, setExportPaintedState] = useState(() => localStorage.getItem("moldable_export_painted") !== "0");
+  const setExportPainted = (v: boolean) => {
+    setExportPaintedState(v);
+    try { localStorage.setItem("moldable_export_painted", v ? "1" : "0"); } catch { /* private mode */ }
+  };
   const [appearance, setAppearanceState] = useState<{ color: string; finish: "matte" | "satin" | "glossy" | "metal" }>(() => {
     try { return { color: "#c7ccd3", finish: "matte", ...JSON.parse(localStorage.getItem("moldable_appearance") ?? "{}") }; } catch { return { color: "#c7ccd3", finish: "matte" }; }
   });
@@ -1199,7 +1206,7 @@ export default function App() {
   // One Select tool with modes: hover-highlight + click a face / edge / corner, or
   // drop a point marker ("point" = the old Pin). Then edit the picked thing precisely.
   const [selectMode, setSelectMode] = useState(false);
-  const [selectKind, setSelectKind] = useState<SelectKind>("face");
+  const [selectKind, setSelectKind] = useState<SelectKind>("auto"); // auto = proximity decides face/edge/corner (Shapr3D-style)
   const [transformMode, setTransformMode] = useState<TransformMode>("off");
   const [measureMode, setMeasureMode] = useState(false);
   // Per-face MMU paint tool (Bambu-style): pick a filament, click a face region to fill it.
@@ -3872,6 +3879,9 @@ export default function App() {
       setTransformMode("off");
       return;
     }
+    // Tapping a ghosted object activates its plate (the slicer gesture): the pale
+    // duplicate you clicked becomes the working plate's object, full colour.
+    if (activePlate !== 0 && plateFor(id) !== activePlate) setActivePlate(plateFor(id));
     setSelAttachIds((sids) => (additive ? (sids.includes(id) ? sids.filter((x) => x !== id) : [...sids, id]) : [id]));
     setModelSelected(false);
     setTransformMode("move");
@@ -3882,6 +3892,7 @@ export default function App() {
   }
 
   function selectModel(sel: boolean) {
+    if (sel && activePlate !== 0 && plateFor("model") !== activePlate) setActivePlate(plateFor("model"));
     setModelSelected(sel);
     if (sel) setSelAttachIds([]);
     setTransformMode(sel ? "move" : "off");
@@ -5804,6 +5815,7 @@ export default function App() {
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onKeepAside={keepVersionAside}
+        exportPaint={{ on: exportPainted, set: setExportPainted, has: !!facePaint }}
         onEditFrozen={(id) => void editFrozen(id)}
         onCheckFit={(ids) => void checkFit(ids)}
         onMakeFit={(ids) => void makeItFit(ids)}

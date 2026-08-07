@@ -917,6 +917,58 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Builds 365–367 — durable edge anchors, one editing tool, faster picking
+
+**The blocker that made fillets disposable is gone.** A `PointOp` used to carry one
+absolute point. Any parameter that moved the geometry under it left the point in mid-air,
+the rebuild threw, and `rescueOps` shed the op with "the spot it was picked on moved with
+the new size". `PointOp` now also carries `rel` (that point as a fraction of the bounding
+box when it was picked) and `dir` (the picked edge's unit direction). `anchorsFor()` in
+`worker/cad.worker.ts` tries the exact point first, then the relative one at a tolerance
+scaled to the part (3% of the bbox diagonal, floored at `PICK_TOL`). `dir` settles ties so
+a rounding can't spread onto the perpendicular edges it meets at a corner. Verified: round
+the top rim of a 60×40×24 bracket, change depth 40→50, the rounding is still there.
+
+That durability is what made an editable list worth building. Roundings and bevels now
+appear in the Modify panel with their sizes — retype one, remove one, or Reset all — and
+the reset is an ordinary undoable step. Same machinery as the magnet pocket list
+(`edgeOpList` / `editEdgeOp` / `removeEdgeOp` / `resetEdgeOps` in `App.tsx`).
+
+**Select is gone; Modify absorbed it.** Two rail tools for one motion, plus a five-way
+Auto/Face/Edge/Corner/Point row asking you to declare intent before hovering anything.
+Now: hover picks whatever is under the cursor, click holds it, the operation is already on
+the panel. `V` opens Modify; `1–3` choose the operation. Point (pin-a-note) became its own
+rail entry, **Note**, key `N` — it was doing something quite different from the four
+geometry pickers it sat beside.
+
+Vocabulary: **Round → Rounded, Bevel → Angled**, each with a profile glyph showing the
+corner it takes off (`IconEdgeRound` / `IconEdgeAngle`). The words named operations you had
+to already know; the glyph is the difference itself.
+
+**Shift-click multi-select** now takes faces, edges AND corners into one set that stays lit
+until applied or cleared (`addPickToMultiSel` in `Viewer.tsx` merges each pick's highlight
+into `multiHi`). The panel names what's in it and applies the armed op to all of them at
+once, choosing per feature: a face extrudes under Push/Pull and rounds its boundary under
+Rounded; an edge or corner rounds either way.
+
+**Perf.** `three-mesh-bvh` was already a dependency and was never wired into picking:
+240 raycasts over a 2,892-triangle part went 61.5 ms → 2.6 ms, identical hits. **The tree
+MUST be built `indirect: true`** — the default reorders the geometry index, which silently
+invalidates every replicad `faceGroup`, and B-rep face picking degrades into a spatial blob
+(a flat top reports itself as curved and Push/Pull refuses it). The CAD worker also stopped
+sending three copies of every mesh: it packs the tessellation into typed arrays and
+transfers the buffers (`packFaces` + comlink `transfer`), and `facesToGeometry` wraps them
+directly instead of going through `replicad-threejs-helper`'s `syncFaces` copy.
+
+Also fixed here: `standDownTools` never reset the pick kind (Note's mode leaked into every
+later tool); the multi-select dedup key was centre-only, so a face and the edge loop
+bounding it collided; and `facesCtl.directOp`'s implementation took `(size)` while its
+declared type was `(type, size)`.
+
+Still open from this batch: **the Text tool UI**. The font and geometry pipeline is shipped
+and measured (`src/text/`, 112 ms / 34 ms / 6 ms) but there is no Text rail tool, hover
+preview, snap-to-surface placement, transform handles or layer editing yet.
+
 ## Build 360 — Shape tool (primitive booleans that stay parametric)
 
 New `SolidOp` in the op chain (`engine/types.ts`, executed in `worker/cad.worker.ts`):

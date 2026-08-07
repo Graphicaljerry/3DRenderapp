@@ -451,7 +451,9 @@ button { font-family: inherit; cursor: pointer; }
 .modify-fly { flex-direction: column; align-items: stretch; gap: 8px; padding: 10px; width: 208px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); }
 .modify-fly .fine { margin: 0; }
 .modify-size { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink2); }
-.modify-size input { width: 76px; }
+.modify-size input { width: 64px; }
+.modify-size button { margin-left: auto; }
+.modify-stop { color: var(--warn); font-weight: 500; }
 .cut-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; font-size: 12px; color: var(--ink2); }
 .cut-actions { display: flex; gap: 6px; }
 /* Live web lookup — its own block under the step timeline, the way the reasoning

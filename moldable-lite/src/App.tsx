@@ -1268,6 +1268,7 @@ export default function App() {
   const [measurePending, setMeasurePending] = useState<[number, number, number] | null>(null);
   const [measurements, setMeasurements] = useState<Measurement[]>([]);
   const [liveDragMm, setLiveDragMm] = useState<number | null>(null); // arrow-drag value mirrored into the quick-edit box
+  const [liveStop, setLiveStop] = useState<"min" | "max" | null>(null); // drag pinned at its limit (bed fit / cut-through / radius cap)
   const [selectedFeature, setSelectedFeature] = useState<PickedFeature | null>(null);
   const [selectedFaces, setSelectedFaces] = useState<PickedFeature[]>([]); // box/marquee multi-select
   const [facesText, setFacesText] = useState("");
@@ -3187,6 +3188,9 @@ export default function App() {
   const modifyOpRef = useRef(modifyOp);
   modifyOpRef.current = modifyOp;
   useEffect(() => { if (!selectMode) setModifyOp(null); }, [selectMode]);
+  /** Which engine op an armed Modify op means on a given feature kind. */
+  const modifyOpType = (op: "push" | "round" | "bevel", kind: PickedFeature["kind"]): PointOp["type"] =>
+    op === "push" ? "extrude" : kind === "face" ? (op === "round" ? "face-fillet" : "face-chamfer") : op === "round" ? "fillet" : "chamfer";
 
   function pickFeature(f: PickedFeature) {
     // The hole tool is waiting for its alignment reference → this pick IS the reference
@@ -3200,15 +3204,10 @@ export default function App() {
       setHoleDraft((d) => (d ? { ...d, picking: false, ref: { center: c, diameter: refDia } } : d));
       return;
     }
+    // Armed Modify: a push pick must be a flat face — anything else is ignored
+    // (the flyout hint says so). Valid picks lock + grow the drag anchor.
     const mo = modifyOpRef.current;
-    if (mo && activeKind === "replicad") {
-      // Armed tool: the click IS the edit — apply and stay armed, never park a
-      // selection (its context bar would double the flyout's own controls).
-      if (mo.op === "push" && f.kind !== "face") return; // push needs a face; the hint says so
-      const type: PointOp["type"] = mo.op === "push" ? "extrude" : f.kind === "face" ? (mo.op === "round" ? "face-fillet" : "face-chamfer") : (mo.op === "round" ? "fillet" : "chamfer");
-      void applyDirectOp(type, mo.op === "push" ? mo.size : Math.abs(mo.size), f);
-      return;
-    }
+    if (mo && mo.op === "push" && f.kind !== "face") return;
     setSelectedFeature(f);
     setFaceText("");
     // Only one editing target (point vs single feature vs multi) at a time.
@@ -3825,8 +3824,16 @@ export default function App() {
   // source of truth (the commit always rebuilds through the CAD worker). ----
   const livePrev = useRef({ next: null as { d: number; solid: Float32Array | null } | null, running: false, gen: 0 });
 
-  function previewDirectOp(dist: number, solid?: Float32Array | null) {
+  /** Keep the status-bar dimensions honest against whatever preview geometry is on screen. */
+  function liveDims(g: THREE.BufferGeometry) {
+    g.computeBoundingBox();
+    const sz = g.boundingBox!.getSize(new THREE.Vector3());
+    setDims({ x: Math.round(sz.x * 10) / 10, y: Math.round(sz.y * 10) / 10, z: Math.round(sz.z * 10) / 10 });
+  }
+
+  function previewDirectOp(dist: number, solid?: Float32Array | null, stop?: "min" | "max" | null) {
     setLiveDragMm(dist); // keep the quick-edit mm box in sync (pre-existing behaviour)
+    setLiveStop(stop ?? null);
     const f = selectedFeature;
     if (!f || !result || result.source.kind !== "code" || !sel || activeKind !== "replicad") return;
     const lp = livePrev.current;
@@ -3840,7 +3847,10 @@ export default function App() {
     const rc0 = result.recenter ?? [0, 0, 0];
     const p = f.at ?? [f.cx, f.cy, f.cz];
     const at: [number, number, number] = [p[0] + rc0[0], p[1] + rc0[1], p[2] + rc0[2]];
-    const type: PointOp["type"] = f.kind === "face" ? "extrude" : "fillet";
+    // An armed Modify op decides what the drag builds (a bevel drags a chamfer, not a
+    // fillet); without one it's the classic face-extrude / edge-fillet.
+    const mo = modifyOpRef.current;
+    const type: PointOp["type"] = mo && mo.op !== "push" ? modifyOpType(mo.op, f.kind) : f.kind === "face" ? "extrude" : "fillet";
     void (async () => {
       try {
         while (lp.next !== null && lp.gen === gen) {
@@ -3862,6 +3872,7 @@ export default function App() {
                   g.computeVertexNormals(); // soup → flat per-face normals, the CAD look
                   g.userData.preview = true; // viewer skips per-tick frills (edge overlay)
                   setGeometry(g);
+                  liveDims(g);
                   continue;
                 }
               }
@@ -3880,6 +3891,7 @@ export default function App() {
             if (dx || dy || dz) res.geometry.translate(dx, dy, dz);
             res.geometry.userData.preview = true; // viewer skips per-tick frills (edge overlay)
             setGeometry(res.geometry);
+            liveDims(res.geometry);
           } catch { /* past the feasible limit at this size — keep the last good preview */ }
         }
       } finally {
@@ -5832,7 +5844,21 @@ export default function App() {
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onKeepAside={keepVersionAside}
-        modifyCtl={{ op: modifyOp, set: (v) => { if (v) setSelectedFeature(null); setModifyOp(v); } }}
+        modifyCtl={{
+          op: modifyOp,
+          // Arming keeps a compatible selection (its anchor appears at once); only a
+          // push armed over a non-face pick has nothing to drag, so that clears.
+          set: (v) => {
+            if (v && selectedFeature && v.op === "push" && selectedFeature.kind !== "face") setSelectedFeature(null);
+            setModifyOp(v);
+          },
+          apply: () => {
+            const f = selectedFeature;
+            const mo = modifyOp;
+            if (!f || !mo || (mo.op === "push" && f.kind !== "face")) return;
+            void applyDirectOp(modifyOpType(mo.op, f.kind), mo.op === "push" ? mo.size : Math.abs(mo.size), f);
+          },
+        }}
         exportPaint={{ on: exportPainted, set: setExportPainted, has: !!facePaint }}
         onEditFrozen={(id) => void editFrozen(id)}
         onCheckFit={(ids) => void checkFit(ids)}
@@ -5970,37 +5996,56 @@ export default function App() {
           directOp: applyDirectOp,
           // Drag handle: a flat face gets a drag-to-extrude arrow; an edge/corner gets a
           // drag-to-round arrow (pointing radially outward so dragging out grows the radius).
+          // The feature's own kind decides (so Auto picks get it too); an armed Modify op
+          // overrides — Round/Bevel drag a radius even on a face. Limits ride along so the
+          // drag stops honestly: out at the bed, in just shy of cutting through.
           pushArrow: (() => {
             const f = selectedFeature;
             if (!(selectMode && activeKind === "replicad" && f)) return null;
-            if (selectKind === "face" && f.kind === "face" && !f.curved)
-              return { center: [f.cx, f.cy, f.cz] as [number, number, number], normal: [f.nx ?? 0, f.ny ?? 0, f.nz ?? 1] as [number, number, number], kind: "extrude" as const };
-            if ((selectKind === "edge" && f.kind === "edge") || (selectKind === "vertex" && f.kind === "vertex")) {
-              const rad = Math.hypot(f.cx, f.cy);
-              const dir: [number, number, number] = rad > 1e-3 ? [f.cx / rad, f.cy / rad, 0] : [0, 0, 1];
-              return { center: [f.cx, f.cy, f.cz] as [number, number, number], normal: dir, kind: "fillet" as const };
+            const mo = modifyOp;
+            if (mo ? mo.op === "push" : f.kind === "face") {
+              if (f.kind !== "face" || f.curved) return null;
+              const n: [number, number, number] = [f.nx ?? 0, f.ny ?? 0, f.nz ?? 1];
+              const ax = [Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])];
+              const k = ax.indexOf(Math.max(ax[0], ax[1], ax[2]));
+              const dimK = dims ? [dims.x, dims.y, dims.z][k] : 40;
+              const bedK = [printer.bed.x, printer.bed.y, printer.bed.z][k];
+              const max = Math.min(150, Math.max(5, (bedK - dimK) / Math.max(0.3, ax[k])));
+              const min = -Math.max(0.5, dimK - 0.6);
+              return { center: [f.cx, f.cy, f.cz] as [number, number, number], normal: n, kind: "extrude" as const, min, max };
             }
-            return null;
+            const rad = Math.hypot(f.cx, f.cy);
+            const dir: [number, number, number] = rad > 1e-3 ? [f.cx / rad, f.cy / rad, 0] : [0, 0, 1];
+            const minDim = dims ? Math.min(dims.x, dims.y, dims.z) : 20;
+            return { center: [f.cx, f.cy, f.cz] as [number, number, number], normal: dir, kind: "fillet" as const, min: 0, max: Math.min(25, Math.max(1, minDim / 2)) };
           })(),
           pushPull: (dist: number) => {
             // End of an arrow drag: stop the live-preview loop before committing.
             livePrev.current.gen++;
             livePrev.current.next = null;
+            setLiveStop(null);
+            setLiveDragMm(null); // the drag is over — the box goes back to showing the typed size
             if (Math.abs(dist) < 0.01) {
-              if (result) setGeometry(result.geometry); // dragged back to ~0 → restore the real model
+              if (result) { setGeometry(result.geometry); setDims(result.dims); } // dragged back to ~0 → restore the real model
               return;
             }
             const f = selectedFeature;
-            if (f?.kind === "face") applyDirectOp("extrude", dist);
+            const mo = modifyOp;
+            if (mo && f) {
+              void applyDirectOp(modifyOpType(mo.op, f.kind), mo.op === "push" ? dist : Math.abs(dist));
+              setModifyOp({ op: mo.op, size: Math.abs(dist) }); // the dragged size becomes the typed size
+            } else if (f?.kind === "face") applyDirectOp("extrude", dist);
             else applyDirectOp("fillet", Math.abs(dist));
           },
           pushLive: previewDirectOp,
           liveMm: liveDragMm,
+          liveStop,
           clear: () => {
             livePrev.current.gen++;
             livePrev.current.next = null;
-            if (result) setGeometry(result.geometry); // drop any un-committed live preview
+            if (result) { setGeometry(result.geometry); setDims(result.dims); } // drop any un-committed live preview
             setLiveDragMm(null);
+            setLiveStop(null);
             setSelectedFeature(null);
           },
         }}

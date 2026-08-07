@@ -118,7 +118,7 @@ interface Props {
   measureMode: boolean; // click two points to measure the distance between them
   measurePending: [number, number, number] | null; // the first clicked point, awaiting the second
   measurements: Measurement[]; // committed point-to-point measurements to render
-  pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round
+  pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet"; min?: number; max?: number } | null; // selected face → drag-to-extrude, edge/corner → drag-to-round; min/max clamp the drag
   modelSelected: boolean; // draw a bounding box around the whole part
   onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
   onModelDblClick?: () => void; // idle-mode double-click on the part (App opens Adjust)
@@ -159,7 +159,7 @@ interface Props {
   onPushPull: (distance: number) => void;
   // Fires as the drag moves (snapped). `solid` is the closed prism (display coords) for the
   // Manifold boolean live preview — present only for extrude drags with a captured cap.
-  onPushPullLive: (distance: number, solid?: Float32Array | null) => void;
+  onPushPullLive: (distance: number, solid?: Float32Array | null, stop?: "min" | "max" | null) => void;
   onContext: (hit: ContextHit) => void; // right-click (without dragging) → quick-action menu
   onEmptyTap?: () => void; // tap on empty space — the app closes open tools/panels
   /** AI change preview: ghost overlays for what the proposal adds (green) / removes (red). */
@@ -457,7 +457,7 @@ interface Internals {
   pushArrow: THREE.Group; // drag-to-extrude handle on a selected flat face (shaft + cone + grab)
   pushGrab: THREE.Mesh; // invisible fat cylinder used to raycast/grab the arrow
   ghost: THREE.Mesh; // translucent live preview of the extruded volume during a push-pull drag
-  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; pointerId: number; live?: boolean } | null; // active push-pull drag; live = a real boolean preview replaced the ghost
+  pushDrag: { start: THREE.Vector3; n: THREE.Vector3; plane: THREE.Plane; base: number; cap: Float32Array; bnd: Float32Array; size: number; lo: number; hi: number; pointerId: number; live?: boolean } | null; // active push-pull drag; lo/hi = limits frozen at grab; live = a real boolean preview replaced the ghost
   arrowHot: boolean; // pointer is over (or dragging) the push-pull arrow — drawn yellow
   selBox: THREE.Group | null; // selection chrome: bounding box + corner anchor dots
   analysisMesh: THREE.Mesh | null; // printability overlay (child of `mesh`, follows its transform)
@@ -661,10 +661,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const pushShaft = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 12), pushMat);
     const pushCone = new THREE.Mesh(new THREE.ConeGeometry(1, 1, 16), pushMat);
     const pushGrab = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 8), new THREE.MeshBasicMaterial({ visible: false }));
-    pushArrow.add(pushShaft, pushCone, pushGrab);
+    // A small ball where the arrow meets the feature: the anchor the drag hangs from.
+    const pushBase = new THREE.Mesh(new THREE.SphereGeometry(1, 16, 12), pushMat);
+    pushArrow.add(pushShaft, pushCone, pushGrab, pushBase);
     pushArrow.visible = false;
     pushArrow.renderOrder = 6;
-    pushShaft.renderOrder = pushCone.renderOrder = 6;
+    pushShaft.renderOrder = pushCone.renderOrder = pushBase.renderOrder = 6;
     scene.add(pushArrow);
 
     // Translucent live preview of the volume being added/removed while dragging the push-pull arrow.
@@ -1713,7 +1715,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         rc.setFromCamera(ndc, camera);
         s2.pushArrow.updateMatrixWorld(true);
         if (rc.intersectObject(s2.pushGrab, false)[0]) {
-          const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number };
+          const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet"; min?: number; max?: number };
           const center = new THREE.Vector3(...ud.center);
           const n = new THREE.Vector3(...ud.normal).normalize();
           const camDir = camera.getWorldDirection(new THREE.Vector3());
@@ -1728,11 +1730,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           const base = rc.ray.intersectPlane(plane, hit0) ? hit0.sub(center).dot(n) : 0; // so the drag starts at 0
           // Capture the selected face's triangles + boundary once, for the live ghost prism.
           // Only extrude gets a ghost — a fillet's rounded volume can't be cheaply previewed.
-          const isExtrude = s2.pushArrow.userData.kind !== "fillet";
+          const isExtrude = ud.kind !== "fillet";
           const capAttr = isExtrude ? (s2.highlight.geometry.getAttribute("position") as THREE.BufferAttribute | undefined) : undefined;
           const cap = capAttr ? (capAttr.array as Float32Array).slice() : new Float32Array();
           const bnd = cap.length ? faceBoundary(cap) : new Float32Array();
-          s2.pushDrag = { start: center, n, plane, base, cap, bnd, size: modelSizeOf(s2), pointerId: e.pointerId };
+          const size0 = modelSizeOf(s2);
+          // Freeze the drag's limits NOW: live previews update the app's dims mid-drag, so
+          // limits recomputed from them would creep and clamp the drag short of the truth.
+          const lo = ud.min ?? (isExtrude ? -size0 * 2 : 0);
+          const hi = ud.max ?? (isExtrude ? size0 * 2 : size0 * 0.5);
+          s2.pushDrag = { start: center, n, plane, base, cap, bnd, size: size0, lo, hi, pointerId: e.pointerId };
           controls.enabled = false;
           setArrowHot(s2, true);
           renderer.domElement.style.cursor = "grabbing";
@@ -1839,10 +1846,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         controls.enabled = true;
         setArrowHot(s2, false);
         renderer.domElement.style.cursor = "";
-        const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
+        const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet"; stop?: "min" | "max" | null };
         const dist = ud.dist ?? 0;
         s2.pushDrag = null;
         ud.dist = 0;
+        ud.stop = null;
         s2.ghost.visible = false; // the real solid replaces the preview on commit
         s2.ghost.geometry.dispose();
         s2.ghost.geometry = new THREE.BufferGeometry();
@@ -1994,20 +2002,25 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         rc.setFromCamera(ndc, camera);
         const hit = new THREE.Vector3();
         if (rc.ray.intersectPlane(s2.pushDrag.plane, hit)) {
-          const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet" };
+          const ud = s2.pushArrow.userData as { center: [number, number, number]; normal: [number, number, number]; dist: number; kind: "extrude" | "fillet"; min?: number; max?: number; stop?: "min" | "max" | null };
           let dist = hit.sub(s2.pushDrag.start).dot(s2.pushDrag.n) - s2.pushDrag.base;
           dist = Math.round(dist * 2) / 2; // snap to 0.5 mm
-          // Clamp to sane bounds for the part so a glancing projection can never run away.
-          if (ud.kind === "fillet") dist = Math.min(Math.max(0, dist), s2.pushDrag.size * 0.5);
-          else dist = Math.max(-s2.pushDrag.size * 2, Math.min(s2.pushDrag.size * 2, dist));
-          if (dist === ud.dist) return; // snapped value unchanged → skip the label/ghost rebuild (pen fires fast)
+          // Clamp to the limits frozen at drag start (bed fit / cut-through / radius cap).
+          // Overshoot = the drag is pinned at a stop.
+          const { lo, hi } = s2.pushDrag;
+          const stop = dist > hi + 1e-6 ? ("max" as const) : dist < lo - 1e-6 && lo < -1e-6 ? ("min" as const) : null;
+          dist = Math.max(lo, Math.min(hi, dist));
+          if (dist === ud.dist && stop === (ud.stop ?? null)) return; // nothing changed → skip the label/ghost rebuild (pen fires fast)
           ud.dist = dist;
-          layoutPushArrow(s2, ud.center, ud.normal, dist, cb.current.units, ud.kind);
+          ud.stop = stop;
+          layoutPushArrow(s2, ud.center, ud.normal, dist, cb.current.units, ud.kind, !!stop);
+          // Pinned at a limit → the handle turns amber so the stop reads on the canvas too.
+          ((s2.pushArrow.children[0] as THREE.Mesh).material as THREE.MeshBasicMaterial).color.set(stop ? 0xd97706 : 0xeab308);
           const pdd = s2.pushDrag;
           const solid = ud.kind !== "fillet" && pdd.cap.length && Math.abs(dist) > 1e-3
             ? buildSolidPrism(pdd.cap, pdd.bnd, [pdd.n.x, pdd.n.y, pdd.n.z], dist)
             : null;
-          cb.current.onPushPullLive(dist, solid); // mm box sync + boolean live preview
+          cb.current.onPushPullLive(dist, solid, stop); // mm box sync + boolean live preview + limit state
           // Live prism preview grows/shrinks with the drag — the face appears to extrude in real time.
           const pd = s2.pushDrag;
           if (pd.cap.length && !pd.live && Math.abs(dist) > 1e-3) {
@@ -2618,6 +2631,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.pushArrow.userData.center = pushArrow.center;
     s.pushArrow.userData.normal = pushArrow.normal;
     s.pushArrow.userData.kind = pushArrow.kind;
+    s.pushArrow.userData.min = pushArrow.min;
+    s.pushArrow.userData.max = pushArrow.max;
     s.pushArrow.userData.dist = 0;
     s.pushArrow.userData.home = undefined; // new feature → new true anchor
     setArrowHot(s, false);
@@ -4520,7 +4535,7 @@ function keepArrowReachable(s: Internals, camera: THREE.PerspectiveCamera, units
 /** Position/scale the arrow along the handle direction for a given (signed) distance.
  *  dist 0 draws the resting handle; during a drag it grows/flips to show magnitude + sign.
  *  kind "fillet" labels it as a radius (R …); "extrude" labels a signed distance. */
-function layoutPushArrow(s: Internals, center: [number, number, number], normal: [number, number, number], dist: number, units: "mm" | "in", kind: "extrude" | "fillet" = "extrude") {
+function layoutPushArrow(s: Internals, center: [number, number, number], normal: [number, number, number], dist: number, units: "mm" | "in", kind: "extrude" | "fillet" = "extrude", atLimit = false) {
   const g = s.pushArrow;
   const size = modelSizeOf(s);
   const dir = new THREE.Vector3(...normal).normalize();
@@ -4531,19 +4546,23 @@ function layoutPushArrow(s: Internals, center: [number, number, number], normal:
   const rS = Math.min(0.65, Math.max(0.22, size * 0.0032));
   g.position.set(center[0], center[1], center[2]);
   g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.multiplyScalar(sign));
-  const [shaft, cone, grab] = g.children as THREE.Mesh[];
+  const [shaft, cone, grab, base] = g.children as THREE.Mesh[];
   shaft.position.set(0, L * 0.42, 0); shaft.scale.set(rS, L * 0.84, rS);
   cone.position.set(0, L * 0.92, 0); cone.scale.set(rS * 3.4, L * 0.16, rS * 3.4);
+  base.position.set(0, 0, 0); base.scale.setScalar(rS * 2.4); // the anchor ball sits ON the feature
   // Generous invisible grab target so the thin arrow is easy to click.
   const grabR = Math.max(rS * 10, size * 0.075);
   grab.position.set(0, L * 0.55, 0); grab.scale.set(grabR, L * 1.45, grabR);
   s.pushArrow.updateMatrixWorld(true);
-  // Live distance label while dragging (child index 3); removed at rest.
-  const old = g.children[3];
+  // Live distance label while dragging (child index 4); removed at rest.
+  const old = g.children[4];
   if (old) { g.remove(old); const m = (old as THREE.Sprite).material as THREE.SpriteMaterial; m.map?.dispose(); m.dispose(); }
   if (Math.abs(dist) > 1e-3) {
-    const text = kind === "fillet" ? `R ${fmtDist(Math.abs(dist), units)}` : `${dist >= 0 ? "+" : "−"}${fmtDist(Math.abs(dist), units)}`;
-    const label = makeLabel(text, { fg: "#1d4ed8", bg: "rgba(255,255,255,0.95)", border: "#2563eb" });
+    const value = kind === "fillet" ? `R ${fmtDist(Math.abs(dist), units)}` : `${dist >= 0 ? "+" : "−"}${fmtDist(Math.abs(dist), units)}`;
+    const text = atLimit ? `${value} · limit` : value;
+    const label = atLimit
+      ? makeLabel(text, { fg: "#b45309", bg: "rgba(255,251,235,0.95)", border: "#d97706" })
+      : makeLabel(text, { fg: "#1d4ed8", bg: "rgba(255,255,255,0.95)", border: "#2563eb" });
     label.position.set(0, L + size * 0.06, 0);
     label.userData.dimLabel = true; label.userData.baseH = size * 0.05;
     g.add(label);

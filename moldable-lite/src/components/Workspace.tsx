@@ -1288,11 +1288,13 @@ function DockRow({ k, v }: { k: string; v: string }) {
 /* Reads whatever is currently selected. Three truthful states rather than one
    invented one: a picked feature, the whole body, or nothing picked yet — the
    empty state is where the selection-driven model gets taught. */
-function DockSelection({ feature, dims, units, modelSelected, ask, onRestFace }: {
+function DockSelection({ feature, dims, units, modelSelected, modifying, ask, onRestFace }: {
   feature: PickedFeature | null;
   dims: { x: number; y: number; z: number } | null;
   units: "mm" | "in";
   modelSelected: boolean;
+  /** The Modify tool is armed — its flyout replaces the floating op bar, so say that instead. */
+  modifying?: boolean;
   ask?: { text: string; setText: (v: string) => void; onAsk: () => void; onClear: () => void; canAsk: boolean; busy: boolean; placeholder: string; count?: number };
   /** Rotate the whole part so this face's normal points down at the plate. Also in
    *  the right-click menu — but right-click doesn't exist on an iPad, so the face
@@ -1320,11 +1322,13 @@ function DockSelection({ feature, dims, units, modelSelected, ask, onRestFace }:
           </button>
         )}
         <p className="dock-note">
-          {feature.kind === "face"
-            ? "Round, Bevel and Push / Pull are on the toolbar at the selection — free, no AI. A negative value pulls the face in, or drag the blue arrow."
-            : feature.kind === "edge"
-              ? "Round and Bevel are on the toolbar at the selection — free, no AI. Or drag the blue arrow to round this edge live."
-              : "Round and Bevel are on the toolbar at the selection — free, no AI."}
+          {modifying
+            ? "Drag the arrow on the model to set the amount live — the size box in the Modify panel follows, and stops when it can't go further."
+            : feature.kind === "face"
+              ? "Round, Bevel and Push / Pull are on the toolbar at the selection — free, no AI. A negative value pulls the face in, or drag the blue arrow."
+              : feature.kind === "edge"
+                ? "Round and Bevel are on the toolbar at the selection — free, no AI. Or drag the blue arrow to round this edge live."
+                : "Round and Bevel are on the toolbar at the selection — free, no AI."}
         </p>
         {ask && <DockAsk ask={ask} />}
       </div>
@@ -1880,16 +1884,18 @@ interface Props {
     pickFaces: (faces: PickedFeature[]) => void;
     askAi: () => void;
     directOp: (type: PointOp["type"], size: number) => void;
-    pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet" } | null;
+    pushArrow: { center: [number, number, number]; normal: [number, number, number]; kind: "extrude" | "fillet"; min?: number; max?: number } | null;
     pushPull: (distance: number) => void;
-    pushLive: (distance: number, solid?: Float32Array | null) => void; // live drag value + optional boolean-preview prism
+    pushLive: (distance: number, solid?: Float32Array | null, stop?: "min" | "max" | null) => void; // live drag value + optional boolean-preview prism + limit state
     liveMm: number | null;
+    liveStop: "min" | "max" | null; // the drag is pinned at its limit
     clear: () => void;
   };
-  /** Modify: arm an op (push/round/bevel) first, then every click applies it — Spline's flow. */
+  /** Modify: arm an op (push/round/bevel), then click a spot and drag its anchor — Spline's flow. */
   modifyCtl: {
     op: { op: "push" | "round" | "bevel"; size: number } | null;
     set: (v: { op: "push" | "round" | "bevel"; size: number } | null) => void;
+    apply: () => void; // apply the typed size to the selected feature (the no-drag path)
   };
   facesCtl: {
     faces: PickedFeature[];
@@ -2915,25 +2921,42 @@ export function Workspace(p: Props) {
                             <button className={p.modifyCtl.op.op === "round" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "round", size: p.modifyCtl.op!.size })}>Round</button>
                             <button className={p.modifyCtl.op.op === "bevel" ? "on" : ""} onClick={() => p.modifyCtl.set({ op: "bevel", size: p.modifyCtl.op!.size })}>Bevel</button>
                           </div>
+                          {/* Mid-drag the box mirrors the live value; typing still works between drags. */}
                           <label className="modify-size">
                             <input
                               type="number"
                               step={0.5}
-                              value={p.modifyCtl.op.size}
+                              value={p.featureCtl.liveMm ?? p.modifyCtl.op.size}
                               onChange={(e) => {
                                 const v = parseFloat(e.target.value);
                                 if (Number.isFinite(v)) p.modifyCtl.set({ op: p.modifyCtl.op!.op, size: v });
                               }}
                             />
                             <span>mm</span>
+                            <button
+                              className="ghost sm"
+                              disabled={!p.featureCtl.selected}
+                              title={p.featureCtl.selected ? "Apply this size to the selected spot" : "Click a spot on the model first"}
+                              onClick={p.modifyCtl.apply}
+                            >Apply</button>
                           </label>
-                          <p className="fine">
-                            {p.modifyCtl.op.op === "push"
-                              ? "Click a face to push it out. A minus size pushes in."
-                              : p.modifyCtl.op.op === "round"
-                                ? "Click a face, edge or corner to round it. Keep clicking to do more."
-                                : "Click a face, edge or corner to bevel it. Keep clicking to do more."}
-                          </p>
+                          {p.featureCtl.liveStop ? (
+                            <p className="fine modify-stop">
+                              {p.featureCtl.liveStop === "max"
+                                ? p.modifyCtl.op.op === "push"
+                                  ? "That's the limit — any further won't fit the printer."
+                                  : "That's the limit — as big as fits here."
+                                : "That's the limit — any deeper cuts through."}
+                            </p>
+                          ) : (
+                            <p className="fine">
+                              {p.modifyCtl.op.op === "push"
+                                ? "Click a face, then drag the arrow — out adds, in cuts. Or type a size and Apply."
+                                : p.modifyCtl.op.op === "round"
+                                  ? "Click a face, edge or corner, then drag the arrow to set the roundness — or type it and Apply."
+                                  : "Click a face, edge or corner, then drag the arrow to set the bevel — or type it and Apply."}
+                            </p>
+                          )}
                           <p className="fine">Shell, revolve or patterns: select the spot with Select, then ask in chat.</p>
                         </div>
                       )}
@@ -3423,7 +3446,7 @@ export function Workspace(p: Props) {
                   {p.activeKind !== "replicad" && <p className="fine">AI edits need a Precise (CAD) model — notes work everywhere.</p>}
                 </div>
               )}
-              {p.featureCtl.selected && p.activeKind === "replicad" && (
+              {p.featureCtl.selected && p.activeKind === "replicad" && !p.modifyCtl.op && (
                 <ContextBar anchor={[p.featureCtl.selected.cx, p.featureCtl.selected.cy, p.featureCtl.selected.cz]} viewerRef={p.viewerRef}>
                   <DirectOpBar
                     kind={p.featureCtl.selected.kind}
@@ -3560,6 +3583,7 @@ export function Workspace(p: Props) {
                     dims={p.dims}
                     units={p.units}
                     modelSelected={p.modelSelected}
+                    modifying={!!p.modifyCtl.op}
                     onRestFace={(normal) => p.printPrep.orient.face(normal)}
                     ask={
                       p.facesCtl.faces.length > 0

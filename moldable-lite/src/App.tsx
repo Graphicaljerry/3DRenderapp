@@ -3915,8 +3915,11 @@ export default function App() {
   function pickFaces(faces: PickedFeature[], additive = false) {
     setSelectedFaces((prev) => {
       if (!additive) return faces;
-      // Shift-click adds to the set — dedup by centre so re-clicking a face is a no-op.
-      const keyOf = (f: PickedFeature) => `${f.cx}|${f.cy}|${f.cz}`;
+      // Shift-click adds to the set — dedup by centre so re-clicking one is a no-op. The
+      // KIND is part of the key now that edges and corners can join: a face and the edge
+      // loop bounding it can share a centre exactly, and without this the second pick
+      // would silently vanish.
+      const keyOf = (f: PickedFeature) => `${f.kind}|${f.cx}|${f.cy}|${f.cz}`;
       const have = new Set(prev.map(keyOf));
       return [...prev, ...faces.filter((f) => !have.has(keyOf(f)))];
     });
@@ -3924,8 +3927,9 @@ export default function App() {
     if (faces.length) { setSelectedFeature(null); setActivePinId(null); setPinText(""); }
   }
 
-  /** Multi-face quick edit: extrude EVERY selected face by the same amount — one local
-      rebuild, no AI. Positive pushes out, negative pockets in. */
+  /** Multi-selection quick edit: apply the armed operation to EVERY picked face, edge
+      and corner in one local rebuild, no AI. Shift-click builds the set; it stays lit
+      until it's applied or cleared. */
   async function applyDirectOpFaces(size: number) {
     if (!selectedFaces.length || !size) return;
     if (!result || result.source.kind !== "code" || !sel || activeKind !== "replicad") {
@@ -3934,19 +3938,31 @@ export default function App() {
     }
     const src = result.source;
     const rc = result.recenter ?? [0, 0, 0];
+    // The set can hold faces, edges AND corners now, so the op each one gets depends on
+    // what it IS and what the Modify tool has armed. Extruding an edge is meaningless;
+    // rounding a face means rounding its boundary. One rule per pair, no silent skips.
+    const armed = modifyOpRef.current?.op ?? "push";
     const ops: PointOp[] = selectedFaces.map((f) => {
       const at = f.at ?? [f.cx, f.cy, f.cz];
-      return { type: "extrude", at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]], size, ...durableAnchor(at, f) };
+      const anchor = { at: [at[0] + rc[0], at[1] + rc[1], at[2] + rc[2]] as [number, number, number], ...durableAnchor(at, f) };
+      const type: PointOp["type"] =
+        armed === "push" ? (f.kind === "face" ? "extrude" : "fillet")
+          : armed === "round" ? (f.kind === "face" ? "face-fillet" : "fillet")
+            : (f.kind === "face" ? "face-chamfer" : "chamfer");
+      // A rounding is a distance outward from the edge; only push/pull carries a sign.
+      return { type, ...anchor, size: type === "extrude" ? size : Math.abs(size) };
     });
     const n = ops.length;
     setSelectedFaces([]);
     setStatus("generating");
     try {
       const res = await sel.engine.build({ kind: "code", code: src.code, params: src.params, ops: [...(src.ops ?? []), ...ops], preview: false });
-      applyResult(res, project?.name ?? "Model", `Extruded ${n} faces by ${size} mm`, `extrude ${n} faces ${size} mm`);
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Extruded **${n} face${n > 1 ? "s" : ""}** by ${size} mm — free, no AI. Undo reverts all of them at once.` }]);
+      const verb = armed === "push" ? "Pushed" : armed === "round" ? "Rounded" : "Angled";
+      const what = `${n} spot${n > 1 ? "s" : ""}`;
+      applyResult(res, project?.name ?? "Model", `${verb} ${what} by ${Math.abs(size)} mm`, `${armed} ${n} spots ${size} mm`);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `${verb} **${what}** by ${Math.abs(size)} mm — free, no AI. Undo reverts all of them at once.` }]);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't extrude all ${n} faces by ${size} mm — ${String(err?.message ?? err)}. Try a smaller amount, or apply faces one at a time.`, error: true }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't apply ${Math.abs(size)} mm to all ${n} — ${String(err?.message ?? err)}. Try a smaller amount, or one at a time.`, error: true }]);
     } finally {
       setStatus("idle");
     }

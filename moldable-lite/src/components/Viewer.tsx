@@ -446,7 +446,8 @@ interface Internals {
   pins: THREE.Group | null;
   material: THREE.MeshStandardMaterial;
   highlight: THREE.Mesh; // translucent overlay for the hovered/selected face
-  multiHi: THREE.Mesh; // overlay for a box-selected SET of faces
+  multiHi: THREE.Mesh; // overlay for a picked SET of faces/edges/corners
+  multiKeys: string[]; // what's in that set, so a repeat click doesn't double-draw it
   edgeHi: THREE.Mesh; // solid marker for a hovered/selected edge (a thin cylinder)
   vertHi: THREE.Sprite; // corner pick marker — a screen-constant anchor dot // solid marker for a hovered/selected vertex (a small sphere)
   markR: number; // marker radius, scaled to the model
@@ -1916,8 +1917,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         if (Math.hypot(e.clientX - sx, e.clientY - sy) > 4) {
           const faces = selectFacesInBox(s2, camera, renderer, sx, sy, e.clientX, e.clientY);
           cb.current.onPickFaces(faces);
-        } else if (cb.current.selectKind === "face" || cb.current.selectKind === "auto") {
-          const added = addFaceToMultiSel(s2, camera, renderer, e.clientX, e.clientY);
+        } else if (cb.current.selectKind !== "point") {
+          // Shift-CLICK adds whatever is under the cursor — face, edge OR corner — and it
+          // stays lit until the set is cleared. Edges and corners used to fall through
+          // here entirely, so shift-clicking four edges to round them together did nothing.
+          const added = addPickToMultiSel(s2, camera, renderer, e.clientX, e.clientY, (p) =>
+            cb.current.selectKind === "auto" ? resolveAutoKind(p) : (cb.current.selectKind as "face" | "edge" | "vertex"));
           if (added) cb.current.onPickFaces([added], true);
         }
         return;
@@ -2299,7 +2304,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     });
     ro.observe(el);
 
-    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, paintMesh: null, paintPrev: null, triColor: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
+    st.current = { renderer, scene, camera, controls, grid, plate, content, mesh: null, dims: null, pins: null, material, highlight, multiHi, multiKeys: [], edgeHi, vertHi, markR: 1, tri: null, lockedHit: null, selCache: null, box: null, ro, tc, pivot: null, transforming: false, measures, pushArrow, pushGrab, ghost, pushDrag: null, arrowHot: false, selBox: null, analysisMesh: null, paintMesh: null, paintPrev: null, triColor: null, axScene, axCam, axBalls, tcR, attachMap: new Map(), attachGroup: null, selAttach: null };
 
     return () => {
       cancelAnimationFrame(raf);
@@ -2412,6 +2417,8 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.highlight.geometry.dispose();
     s.highlight.geometry = new THREE.BufferGeometry();
     s.multiHi.visible = false;
+    s.multiKeys.length = 0;
+    s.multiKeys.length = 0;
     s.multiHi.geometry.dispose();
     s.multiHi.geometry = new THREE.BufferGeometry();
     s.edgeHi.visible = false;
@@ -2832,6 +2839,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.lockedHit = null;
     s.highlight.visible = false;
     s.multiHi.visible = false;
+    s.multiKeys.length = 0;
     s.edgeHi.visible = false;
     s.vertHi.visible = false;
     s.controls.enabled = true;
@@ -4164,9 +4172,49 @@ function faceRegionInfo(tri: TriData, tris: number[], rep: number): { info: Feat
  *  returns one payload per distinct face. */
 /** Shift-click in face mode: pick the face under the cursor, merge its triangles into
  *  the multi-select overlay, and return its payload for the app's selection set. */
-function addFaceToMultiSel(
+/** Non-indexed triangle positions for a tube along an edge chain — the same slim tube
+ *  the single-edge highlight draws, but as raw positions so a SET of picks can be merged
+ *  into one overlay. */
+function edgeChainPositions(tri: TriData, chainId: number, markR: number): Float32Array {
+  const ch = tri.chains[chainId];
+  const er = Math.max(0.14, markR * 0.45);
+  const parts: THREE.BufferGeometry[] = [];
+  const yA = new THREE.Vector3(0, 1, 0);
+  const A = new THREE.Vector3(), B = new THREE.Vector3(), dir = new THREE.Vector3(), mid = new THREE.Vector3();
+  const q = new THREE.Quaternion(), mtx = new THREE.Matrix4(), scl = new THREE.Vector3();
+  for (const si of ch.segs) {
+    A.set(tri.edges[si * 6], tri.edges[si * 6 + 1], tri.edges[si * 6 + 2]);
+    B.set(tri.edges[si * 6 + 3], tri.edges[si * 6 + 4], tri.edges[si * 6 + 5]);
+    dir.subVectors(B, A);
+    const L = dir.length();
+    if (L < 1e-6) continue;
+    dir.divideScalar(L);
+    mid.addVectors(A, B).multiplyScalar(0.5);
+    q.setFromUnitVectors(yA, dir);
+    scl.set(er, L, er);
+    mtx.compose(mid, q, scl);
+    const cyl = new THREE.CylinderGeometry(1, 1, 1, 8).applyMatrix4(mtx).toNonIndexed();
+    parts.push(cyl);
+  }
+  if (!parts.length) return new Float32Array(0);
+  const merged = mergeGeometries(parts, false);
+  const out = merged.getAttribute("position").array as Float32Array;
+  return out.slice();
+}
+
+/** A small solid at a corner, so a picked vertex reads in the merged overlay. */
+function vertexPositions(p: THREE.Vector3, markR: number): Float32Array {
+  const r = Math.max(0.35, markR * 1.1);
+  const g = new THREE.OctahedronGeometry(r).translate(p.x, p.y, p.z).toNonIndexed();
+  return (g.getAttribute("position").array as Float32Array).slice();
+}
+
+/** Add whatever is under the cursor to the multi-selection, MERGING its highlight into
+ *  the shared overlay. This used to handle faces only, which is why shift-clicking a set
+ *  of edges to round them together didn't work — the pick landed but nothing held it. */
+function addPickToMultiSel(
   s: Internals, camera: THREE.PerspectiveCamera, renderer: THREE.WebGLRenderer,
-  clientX: number, clientY: number,
+  clientX: number, clientY: number, resolveKind: (hit: THREE.Vector3) => "face" | "edge" | "vertex",
 ): PickedFeature | null {
   const tri = ensureTri(s), mesh = s.mesh;
   if (!tri || !mesh) return null;
@@ -4175,8 +4223,38 @@ function addFaceToMultiSel(
   rc.setFromCamera(new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1), camera);
   const hit = rc.intersectObject(mesh, false)[0];
   if (!hit || hit.faceIndex == null) return null;
-  const region = faceRegion(tri, hit.faceIndex);
-  const { info, positions } = faceRegionInfo(tri, region, hit.faceIndex);
+  const kind = resolveKind(hit.point);
+  let info: FeatureInfo;
+  let positions: Float32Array;
+  if (kind === "edge") {
+    const chainId = nearestEdgeChainId(tri, hit.point);
+    if (chainId < 0) return null;
+    const ch = tri.chains[chainId];
+    info = {
+      kind: "edge",
+      a: new THREE.Vector3(ch.ax, ch.ay, ch.az),
+      b: new THREE.Vector3(ch.bx, ch.by, ch.bz),
+      c: new THREE.Vector3(ch.cx, ch.cy, ch.cz),
+      len: ch.len, closed: ch.closed,
+    };
+    positions = edgeChainPositions(tri, chainId, s.markR);
+  } else if (kind === "vertex") {
+    const vId = nearestVertexId(tri, hit.point);
+    const p = new THREE.Vector3(tri.vpos[vId * 3], tri.vpos[vId * 3 + 1], tri.vpos[vId * 3 + 2]);
+    info = { kind: "vertex", pos: p };
+    positions = vertexPositions(p, s.markR);
+  } else {
+    const region = faceRegion(tri, hit.faceIndex);
+    const r = faceRegionInfo(tri, region, hit.faceIndex);
+    info = r.info;
+    positions = r.positions;
+  }
+  if (!positions.length) return null;
+  // The App dedupes its set by kind+centre; the overlay has to make the SAME call or the
+  // two disagree — clicking one rim twice lit it twice while the set held one entry.
+  const key = `${kind}|${featureToPayload(info).cx}|${featureToPayload(info).cy}|${featureToPayload(info).cz}`;
+  if (s.multiKeys.includes(key)) return null;
+  s.multiKeys.push(key);
   const prev = s.multiHi.visible ? (s.multiHi.geometry.getAttribute("position")?.array as Float32Array | undefined) : undefined;
   const merged = new Float32Array((prev?.length ?? 0) + positions.length);
   if (prev) merged.set(prev, 0);
@@ -4240,6 +4318,7 @@ function selectFacesInBox(
   } else {
     s.multiHi.geometry = new THREE.BufferGeometry();
     s.multiHi.visible = false;
+    s.multiKeys.length = 0;
   }
   return faces;
 }

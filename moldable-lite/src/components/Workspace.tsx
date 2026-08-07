@@ -1302,7 +1302,14 @@ function DockSelection({ feature, dims, units, modelSelected, modifying, ask, on
   modelSelected: boolean;
   /** The Modify tool is armed — its flyout replaces the floating op bar, so say that instead. */
   modifying?: boolean;
-  ask?: { text: string; setText: (v: string) => void; onAsk: () => void; onClear: () => void; canAsk: boolean; busy: boolean; placeholder: string; count?: number };
+  ask?: {
+    text: string; setText: (v: string) => void; onAsk: () => void; onClear: () => void;
+    canAsk: boolean; busy: boolean; placeholder: string; count?: number;
+    /** How the multi-selection breaks down, so the panel can name it honestly. */
+    kinds?: { face?: number; edge?: number; vertex?: number };
+    /** Run the armed Modify operation over the whole set. */
+    applyAll?: { label: string; size: number; run: () => void };
+  };
   /** Rotate the whole part so this face's normal points down at the plate. Also in
    *  the right-click menu — but right-click doesn't exist on an iPad, so the face
    *  panel is the findable home. */
@@ -1351,10 +1358,29 @@ function DockSelection({ feature, dims, units, modelSelected, modifying, ask, on
     );
   }
   if (ask && ask.count) {
+    // The set can hold faces, edges and corners together now, so it can't be labelled
+    // "Faces" — name what's actually in it.
+    const kinds = ask.kinds ?? {};
+    const parts = [
+      kinds.face ? `${kinds.face} face${kinds.face > 1 ? "s" : ""}` : "",
+      kinds.edge ? `${kinds.edge} edge${kinds.edge > 1 ? "s" : ""}` : "",
+      kinds.vertex ? `${kinds.vertex} corner${kinds.vertex > 1 ? "s" : ""}` : "",
+    ].filter(Boolean);
     return (
       <div className="dock-panel">
-        <DockRow k="Faces" v={`${ask.count} selected`} />
+        <DockRow k="Selected" v={parts.length ? parts.join(" · ") : `${ask.count} spots`} />
         <p className="dock-note">Shift-click to add more, or shift-drag to box-select.</p>
+        {/* Apply the armed operation to every one of them at once — the whole reason to
+            build a set. Only offered while an operation IS armed; otherwise the set is
+            just something to describe to the AI below. */}
+        {ask.applyAll && (
+          <div className="param-actions">
+            <button className="primary sm" disabled={ask.busy} onClick={ask.applyAll.run}
+              title={`Apply ${ask.applyAll.label} ${ask.applyAll.size} mm to all ${ask.count}`}>
+              {ask.applyAll.label} all {ask.count} · {ask.applyAll.size} mm
+            </button>
+          </div>
+        )}
         <DockAsk ask={ask} />
       </div>
     );
@@ -2202,7 +2228,9 @@ interface Props {
     text: string;
     setText: (s: string) => void;
     askAi: () => void;
-    directOp: (size: number) => void; // extrude every selected face by size mm — local, no AI
+    /** Apply the armed Modify operation to every pick in the set — local, no AI. What
+     *  each one gets depends on whether it's a face, an edge or a corner. */
+    directOp: (size: number) => void;
     clear: () => void;
   };
   transformCtl: {
@@ -3921,7 +3949,19 @@ export function Workspace(p: Props) {
                     onRestFace={(normal) => p.printPrep.orient.face(normal)}
                     ask={
                       p.facesCtl.faces.length > 0
-                        ? { text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: "e.g. add a 3 mm fillet to these faces · shell these 2 mm", count: p.facesCtl.faces.length }
+                        ? {
+                          text: p.facesCtl.text, setText: p.facesCtl.setText, onAsk: p.facesCtl.askAi, onClear: p.facesCtl.clear,
+                          canAsk: p.activeKind === "replicad", busy: p.status === "generating",
+                          placeholder: "e.g. add a 3 mm fillet to these · shell these 2 mm", count: p.facesCtl.faces.length,
+                          kinds: p.facesCtl.faces.reduce((a, f) => ({ ...a, [f.kind]: (a[f.kind] ?? 0) + 1 }), {} as Record<string, number>),
+                          applyAll: p.modifyCtl.op
+                            ? {
+                              label: p.modifyCtl.op.op === "push" ? "Push/Pull" : p.modifyCtl.op.op === "round" ? "Round" : "Angle",
+                              size: Math.abs(p.modifyCtl.op.size),
+                              run: () => p.facesCtl.directOp(p.modifyCtl.op!.size),
+                            }
+                            : undefined,
+                        }
                         : p.featureCtl.selected
                           ? { text: p.featureCtl.text, setText: p.featureCtl.setText, onAsk: p.featureCtl.askAi, onClear: p.featureCtl.clear, canAsk: p.activeKind === "replicad", busy: p.status === "generating", placeholder: p.featureCtl.selected.kind === "edge" ? "e.g. add a 2 mm fillet · chamfer this edge 1 mm" : p.featureCtl.selected.kind === "vertex" ? "e.g. round this corner 3 mm" : "e.g. add two 4 mm screw holes · pocket 3 mm deep" }
                           : undefined

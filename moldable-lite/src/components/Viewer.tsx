@@ -17,6 +17,8 @@ export type TransformCommit =
 
 export interface ViewerHandle {
   resetView: () => void;
+  /** Put down a click-locked feature highlight the app decided not to keep. */
+  clearLock: () => void;
   /** Clear all per-face MMU paint from the model. */
   eraseFacePaint: () => void;
   /** Grow (+1) or shrink (−1) every painted region by one triangle ring. */
@@ -3270,6 +3272,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => { invalidateRef.current(4); });
 
   useImperativeHandle(ref, () => wakeOnCall({
+    clearLock() {
+      const s = st.current;
+      if (!s) return;
+      s.lockedHit = null;
+      s.highlight.visible = s.edgeHi.visible = s.vertHi.visible = false;
+    },
     growPaint(dir: 1 | -1) {
       const s = st.current;
       if (!s?.mesh || !ensureTri(s) || !s.tri || !s.triColor) return;

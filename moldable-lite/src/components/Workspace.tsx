@@ -1409,13 +1409,13 @@ type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "histor
 // "Adjust", not "Parameters": the row is free no-AI dimension tweaking, and "Parameters"
 // sent people to the chatbot to pay tokens for what this panel does for free.
 const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string; icon: JSX.Element }> = [
-  { key: "selection", label: "Selection", icon: <IconPointer size={14} /> },
-  { key: "objects", label: "Objects", icon: <IconLayers size={14} /> },
-  { key: "params", label: "Adjust", icon: <IconSliders size={14} /> },
-  { key: "print", label: "Printability", icon: <IconPrinter size={14} /> },
-  { key: "code", label: "Source", icon: <IconCode size={14} /> },
-  { key: "history", label: "History", icon: <IconHistory size={14} /> },
-  { key: "export", label: "Export", icon: <IconExport size={14} /> },
+  { key: "selection", label: "Selection", icon: <IconPointer size={18} /> },
+  { key: "objects", label: "Objects", icon: <IconLayers size={18} /> },
+  { key: "params", label: "Adjust", icon: <IconSliders size={18} /> },
+  { key: "print", label: "Printability", icon: <IconPrinter size={18} /> },
+  { key: "code", label: "Source", icon: <IconCode size={18} /> },
+  { key: "history", label: "History", icon: <IconHistory size={18} /> },
+  { key: "export", label: "Export", icon: <IconExport size={18} /> },
 ];
 
 /** Reactive media query — the phone shell is a different composition, not a squeezed
@@ -2021,6 +2021,7 @@ interface Props {
   /** Modify: arm an op (push/round/bevel), then click a spot and drag its anchor — Spline's flow. */
   modifyCtl: {
     op: { op: "push" | "round" | "bevel"; size: number } | null;
+    note: string | null; // why the last click did nothing (wrong feature for the op)
     set: (v: { op: "push" | "round" | "bevel"; size: number } | null) => void;
     apply: () => void; // apply the typed size to the selected feature (the no-drag path)
   };
@@ -3099,13 +3100,19 @@ export function Workspace(p: Props) {
                                   : "That's the limit — as big as fits here."
                                 : "That's the limit — any deeper cuts through."}
                             </p>
+                          ) : p.modifyCtl.note ? (
+                            <p className="fine modify-stop">{p.modifyCtl.note}</p>
+                          ) : p.featureCtl.selected ? (
+                            <p className="fine">
+                              {p.modifyCtl.op.op === "push"
+                                ? "Now drag the arrow — out adds, in cuts. Or type a size and press Apply."
+                                : "Now drag the arrow to set the size by eye — or type it and press Apply."}
+                            </p>
                           ) : (
                             <p className="fine">
                               {p.modifyCtl.op.op === "push"
-                                ? "Click a face, then drag the arrow — out adds, in cuts. Or type a size and Apply."
-                                : p.modifyCtl.op.op === "round"
-                                  ? "Click a face, edge or corner, then drag the arrow to set the roundness — or type it and Apply."
-                                  : "Click a face, edge or corner, then drag the arrow to set the bevel — or type it and Apply."}
+                                ? "Click a flat face to give it a drag arrow."
+                                : "Click a face, edge or corner to give it a drag arrow."}
                             </p>
                           )}
                           <p className="fine">Shell, revolve or patterns: select the spot with Select, then ask in chat.</p>

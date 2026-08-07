@@ -194,7 +194,9 @@ export default defineConfig({
   // docs) matches NOTHING because no var starts with a literal asterisk. The fixed
   // prefix exposes TAURI_ENV_PLATFORM to import.meta.env for the desktop-only code.
   envPrefix: ["VITE_", "TAURI_ENV_"],
-  optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"] },
+  // wawoff2 is an emscripten CJS bundle and opentype.js ships CJS entry points —
+  // both need pre-bundling or the Text tool's lazy import stalls on first use.
+  optimizeDeps: { exclude: ["replicad", "replicad-opencascadejs"], include: ["opentype.js"] },
   build: {
     target: "esnext",
     // Multi-page: the app is the default entry (index.html); landing.html is a

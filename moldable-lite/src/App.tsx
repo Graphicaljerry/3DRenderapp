@@ -3216,6 +3216,8 @@ export default function App() {
   // While armed, every picked face/edge/corner applies the pending op immediately,
   // so "round these four corners" is four clicks, not four dialogs.
   const [modifyOp, setModifyOp] = useState<{ op: "push" | "round" | "bevel"; size: number } | null>(null);
+  const [modifyNote, setModifyNote] = useState<string | null>(null);
+  useEffect(() => { setModifyNote(null); }, [modifyOp?.op]);
   const modifyOpRef = useRef(modifyOp);
   modifyOpRef.current = modifyOp;
   useEffect(() => { if (!selectMode) setModifyOp(null); }, [selectMode]);
@@ -3319,10 +3321,20 @@ export default function App() {
     }
     // Armed Shape tool: this click IS the placement.
     if (shapeToolRef.current && activeKind === "replicad") { void placeShape(f); return; }
-    // Armed Modify: a push pick must be a flat face — anything else is ignored
-    // (the flyout hint says so). Valid picks lock + grow the drag anchor.
+    // Armed Modify: Push/Pull only works on a flat face. A click anywhere else used
+    // to leave a locked anchor dot sitting on the model with nothing to do — the
+    // classic "what is this dot for" dead end. Now the dot is put down and the
+    // flyout says what happened and what WOULD work there.
     const mo = modifyOpRef.current;
-    if (mo && mo.op === "push" && f.kind !== "face") return;
+    if (mo && mo.op === "push" && (f.kind !== "face" || f.curved)) {
+      viewer.current?.clearLock();
+      setModifyNote(
+        f.kind !== "face"
+          ? `Push/Pull needs a flat face \u2014 that was ${f.kind === "vertex" ? "a corner" : "an edge"}. Round and Bevel work there.`
+          : "Push/Pull needs a flat face \u2014 that one is curved.");
+      return;
+    }
+    if (mo) setModifyNote(null);
     setSelectedFeature(f);
     setFaceText("");
     // Only one editing target (point vs single feature vs multi) at a time.
@@ -6046,6 +6058,7 @@ export default function App() {
         }}
         modifyCtl={{
           op: modifyOp,
+          note: modifyNote,
           // Arming keeps a compatible selection (its anchor appears at once); only a
           // push armed over a non-face pick has nothing to drag, so that clears.
           set: (v) => {

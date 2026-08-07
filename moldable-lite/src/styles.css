@@ -336,7 +336,10 @@ button:disabled { cursor: default; }
 .messages.selecting .think-done, .messages.selecting .src-row, .messages.selecting .confirm-card { pointer-events: none; }
 .sel-mark {
   position: absolute; top: 20px; left: 0; width: 17px; height: 17px;
-  border: 1.5px solid var(--bord2); border-radius: var(--r-full); background: var(--card);
+  /* --bord2 and --card were never defined anywhere, so both declarations were invalid
+     at computed-value time and this checkbox rendered with no edge and no fill against
+     the chat background — invisible until you hovered the row it belongs to. */
+  border: 1.5px solid var(--bord-strong); border-radius: var(--r-full); background: var(--bg);
   display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto;
 }
 .msg.user .sel-mark { left: auto; right: 0; }
@@ -774,7 +777,9 @@ button:disabled { cursor: default; }
 .right-dock { position: absolute; top: 10px; right: 10px; bottom: 112px; z-index: 9; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100% - 20px); pointer-events: none; }
 .right-dock > * { pointer-events: auto; position: static; flex: 0 0 auto; }
 .right-dock:empty { display: none; }
-.mesh-stats { z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
+/* No z-index: .right-dock forces position:static on its children, and z-index does
+   nothing on a static box. The stack's own z-index: 9 is what orders this. */
+.mesh-stats { display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
 .ms-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11.5px; }
 .ms-row span { color: var(--mut); }
 .ms-row b { font-family: var(--font-mono); font-weight: 500; font-size: 11px; color: var(--ink2); font-variant-numeric: tabular-nums; }
@@ -2290,7 +2295,7 @@ details.guide { margin-top: 10px; }
 .canvas-rail .ghost.sm.iconbtn { justify-content: center; } /* touch: icon-only rows stay centred */
 @media (hover: hover) and (pointer: fine) {
   .canvas-rail .rail-name { display: block; }
-  .canvas-rail { width: var(--rail-w, 47px); }
+  .canvas-rail { width: var(--rail-w); }
   .canvas-rail > * { width: 100%; }
   .canvas-rail > .rail-sep { width: auto; } /* margins position it; 100% would poke past the padding */
   .canvas-rail .ghost.sm.iconbtn { width: 100%; justify-content: flex-start; overflow: hidden; }
@@ -2303,7 +2308,7 @@ details.guide { margin-top: 10px; }
    panel covered ~420px of canvas, and the names are redundant anyway once the
    tool's own titled panel is on screen. */
 @media (hover: hover) and (pointer: fine) {
-  .canvas-rail:has(.rail-fly):hover { width: var(--rail-w, 47px); }
+  .canvas-rail:has(.rail-fly):hover { width: var(--rail-w); }
   .canvas-rail:has(.rail-fly):hover .rail-name { opacity: 0; transform: translateX(-6px); transition: opacity .1s ease; }
 }
 .canvas-rail { transition: width .22s cubic-bezier(.22,1,.36,1), border-radius .22s ease; }

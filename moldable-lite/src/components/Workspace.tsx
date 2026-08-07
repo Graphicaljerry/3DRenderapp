@@ -1,6 +1,7 @@
 import { Fragment, memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { Viewer, type ViewerHandle, type PickedPoint, type PickedFeature, type SelectKind, type ShowcaseScene, type TransformMode, type TransformCommit, type Measurement, type ContextHit } from "./Viewer";
+import type { TextSpec } from "../text/geometry";
 import { Markdown } from "./Markdown";
 import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
@@ -34,7 +35,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1836,6 +1837,95 @@ function fmtMm(v: number): string {
   return `${r} mm`;
 }
 
+/** Text tool panel: the words, the font, the three sizes — and every placed text as an
+ *  editable list. Selecting a row points the same fields at THAT text (the ShapeFly
+ *  pattern), so editing after placement is the same motion as setting up before it. */
+function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
+  const editing = ctl.editId ? ctl.placed.find((t) => t.id === ctl.editId) ?? null : null;
+  const spec = editing ? editing.spec : ctl.tool!;
+  const patch = (p: Partial<TextSpec>) => {
+    if (editing) ctl.edit(editing.id, p);
+    else ctl.set({ ...ctl.tool!, ...p });
+  };
+  // The dropdown lists Google families plus whatever this session has learned about —
+  // device fonts once listed, and the current family even when it came from a file
+  // (otherwise the select would silently show the wrong name).
+  const families = [...ctl.fonts];
+  for (const f of ctl.localFonts ?? []) if (!families.includes(f)) families.push(f);
+  if (!families.includes(spec.family)) families.unshift(spec.family);
+  return (
+    <div className="rail-fly text-fly">
+      <input
+        className="text-words"
+        type="text"
+        value={spec.text}
+        placeholder="Type something…"
+        aria-label="The text to place"
+        onChange={(e) => patch({ text: e.target.value })}
+      />
+      <div className="shape-lbl"><span>Font</span>
+        {ctl.fontState === "loading" && <span className="shape-unit">loading…</span>}
+      </div>
+      <select
+        className="text-family"
+        value={spec.family}
+        aria-label="Font family"
+        onChange={(e) => {
+          const fam = e.target.value;
+          // A device font needs its bytes pulled before it can build geometry.
+          if (ctl.localFonts?.includes(fam) && !ctl.fonts.includes(fam)) ctl.useLocalFont(fam);
+          else patch({ family: fam, custom: !ctl.fonts.includes(fam) });
+        }}
+      >
+        {families.map((f) => <option key={f} value={f}>{f}</option>)}
+      </select>
+      <div className="text-srcs">
+        <label className="link-sm text-upload" title="Use your own .ttf, .otf or .woff2 — it works for this session">
+          Font file…
+          <input type="file" accept=".ttf,.otf,.woff,.woff2" className="sr-file"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) ctl.uploadFont(f); e.currentTarget.value = ""; }} />
+        </label>
+        {ctl.canLocal && !ctl.localFonts && (
+          <button className="link-sm" title="List the fonts installed on this device (the browser will ask permission)" onClick={ctl.loadLocalFonts}>This device's fonts…</button>
+        )}
+      </div>
+      {ctl.fontState === "error" && ctl.fontError && <p className="fine modify-stop">{ctl.fontError}</p>}
+      <div className="shape-lbl"><span>Size</span><span className="shape-unit">mm</span></div>
+      <div className="shape-nums">
+        {([["H", "size", 1], ["Deep", "depth", 0.2], ["Bevel", "bevel", 0]] as const).map(([l, k, min]) => (
+          <label key={k}><span>{l}</span>
+            <input type="number" step={k === "size" ? 1 : 0.2} min={min} value={spec[k]}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v) && v >= min) patch({ [k]: v }); }} />
+          </label>
+        ))}
+      </div>
+      {editing ? (
+        <p className="fine">Editing this one in place — its spot doesn't move. Use Move to slide or spin it.</p>
+      ) : (
+        <p className="fine">The text rides the cursor — click the model to set it down. It lands as its own layer: movable, editable, in Objects.</p>
+      )}
+      {ctl.placed.length > 0 && (
+        <>
+          <div className="shape-lbl"><span>Placed</span><span className="shape-unit">{ctl.placed.length}</span></div>
+          <div className="pocket-list">
+            {ctl.placed.map((t) => (
+              <div key={t.id} className={`pocket-row${ctl.editId === t.id ? " on" : ""}`}>
+                <button className="pocket-pick" title="Edit this one — the fields above point at it"
+                  onClick={() => ctl.select(ctl.editId === t.id ? null : t.id)}>
+                  <IconTextTool size={13} />
+                  <span className="pocket-size">{t.spec.text.length > 14 ? `${t.spec.text.slice(0, 13)}…` : t.spec.text}</span>
+                  <span className="pocket-where">{t.spec.family}</span>
+                </button>
+                <button className="x" aria-label="Remove this text" title="Remove this text layer" onClick={() => ctl.remove(t.id)}><IconX /></button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** One length in the chosen unit, for inline readouts. */
 function fmtLen(mm: number, units: "mm" | "in"): string {
   return units === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${Math.round(mm * 10) / 10} mm`;
@@ -2196,6 +2286,27 @@ interface Props {
     clear: () => void;
   };
   /** Shape: drop a primitive exactly where you point, then type its numbers. No AI. */
+  textCtl: {
+    tool: TextSpec | null;
+    set: (t: TextSpec | null) => void;
+    toggle: () => void;
+    /** Prebuilt solid for the armed spec — the Viewer's cursor ghost. Null while the font loads. */
+    ghost: THREE.BufferGeometry | null;
+    place: (at: [number, number, number], quat: [number, number, number, number]) => void;
+    fontState: "idle" | "loading" | "ready" | "error";
+    fontError: string | null;
+    fonts: string[];
+    localFonts: string[] | null; // device families once listed; null = not asked yet
+    canLocal: boolean; // browser exposes queryLocalFonts (Chrome/Edge — not Safari)
+    loadLocalFonts: () => void;
+    useLocalFont: (family: string) => void;
+    uploadFont: (f: File) => void;
+    placed: { id: string; spec: TextSpec }[];
+    editId: string | null;
+    select: (id: string | null) => void;
+    edit: (id: string, patch: Partial<TextSpec>) => void;
+    remove: (id: string) => void;
+  };
   shapeCtl: {
     tool: { shape: "box" | "cylinder" | "sphere"; size: [number, number, number]; cut: boolean; snap: number } | null;
     set: (v: Props["shapeCtl"]["tool"]) => void;
@@ -3076,6 +3187,7 @@ export function Workspace(p: Props) {
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
                   : null}
                 onModelDblClick={() => { setDockPanel("params"); setDockOpen(true); }}
+                textPlace={p.textCtl.tool ? { geometry: p.textCtl.ghost, onPlace: p.textCtl.place } : null}
                 magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
                   ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, snap: p.magnetCtl.tool.snap, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
                   : p.screwCtl.tool && p.screwCtl.cut
@@ -3195,6 +3307,33 @@ export function Workspace(p: Props) {
               })()}
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+                  {/* Move leads: it's the first tool in every 3D app people
+                      already know, and the one they reach for most. */}
+                  <div className="rail-tool">
+                    <button
+                      className={`ghost sm iconbtn${p.transformCtl.mode !== "off" ? " on" : ""}`}
+                      aria-pressed={p.transformCtl.mode !== "off"}
+                      aria-label="Transform"
+                      disabled={p.transformCtl.busy}
+                      title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
+                      onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
+                    >
+                      <IconTransform />
+                    <span className="rail-name">Move</span>
+                    </button>
+                    {p.transformCtl.mode !== "off" && (
+                      <div className="rail-fly">
+                        <div className="seg sm mode-seg">
+                          <button className={`iconbtn${p.transformCtl.mode === "move" ? " on" : ""}`} aria-label="Move" title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}><IconTransform /><span className="btn-label">Move</span></button>
+                          <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings — hold Shift for 90° steps)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
+                          <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
+                        </div>
+                        {p.transformCtl.mode === "rotate" && (
+                          <RotateByRow busy={p.transformCtl.busy} onGo={p.transformCtl.rotateBy} />
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {(p.activeKind === "replicad" || p.separatedKind === "replicad") && (
                     <>
                     {/* Select used to live here. It picked a face/edge/corner and then you
@@ -3241,31 +3380,6 @@ export function Workspace(p: Props) {
                     </div>
                     </>
                   )}
-                  <div className="rail-tool">
-                    <button
-                      className={`ghost sm iconbtn${p.transformCtl.mode !== "off" ? " on" : ""}`}
-                      aria-pressed={p.transformCtl.mode !== "off"}
-                      aria-label="Transform"
-                      disabled={p.transformCtl.busy}
-                      title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
-                      onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
-                    >
-                      <IconTransform />
-                    <span className="rail-name">Move</span>
-                    </button>
-                    {p.transformCtl.mode !== "off" && (
-                      <div className="rail-fly">
-                        <div className="seg sm mode-seg">
-                          <button className={`iconbtn${p.transformCtl.mode === "move" ? " on" : ""}`} aria-label="Move" title="Move the part (drag the arrows)" onClick={() => p.transformCtl.setMode("move")}><IconTransform /><span className="btn-label">Move</span></button>
-                          <button className={`iconbtn${p.transformCtl.mode === "rotate" ? " on" : ""}`} aria-label="Rotate" title="Rotate the part (drag the rings — hold Shift for 90° steps)" onClick={() => p.transformCtl.setMode("rotate")}><IconRotate /><span className="btn-label">Rotate</span></button>
-                          <button className={`iconbtn${p.transformCtl.mode === "scale" ? " on" : ""}`} aria-label="Scale" title="Scale the part uniformly (drag a handle)" onClick={() => p.transformCtl.setMode("scale")}><IconScale /><span className="btn-label">Scale</span></button>
-                        </div>
-                        {p.transformCtl.mode === "rotate" && (
-                          <RotateByRow busy={p.transformCtl.busy} onGo={p.transformCtl.rotateBy} />
-                        )}
-                      </div>
-                    )}
-                  </div>
                   <div className="rail-tool">
                     <button
                       className={`ghost sm iconbtn${p.measureCtl.mode ? " on" : ""}`}
@@ -3531,6 +3645,23 @@ export function Workspace(p: Props) {
                     )}
                   </div>
                   <div className="rail-tool">
+                    {/* Text: real 3D type, placed by pointing. The words stay editable
+                        because the layer keeps its TextSpec — this is the tool's whole
+                        difference from a logo, which arrives already frozen to a mesh. */}
+                    <button
+                      className={`ghost sm iconbtn${p.textCtl.tool ? " on" : ""}`}
+                      aria-pressed={!!p.textCtl.tool}
+                      aria-label="Text"
+                      disabled={!p.geometry || p.tab !== "3d"}
+                      title="Text tool: type a word, pick a font (Google Fonts or your own file), and the text rides the cursor — click the model to place it as its own editable layer"
+                      onClick={p.textCtl.toggle}
+                    >
+                      <IconTextTool size={19} />
+                    <span className="rail-name">Text</span>
+                    </button>
+                    {p.textCtl.tool && <TextFly ctl={p.textCtl} />}
+                  </div>
+                  <div className="rail-tool">
                     {/* Add Logo: opens a panel rather than a bare file dialog, so the
                         accepted formats and the "what happens next" step are visible
                         BEFORE the picker, and a file can be dropped straight onto it. */}
@@ -3624,6 +3755,7 @@ export function Workspace(p: Props) {
                           if (p.paintCtl.mode) p.paintCtl.setMode(false);
                           if (p.magnetCtl.tool) p.magnetCtl.toggle();
                           if (p.screwCtl.tool) p.screwCtl.toggle();
+                          if (p.textCtl.tool) p.textCtl.toggle();
                         }
                         return !v;
                       })}

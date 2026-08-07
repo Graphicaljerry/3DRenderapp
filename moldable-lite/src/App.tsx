@@ -24,6 +24,8 @@ import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
 import { downscaleImage, squareAvatar } from "./lib/downscale";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
+import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalFonts, loadLocalFont } from "./text/fonts";
+import { TEXT_DEFAULT, buildTextGeometry, type TextSpec } from "./text/geometry";
 import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
@@ -565,7 +567,12 @@ export default function App() {
   const geometryRef = useRef<THREE.BufferGeometry | null>(null);
   geometryRef.current = geometry;
   const [modelSelected, setModelSelected] = useState(false); // whole-part selection (bounding box)
-  const [attachments, setAttachments] = useState<{ id: string; geometry: THREE.BufferGeometry; name: string; tint?: string; frozenSource?: BuildInput }[]>([]); // free-floating objects (logos, badges, parts…); frozenSource = a kept model version that can be swapped back to live
+  const [attachments, setAttachments] = useState<{
+    id: string; geometry: THREE.BufferGeometry; name: string; tint?: string;
+    frozenSource?: BuildInput; // a kept model version that can be swapped back to live
+    text?: TextSpec; // this attachment IS a text layer — the spec it rebuilds from, forever editable
+    place?: { at: [number, number, number]; quat: [number, number, number, number] }; // pose pinned at placement (text lands ON a face, not staged beside the model)
+  }[]>([]); // free-floating objects (logos, badges, text, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
   // Build plates: every object (the model = "model", attachments by id) lives on a plate.
   // Bambu-Studio-style: any number of plates, assignment via menu, saved with the project.
@@ -1249,7 +1256,7 @@ export default function App() {
   /** Turn the Paint tool on/off; enabling it disables the other single-owner viewer tools. */
   const setPaintMode = (on: boolean) => {
     setPaintModeState(on);
-    if (on) { setSelectMode(false); setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setSelectedFeature(null); setSelectedFaces([]); }
+    if (on) { setSelectMode(false); setTransformMode("off"); setMeasureMode(false); setMeasurePending(null); setSelectedFeature(null); setSelectedFaces([]); setTextToolState(null); setTextEditId(null); }
   };
   /** A committed paint stroke (or erase) — store it; all-zero collapses to "no paint". */
   // Paint strokes get their own undo stack. They aren't model versions (no geometry
@@ -3286,6 +3293,96 @@ export default function App() {
   const shapeToolRef = useRef(shapeTool);
   shapeToolRef.current = shapeTool;
   const [shapeEdit, setShapeEdit] = useState<number | null>(null);
+  // ---- Text tool: type → pick a font → the text itself rides the cursor as a ghost →
+  // click lands it ON the surface as its own layer. It stays an attachment (movable
+  // with Transform, listed in Objects) and keeps its TextSpec, so the words, font and
+  // sizes stay editable forever — unlike a logo, which arrives already frozen to a mesh.
+  const [textTool, setTextToolState] = useState<TextSpec | null>(null);
+  const textToolRef = useRef(textTool);
+  textToolRef.current = textTool;
+  const [textGhostGeom, setTextGhostGeom] = useState<THREE.BufferGeometry | null>(null);
+  const [textFontState, setTextFontState] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [textFontErr, setTextFontErr] = useState<string | null>(null);
+  const [textEditId, setTextEditId] = useState<string | null>(null);
+  const [localFontList, setLocalFontList] = useState<string[] | null>(null);
+  const textGhostRef = useRef(textGhostGeom);
+  textGhostRef.current = textGhostGeom;
+  // Ghost geometry follows the armed spec. Debounced: every keystroke edits the spec,
+  // and the font fetch (first use of a family) plus the tessellation are async work
+  // that must never run per-character. A generation counter drops stale results.
+  const textGen = useRef(0);
+  useEffect(() => {
+    const t = textTool;
+    if (!t) { setTextGhostGeom((old) => { old?.dispose(); return null; }); setTextFontState("idle"); setTextFontErr(null); return; }
+    const gen = ++textGen.current;
+    setTextFontState("loading");
+    const h = setTimeout(async () => {
+      try {
+        const font = await getFont(t.family, !!t.custom);
+        if (textGen.current !== gen) return;
+        const g = buildTextGeometry(font, t);
+        if (textGen.current !== gen) { g.dispose(); return; }
+        setTextGhostGeom((old) => { old?.dispose(); return g; });
+        setTextFontState("ready");
+        setTextFontErr(null);
+      } catch (err: any) {
+        if (textGen.current !== gen) return;
+        setTextFontState("error");
+        setTextFontErr(String(err?.message ?? err));
+      }
+    }, 250);
+    return () => clearTimeout(h);
+  }, [textTool]);
+  /** Commit the ghost's exact pose as a new text layer. The tool stays armed — placing
+   *  a second line is another click, same as the Shape tool. */
+  function placeText(at: [number, number, number], quat: [number, number, number, number]) {
+    const t = textToolRef.current;
+    const g = textGhostRef.current;
+    if (!t || !g) return;
+    const id = mid();
+    const name = t.text.length > 18 ? `“${t.text.slice(0, 17)}…”` : `“${t.text}”`;
+    setAttachments((a) => [...a, { id, geometry: g.clone(), name, text: { ...t }, place: { at, quat } }]);
+    setTextEditId(id); // its numbers are right there to retype, like a just-dropped shape
+    explainOnce("text", `Text is its own **layer**: move or spin it with Transform, retype anything in the Text panel, and find it in **Objects**. Merge raises it off the surface; Engrave carves it in — both bake the model to a mesh, so do CAD edits first.`);
+  }
+  /** Re-run the pipeline for a placed text with its edited spec. The mesh keeps its
+   *  pose — the Viewer swaps geometry under the same id — so editing never re-places. */
+  const textEditGen = useRef(new Map<string, number>());
+  async function editText(id: string, patch: Partial<TextSpec>) {
+    const cur = attachments.find((x) => x.id === id);
+    if (!cur?.text) return;
+    const spec: TextSpec = { ...cur.text, ...patch };
+    const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
+    setAttachments((l) => l.map((x) => (x.id === id ? { ...x, text: spec, name } : x)));
+    const gen = (textEditGen.current.get(id) ?? 0) + 1;
+    textEditGen.current.set(id, gen);
+    try {
+      const font = await getFont(spec.family, !!spec.custom);
+      if (textEditGen.current.get(id) !== gen) return;
+      const g = buildTextGeometry(font, spec);
+      setAttachments((l) => l.map((x) => {
+        if (x.id !== id) return x;
+        const old = x.geometry;
+        setTimeout(() => old.dispose(), 0); // after the Viewer's swap effect has run
+        return { ...x, geometry: g };
+      }));
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild that text: ${String(err?.message ?? err)}`, error: true }]);
+    }
+  }
+  /** A .ttf/.otf/.woff2 the user handed over — usable immediately, this session. */
+  async function useFontFile(file: File) {
+    const fam = file.name.replace(/\.(ttf|otf|woff2?)$/i, "");
+    try {
+      await registerFontBytes(fam, await file.arrayBuffer());
+      const t = textToolRef.current;
+      const target = textEditId && attachments.find((x) => x.id === textEditId)?.text ? textEditId : null;
+      if (target) void editText(target, { family: fam, custom: true });
+      else if (t) setTextToolState({ ...t, family: fam, custom: true });
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't read ${file.name} as a font: ${String(err?.message ?? err)}`, error: true }]);
+    }
+  }
   useEffect(() => { if (!selectMode) { setShapeTool(null); setShapeEdit(null); } }, [selectMode]);
 
   /** Drop the armed primitive at a picked spot. Added shapes sit ON the surface, cut
@@ -5739,6 +5836,8 @@ export default function App() {
     setCutMode(false);
     setPendingCut(null);
     setHoleEdit(null);
+    setTextToolState(null);
+    setTextEditId(null);
   }
   const toggleSelectTool = () => {
     if ((result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive")) !== "replicad") return;
@@ -5774,8 +5873,15 @@ export default function App() {
     standDownTools(); // resets the kind to auto, so the "off" branch needs nothing more
     if (on) { setSelectKind("point"); setSelectMode(true); }
   };
-  const toggleMeasureTool = () => setMeasureMode((on) => { const next = !on; if (next) { setSelectMode(false); setTransformMode("off"); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } else setMeasurePending(null); return next; });
-  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; setTransformMode(next); setModelSelected(next !== "off"); if (next !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); setMagnetTool(null); setScrewTool(null); } };
+  // These two predate standDownTools and each carried a hand-rolled stand-down list —
+  // which is exactly how new tools (text, once magnets) kept slipping through them.
+  const toggleMeasureTool = () => { const on = !measureMode; standDownTools(); if (on) setMeasureMode(true); };
+  const toggleTransformTool = () => { const next = transformMode === "off" ? "move" : "off"; standDownTools(); setTransformMode(next); setModelSelected(next !== "off"); };
+  const toggleTextTool = () => {
+    const on = !textToolRef.current;
+    standDownTools();
+    if (on) setTextToolState({ ...TEXT_DEFAULT });
+  };
 
   const undo = () => {
     // Time travel during a build is a race the user always loses: the in-flight
@@ -5840,6 +5946,7 @@ export default function App() {
       switch (e.key.toLowerCase()) {
         case "v": toggleModifyTool(); break; // Select folded into Modify; V still opens the editing tool
         case "n": togglePinTool(); break;
+        case "t": if (geometry) toggleTextTool(); break; // text needs a surface to land on
         case "g": toggleTransformTool(); break;
         case "m": toggleMeasureTool(); break;
         case "b": setPaintMode(!paintMode); break;
@@ -6240,6 +6347,36 @@ export default function App() {
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onKeepAside={keepVersionAside}
+        textCtl={{
+          tool: textTool,
+          set: setTextToolState,
+          toggle: toggleTextTool,
+          ghost: textGhostGeom,
+          place: placeText,
+          fontState: textFontState,
+          fontError: textFontErr,
+          fonts: [...GOOGLE_FONTS],
+          localFonts: localFontList,
+          canLocal: canListLocalFonts,
+          loadLocalFonts: async () => {
+            try { setLocalFontList((await listLocalFonts()).map((f) => f.family)); }
+            catch (err: any) { setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't list this device's fonts: ${String(err?.message ?? err)}`, error: true }]); }
+          },
+          useLocalFont: async (family: string) => {
+            try {
+              await loadLocalFont(family);
+              const target = textEditId && attachments.find((x) => x.id === textEditId)?.text ? textEditId : null;
+              if (target) void editText(target, { family, custom: true });
+              else if (textToolRef.current) setTextToolState({ ...textToolRef.current, family, custom: true });
+            } catch (err: any) { setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]); }
+          },
+          uploadFont: (f: File) => void useFontFile(f),
+          placed: attachments.flatMap((a) => (a.text ? [{ id: a.id, spec: a.text }] : [])),
+          editId: textEditId,
+          select: (id: string | null) => { setTextEditId(id); if (id) selectAttach(id); },
+          edit: (id: string, patch: Partial<TextSpec>) => void editText(id, patch),
+          remove: (id: string) => { removeAttachment(id); if (textEditId === id) setTextEditId(null); },
+        }}
         shapeCtl={{
           tool: shapeTool,
           set: (v) => { if (v) setSelectedFeature(null); setShapeTool(v); if (!v) setShapeEdit(null); },

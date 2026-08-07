@@ -116,6 +116,14 @@ export const IconShapes = ({ size = 15 }: { size?: number }) => (
     <path d="M15.3 15.1c0-1 1.3-1.8 2.9-1.8s2.9.8 2.9 1.8v4.2c0 1-1.3 1.8-2.9 1.8s-2.9-.8-2.9-1.8Z" />
   </svg>
 );
+/** Text tool: a T on its baseline — the baseline is what says "type", not "translate". */
+export const IconTextTool = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <path d="M5 6.5V4.5h14v2" />
+    <path d="M12 4.5V19" />
+    <path d="M9 19h6" />
+  </svg>
+);
 /* Edge treatments, drawn as the PROFILE you'd see looking down the edge — a square
    corner with the piece taken off it. "Round" and "Bevel" are words a designer has to
    learn; a quarter-circle next to a diagonal is the thing itself. The faint square is

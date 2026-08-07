@@ -513,6 +513,14 @@ button:disabled { cursor: default; }
 /* Shape tool: the same panel shape as Modify, with rows of typed numbers — the
    numbers ARE the feature, so they get the room. */
 .shape-fly { width: 232px; }
+/* Text tool: the words lead, everything else supports them. */
+.text-fly { width: 236px; }
+.text-fly .text-words { width: 100%; box-sizing: border-box; padding: 7px 9px; font-size: 13px; }
+.text-fly .text-family { width: 100%; box-sizing: border-box; padding: 6px 8px; font: inherit; font-size: 12.5px; color: var(--ink); background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-sm); }
+.text-fly .text-family:focus-visible { border-color: var(--accent); outline: none; }
+.text-fly .text-srcs { display: flex; align-items: center; gap: 14px; margin-top: -6px; }
+.text-fly .text-upload { position: relative; overflow: hidden; display: inline-block; cursor: pointer; }
+
 .shape-fly .fine { margin: 0; }
 /* The panel was four identical grey rows: what to drop, add or cut, the size, where
    it lands. Everything looked equally important, so nothing led. These label rows

@@ -131,7 +131,10 @@ interface Props {
   modelSelected: boolean; // draw a bounding box around the whole part
   onModelSelect: (sel: boolean) => void; // idle-mode tap on/off the part
   onModelDblClick?: () => void; // idle-mode double-click on the part (App opens Adjust)
-  attachments: { id: string; geometry: THREE.BufferGeometry; tint?: string }[]; // free-floating objects
+  /** Free-floating objects. `place` pins the initial transform (text snapped to a
+   *  face); without it new arrivals stage beside the model. A geometry swap under an
+   *  existing id (editing a placed text) keeps the mesh's transform. */
+  attachments: { id: string; geometry: THREE.BufferGeometry; tint?: string; place?: { at: [number, number, number]; quat: [number, number, number, number] } }[];
   selAttachIds: string[]; // which of them are selected (>1 → group transform)
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
@@ -197,6 +200,13 @@ interface Props {
       normal: [number, number, number];
       back: { at: [number, number, number]; normal: [number, number, number]; thickness: number } | null;
     }) => void;
+  } | null;
+  /** Text tool: a ghost of the actual text solid rides the cursor over the model,
+   *  lying on the surface (+Z along the face normal); a tap commits that spot. The
+   *  geometry is prebuilt by App (fonts load async) — null means still loading. */
+  textPlace: {
+    geometry: THREE.BufferGeometry | null;
+    onPlace: (at: [number, number, number], quat: [number, number, number, number]) => void;
   } | null;
 }
 
@@ -513,7 +523,7 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   /** Whether the scene-wide floor grid should be on. Held in a ref because the theme
@@ -532,6 +542,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   // as the hole tool: the ghost follows the cursor at frame rate, no re-renders).
   const magIx = useRef<Props["magnetPlace"]>(magnetPlace);
   magIx.current = magnetPlace;
+  const textIx = useRef<Props["textPlace"]>(textPlace);
+  textIx.current = textPlace;
+  const textGhost = useRef<THREE.Mesh | null>(null);
   const [hovered, setHovered] = useState<string | null>(null);
   const hoveredRef = useRef<string | null>(null);
   // Set by the mount effect: "the scene changed, draw again" (see render-on-demand).
@@ -1341,6 +1354,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (holeIx.current.place?.active) {
         const at = holeHover(e);
         if (at) holeIx.current.place.onPlace(at);
+        return;
+      }
+      // Text tool owns taps while armed: commit the ghost's exact pose.
+      if (textIx.current && s2.mesh) {
+        const g = textGhost.current;
+        if (g?.visible) {
+          textIx.current.onPlace(
+            [g.position.x, g.position.y, g.position.z],
+            [g.quaternion.x, g.quaternion.y, g.quaternion.z, g.quaternion.w],
+          );
+        }
         return;
       }
       // Magnet tool owns taps on the model: the ghost's spot becomes a pocket. It also
@@ -2176,6 +2200,25 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         }
         return;
       }
+      // Text tool: the text ghost lies on whatever face is under the cursor, +Z out.
+      if (textIx.current) {
+        const s3 = st.current;
+        const g = textGhost.current;
+        if (s3?.mesh && g) {
+          const rect2 = canvasRect();
+          rc.setFromCamera(new THREE.Vector2(((e.clientX - rect2.left) / rect2.width) * 2 - 1, -((e.clientY - rect2.top) / rect2.height) * 2 + 1), camera);
+          const hit = rc.intersectObject(s3.mesh, false)[0];
+          if (hit?.face) {
+            const wn = hit.face.normal.clone().transformDirection(s3.mesh.matrixWorld).normalize();
+            g.position.copy(hit.point).addScaledVector(wn, 0.02); // a hair proud — no z-fight
+            g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), wn);
+            g.visible = true;
+          } else g.visible = false;
+          renderer.domElement.style.cursor = hit?.face ? "crosshair" : "";
+          invalidateRef.current(1);
+        }
+        return;
+      }
       // Anchor hover works IN transform mode (that's when the box shows): resize cursor + grow.
       if (s2.selBox && !s2.transforming) {
         const r0 = canvasRect();
@@ -2589,6 +2632,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       }
     }
     for (const a of attachments) {
+      const existing = s.attachMap.get(a.id);
+      if (existing) {
+        // Same id, new geometry = an in-place edit (retyping a placed text). The mesh
+        // keeps its transform — the whole point of editing over re-placing.
+        if (existing.geometry !== a.geometry) existing.geometry = a.geometry;
+        continue;
+      }
       if (s.attachMap.has(a.id)) continue;
       // Separated model parts keep the model's grey (tint) — only true foreign objects
       // (imports, logos, pasted copies) get the distinguishing teal.
@@ -2602,7 +2652,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         s.mesh.geometry.computeBoundingBox();
         z = s.mesh.geometry.boundingBox!.max.z;
       }
-      m.position.set(s.attachMap.size * 8, 0, z - (a.geometry.boundingBox!.min.z ?? 0) + 0.01);
+      if (a.place) {
+        // Text placed on a face arrives with its pose decided — put it exactly there.
+        m.position.set(...a.place.at);
+        m.quaternion.set(...a.place.quat);
+      } else m.position.set(s.attachMap.size * 8, 0, z - (a.geometry.boundingBox!.min.z ?? 0) + 0.01);
       s.scene.add(m);
       s.attachMap.set(a.id, m);
     }
@@ -3338,6 +3392,29 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     cur.cyl = cyl;
     cur.ring = ring;
   }, [magnetPlace?.diameter, magnetPlace?.depth, !!magnetPlace]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Text tool ghost: the REAL text solid, semi-transparent, riding the cursor. Rebuilt
+  // whenever App hands over new geometry (font loaded, spec edited) — the mesh itself
+  // is cheap, the geometry was the expensive part and App owns that.
+  useEffect(() => {
+    const s = st.current;
+    if (!s) return;
+    if (textGhost.current) {
+      s.scene.remove(textGhost.current);
+      (textGhost.current.material as THREE.Material).dispose();
+      textGhost.current = null;
+    }
+    if (!textPlace?.geometry) { invalidateRef.current(2); return; }
+    const m = new THREE.Mesh(
+      textPlace.geometry,
+      new THREE.MeshBasicMaterial({ color: 0x498a6f, transparent: true, opacity: 0.55, depthTest: false }),
+    );
+    m.renderOrder = 4;
+    m.visible = false;
+    s.scene.add(m);
+    textGhost.current = m;
+    invalidateRef.current(2);
+  }, [textPlace?.geometry, !!textPlace]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Gizmo snapping (grid mm / degrees) from the toolbar's magnet menu. 0 = free.
   // Holding SHIFT overrides rotation to right-angle steps (90/180/270/360) for the

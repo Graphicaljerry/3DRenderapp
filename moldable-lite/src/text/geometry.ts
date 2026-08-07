@@ -40,7 +40,9 @@ export function buildTextGeometry(font: Font, spec: TextSpec): THREE.BufferGeome
   // bevelOffset so thin strokes don't vanish at print size. Clamp bevel to the depth.
   const bevel = Math.max(0, Math.min(spec.bevel, spec.depth / 2 - 0.05));
   const g = new THREE.ExtrudeGeometry(shapes, {
-    depth: spec.depth - (bevel > 0 ? bevel : 0),
+    // ExtrudeGeometry adds bevelThickness at BOTH z-ends, so the straight walls must
+    // give up twice the bevel or "Deep: 6" measures 6.8 — depth here means the TOTAL.
+    depth: spec.depth - (bevel > 0 ? 2 * bevel : 0),
     bevelEnabled: bevel > 0,
     bevelThickness: bevel,
     bevelSize: bevel,

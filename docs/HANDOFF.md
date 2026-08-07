@@ -965,9 +965,22 @@ later tool); the multi-select dedup key was centre-only, so a face and the edge 
 bounding it collided; and `facesCtl.directOp`'s implementation took `(size)` while its
 declared type was `(type, size)`.
 
-Still open from this batch: **the Text tool UI**. The font and geometry pipeline is shipped
-and measured (`src/text/`, 112 ms / 34 ms / 6 ms) but there is no Text rail tool, hover
-preview, snap-to-surface placement, transform handles or layer editing yet.
+**Text tool shipped (build 371).** Rail tool `Text` (key T, next to Add Logo) on the
+`src/text/` pipeline: type words → pick a font (Google list, a .ttf/.otf/.woff2 file via
+`registerFontBytes`, or device fonts via `queryLocalFonts` where the browser allows) →
+the built solid rides the cursor as a ghost (`textPlace` prop in Viewer.tsx, same
+pattern as `magnetPlace`) → click pins it ON the face (+Z along the normal). It lands as
+an ATTACHMENT carrying its `TextSpec` (`attachments[].text` + `place`), so it shows in
+Objects, moves with Transform, and stays editable forever — retyping words/font/sizes
+swaps geometry under the same id without moving the mesh (the attachments effect in
+Viewer.tsx handles same-id geometry swaps now). Like all attachments it is session-only:
+not persisted, outside undo history. `buildTextGeometry` fix: ExtrudeGeometry bevels
+BOTH z-ends, so depth now means TOTAL height. Sandbox note: Chromium can't reach
+fonts.googleapis.com — the probe (`texttool.mjs`) node-fetches and `page.route`-serves it.
+
+Also: **Move (Transform) now leads the rail** — first tool, the universal convention —
+and `toggleMeasureTool`/`toggleTransformTool` were rewired through `standDownTools`
+(each had a hand-rolled stand-down list that new tools kept slipping through).
 
 ## Build 360 — Shape tool (primitive booleans that stay parametric)
 

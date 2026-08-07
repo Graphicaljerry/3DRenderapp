@@ -1134,6 +1134,12 @@ button:disabled { cursor: default; }
 .fx-slider b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 /* Which tabs are carrying something, readable without switching to them. */
 .fx-dot { width: 5px; height: 5px; margin-left: 5px; border-radius: 50%; background: var(--accent); flex: none; }
+/* Selection vs application are different states now: .on is the tile you're LOOKING at,
+   .applied is the one actually on the model — marked with the same dot the tab wears. */
+.fx-grid button { position: relative; }
+.fx-grid button.applied::after { content: ""; position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.fx-actions { display: flex; gap: 6px; }
+.fx-actions .primary { flex: 1; }
 .pattern-fly .fine { margin: 0; line-height: 1.45; }
 .fx-busy { color: var(--accent-d); }
 /* A treatment is live but the panel is shut — the rail says so without lighting up as

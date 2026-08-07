@@ -8,7 +8,7 @@ import { geometryToSTL } from "./print/stl";
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, ShowcaseScene, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfFxSlot } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, FX_LABEL, isRib, type SurfFxSlot } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import type { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp, SolidOp } from "./engine/types";
@@ -2260,6 +2260,9 @@ export default function App() {
       ops: res.source.kind === "code" ? res.source.ops : undefined,
       importFile: res.source.kind === "code" ? importFileRef.current ?? undefined : undefined,
       importKind: res.source.kind === "code" && importFileRef.current ? importKindRef.current : undefined,
+      // A model edit while a pattern is on keeps the pattern — the new version must say
+      // so, or undoing PAST it would strip the surface along with the edit.
+      surfFx: fxForSnap(),
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
       glb: res.glb,
@@ -2382,6 +2385,7 @@ export default function App() {
       importFile: importFileRef.current ?? undefined,
       importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: res.dims,
+      surfFx: fxForSnap(),
     };
     const next = coalesce ? replaceHeadVersion(proj, snap) : appendVersion(proj, snap);
     next.chat = projectRef.current?.chat ?? proj.chat;
@@ -2708,6 +2712,7 @@ export default function App() {
       importFile: importFileRef.current ?? undefined,
       importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: result.dims,
+      surfFx: fxForSnap(),
     });
     persist(next);
     setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
@@ -4452,6 +4457,10 @@ export default function App() {
   // and the base is exactly what it was; Adjust still works and the fx re-applies on
   // top of every rebuild. Works on CAD and mesh models alike (it's pure triangles).
   const [surfFx, setSurfFx] = useState<{ pattern: SurfFxSlot | null; texture: SurfFxSlot | null }>({ pattern: null, texture: null });
+  const surfFxRef = useRef(surfFx);
+  surfFxRef.current = surfFx;
+  /** The live fx for a version snapshot — undefined when plain, so old records stay small. */
+  const fxForSnap = () => (surfFxRef.current.pattern || surfFxRef.current.texture ? { ...surfFxRef.current } : undefined);
   const [fxBusy, setFxBusy] = useState(false);
   const fxCache = useRef<{ key: string; geom: THREE.BufferGeometry } | null>(null);
   const fxGen = useRef(0);
@@ -4525,6 +4534,38 @@ export default function App() {
       }
     })();
   }, [result, surfFx, geometry]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Apply/remove a surface treatment AS A HISTORY STEP. The model fields are copied
+   *  from the head version unchanged — only the surface spec moves — so Undo takes off
+   *  exactly the pattern you just applied and nothing else, and Redo puts it back. */
+  function commitSurfFx(slot: "pattern" | "texture", v: SurfFxSlot | null) {
+    const next = { ...surfFxRef.current, [slot]: v };
+    setSurfFx(next);
+    const proj = projectRef.current;
+    const head = proj?.versions[headIndex(proj)];
+    if (!proj || !head) return; // no history yet — nothing to record against
+    const summary = v
+      ? `${FX_LABEL[v.kind]} ${slot === "pattern" ? (isRib(v.kind) ? "ribs" : "pattern") : "texture"} — ${v.scale} mm, ${Math.abs(v.depth)} mm ${v.depth < 0 ? "carved" : "raised"}`
+      : `Took the ${slot} off`;
+    const snap = appendVersion(proj, {
+      engine: head.engine,
+      summary,
+      code: head.code,
+      params: head.params,
+      ops: head.ops,
+      importFile: head.importFile,
+      importKind: head.importKind,
+      spec: head.spec,
+      dims: head.dims,
+      glb: head.glb,
+      meshXform: head.meshXform,
+      genSource: head.genSource,
+      splitPieces: head.splitPieces,
+      surfFx: next.pattern || next.texture ? next : undefined,
+    });
+    persist(snap);
+    stampHeadThumb();
+  }
 
   /** Inspector edit: uniform-scale the part so the given axis hits `target` mm. */
   function scaleToDim(axis: "x" | "y" | "z", target: number) {
@@ -5796,6 +5837,15 @@ export default function App() {
   async function rebuildHead(next: Project) {
     seedHistory(next.engine, next.code, next.spec);
     clearImage();
+    // Every version knows its own surface: restoring one shows EXACTLY what it looked
+    // like — patterned if it was patterned, plain if it was plain. Before this, the fx
+    // was free-floating state that chased every rebuild, so restoring an old version
+    // silently re-wrapped it in whatever pattern happened to be on.
+    const hvFx = next.versions[headIndex(next)]?.surfFx;
+    setSurfFx({
+      pattern: (hvFx?.pattern as SurfFxSlot | null) ?? null,
+      texture: (hvFx?.texture as SurfFxSlot | null) ?? null,
+    });
     if (next.engine === "generative" && next.glb) {
       const g = await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
       // A split version carries its piece layout — revive the per-piece export list
@@ -6143,6 +6193,7 @@ export default function App() {
     setSeparated(false);
     setAttachments([]);
     setSelAttachIds([]);
+    setSurfFx({ pattern: null, texture: null }); // a fresh part starts plain
     setActivePinId(null);
     setSelectMode(false);
     setSelectedFeature(null);
@@ -6576,7 +6627,7 @@ export default function App() {
         modelBadge={modelBadge}
         surfaceCtl={{
           fx: surfFx,
-          set: (slot, v) => setSurfFx((s) => ({ ...s, [slot]: v })),
+          set: commitSurfFx,
           busy: fxBusy,
         }}
         printer={printer}

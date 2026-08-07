@@ -1087,6 +1087,29 @@ Probe: `ribs.mjs` shoots all six on a round body and reports triangles/watertigh
 `ribdiag2.mjs` counts flipped triangles. Re-run `plook.mjs` after ANY change to
 `detail` — facets show up in pixels long before they show up in a number.
 
+**Pattern tool: deliberate Apply + real history (build 375).** Two behaviour changes,
+both from Jerry's report:
+
+1. *The panel edits a DRAFT.* Tile clicks and sliders stage; nothing touches the model
+   until **Apply** (label becomes **Update** when a slot is already on; **Remove** sits
+   beside it). Browsing tiles used to fire a multi-second full-surface recompute per
+   click. The applied tile wears a dot distinct from the `.on` selection highlight.
+2. *Applying a surface treatment is a history step.* `Version`/`Snapshot` gained
+   `surfFx` (store/types.ts `SurfFxSnap` — structural twin of `SurfFxSlot`, the store
+   must not import engine types). `commitSurfFx()` in App.tsx appends a version copying
+   the head's model fields with only the fx spec changed, so Undo takes off exactly the
+   pattern and Redo puts it back; `rebuildHead` sets `surfFx` from the target version
+   (absent = plain), so restore/undo/redo/reopen show each version EXACTLY as it was —
+   the old free-floating fx state silently re-wrapped anything you restored. Model-edit
+   snapshots (applyResult, the Adjust coalesce path, saveParamsVersion) carry
+   `fxForSnap()` so a pattern survives its own timeline. Bonus: since the fx is a spec
+   in the version, patterns now survive reload/reopen.
+
+Still OUTSIDE undo, for honesty: text/logo layers and their transforms (session-only
+attachments), measurements, pins. Paint has its own undo layered before versions in
+`undo()`. Probe: `fxhistory.mjs` — browsing is free, Apply = one step, Undo exact,
+restore never re-wraps.
+
 ## Build 360 — Shape tool (primitive booleans that stay parametric)
 
 New `SolidOp` in the op chain (`engine/types.ts`, executed in `worker/cad.worker.ts`):

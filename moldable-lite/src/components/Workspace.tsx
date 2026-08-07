@@ -744,7 +744,7 @@ function MaterialMenu({ appearance, setAppearance }: { appearance: { color: stri
  *  exactly as it was and Adjust keeps working underneath. */
 function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
   const [tab, setTab] = useState<"pattern" | "texture">("pattern");
-  const slot = ctl.fx[tab];
+  const applied = ctl.fx[tab];
   // The Pattern tab holds two families that behave differently enough to label: ribbed
   // ones wrap around the upright axis (and leave the rim flat), all-over ones are
   // stamped across the whole skin. Two named groups beat one anonymous grid of twelve.
@@ -755,29 +755,33 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           { label: "All over", note: "covers every face", kinds: PATTERN_KINDS },
         ]
       : [{ label: "", note: "", kinds: TEXTURE_KINDS }];
-  // Sliders write on every pixel of the drag; each write is a full re-displace. Show
-  // the drag immediately, commit it a beat after the hand stops.
-  const [draft, setDraft] = useState<{ scale: number; depth: number } | null>(null);
-  const timer = useRef<number | null>(null);
-  useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current); }, []);
-  const scale = draft?.scale ?? slot?.scale ?? 4;
-  const depth = Math.abs(draft?.depth ?? slot?.depth ?? 0.6);
-  const raised = (draft?.depth ?? slot?.depth ?? 1) >= 0;
-  const commit = (next: { scale: number; depth: number }) => {
-    setDraft(next);
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => { setDraft(null); if (slot) ctl.set(tab, { ...slot, ...next }); }, 260);
-  };
+  // Everything in the panel edits a DRAFT; nothing touches the model until Apply.
+  // Browsing tiles used to recompute the whole surface on every click — a multi-second
+  // job on a big part, fired while the user was still window-shopping — and each one
+  // landed in history. Now trying things is free and Apply is one deliberate step.
+  const [draft, setDraft] = useState<SurfFxSlot | null>(applied);
+  // Each tab owns its own draft; flipping tabs (or an outside change like Undo)
+  // reseats the draft on what that tab actually has applied.
+  const seed = `${tab}|${JSON.stringify(applied)}`;
+  const seeded = useRef(seed);
+  if (seeded.current !== seed) {
+    seeded.current = seed;
+    setDraft(applied);
+  }
+  const scale = draft?.scale ?? 4;
+  const depth = Math.abs(draft?.depth ?? 0.6);
+  const raised = (draft?.depth ?? 1) >= 0;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(applied);
   const other = tab === "pattern" ? ctl.fx.texture : ctl.fx.pattern;
   return (
     <div className="rail-fly pattern-fly">
-      {/* Both slots stay armed while you flip tabs — that's how you stack a knurl
+      {/* Both slots stay applied while you flip tabs — that's how you stack a knurl
           under scales without a "merge" button to hunt for. */}
       <div className="seg sm mode-seg" role="radiogroup" aria-label="Kind of surface treatment">
         {(["pattern", "texture"] as const).map((t) => (
           <button key={t} className={tab === t ? "on" : ""} role="radio" aria-checked={tab === t}
-            title={t === "pattern" ? "Decorative relief — scales, chevrons, studs" : "Micro surface feel — grip, roughness, hiding layer lines"}
-            onClick={() => { setDraft(null); setTab(t); }}>
+            title={t === "pattern" ? "Decorative relief — ribs, scales, studs" : "Micro surface feel — grip, roughness, hiding layer lines"}
+            onClick={() => setTab(t)}>
             <span className="btn-label">{t === "pattern" ? "Pattern" : "Texture"}</span>
             {ctl.fx[t] && <i className="fx-dot" aria-label="on" />}
           </button>
@@ -788,16 +792,17 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           {g.label && <div className="shape-lbl"><span>{g.label}</span><span className="shape-unit">{g.note}</span></div>}
           <div className="fx-grid" role="radiogroup" aria-label={g.label || (tab === "pattern" ? "Pattern" : "Texture")}>
             {g.kinds.map((k) => (
-              <button key={k} role="radio" aria-checked={slot?.kind === k} className={slot?.kind === k ? "on" : ""}
+              <button key={k} role="radio" aria-checked={draft?.kind === k}
+                className={`${draft?.kind === k ? "on" : ""}${applied?.kind === k ? " applied" : ""}`}
                 title={FX_TIP[k]}
                 onClick={() => {
-                  setDraft(null);
+                  if (draft?.kind === k) { setDraft(null); return; }
                   // A rib wants a finer pitch and more relief than a stamped pattern, so
                   // switching family carries its own starting proportions rather than
                   // inheriting numbers that were right for the other one.
-                  const keep = slot && isRib(slot.kind) === isRib(k);
+                  const keep = draft && isRib(draft.kind) === isRib(k);
                   const st = keep ? { scale, depth } : FX_START(k);
-                  ctl.set(tab, slot?.kind === k ? null : { kind: k, scale: st.scale, depth: raised ? st.depth : -st.depth });
+                  setDraft({ kind: k, scale: st.scale, depth: raised ? st.depth : -st.depth });
                 }}>
                 <PatternSwatch kind={k} />
                 <span>{FX_LABEL[k]}</span>
@@ -806,35 +811,47 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           </div>
         </div>
       ))}
-      {slot ? (
+      {draft && (
         <>
           <label className="fx-slider">
-            <span>{isRib(slot.kind) ? "Rib pitch" : "Size"} <b>{scale} mm</b></span>
+            <span>{isRib(draft.kind) ? "Rib pitch" : "Size"} <b>{scale} mm</b></span>
             <input type="range" min={1.5} max={20} step={0.5} value={scale} aria-label="Pattern size"
-              onChange={(e) => commit({ scale: parseFloat(e.target.value), depth: raised ? depth : -depth })} />
+              onChange={(e) => setDraft({ ...draft, scale: parseFloat(e.target.value) })} />
           </label>
           <label className="fx-slider">
             <span>Relief <b>{depth} mm</b></span>
             <input type="range" min={0.1} max={3} step={0.1} value={depth} aria-label="Pattern relief"
-              onChange={(e) => { const d = parseFloat(e.target.value); commit({ scale, depth: raised ? d : -d }); }} />
+              onChange={(e) => { const d = parseFloat(e.target.value); setDraft({ ...draft, depth: raised ? d : -d }); }} />
           </label>
           <div className="seg sm mode-seg" role="radiogroup" aria-label="Direction">
             <button className={raised ? "on" : ""} role="radio" aria-checked={raised} title="The pattern stands out from the surface"
-              onClick={() => ctl.set(tab, { ...slot, depth: Math.abs(slot.depth) })}>Raised</button>
+              onClick={() => setDraft({ ...draft, depth: Math.abs(draft.depth) })}>Raised</button>
             <button className={!raised ? "on" : ""} role="radio" aria-checked={!raised} title="The pattern is carved into the surface"
-              onClick={() => ctl.set(tab, { ...slot, depth: -Math.abs(slot.depth) })}>Carved</button>
+              onClick={() => setDraft({ ...draft, depth: -Math.abs(draft.depth) })}>Carved</button>
           </div>
-          <button className="ghost sm" onClick={() => ctl.set(tab, null)}
-            title={`Take the ${tab} back off — the surface returns to exactly what it was`}>
-            Remove {tab}
-          </button>
         </>
-      ) : (
-        <p className="fine">Pick one — it wraps the whole outer shell. Works on Precise and mesh models alike.</p>
+      )}
+      {(dirty || applied) && (
+        <div className="fx-actions">
+          <button className="primary sm" disabled={!dirty || ctl.busy}
+            title="Put this on the model — one History step, one Undo to take it back off"
+            onClick={() => ctl.set(tab, draft)}>
+            {ctl.busy ? "Working…" : applied ? (draft ? "Update" : "Remove") : "Apply"}
+          </button>
+          {applied && draft && (
+            <button className="ghost sm" disabled={ctl.busy} onClick={() => ctl.set(tab, null)}
+              title={`Take the ${tab} back off — the surface returns to exactly what it was`}>
+              Remove
+            </button>
+          )}
+        </div>
+      )}
+      {!draft && !applied && (
+        <p className="fine">Pick one, size it, then Apply. It wraps the outer shell — Precise and mesh models alike.</p>
       )}
       {ctl.busy && <p className="fine fx-busy">Wrapping the surface…</p>}
-      {slot && other && !ctl.busy && (
-        <p className="fine">Both on: {FX_LABEL[other.kind]} underneath, {FX_LABEL[slot.kind]} riding over it.</p>
+      {applied && other && !ctl.busy && (
+        <p className="fine">Both on: {FX_LABEL[other.kind]} underneath, {FX_LABEL[applied.kind]} riding over it.</p>
       )}
       {(ctl.fx.pattern || ctl.fx.texture) && !ctl.busy && (
         <p className="fine">STL, 3MF and OBJ carry this. STEP stays the smooth original — it has no way to hold a million facets.</p>

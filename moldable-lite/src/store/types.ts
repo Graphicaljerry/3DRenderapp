@@ -46,7 +46,16 @@ export interface Version {
    *  [vertex count, colour, dims] per piece is enough to reconstruct the per-piece
    *  export list after undo/redo/reopen without re-running the CSG. */
   splitPieces?: { n: number; color: string; dims: { x: number; y: number; z: number }; plate?: number }[];
+  /** Surface pattern/texture live at this snapshot. The treatment is a SPEC — the
+   *  displaced mesh recomputes from it — so undo/redo/restore replay the exact surface
+   *  each version had, and applying one is itself an undoable step. Absent = plain. */
+  surfFx?: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null };
 }
+
+/** One surface treatment, storable: which pattern, its pitch, its relief (negative =
+ *  carved). Structural twin of the engine's SurfFxSlot — the store must not import
+ *  engine types. */
+export interface SurfFxSnap { kind: string; scale: number; depth: number }
 
 export interface Project {
   id: string;

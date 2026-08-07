@@ -1103,6 +1103,26 @@ export default function App() {
     addAttachment(g, `${c.name} copy`);
   }
   const duplicateObject = (target: { kind: "model" } | { kind: "attachment"; id: string }) => pasteObject(copyObject(target));
+  /** Freeze the CURRENT model as a named copy on a NEW build plate — the
+   *  try-a-variant flow: the next chat request reworks the live model while this
+   *  version stays visible beside it (a smaller speaker box next to the original,
+   *  Bambu-style). The copy is a plain mesh: movable, per-plate, exported with its
+   *  plate — not parametrically editable; the live model keeps the History. */
+  function keepVersionAside() {
+    const snap = copyObject({ kind: "model" });
+    if (!snap) return;
+    const pos = snap.pos.slice();
+    // Land it BESIDE the live model, not on top: its own width plus a hand's gap.
+    const shift = (dims?.x ?? 60) + 25;
+    for (let i = 0; i < pos.length; i += 3) pos[i] += shift;
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+    g.computeVertexNormals();
+    const v = project?.versions.length ?? 0;
+    const id = addAttachment(g, `${snap.name} · v${v}`);
+    assignPlate(id, addPlate());
+    explainOnce("keep-aside", `Kept **${snap.name} · v${v}** on its own build plate, beside the live model. Now ask for the variant — "make it smaller with one 4-inch hole", say — and the live model changes while the kept copy stays put. The Plates bar (bottom of the canvas) switches between them or shows all; each plate exports separately from Export.`);
+  }
   const removeAttachment = (id: string) => {
     setAttachments((a) => a.filter((x) => x.id !== id));
     setSelAttachIds((sids) => {
@@ -5741,6 +5761,7 @@ export default function App() {
         separatedKind={separated ? separatedRef.current?.result.kind ?? null : null}
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
+        onKeepAside={keepVersionAside}
         onCheckFit={(ids) => void checkFit(ids)}
         onMakeFit={(ids) => void makeItFit(ids)}
         onDropToPlate={dropToPlate}

@@ -1724,6 +1724,7 @@ interface Props {
   separatedKind: EngineKind | null; // engine kind of the model the split came from (Select shows disabled, not gone)
   onSeparateParts: () => void;
   onRegroup: () => void;
+  onKeepAside: () => void; // freeze the current model on a new plate, then iterate
   onCheckFit: (ids: string[]) => void;
   onMakeFit: (ids: string[]) => void;
   onDropToPlate: (ids: string[]) => void;
@@ -2107,6 +2108,12 @@ export function Workspace(p: Props) {
                     {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
                     {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
                   </div>
+                  {p.geometry && (
+                    <button className="ghost sm lp-keep" title="Freeze a copy of the model on its own build plate, beside the live one — then ask for the next variant without losing this version"
+                      onClick={p.onKeepAside}>
+                      Keep this version aside
+                    </button>
+                  )}
                   {(() => {
                     const sepSet = new Set(p.separatedIds);
                     const grouped = p.attachments.filter((a) => sepSet.has(a.id));
@@ -2775,6 +2782,7 @@ export function Workspace(p: Props) {
                         ) : p.partCount > 1 ? (
                           <Item label={`Separate ${p.partCount} parts`} hint="Move each solid on its own" onClick={p.onSeparateParts} />
                         ) : null}
+                        <Item label="Keep this version aside" hint="A copy on its own plate — then iterate the live model" onClick={p.onKeepAside} />
                         {t.normal && (
                           <Item label="This face on the plate" hint="Rotate so the clicked face sits flat" onClick={() => p.printPrep.orient.face(t.normal!)} />
                         )}

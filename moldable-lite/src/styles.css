@@ -2427,3 +2427,6 @@ details.guide { margin-top: 10px; }
   .dock-item { min-height: 44px; }
   .dock-list.icons .dock-item { padding: 11px 0; }
 }
+
+/* Objects panel: the keep-a-version action sits under the model row. */
+.lp-keep { margin: 2px 10px 8px; align-self: flex-start; }

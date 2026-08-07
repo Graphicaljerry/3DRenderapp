@@ -376,6 +376,39 @@ function buildPlate(bed: { x: number; y: number; z?: number }, theme: "light" | 
   );
   border.position.z = 0.02;
   g.add(border);
+  // The bed's own grid, drawn ONLY over the plate — this is what makes it read as a
+  // machine bed instead of ruled paper. The scene-wide GridHelper it replaces ran 300 mm
+  // past a 256 mm bed and lit its two centre lines brighter than the rest, so the
+  // strongest marks on screen were a giant cross through open space.
+  //
+  // Slicers do the opposite: an even 10 mm weave you can measure against without
+  // looking at it, a slightly firmer line every 50 mm to count by, and the plate's own
+  // outline as the brightest thing. Two draw calls, both LineSegments.
+  {
+    const minor: number[] = [], major: number[] = [];
+    const hx = bed.x / 2, hy = bed.y / 2;
+    const line = (a: number[], p: number[]) => a.push(...p);
+    for (let x = -Math.floor(hx / 10) * 10; x <= hx + 0.001; x += 10) {
+      line(Math.abs(x) % 50 < 0.001 ? major : minor, [x, -hy, 0, x, hy, 0]);
+    }
+    for (let y = -Math.floor(hy / 10) * 10; y <= hy + 0.001; y += 10) {
+      line(Math.abs(y) % 50 < 0.001 ? major : minor, [-hx, y, 0, hx, y, 0]);
+    }
+    // Both weaves are the SAME hue as the plate, a step off its fill — contrast carries
+    // the 50 mm rhythm, not colour, so nothing competes with the part standing on it.
+    const weave = (pts: number[], opacity: number) => {
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+      const m = new THREE.LineBasicMaterial({ color: c.edge, transparent: true, opacity });
+      const seg = new THREE.LineSegments(geo, m);
+      seg.position.z = 0.01; // above the slab, below the perimeter
+      seg.name = "plateGrid"; // the grid-opacity setting finds it by name
+      seg.userData.baseOpacity = opacity;
+      return seg;
+    };
+    if (minor.length) g.add(weave(minor, 0.22));
+    if (major.length) g.add(weave(major, 0.42));
+  }
   // Build-VOLUME cage, slicer-style: faint corner posts up to the printer's max
   // height plus a top rim, so "too tall" is visible the same way "too wide" is.
   if (bed.z && bed.z > 0) {
@@ -483,6 +516,9 @@ interface Internals {
 export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
+  /** Whether the scene-wide floor grid should be on. Held in a ref because the theme
+   *  effect REPLACES the GridHelper object and has to restore the state it was in. */
+  const gridVisibleRef = useRef(false);
   const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
   cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
@@ -2756,14 +2792,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const s = st.current;
     if (!s) return;
-    s.grid.visible = !showcase;
+    // The plate carries its own bed-sized grid now, so the scene-wide one is only the
+    // floor for when the plate is OFF. Two grids at once was the checkerboard.
+    gridVisibleRef.current = !showcase && !showPlate;
+    s.grid.visible = gridVisibleRef.current;
     s.plate.visible = showPlate && !showcase;
     if (s.dims) s.dims.visible = !showcase && showDims;
     if (s.pins) s.pins.visible = !showcase;
     s.measures.visible = !showcase;
     s.controls.autoRotate = showcase;
     s.controls.autoRotateSpeed = 1.4;
-  }, [showcase, showDims]);
+  }, [showcase, showDims, showPlate]); // showPlate reached in here but wasn't a dep — the floor grid stayed on under the plate
 
   // Display material: filament colour + finish, and the baked texture when the model
   // ships painted (AI meshes). Split-piece vertex colours always win over both.
@@ -2889,8 +2928,16 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     s.scene.remove(s.grid);
     s.grid.geometry.dispose();
     (Array.isArray(s.grid.material) ? s.grid.material : [s.grid.material]).forEach((m) => m.dispose());
-    s.grid = new THREE.GridHelper(300, 30, ...THEME_GRID[theme]);
+    // Both colours the same: GridHelper paints its two CENTRE lines in the first and
+    // everything else in the second, so a brighter first colour drew a giant cross
+    // through the middle of the floor — the single loudest mark on the stage, and the
+    // thing that made this read as ruled paper rather than a workshop floor.
+    s.grid = new THREE.GridHelper(300, 30, THEME_GRID[theme][1], THEME_GRID[theme][1]);
     s.grid.rotation.x = Math.PI / 2;
+    // A fresh object defaults to visible; the effect that owns visibility keys off
+    // showcase/showPlate and won't re-run just because the theme changed, so the
+    // replacement has to inherit the state its predecessor was in.
+    s.grid.visible = gridVisibleRef.current;
     s.scene.add(s.grid);
   }, [theme]);
 
@@ -3029,7 +3076,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     m.transparent = gridOpacity < 1;
     m.opacity = gridOpacity;
     m.needsUpdate = true;
-  }, [gridOpacity, theme]);
+    // …and the plate's own weave, which is what's actually on screen while the build
+    // plate is shown. Each line set scales from the opacity it was authored with, so
+    // the 10 mm / 50 mm relationship survives the slider.
+    s.plate.traverse((o) => {
+      if (o.name !== "plateGrid") return;
+      const pm = (o as THREE.LineSegments).material as THREE.LineBasicMaterial;
+      pm.opacity = (o.userData.baseOpacity ?? 1) * gridOpacity;
+      pm.transparent = true;
+      pm.needsUpdate = true;
+    });
+  }, [gridOpacity, theme, showPlate, bed.x, bed.y]);
 
   useEffect(() => {
     const s = st.current;

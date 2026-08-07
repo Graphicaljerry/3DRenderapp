@@ -3497,7 +3497,9 @@ export default function App() {
     // recess real prints leave, so mating magnets actually touch. Persisted: a
     // printer's parts want the same seat every time.
     const seat = ((): number => { const v = parseFloat(localStorage.getItem("moldable_magnet_seat") ?? ""); return v === 0 || v === 0.1 || v === 0.2 ? v : 0.1; })();
-    setMagnetTool({ size: MAGNET_SIZES[5], fit: "glue", seat, pair: false, snap: 1, placed: [] });
+    // MAGNET_SIZES[4] is 8×2 — the disc most people already have a bag of, and thin
+    // enough that its pocket doesn't eat a 3 mm wall. (Was [5], the 8×3.)
+    setMagnetTool({ size: MAGNET_SIZES[4], fit: "glue", seat, pair: false, snap: 1, placed: [] });
   }
   // ---- Non-destructive hole editing -------------------------------------------
   // Magnet pockets and screw holes are OPS in the parametric chain, never baked —

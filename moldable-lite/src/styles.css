@@ -49,6 +49,12 @@
   --shadow-sm: 0 1px 2px rgba(18,40,36,.05), 0 1px 1px rgba(18,40,36,.04);
   --shadow-md: 0 2px 4px rgba(18,40,36,.05), 0 6px 16px rgba(18,40,36,.07);
   --shadow-lg: 0 6px 14px rgba(18,40,36,.07), 0 18px 40px rgba(18,40,36,.10);
+  /* The two floating canvas pills share this. A single big downward drop (the old
+     `0 17px 14px -4px`) grounds a 51px-tall bar convincingly and then hangs off the
+     bottom cap of a 500px-tall rail — which is why the two looked unrelated even
+     though their CSS was already identical. The ambient pass sits close to the edge
+     and is size-independent, so it reads the same on both; the key pass adds float. */
+  --shadow-float: 0 2px 5px rgba(18,40,36,.09), 0 14px 22px -8px rgba(18,40,36,.14);
   /* Sharp, exact radius scale. */
   /* The whole radius scale — four tiers + pill, assigned by element role
      (xs: swatches/inline chips · sm: small controls · md: buttons/panels ·
@@ -136,6 +142,7 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
   --shadow-sm: none;
   --shadow-md: 0 4px 16px rgba(0,0,0,.45);
   --shadow-lg: 0 16px 44px rgba(0,0,0,.55);
+  --shadow-float: 0 2px 6px rgba(0,0,0,.38), 0 14px 24px -10px rgba(0,0,0,.5);
 }
 /* ---- Scrollbars: thin, rounded, quiet — matched to the theme instead of the OS
    default chrome. Standard properties for Firefox, ::-webkit-* for Safari/Chrome. ---- */
@@ -473,7 +480,7 @@ button:disabled { cursor: default; }
 .cut-fly .fine { margin: 0; }
 /* Modify flyout: the armed op, its size, and what the next click will do. A real
    panel (not a bare seg row) because it stacks controls over two lines of hint. */
-.modify-fly { width: 236px; gap: 7px; } /* three named tiles + the applied-edges list */
+.modify-fly { width: 236px; } /* three named tiles + the applied-edges list */
 .modify-fly .fine { margin: 0; }
 .modify-fly .pocket-pick { align-items: center; gap: 6px; }
 .modify-fly .pocket-pick svg { flex: none; color: var(--subt); }
@@ -502,7 +509,7 @@ button:disabled { cursor: default; }
 .modify-stop { color: var(--warn); font-weight: 500; }
 /* Shape tool: the same panel shape as Modify, with rows of typed numbers — the
    numbers ARE the feature, so they get the room. */
-.shape-fly { width: 232px; gap: 7px; }
+.shape-fly { width: 232px; }
 .shape-fly .fine { margin: 0; }
 /* The panel was four identical grey rows: what to drop, add or cut, the size, where
    it lands. Everything looked equally important, so nothing led. These label rows
@@ -623,7 +630,10 @@ button:disabled { cursor: default; }
    top-left corner. The tab strip that used to sit there duplicated the Inspector's
    section list, so it's gone — one pill, one row. */
 .viewer-head .viewer-tools { align-items: stretch; }
-.viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 32px; box-sizing: border-box; }
+/* 39px, matching the rail's button box exactly. Both pills are now
+   1px border + 5px padding + 39px control + 5px padding + 1px border = 51px across
+   their short axis, so neither reads as the skinny one. */
+.viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 39px; box-sizing: border-box; }
 .viewer-head .viewer-tools .seg.sm { align-items: stretch; }
 /* Radii nest cleanly inside the round capsule: the undo/redo track ran 9px corners
    with 6px buttons inside a fully-round pill — three radii in 32px of height. */
@@ -643,8 +653,8 @@ button:disabled { cursor: default; }
    the horizontal one look like a leftover. */
 .viewer-head .viewer-tools {
   background: var(--chrome); border-radius: var(--r-full);
-  box-shadow: 0 17px 14px -4px rgba(0, 0, 0, 0.11);
-  padding: 4px 6px; gap: 3px; flex-wrap: nowrap;
+  border: 1px solid transparent; box-shadow: var(--shadow-float);
+  padding: 5px 6px; gap: 3px; flex-wrap: nowrap;
 }
 /* …and the same icon size. These were rendering ~15px against the rail's 17px, which
    is exactly the kind of difference you feel without being able to name. */
@@ -752,8 +762,17 @@ button:disabled { cursor: default; }
    ends above the corner orientation gizmo. (The zoom cluster is NOT a member — the
    stack steps left to clear the open Inspector card, and the corner cluster must
    stay in the corner; it pins itself, at .zoom-ctl.) */
+/* The stack's children must NEVER shrink. `flex: 0 1 auto` with `min-height: 0` let a
+   short canvas squeeze a pill's PAINTED box — fill, hairline, padding — while its text
+   kept full height, and overflow:visible then printed those words straight onto the
+   model. Measured at 900×440: the stats pill collapsed 79px → 18px and its "Triangles /
+   Watertight / Volume" lines smeared across the canvas and over the view-snaps pill.
+   No clip here on purpose: these children carry their own drop shadows and the
+   inspector can open popovers, so clipping the column would cost both. If the canvas is
+   too short the lowest pill simply extends past the stack — as a pill, which is
+   ordinary crowding, not the bug. */
 .right-dock { position: absolute; top: 10px; right: 10px; bottom: 112px; z-index: 9; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; max-width: calc(100% - 20px); pointer-events: none; }
-.right-dock > * { pointer-events: auto; position: static; flex: 0 1 auto; min-height: 0; }
+.right-dock > * { pointer-events: auto; position: static; flex: 0 0 auto; }
 .right-dock:empty { display: none; }
 .mesh-stats { z-index: 5; display: flex; flex-direction: column; gap: 3px; padding: 8px 11px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-sm); pointer-events: none; }
 .ms-row { display: flex; justify-content: space-between; gap: 16px; font-size: 11.5px; }
@@ -1061,8 +1080,16 @@ button:disabled { cursor: default; }
    slider used to sit directly on the 3D view, so light parts swallowed the text and
    the palette read as broken. (Its children carry their own fills; the WRAPPER had
    none.) */
+/* Paint and Fasteners wrap their rows in an inner column, so the panel gap set on
+   .rail-fly lands on that ONE child and never reaches the rows. Both inherit the panel
+   scale explicitly — this is why the paint popup stayed cramped while every other tool
+   loosened up. */
+.paint-fly, .magnet-fly { display: flex; flex-direction: column; gap: 12px; }
 .paint-fly { min-width: 190px; }
 .paint-lbl { font-size: 11px; font-weight: 600; color: var(--subt); }
+/* Section labels bind DOWN — they name the block under them, and a flat panel gap can't
+   say which side a label belongs to. Gentle: -5px pulled "Filament" onto the swatches. */
+.rail-fly .paint-lbl, .rail-fly .shape-lbl { margin-bottom: -4px; margin-top: 2px; }
 /* Magnet tool flyout: catalogue-size chips + fit + the pair-through-the-wall toggle. */
 /* 234px: the widest row is the screw tool's Bites in / Slides through / Heat-set seg
    at 204px + pill padding — 208px clipped "Heat-set" at the panel edge. */
@@ -1084,7 +1111,7 @@ button:disabled { cursor: default; }
 .canvas-rail .rail-fly .seg:not(.kind-seg) { display: flex; width: 100%; }
 .canvas-rail .rail-fly .seg:not(.kind-seg) > button { flex: 1 1 0; min-width: 0; justify-content: center; }
 .canvas-rail .rail-fly .kind-seg { width: max-content; max-width: 100%; }
-.magnet-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 5px; }
+.magnet-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .magnet-sizes .msize { padding: 5px 0; border: 1px solid var(--bord); border-radius: var(--r-sm); background: var(--ctl); color: var(--ink2); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
 .magnet-sizes .msize:hover { border-color: var(--bord-strong); color: var(--ink); }
 .magnet-sizes .msize.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent-d); }
@@ -1093,7 +1120,7 @@ button:disabled { cursor: default; }
 .magnet-hint { font-size: 11px; line-height: 1.45; color: var(--subt); }
 /* The pockets a model carries, as rows: pick one to edit it, ✕ to fill it back in.
    Capped in height so a part with twenty magnets can't push the panel off screen. */
-.pocket-list { display: flex; flex-direction: column; gap: 3px; max-height: 168px; overflow-y: auto; }
+.pocket-list { display: flex; flex-direction: column; gap: 5px; max-height: 168px; overflow-y: auto; }
 .pocket-row { display: flex; align-items: center; gap: 4px; border: 1px solid transparent; border-radius: var(--r-sm); }
 .pocket-row.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .pocket-pick { flex: 1; display: flex; align-items: baseline; gap: 7px; min-width: 0; padding: 5px 7px; border: 0; background: transparent; border-radius: var(--r-sm); text-align: left; cursor: pointer; }
@@ -1102,7 +1129,7 @@ button:disabled { cursor: default; }
 .pocket-where { font-size: 11px; color: var(--subt); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pocket-row .x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none; border: 0; background: transparent; color: var(--subt); border-radius: var(--r-sm); cursor: pointer; }
 .pocket-row .x:hover { background: var(--ctl); color: var(--ink); }
-.paint-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
+.paint-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
 .paint-swatches .psw { width: 100%; aspect-ratio: 1; border-radius: var(--r-xs); border: none; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
 .paint-swatches .psw:hover { transform: scale(1.12); }
 .paint-swatches .psw.on { box-shadow: inset 0 0 0 1px rgba(0,0,0,.28), 0 0 0 2px var(--accent); }
@@ -1347,9 +1374,13 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 
 /* ---------- collapsible chat ---------- */
 .chat-bar { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--bord); flex: 0 0 auto; }
+/* One header row, one type size. Select/Hide were 12px against the title's 15px and
+   read as a different tier of thing; they are actions ON this panel, so they match its
+   size and stay secondary through WEIGHT and colour instead — which is the ordering
+   signal that survives someone bumping their browser's text size. */
 .chat-title { font-size: 15px; font-weight: 600; color: var(--ink); }
-.chat-date { font-size: 12.5px; color: var(--mut); }
-.chat-hide { background: none; border: none; padding: 5px 10px; border-radius: var(--r-sm); font: inherit; font-size: 12px; color: var(--ink2); cursor: pointer; }
+.chat-date { font-size: 14px; color: var(--mut); }
+.chat-hide { background: none; border: none; padding: 5px 10px; border-radius: var(--r-sm); font: inherit; font-size: 15px; font-weight: 500; color: var(--mut); cursor: pointer; }
 .chat-hide:hover { background: var(--surf); color: var(--ink); }
 .split.chat-collapsed { grid-template-columns: 40px 1fr; }
 /* A COLLAPSED rail is tinted with the accent wash and keeps an accent label, so a
@@ -2100,8 +2131,11 @@ details.guide { margin-top: 10px; }
 [data-theme="dark"] .canvas-rail,
 [data-theme="dark"] .viewer-head .viewer-tools {
   background: #24262a;
-  border: 1px solid rgba(255, 255, 255, 0.09);
-  box-shadow: 0 18px 22px -8px rgba(0, 0, 0, 0.55);
+  /* border-COLOR, never the shorthand: the shorthand adds a border dark-only, and the
+     pill (content-sized) then grows 1px on each side while the rail (fixed width, so
+     its border paints inward) does not. Both carry a transparent 1px in light for the
+     same reason — the box model has to be identical in both themes. */
+  border-color: rgba(255, 255, 255, 0.09);
 }
 [data-theme="dark"] .zoom-ctl,
 [data-theme="dark"] .view-snaps {
@@ -2115,7 +2149,7 @@ details.guide { margin-top: 10px; }
 .canvas-rail {
   position: absolute;
   left: 10px;
-  top: 62px;
+  top: 64px; /* 10 (pill top) + 51 (pill height) + 3 (the gap between the two bars) */
   /* No overflow here: the tool flyouts are absolutely-positioned children that
      extend to the RIGHT of the rail, and any overflow value other than visible
      (even overflow-y alone — the other axis then computes to auto) would clip them.
@@ -2128,11 +2162,11 @@ details.guide { margin-top: 10px; }
   gap: 4px;
   padding: 6px 5px;
   background: var(--chrome);
-  border: none;
+  border: 1px solid transparent; /* the 1px --rail-w budgets; dark only paints it */
   /* Capsule with a long soft drop — the mock's one theatrical shadow. It floats over
      the 3D stage, where a hairline border read as part of the scene. */
   border-radius: var(--r-full);
-  box-shadow: 0 17px 14px -4px rgba(0, 0, 0, 0.11);
+  box-shadow: var(--shadow-float);
 }
 .canvas-rail .btn-label { display: none; } /* icon-only rail; titles carry the words */
 .canvas-rail > .rail-tool { position: relative; display: flex; }
@@ -2146,7 +2180,7 @@ details.guide { margin-top: 10px; }
   top: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 12px;
   align-items: stretch;
   width: max-content;
   max-width: 248px;
@@ -2164,8 +2198,11 @@ details.guide { margin-top: 10px; }
 /* Armed rail tool: a ring around the icon. A rounded square read like a second
    button chrome; a circle reads like a state. */
 .canvas-rail .ghost.sm.iconbtn.on { border-color: transparent; background: transparent; position: relative; color: var(--ink); }
+/* 35px inside a 39px button box, itself filling the rail's 39px inner width — so the
+   ring clears the pill's inner edge by 2px. At 30px it floated with 4.5px of slack a
+   side and read as unrelated to the pill holding it. */
 .canvas-rail .ghost.sm.iconbtn.on::before {
-  content: ""; position: absolute; left: 50%; top: 50%; width: 30px; height: 30px;
+  content: ""; position: absolute; left: 50%; top: 50%; width: 35px; height: 35px;
   transform: translate(-50%, -50%); border: 1.5px solid var(--accent); border-radius: 50%; pointer-events: none;
 }
 /* On a phone/tablet the buttons are bigger, so the ring grows with them. */

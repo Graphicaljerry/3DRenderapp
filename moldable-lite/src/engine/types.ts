@@ -58,12 +58,24 @@ export interface ScaleOp {
   factor: number;
   center: Vec3;
 }
+/** Shape tool: add or cut a primitive at a point — "I know exactly where I want this
+ *  lump/hole and I don't want to describe it". Stays in the op chain, so the model keeps
+ *  its recipe (Adjust still works) instead of collapsing to a mesh the way a boolean
+ *  against an imported object does. */
+export interface SolidOp {
+  type: "solid";
+  shape: "box" | "cylinder" | "sphere";
+  at: Vec3;   // centre of the primitive, engine coords
+  size: Vec3; // box w/d/h · cylinder ⌀/⌀/h · sphere ⌀ (x only)
+  cut: boolean; // true = subtract it, false = fuse it on
+  axis?: "x" | "y" | "z"; // cylinder axis; default z
+}
 /** Elephant-foot guard: chamfer every edge lying in the bottom (bed) plane. */
 export interface ChamferBottomOp {
   type: "chamferBottom";
   size: number; // chamfer distance, mm (0.2–0.5 typical)
 }
-export type CadOp = PointOp | HoleOp | ScrewOp | TranslateOp | RotateOp | ScaleOp | ChamferBottomOp;
+export type CadOp = PointOp | HoleOp | ScrewOp | SolidOp | TranslateOp | RotateOp | ScaleOp | ChamferBottomOp;
 
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.

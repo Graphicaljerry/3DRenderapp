@@ -34,7 +34,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconModify, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconCornerSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconTexturize, IconPaint, IconCut, IconChecklist } from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1548,6 +1548,108 @@ function PathToPrint({ hasModel, report, onOpenCheck }: {
   );
 }
 
+/** Shape tool panel: what to drop, whether it adds or cuts, and — once something is
+ *  placed — its exact size and centre. Clicking puts it roughly where you point; these
+ *  boxes are what make it exact, which is the whole reason not to describe it in words. */
+function ShapeFly({ ctl, units }: { ctl: Props["shapeCtl"]; units: "mm" | "in" }) {
+  const t = ctl.tool!;
+  const sel = ctl.editIndex != null ? ctl.shapes.find((x) => x.index === ctl.editIndex) ?? null : null;
+  const KINDS: { k: "box" | "cylinder" | "sphere"; label: string }[] = [
+    { k: "box", label: "Box" }, { k: "cylinder", label: "Cylinder" }, { k: "sphere", label: "Ball" },
+  ];
+  // Which of the three numbers a shape actually has: a ball is one diameter, a
+  // cylinder is a diameter and a height, a box is all three.
+  const fields = (k: string): { i: number; l: string }[] =>
+    k === "sphere" ? [{ i: 0, l: "⌀" }]
+      : k === "cylinder" ? [{ i: 0, l: "⌀" }, { i: 2, l: "H" }]
+        : [{ i: 0, l: "W" }, { i: 1, l: "D" }, { i: 2, l: "H" }];
+  const size = sel ? sel.size : t.size;
+  const kind = sel ? sel.shape : t.shape;
+  const setSize = (i: number, v: number) => {
+    const next: [number, number, number] = [...size] as [number, number, number];
+    next[i] = v;
+    if (i === 0 && kind !== "box") next[1] = v; // ⌀ drives both cross-section axes
+    if (kind === "sphere") { next[1] = v; next[2] = v; }
+    if (sel) ctl.edit(sel.index, { size: next });
+    else ctl.set({ ...t, size: next });
+  };
+  return (
+    <div className="rail-fly shape-fly">
+      <div className="seg sm">
+        {KINDS.map((o) => (
+          <button key={o.k} className={kind === o.k ? "on" : ""}
+            onClick={() => (sel ? undefined : ctl.set({ ...t, shape: o.k }))}
+            disabled={!!sel}
+            title={sel ? "Deselect below to change what the next click drops" : `Drop a ${o.label.toLowerCase()}`}>{o.label}</button>
+        ))}
+      </div>
+      <div className="seg sm">
+        <button className={(sel ? !sel.cut : !t.cut) ? "on" : ""}
+          onClick={() => (sel ? ctl.edit(sel.index, { cut: false }) : ctl.set({ ...t, cut: false }))}
+          title="Fuse it onto the part — a boss, a rib, a lug">Add</button>
+        <button className={(sel ? sel.cut : t.cut) ? "on" : ""}
+          onClick={() => (sel ? ctl.edit(sel.index, { cut: true }) : ctl.set({ ...t, cut: true }))}
+          title="Subtract it — a pocket, a slot, a clearance">Cut</button>
+      </div>
+      <div className="shape-nums">
+        {fields(kind).map((f) => (
+          <label key={f.i}><span>{f.l}</span>
+            <input type="number" step={0.5} min={0.2} value={size[f.i]}
+              onChange={(e) => { const v = parseFloat(e.target.value); if (Number.isFinite(v) && v > 0) setSize(f.i, v); }} />
+          </label>
+        ))}
+        <span className="shape-unit">mm</span>
+      </div>
+      {sel ? (
+        <>
+          <div className="paint-lbl">Where its centre sits</div>
+          <div className="shape-nums">
+            {(["X", "Y", "Z"] as const).map((ax, i) => (
+              <label key={ax}><span>{ax}</span>
+                <input type="number" step={0.5} value={sel.at[i]}
+                  onChange={(e) => {
+                    const v = parseFloat(e.target.value);
+                    if (!Number.isFinite(v)) return;
+                    const next: [number, number, number] = [...sel.at] as [number, number, number];
+                    next[i] = v;
+                    ctl.edit(sel.index, { at: next });
+                  }} />
+              </label>
+            ))}
+            <span className="shape-unit">mm</span>
+          </div>
+          <p className="fine">Z is height above the plate. Type any of them — nothing is baked in.</p>
+        </>
+      ) : (
+        <>
+          <div className="seg sm">
+            <button className={t.snap > 0 ? "on" : ""} onClick={() => ctl.set({ ...t, snap: 1 })} title="Land the centre on a 1 mm grid">1 mm grid</button>
+            <button className={t.snap === 0 ? "on" : ""} onClick={() => ctl.set({ ...t, snap: 0 })} title="Land it exactly where you clicked">Free</button>
+          </div>
+          <p className="fine">Click the model where you want it. {t.cut ? "It sinks in, so the size above is the pocket." : "It sits on the surface."} Then type its exact numbers.</p>
+        </>
+      )}
+      {ctl.shapes.length > 0 && (
+        <>
+          <div className="paint-lbl">On the model</div>
+          <div className="pocket-list">
+            {ctl.shapes.map((k) => (
+              <div key={k.index} className={`pocket-row${ctl.editIndex === k.index ? " on" : ""}`}>
+                <button className="pocket-pick" title="Edit this one — its size and centre become the boxes above"
+                  onClick={() => ctl.select(ctl.editIndex === k.index ? null : k.index)}>
+                  <span className="pocket-size">{k.cut ? "Cut" : "Add"} {k.shape === "sphere" ? "ball" : k.shape}</span>
+                  <span className="pocket-where">{k.size.slice(0, k.shape === "sphere" ? 1 : k.shape === "cylinder" ? 1 : 3).map((n) => Math.round(n * 10) / 10).join("×")} · {fmtLen(k.at[2], units)} up</span>
+                </button>
+                <button className="x" aria-label="Remove this shape" title="Take it back off — undoable" onClick={() => ctl.remove(k.index)}><IconX /></button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /** One length in the chosen unit, for inline readouts. */
 function fmtLen(mm: number, units: "mm" | "in"): string {
   return units === "in" ? `${(mm / 25.4).toFixed(2)}″` : `${Math.round(mm * 10) / 10} mm`;
@@ -1904,6 +2006,17 @@ interface Props {
     liveMm: number | null;
     liveStop: "min" | "max" | null; // the drag is pinned at its limit
     clear: () => void;
+  };
+  /** Shape: drop a primitive exactly where you point, then type its numbers. No AI. */
+  shapeCtl: {
+    tool: { shape: "box" | "cylinder" | "sphere"; size: [number, number, number]; cut: boolean; snap: number } | null;
+    set: (v: Props["shapeCtl"]["tool"]) => void;
+    arm: () => void;
+    shapes: { index: number; shape: "box" | "cylinder" | "sphere"; cut: boolean; size: [number, number, number]; at: [number, number, number] }[];
+    editIndex: number | null;
+    select: (i: number | null) => void;
+    edit: (i: number, patch: { size?: [number, number, number]; at?: [number, number, number]; cut?: boolean }) => void;
+    remove: (i: number) => void;
   };
   /** Modify: arm an op (push/round/bevel), then click a spot and drag its anchor — Spline's flow. */
   modifyCtl: {
@@ -2887,19 +3000,19 @@ export function Workspace(p: Props) {
                           is split into parts the canvas shows plain part meshes, but the tool stays
                           VISIBLE and disabled — vanishing mid-session read as a bug. */}
                       <button
-                        className={`ghost sm iconbtn${p.featureCtl.mode && !p.modifyCtl.op ? " on" : ""}`}
-                        aria-pressed={p.featureCtl.mode && !p.modifyCtl.op}
+                        className={`ghost sm iconbtn${p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool ? " on" : ""}`}
+                        aria-pressed={p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool}
                         aria-label="Select"
                         disabled={p.activeKind !== "replicad"}
                         title={p.activeKind !== "replicad"
                           ? "Select works on the whole CAD model — Regroup parts to use it"
                           : "Select tool: hover to highlight a face, edge or corner and click to pick it — or use Point to mark an exact spot — then tell the AI what to change there"}
-                        onClick={() => { if (p.modifyCtl.op) p.modifyCtl.set(null); else p.featureCtl.toggleMode(); }}
+                        onClick={() => { if (p.modifyCtl.op || p.shapeCtl.tool) { p.modifyCtl.set(null); p.shapeCtl.set(null); } else p.featureCtl.toggleMode(); }}
                       >
                         <IconPointer />
                       <span className="rail-name">Select</span>
                     </button>
-                      {p.featureCtl.mode && !p.modifyCtl.op && p.activeKind === "replicad" && (
+                      {p.featureCtl.mode && !p.modifyCtl.op && !p.shapeCtl.tool && p.activeKind === "replicad" && (
                         <div className="rail-fly">
                           <div className="seg sm mode-seg">
                             {SELECT_MODES.map((m, i) => (
@@ -2910,6 +3023,27 @@ export function Workspace(p: Props) {
                           </div>
                         </div>
                       )}
+                    </div>
+                    <div className="rail-tool">
+                      {/* Shape: the "I know exactly where I want this lump/hole" tool.
+                          Placing is a click; being EXACT is the number fields under it. */}
+                      <button
+                        className={`ghost sm iconbtn${p.shapeCtl.tool ? " on" : ""}`}
+                        aria-pressed={!!p.shapeCtl.tool}
+                        aria-label="Shape"
+                        disabled={p.activeKind !== "replicad"}
+                        title={p.activeKind !== "replicad"
+                          ? "Shapes work on the whole CAD model — Regroup parts to use it"
+                          : "Shape tool: drop a box, cylinder or ball exactly where you click, added on or cut out — then type its exact size and position. Free, no AI."}
+                        onClick={() => {
+                          if (p.shapeCtl.tool) { p.shapeCtl.set(null); if (p.featureCtl.mode) p.featureCtl.toggleMode(); }
+                          else { p.shapeCtl.arm(); if (!p.featureCtl.mode) p.featureCtl.toggleMode(); }
+                        }}
+                      >
+                        <IconShapes />
+                      <span className="rail-name">Shape</span>
+                    </button>
+                      {p.shapeCtl.tool && p.activeKind === "replicad" && <ShapeFly ctl={p.shapeCtl} units={p.units} />}
                     </div>
                     <div className="rail-tool">
                       {/* Modify inverts Select's flow: arm the operation FIRST, then every click
@@ -2925,7 +3059,7 @@ export function Workspace(p: Props) {
                           : "Modify tool: pick Push/Pull, Round or Bevel and a size, then click the model — each click applies it right there, no AI"}
                         onClick={() => {
                           if (p.modifyCtl.op) { p.modifyCtl.set(null); if (p.featureCtl.mode) p.featureCtl.toggleMode(); }
-                          else { p.modifyCtl.set({ op: "push", size: 2 }); if (!p.featureCtl.mode) p.featureCtl.toggleMode(); }
+                          else { p.shapeCtl.set(null); p.modifyCtl.set({ op: "push", size: 2 }); if (!p.featureCtl.mode) p.featureCtl.toggleMode(); }
                         }}
                       >
                         <IconModify />

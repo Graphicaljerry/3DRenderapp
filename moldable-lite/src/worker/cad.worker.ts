@@ -202,6 +202,32 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       else if (u[2] < 0) cutter = cutter.rotate(180, [0, 0, 0], [1, 0, 0]);
       return shape.cut(cutter.translate(op.at));
     }
+    if (op.type === "solid") {
+      // A primitive placed by hand, fused on or cut out. Built about the ORIGIN then
+      // moved, so the `at` the app records is always the shape's centre — which is what
+      // makes it editable later (change the size, the centre stays put).
+      const [sx, sy, sz] = op.size;
+      let solid: any;
+      let origin: [number, number, number] = [op.at[0], op.at[1], op.at[2]];
+      if (op.shape === "box") {
+        // makeBaseBox grows from a CORNER at the origin, so shift by half to make `at`
+        // mean the centre — which is what lets the size be retyped later without the
+        // shape wandering off the spot it was placed on.
+        solid = R.makeBaseBox(sx, sy, sz);
+        origin = [op.at[0] - sx / 2, op.at[1] - sy / 2, op.at[2] - sz / 2];
+      } else if (op.shape === "sphere") {
+        solid = R.makeSphere(sx / 2);
+      } else {
+        const ax = op.axis ?? "z";
+        const dir: [number, number, number] = ax === "x" ? [1, 0, 0] : ax === "y" ? [0, 1, 0] : [0, 0, 1];
+        // makeCylinder grows FROM its origin along dir — start half a length back so the
+        // finished cylinder is centred like the other two.
+        const half: [number, number, number] = [(-dir[0] * sz) / 2, (-dir[1] * sz) / 2, (-dir[2] * sz) / 2];
+        solid = R.makeCylinder(sx / 2, sz, half, dir);
+      }
+      solid = solid.translate(origin);
+      return op.cut ? shape.cut(solid) : shape.fuse(solid);
+    }
     if (op.type === "hole") {
       // Drill along −normal from 1 mm proud of the face (clean entry). depth 0 = through:
       // longer than any printable part, so it exits the far side no matter the shape.
@@ -248,6 +274,7 @@ function applyOneOp(shape: any, op: WorkerOp, probeLimit = true): any {
       case "chamferBottom": label = `Bottom-edge chamfer of ${op.size} mm`; break;
       case "extrude": label = `Extrude of ${op.size} mm`; break;
       case "hole": label = `⌀${op.diameter} mm hole`; break;
+      case "solid": label = `${op.cut ? "Cut" : "Added"} ${op.shape}`; break;
       case "screw": label = `${op.major} mm screw hole${op.pitch > 0 ? " (threaded)" : ""}`; break;
       default: label = `${op.type.includes("chamfer") ? "Chamfer" : "Fillet"} of ${op.size} mm`;
     }

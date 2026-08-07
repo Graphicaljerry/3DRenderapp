@@ -11,7 +11,7 @@ import { getEngineSelection, type EngineSelection } from "./engine/selectEngine"
 import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, type SurfacePattern } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import type { GenerativeEngine } from "./engine/generativeEngine";
-import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp } from "./engine/types";
+import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp, SolidOp } from "./engine/types";
 import { MODELS, type ApiMsg } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
@@ -3219,6 +3219,88 @@ export default function App() {
   const modifyOpRef = useRef(modifyOp);
   modifyOpRef.current = modifyOp;
   useEffect(() => { if (!selectMode) setModifyOp(null); }, [selectMode]);
+  // ---- Shape tool: drop a primitive exactly where you point, then type its numbers.
+  // The whole point is the case where describing it in words is slower and less exact
+  // than placing it — so nothing here touches the AI, and every value is editable after.
+  type ShapeKind = "box" | "cylinder" | "sphere";
+  type ShapeTool = { shape: ShapeKind; size: [number, number, number]; cut: boolean; snap: number };
+  const SHAPE_DEFAULT: ShapeTool = { shape: "box", size: [10, 10, 10], cut: false, snap: 1 };
+  const [shapeTool, setShapeTool] = useState<ShapeTool | null>(null);
+  const shapeToolRef = useRef(shapeTool);
+  shapeToolRef.current = shapeTool;
+  const [shapeEdit, setShapeEdit] = useState<number | null>(null);
+  useEffect(() => { if (!selectMode) { setShapeTool(null); setShapeEdit(null); } }, [selectMode]);
+
+  /** Drop the armed primitive at a picked spot. Added shapes sit ON the surface, cut
+   *  shapes sink INTO it — so "cut a 10 mm cube here" is a 10 mm deep pocket, not a
+   *  half-depth one you have to nudge. */
+  async function placeShape(f: PickedFeature) {
+    const t = shapeToolRef.current;
+    const cur = resultRef.current;
+    if (!t || !cur || cur.source.kind !== "code") return;
+    const rc = cur.recenter ?? [0, 0, 0];
+    const p = f.at ?? [f.cx, f.cy, f.cz];
+    const n: [number, number, number] = f.kind === "face" ? [f.nx ?? 0, f.ny ?? 0, f.nz ?? 1] : [0, 0, 1];
+    const half = (t.shape === "sphere" ? t.size[0] : t.size[2]) / 2;
+    const dir = t.cut ? -half : half; // into the part to carve, out of it to add
+    const q = (v: number) => (t.snap > 0 ? Math.round(v / t.snap) * t.snap : Math.round(v * 100) / 100);
+    const at: [number, number, number] = [
+      q(p[0] + n[0] * dir + rc[0]),
+      q(p[1] + n[1] * dir + rc[1]),
+      q(p[2] + n[2] * dir + rc[2]),
+    ];
+    const op: SolidOp = { type: "solid", shape: t.shape, at, size: [...t.size] as [number, number, number], cut: t.cut };
+    const ops = [...(cur.source.ops ?? []), op];
+    setShapeEdit(ops.length - 1); // land selected, so the numbers are right there to type
+    const word = t.shape === "sphere" ? "ball" : t.shape;
+    await rebuildWithOps(ops, `${t.cut ? "Cut" : "Added"} a ${t.size.join(" × ")} mm ${word}`, `${t.cut ? "cut" : "add"} ${word}`);
+  }
+
+  if (import.meta.env.DEV) (window as any).__ops = () => (resultRef.current?.source.kind === "code" ? resultRef.current.source.ops ?? [] : []);
+  /** Every hand-placed primitive on the model, read back out of the op chain. */
+  function shapeList() {
+    if (!result || result.source.kind !== "code") return [];
+    const rc = result.recenter ?? [0, 0, 0];
+    return (result.source.ops ?? []).flatMap((o, index) => {
+      if (o.type !== "solid") return [];
+      return [{
+        index,
+        shape: o.shape as ShapeKind,
+        cut: o.cut,
+        size: o.size as [number, number, number],
+        at: [o.at[0] - rc[0], o.at[1] - rc[1], o.at[2] - rc[2]] as [number, number, number], // display coords
+      }];
+    });
+  }
+
+  /** Retype a placed primitive's size or centre — the precision half of the tool. */
+  async function editShapeApply(index: number, patch: { size?: [number, number, number]; at?: [number, number, number]; cut?: boolean }) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = [...(cur.source.ops ?? [])];
+    const op = ops[index];
+    if (!op || op.type !== "solid") return;
+    const rc = cur.recenter ?? [0, 0, 0];
+    ops[index] = {
+      ...op,
+      size: patch.size ?? op.size,
+      cut: patch.cut ?? op.cut,
+      at: patch.at ? [patch.at[0] + rc[0], patch.at[1] + rc[1], patch.at[2] + rc[2]] : op.at,
+    };
+    await rebuildWithOps(ops, `Changed the ${op.shape === "sphere" ? "ball" : op.shape}`, "edit shape");
+  }
+
+  async function removeShapeAt(index: number) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = [...(cur.source.ops ?? [])];
+    const op = ops[index];
+    if (!op || op.type !== "solid") return;
+    ops.splice(index, 1);
+    setShapeEdit(null); // removing shifts every later index
+    await rebuildWithOps(ops, `Removed the ${op.shape === "sphere" ? "ball" : op.shape}`, "remove shape");
+  }
+
   /** Which engine op an armed Modify op means on a given feature kind. */
   const modifyOpType = (op: "push" | "round" | "bevel", kind: PickedFeature["kind"]): PointOp["type"] =>
     op === "push" ? "extrude" : kind === "face" ? (op === "round" ? "face-fillet" : "face-chamfer") : op === "round" ? "fillet" : "chamfer";
@@ -3235,6 +3317,8 @@ export default function App() {
       setHoleDraft((d) => (d ? { ...d, picking: false, ref: { center: c, diameter: refDia } } : d));
       return;
     }
+    // Armed Shape tool: this click IS the placement.
+    if (shapeToolRef.current && activeKind === "replicad") { void placeShape(f); return; }
     // Armed Modify: a push pick must be a flat face — anything else is ignored
     // (the flyout hint says so). Valid picks lock + grow the drag anchor.
     const mo = modifyOpRef.current;
@@ -5950,6 +6034,16 @@ export default function App() {
         onSeparateParts={separateParts}
         onRegroup={regroupParts}
         onKeepAside={keepVersionAside}
+        shapeCtl={{
+          tool: shapeTool,
+          set: (v) => { if (v) setSelectedFeature(null); setShapeTool(v); if (!v) setShapeEdit(null); },
+          arm: () => { setShapeTool(SHAPE_DEFAULT); setModifyOp(null); setSelectedFeature(null); },
+          shapes: shapeList(),
+          editIndex: shapeEdit,
+          select: (i) => setShapeEdit(i),
+          edit: (i, patch) => void editShapeApply(i, patch),
+          remove: (i) => void removeShapeAt(i),
+        }}
         modifyCtl={{
           op: modifyOp,
           // Arming keeps a compatible selection (its anchor appears at once); only a

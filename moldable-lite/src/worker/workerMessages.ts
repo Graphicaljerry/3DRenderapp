@@ -32,6 +32,7 @@ export type WorkerOp =
   | { type: "fillet" | "chamfer" | "face-fillet" | "face-chamfer" | "extrude"; at: Vec3; size: number }
   | { type: "hole"; at: Vec3; normal: Vec3; diameter: number; depth: number; tag?: string }
   | { type: "screw"; at: Vec3; normal: Vec3; minor: number; major: number; pitch: number; depth: number; countersink: number }
+  | { type: "solid"; shape: "box" | "cylinder" | "sphere"; at: Vec3; size: Vec3; cut: boolean; axis?: "x" | "y" | "z" }
   | { type: "translate"; delta: Vec3 }
   | { type: "rotate"; axis: Vec3; angleDeg: number; center: Vec3 }
   | { type: "scale"; factor: number; center: Vec3 }

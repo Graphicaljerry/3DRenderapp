@@ -107,6 +107,15 @@ export const IconPointer = ({ size = 15 }: { size?: number }) => (
     <path d="M5 3l7.4 17.5 2.2-7.2 7.2-2.4Z" />
   </svg>
 );
+/** Shape tool: a cube with a cylinder and ball beside it. */
+export const IconShapes = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.7}>
+    <path d="M3.2 8.6 8 6.2l4.8 2.4v5.2L8 16.2l-4.8-2.4Z" />
+    <path d="M8 11.4v4.8M3.2 8.6 8 11.4l4.8-2.8" />
+    <circle cx="18.2" cy="6.6" r="3.1" />
+    <path d="M15.3 15.1c0-1 1.3-1.8 2.9-1.8s2.9.8 2.9 1.8v4.2c0 1-1.3 1.8-2.9 1.8s-2.9-.8-2.9-1.8Z" />
+  </svg>
+);
 /** Modify tool: a face pulled up out of a slab. */
 export const IconModify = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>

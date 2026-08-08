@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.2.0",
   "type": "module",
-  "description": "Moldable — describe -> parametric 3D-printable model (replicad primary engine, primitive/CSG fallback). BYO Anthropic key.",
+  "description": "Moldable \u2014 describe -> parametric 3D-printable model (replicad primary engine, primitive/CSG fallback). BYO Anthropic key.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -27,7 +27,6 @@
     "react-dom": "^18.3.1",
     "replicad": "^0.23.1",
     "replicad-opencascadejs": "^0.23.0",
-    "replicad-threejs-helper": "^0.23.0",
     "three": "^0.169.0",
     "three-bvh-csg": "^0.0.17",
     "three-mesh-bvh": "^0.9.13",

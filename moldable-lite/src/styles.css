@@ -2727,6 +2727,38 @@ details.guide { margin-top: 10px; }
 .sheet-grab-pill { width: 42px; height: 5px; border-radius: var(--r-full); background: var(--bord-strong); }
 .sheet-grab:active .sheet-grab-pill { background: var(--mut); }
 
+/* ---------- what the selection can do ----------
+   Bottom-centre of the stage rather than pinned to the picked point: a bar that chases
+   the selection lands under the cursor, off the edge, or behind the Inspector depending
+   on where you tapped, and on a tablet it would sit under your own hand. One known place,
+   one row, appearing only when there IS a selection — so it reads as an answer to what
+   you just did rather than as another permanent toolbar. */
+.sel-acts {
+  position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); z-index: 8;
+  display: flex; align-items: center; gap: 6px; flex-wrap: nowrap;
+  max-width: calc(100% - 24px); overflow-x: auto; scrollbar-width: none;
+  padding: 5px 6px; border-radius: var(--r-full);
+  background: var(--bg); border: 1px solid var(--bord); box-shadow: var(--shadow-md);
+  animation: sel-acts-in .16s cubic-bezier(.22, 1, .36, 1);
+}
+.sel-acts::-webkit-scrollbar { display: none; }
+.sel-acts > * { flex: 0 0 auto; }
+.sel-acts .sel-acts-more { color: var(--mut); }
+@keyframes sel-acts-in { from { opacity: 0; transform: translate(-50%, 6px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@media (prefers-reduced-motion: reduce) { .sel-acts { animation: none; } }
+/* The view snaps and the plate bar own the same strip — the selection bar is the newer
+   answer to "what now", so they step up while it is showing. */
+.viewer-body:has(.sel-acts) .view-snaps,
+.viewer-body:has(.sel-acts) .plate-bar,
+.viewer-body:has(.sel-acts) .showcase-bar { bottom: 66px; }
+@media (max-width: 760px) {
+  /* The phone rail lies along the bottom — the bar goes above it, not under it. */
+  .sel-acts { bottom: 62px; }
+  .viewer-body:has(.sel-acts) .view-snaps,
+  .viewer-body:has(.sel-acts) .plate-bar,
+  .viewer-body:has(.sel-acts) .showcase-bar { bottom: 116px; }
+}
+
 /* ---------- focus mode ----------
    Everything that isn't the model steps off. Written as a subtraction from the normal
    shell rather than a second layout, so nothing can drift out of step with it: the same

@@ -2064,6 +2064,58 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
  *  status about the thing on the canvas, so it belongs on the canvas: it appears where
  *  the work is, says what went wrong, and goes away on its own or on a tap. The message
  *  still exists in the transcript data — it is simply not rendered there. */
+/** What you can do with what you just picked, offered where you picked it.
+ *
+ *  Shapr3D calls this its adaptive UI and it is the single biggest thing Moldable was
+ *  missing: you tap a face on the left of the model and the answer to "what now" appears
+ *  in the Inspector on the far right — on an iPad, a different half of the screen. So the
+ *  verbs that actually apply to THIS selection come to the stage instead, three or four
+ *  of them, with everything else still one tap away behind More.
+ *
+ *  It offers only what already exists elsewhere in the app — nothing here is a second
+ *  implementation of an action, just a shorter route to one. */
+function SelectionActions({ p, onMore }: { p: Props; onMore: () => void }) {
+  const feat = p.featureCtl.selected;
+  const layers = p.selAttachIds ?? [];
+  const kind = feat?.kind;
+  type Act = { key: string; label: string; title: string; run: () => void; primary?: boolean };
+  const acts: Act[] = [];
+
+  if (layers.length) {
+    // A placed word or logo: the two things you reach for after moving one.
+    const one = layers.length === 1;
+    acts.push({ key: "dup", label: one ? "Duplicate" : `Duplicate ${layers.length}`, title: "Leave a copy of this layer (⌘D)", run: () => layers.forEach((id) => p.onDuplicateAttachment(id)), primary: true });
+    acts.push({ key: "del", label: "Remove", title: "Delete this layer (Delete)", run: () => layers.forEach((id) => p.onRemoveAttachment(id)) });
+  } else if (feat) {
+    // A picked face, edge or corner. The direct ops are the same ones the Modify tool
+    // arms — this just skips going to find it.
+    if (kind === "face") {
+      // The face normal is optional on a PickedFeature (a curved pick may have none), so
+      // "rest on this" is only offered when there is a direction to rest along.
+      if (feat.nx !== undefined && feat.ny !== undefined && feat.nz !== undefined) {
+        acts.push({ key: "rest", label: "Rest on plate", title: "Turn the part so this face lies on the build plate", run: () => p.printPrep.orient.face([feat.nx!, feat.ny!, feat.nz!]), primary: true });
+      }
+      acts.push({ key: "push", label: "Push/Pull", title: "Move this face in or out", run: () => p.modifyCtl.set({ op: "push", size: 2 }) });
+    }
+    if (kind === "edge" || kind === "vertex" || kind === "face") {
+      acts.push({ key: "round", label: "Round", title: "Fillet this", run: () => p.modifyCtl.set({ op: "round", size: 2 }) });
+    }
+    if (kind === "edge" || kind === "vertex") {
+      acts.push({ key: "bevel", label: "Angle", title: "Chamfer this", run: () => p.modifyCtl.set({ op: "bevel", size: 1 }) });
+    }
+  }
+  if (!acts.length) return null;
+
+  return (
+    <div className="sel-acts" role="toolbar" aria-label="What you can do with the selection">
+      {acts.map((a) => (
+        <button key={a.key} className={a.primary ? "primary sm" : "ghost sm"} title={a.title} onClick={a.run}>{a.label}</button>
+      ))}
+      <button className="ghost sm sel-acts-more" title="Everything else for this selection" onClick={onMore}>More…</button>
+    </div>
+  );
+}
+
 function CanvasToast({ messages }: { messages: ChatMessage[] }) {
   const newest = [...messages].reverse().find((m) => m.error) ?? null;
   const [dismissed, setDismissed] = useState<string | null>(null);
@@ -3554,6 +3606,9 @@ export function Workspace(p: Props) {
                 );
               })()}
               <CanvasToast messages={p.messages} />
+              {/* Shapr3D's adaptive menu, on the stage: what this selection can do, where
+                  you made it. Hidden in focus mode — that is the mode for looking. */}
+              {!focus && <SelectionActions p={p} onMore={() => { setDockPanel("selection"); setDockOpen(true); }} />}
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
                   {/* Move leads: it's the first tool in every 3D app people

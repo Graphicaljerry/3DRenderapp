@@ -917,6 +917,40 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 392 — what the selection can do, on the stage
+
+Shapr3D's adaptive menu, the biggest single item on the research list. You tap a face on
+the left of the model and the answer to "what now" used to appear in the Inspector on the
+far right — on an iPad, a different half of the screen. `SelectionActions` now floats the
+verbs that actually apply, bottom-centre of the canvas:
+
+- a **face** → Rest on plate · Push/Pull · Round
+- an **edge or corner** → Round · Angle
+- **placed layers** → Duplicate · Remove (for however many are selected)
+- always → **More…**, which opens the Inspector's Selection panel
+
+Nothing here is a second implementation — every button calls the same controller the
+Inspector does. Bottom-centre rather than pinned to the picked point on purpose: a bar
+that chases the selection lands under the cursor, off the edge, or behind the Inspector
+depending on where you tapped, and on a tablet it would sit under your own hand. The view
+snaps, plate bar and showcase bar step up 54px while it is showing; it hides in focus
+mode.
+
+Note on reach: face/edge/corner picking is armed by the **Modify** tool, so the geometry
+half of this bar appears while picking is on. The layer half (Duplicate/Remove) appears
+whenever a layer is selected, which is the common case.
+
+**Dropped from the list: the rail dial** (Nomad's permanent tool sliders). Built, then
+removed before shipping — the premise does not hold here. Nomad keeps a slider beside the
+rail because you can dismiss a tool's panel and keep the tool armed; in Moldable the rail
+button IS the arm/disarm, so closing the Text flyout puts the tool down and a docked size
+control would only duplicate the flyout's own Size field while it is open. Worth doing
+properly one day, but it needs "dismiss the panel, keep the tool" first — a change to what
+a rail button means, not a control to bolt on.
+
+Still outstanding from the seven: Pencil-draws/finger-orbits (`pointerType` routing), and
+editable History steps.
+
 ## Build 391 — borrowed from Shapr3D, Nomad and Spline (1 of 2)
 
 From the design research (artifact: "what to borrow from Shapr3D, Nomad Sculpt and

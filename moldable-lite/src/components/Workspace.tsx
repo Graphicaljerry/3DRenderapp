@@ -35,7 +35,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch } from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1987,8 +1987,18 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
         <button className="ghost sm" title="Quarter turn — the usual way to run text down the side of a part"
           onClick={() => patch({ roll: ((((spec.roll ?? 0) + 90) % 360) + 360) % 360 })}>Turn 90°</button>
       </div>
+      <label className="magnet-pair" title="On: the word bends to the curve of whatever it lands on, and re-fits itself every time you move it — so it stays flush on a vase, a mug or a rounded corner. Off: it stays a flat plaque you can put anywhere, including off the surface.">
+        <input type="checkbox" checked={spec.wrap !== false} onChange={(e) => patch({ wrap: e.target.checked })} />
+        <span>Follow the curve</span>
+      </label>
       {editing ? (
-        <p className="fine">Editing this one in place — its spot doesn't move. Drag the handles on it to move, spin or resize; the Transform rail switches which.</p>
+        <div className="hole-edit-actions">
+          <button className="ghost sm" title="Make another copy of this word, just below it" onClick={() => ctl.duplicate(editing.id)}>Duplicate</button>
+          <button className="ghost sm" title="Stop editing this one — the panel goes back to placing new text" onClick={() => ctl.select(null)}>Done</button>
+        </div>
+      ) : null}
+      {editing ? (
+        <p className="fine">Editing this one in place — its spot doesn't move, and nothing new is riding the cursor. Drag the handles on it to move, spin or resize; the Transform rail switches which.</p>
       ) : (
         <p className="fine">The text rides the cursor — click the model to set it down. It lands as its own layer: movable, editable, in Objects.</p>
       )}
@@ -2004,6 +2014,7 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
                   <span className="pocket-size">{t.spec.text.length > 14 ? `${t.spec.text.slice(0, 13)}…` : t.spec.text}</span>
                   <span className="pocket-where">{t.spec.family}</span>
                 </button>
+                <button className="x" aria-label="Duplicate this text" title="Make another copy of this word, just below it" onClick={() => ctl.duplicate(t.id)}><IconCopy size={13} /></button>
                 <button className="x" aria-label="Remove this text" title="Remove this text layer" onClick={() => ctl.remove(t.id)}><IconX /></button>
               </div>
             ))}
@@ -2401,6 +2412,8 @@ interface Props {
     editId: string | null;
     select: (id: string | null) => void;
     edit: (id: string, patch: Partial<TextSpec>) => void;
+    /** Copy a placed word, offset down the face, wrapped to where the copy lands. */
+    duplicate: (id: string) => void;
     remove: (id: string) => void;
   };
   shapeCtl: {
@@ -3308,7 +3321,13 @@ export function Workspace(p: Props) {
                   ? { active: true, snap: p.holeCtl.draft.snap, onPlace: (at) => p.holeCtl.patch({ at }) }
                   : null}
                 onModelDblClick={() => { setDockPanel("params"); setDockOpen(true); }}
-                textPlace={p.textCtl.tool ? { geometry: p.textCtl.ghost, roll: p.textCtl.tool.roll ?? 0, onPlace: p.textCtl.place } : null}
+                /* Placing and editing are different jobs. While a placed layer is selected the
+                   panel is editing THAT word, so the tool stops offering to drop another —
+                   a second ghost riding the cursor over the gizmo was the app looking like
+                   it was about to place something you hadn't asked for. */
+                textPlace={p.textCtl.tool && !p.textCtl.editId
+                  ? { geometry: p.textCtl.ghost, roll: p.textCtl.tool.roll ?? 0, onPlace: p.textCtl.place }
+                  : null}
                 magnetPlace={p.magnetCtl.tool && p.magnetCtl.pocket
                   ? { diameter: p.magnetCtl.pocket.diameter, depth: p.magnetCtl.pocket.depth, snap: p.magnetCtl.tool.snap, align: p.magnetCtl.tool.placed, onPlace: p.magnetCtl.place }
                   : p.screwCtl.tool && p.screwCtl.cut

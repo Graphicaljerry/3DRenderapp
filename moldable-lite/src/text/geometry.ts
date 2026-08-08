@@ -14,13 +14,18 @@ export interface TextSpec {
   depth: number;    // extrusion, mm
   bevel: number;    // bevel size AND depth, mm; 0 = crisp edge
   spacing: number;  // extra tracking between glyphs, mm
+  /** Follow the curve of whatever it is standing on. On means the solid is bent to the
+   *  wall's radius and the layer re-seats itself on the surface every time it moves; off
+   *  means it stays a flat plaque you can position freely. Pose, not shape, like `roll` —
+   *  the builder ignores it and the wrap is applied after. */
+  wrap: boolean;
   /** Spin about the face the text lies on, degrees. Pose, not shape — the builder
    *  below ignores it; the Viewer folds it into the placement quaternion. It lives on
    *  the spec so the panel can show it and so it survives retyping the words. */
   roll: number;
 }
 
-export const TEXT_DEFAULT: TextSpec = { text: "Text", family: "Inter", size: 12, depth: 3, bevel: 0.4, spacing: 0, roll: 0 };
+export const TEXT_DEFAULT: TextSpec = { text: "Text", family: "Inter", size: 12, depth: 3, bevel: 0.4, spacing: 0, roll: 0, wrap: true };
 
 /** Build the solid for a spec: lying in XY, extruding toward +Z, centred on the
  *  origin with its BASE at z = 0 — so placing it is "put the origin on the surface,

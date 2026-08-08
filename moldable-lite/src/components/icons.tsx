@@ -56,6 +56,13 @@ export const IconX = ({ size = 14 }: { size?: number }) => (
     <path d="M18 6 6 18M6 6l12 12" />
   </svg>
 );
+/** Two offset sheets — the universal "make another one of these". */
+export const IconCopy = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <rect x="9" y="9" width="11" height="11" rx="2" />
+    <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+  </svg>
+);
 export const IconCheck = ({ size = 13 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2.4}>
     <path d="M20 6 9 17l-5-5" />

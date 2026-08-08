@@ -3399,10 +3399,11 @@ export default function App() {
     const g = textGhostRef.current;
     if (!t || !g) return;
     // Wrapped to the same wall radius the ghost was showing — what you saw is what lands.
-    const solid = bendAroundY(g.clone(), bend);
+    const r = t.wrap === false ? Infinity : bend;
+    const solid = bendAroundY(g.clone(), r);
     const id = mid();
     const name = t.text.length > 18 ? `“${t.text.slice(0, 17)}…”` : `“${t.text}”`;
-    setAttachments((a) => [...a, { id, geometry: solid, name, text: { ...t }, place: { at, quat, bend } }]);
+    setAttachments((a) => [...a, { id, geometry: solid, name, text: { ...t }, place: { at, quat, bend: r } }]);
     setTextEditId(id); // its numbers are right there to retype, like a just-dropped shape
     // …and its handles are right there to grab. Dropping something and having it come up
     // selected is the universal 3D-app gesture, and without it the only route to the
@@ -3435,16 +3436,48 @@ export default function App() {
     try {
       const font = await getFont(spec.family, !!spec.custom);
       if (textEditGen.current.get(id) !== gen) return;
-      const g = bendAroundY(buildTextGeometry(font, spec), cur.place?.bend ?? Infinity);
+      const wrap = spec.wrap !== false;
+      const bend = wrap ? cur.place?.bend ?? Infinity : Infinity;
+      const g = bendAroundY(buildTextGeometry(font, spec), bend);
       setAttachments((l) => l.map((x) => {
         if (x.id !== id) return x;
         const old = x.geometry;
         setTimeout(() => old.dispose(), 0); // after the Viewer's swap effect has run
-        return { ...x, geometry: g };
+        return { ...x, geometry: g, place: x.place ? { ...x.place, bend } : x.place };
       }));
+      // Wrap just turned on: the layer has no radius yet, and only a re-seat can measure
+      // the wall it is standing on.
+      if (wrap && !Number.isFinite(bend)) await reseatText([id]);
       setTimeout(() => commitTexts(`Edited “${spec.text}”`, textsForSnap()), 0);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild that text: ${String(err?.message ?? err)}`, error: true }]);
+    }
+  }
+  /** Copy a placed word, offset a little along the surface so the copy is visible and
+   *  grabbable rather than hidden exactly under the original. */
+  async function duplicateText(id: string) {
+    const src = attachmentsRef.current.find((a) => a.id === id);
+    if (!src?.text) return;
+    const spec = { ...src.text };
+    try {
+      const flat = buildTextGeometry(await getFont(spec.family, !!spec.custom), spec);
+      flat.computeBoundingBox();
+      const bend = src.place?.bend ?? Infinity;
+      const newId = mid();
+      const at = src.place?.at ?? [0, 0, 0];
+      const quat = src.place?.quat ?? [0, 0, 0, 1];
+      // Down the face by a line and a half, in the layer's own frame.
+      const drop = new THREE.Vector3(0, -(spec.size * 1.5), 0).applyQuaternion(new THREE.Quaternion(...quat));
+      const to: [number, number, number] = [at[0] + drop.x, at[1] + drop.y, at[2] + drop.z];
+      const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
+      setAttachments((a) => [...a, { id: newId, geometry: bendAroundY(flat, bend), name, text: spec, place: { at: to, quat, scale: src.place?.scale, bend } }]);
+      setTextEditId(newId);
+      selectAttach(newId);
+      // The copy lands beside the original and then sits back down on the wall there,
+      // so a duplicate on a curved body is wrapped to ITS spot, not the original's.
+      setTimeout(() => void reseatText([newId]).then(() => setTimeout(() => commitTexts(`Duplicated ${name}`, textsForSnap()), 0)), 0);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't duplicate that text: ${String(err?.message ?? err)}`, error: true }]);
     }
   }
   /** A .ttf/.otf/.woff2 the user handed over — usable immediately, this session. */
@@ -4017,8 +4050,12 @@ export default function App() {
         supportsStep: false,
         glb: geometryToSTL(g!),
       };
-      applyResult(res, project?.name ?? "Model", `Engraved ${names} into the model`, `engrave ${names}`);
+      // Mark them consumed BEFORE the snapshot, or the version records the model with
+      // the shape carved in and the layer still standing on it (see consumedLayers).
       const gone = new Set(targets.map((t) => t.id));
+      consumedLayers.current = gone;
+      applyResult(res, project?.name ?? "Model", `Engraved ${names} into the model`, `engrave ${names}`);
+      consumedLayers.current = new Set();
       setAttachments((a) => a.filter((x) => !gone.has(x.id)));
       setSelAttachIds([]);
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Engraved **${names}** into the surface — the shape is carved in wherever it overlapped. Undo brings the layer back to adjust.` }]);
@@ -4464,8 +4501,10 @@ export default function App() {
       // survive as ordinary objects instead of vanishing with the sandbox.
       separatedRef.current = null;
       setSeparated(false);
-      applyResult(res, `${project?.name ?? "Model"} + ${names}`, `Merged ${names} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${names}`);
       const mergedIds = new Set(targets.map((t) => t.id));
+      consumedLayers.current = mergedIds; // see consumedLayers: the snapshot runs first
+      applyResult(res, `${project?.name ?? "Model"} + ${names}`, `Merged ${names} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${names}`);
+      consumedLayers.current = new Set();
       setAttachments((a) => a.filter((x) => !mergedIds.has(x.id)));
       setSelAttachIds([]);
       setTransformMode("off");
@@ -4504,7 +4543,7 @@ export default function App() {
   attachmentsRef.current = attachments;
   function textsForSnap(): TextLayerSnap[] | undefined {
     const out = attachmentsRef.current.flatMap((a) => {
-      if (!a.text) return [];
+      if (!a.text || consumedLayers.current.has(a.id)) return [];
       const live = viewer.current?.attachPose?.(a.id);
       const at = live?.at ?? a.place?.at ?? [0, 0, 0];
       const quat = live?.quat ?? a.place?.quat ?? [0, 0, 0, 1];
@@ -4518,10 +4557,17 @@ export default function App() {
    *  they are the same problem — a layer whose shape is cheap to rebuild and expensive
    *  to store — and splitting them apart is how the logo half got forgotten the first
    *  time round, leaving logos to vanish on every reload. */
+  /** Layers a merge or engrave has just consumed. applyResult snapshots the layer list,
+   *  and it runs BEFORE setAttachments has dropped them — so without this the version
+   *  records the model with the shape already baked in AND the layer still standing on
+   *  it. Restore that version and you get a second copy exactly on top of the first:
+   *  coincident faces, which the depth buffer resolves at random and which read as
+   *  see-through slashes across the letters. */
+  const consumedLayers = useRef<Set<string>>(new Set());
   const LOGO_SRC_CAP = 512 * 1024; // an outline past this is a traced photo, not a logo
   function logosForSnap(): LogoLayerSnap[] | undefined {
     const out = attachmentsRef.current.flatMap((a) => {
-      if (!a.logo || a.logo.svg.length > LOGO_SRC_CAP) return [];
+      if (!a.logo || consumedLayers.current.has(a.id) || a.logo.svg.length > LOGO_SRC_CAP) return [];
       const live = viewer.current?.attachPose?.(a.id);
       const at = live?.at ?? a.place?.at;
       const quat = live?.quat ?? a.place?.quat;
@@ -4558,6 +4604,36 @@ export default function App() {
       } catch { return []; } // one unreadable outline must not take the whole restore down
     });
     setAttachments((l) => [...l.filter((a) => !a.logo), ...built]);
+  }
+  /** Sit a wrapped word back down on the model after it has been dragged, rebuilt to the
+   *  curvature of wherever it landed. Without this a gizmo move is a plain translation:
+   *  the word keeps the bend and the tilt of the spot it was placed at, so sliding it
+   *  around a curved body walks it off the surface — which is exactly what the two
+   *  stray "Text" layers in the report were. Only for layers with wrap on; wrap off
+   *  means "this is a flat plaque, put it where I put it". */
+  async function reseatText(ids: string[]) {
+    const live = attachmentsRef.current.filter((a) => a.text && a.text.wrap !== false && ids.includes(a.id));
+    if (!live.length) return;
+    const rebuilt = await Promise.all(live.map(async (a) => {
+      try {
+        const spec = a.text as TextSpec;
+        const flat = buildTextGeometry(await getFont(spec.family, !!spec.custom), spec);
+        flat.computeBoundingBox();
+        const half = (flat.boundingBox!.max.x - flat.boundingBox!.min.x) / 2;
+        const seat = viewer.current?.seatAttachment?.(a.id, spec.roll ?? 0, half);
+        if (!seat) { flat.dispose(); return null; }
+        return { id: a.id, geometry: bendAroundY(flat, seat.bend), place: { at: seat.at, quat: seat.quat, bend: seat.bend } };
+      } catch { return null; }
+    }));
+    const ok = rebuilt.filter((x): x is NonNullable<typeof x> => !!x);
+    if (!ok.length) return;
+    setAttachments((l) => l.map((a) => {
+      const r = ok.find((x) => x.id === a.id);
+      if (!r) return a;
+      const old = a.geometry;
+      setTimeout(() => old.dispose(), 0); // after the Viewer's swap effect has run
+      return { ...a, geometry: r.geometry, place: { ...a.place, ...r.place } };
+    }));
   }
   /** Append a version whose only change is the text layers — so Undo takes off exactly
    *  the word you just placed, and nothing of the model underneath it. */
@@ -6639,7 +6715,10 @@ export default function App() {
           tool: textTool,
           set: setTextToolState,
           toggle: toggleTextTool,
-          ghost: textGhostGeom,
+          // No placement ghost while a placed layer is being edited: the panel is
+          // editing THAT word, and a second one riding the cursor at the same time is
+          // the app looking like it is about to drop another.
+          ghost: textEditId ? null : textGhostGeom,
           place: placeText,
           fontState: textFontState,
           fontError: textFontErr,
@@ -6663,6 +6742,7 @@ export default function App() {
           editId: textEditId,
           select: (id: string | null) => { setTextEditId(id); if (id) selectAttach(id); },
           edit: (id: string, patch: Partial<TextSpec>) => void editText(id, patch),
+          duplicate: (id: string) => void duplicateText(id),
           remove: (id: string) => {
             const gone = attachmentsRef.current.find((a) => a.id === id)?.text?.text ?? "text";
             removeAttachment(id);
@@ -6929,7 +7009,11 @@ export default function App() {
               const p2 = poses.find((x) => x.id === a.id);
               return p2 ? { ...a, place: { at: p2.at, quat: p2.quat, scale: p2.scale } } : a;
             }));
-            if (touchedText) setTimeout(() => commitTexts("Moved a text layer", textsForSnap()), 0);
+            if (touchedText) {
+              // Re-seat first, then record — otherwise History keeps the mid-air pose.
+              void reseatText(poses.map((x) => x.id)).then(() =>
+                setTimeout(() => commitTexts("Moved a text layer", textsForSnap()), 0));
+            }
             else if (touchedLogo) setTimeout(() => commitLogos("Moved a logo layer"), 0);
           },
           rotateBy: (axis, deg) => {

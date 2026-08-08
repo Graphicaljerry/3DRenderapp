@@ -64,7 +64,7 @@ export interface Version {
  *  structurally because the store must not import engine or text types. */
 export interface TextLayerSnap {
   id: string;
-  spec: { text: string; family: string; custom?: boolean; size: number; depth: number; bevel: number; spacing: number; roll: number };
+  spec: { text: string; family: string; custom?: boolean; size: number; depth: number; bevel: number; spacing: number; roll: number; wrap?: boolean };
   at: [number, number, number];
   quat: [number, number, number, number];
   /** Uniform scale from the gizmo; absent means 1. */

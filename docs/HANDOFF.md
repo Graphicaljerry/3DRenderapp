@@ -917,6 +917,39 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 380 — text you can actually edit, and the see-through-letter bug
+
+**The see-through polygon in the "D" was a coincident copy, not a hole.** The text
+solid measures watertight, manifold and consistently wound — 0 open edges, 0 flipped
+faces. What was actually on screen was TWO copies of the word in the same place: merge
+and engrave call `applyResult` (which snapshots the layer list) *before* their
+`setAttachments` drops the layers they just consumed, so the version recorded the model
+with the word baked in AND the word still standing on it. Any later rebuild put the
+layer back on top of itself; the depth buffer resolves coincident faces at random,
+which reads as slashes through the letters. `consumedLayers` marks them for the
+snapshot. This arrived with the 378/379 layer-persistence work — it could not happen
+before, because layers didn't come back at all.
+
+**A moved word re-seats and re-wraps.** A gizmo drag is a straight translation, so a
+word slid along a curved body kept the bend AND the tilt of the spot it was placed at
+and walked off the surface — the two stray "Text" layers in the report. `seatAttachment`
+in the Viewer finds the nearest point on the model (BVH `closestPointToPoint`, not a
+ray: a dragged layer can end up beside or inside the body), re-orients to that face,
+re-measures the wall radius and moves the mesh there; App rebuilds the solid at the new
+bend. Measured: 3.26 mm off the surface before, 0.02 mm after.
+
+**Wrap is a choice now.** `TextSpec.wrap` (default on) — "Follow the curve" in the
+panel. On, the word bends to the wall and re-fits on every move; off, it stays a flat
+plaque you can put anywhere. Toggling it rebuilds, and turning it back on goes and
+measures the wall it is standing on.
+
+**Editing stops offering to place.** While a placed layer is selected the tool no
+longer paints a cursor ghost — a second word riding the cursor over the gizmo looked
+like the app was about to drop one you hadn't asked for.
+
+**Duplicate**, from the panel or any row in Placed: copies the spec a line and a half
+down the face, then seats it, so a copy on a curved body wraps to ITS spot.
+
 ## Builds 379 — one lit tool, smooth ribs, text that wraps, layers that persist
 
 **Rail: exactly one tool armed, ever.** Every rail button now routes through

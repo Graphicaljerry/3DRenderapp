@@ -47,6 +47,12 @@ export interface ViewerHandle {
    *  angle so it composes with whatever the gizmo has already done instead of
    *  snapping the layer back to a pose the user has since moved away from. */
   rollAttachment: (id: string, deltaDeg: number) => void;
+  /** Sit a layer back down on the model at wherever it has been dragged to, and report
+   *  the wall radius under it. This is what lets a wrapped word be MOVED: a gizmo drag
+   *  is a straight translation, so a word slid along a curved body would otherwise walk
+   *  off the surface and keep the curvature of the spot it started at. `halfWidth` is
+   *  the flat word's half-width, which only the caller (who rebuilds it) knows. */
+  seatAttachment: (id: string, rollDeg: number, halfWidth: number) => { at: [number, number, number]; quat: [number, number, number, number]; bend: number } | null;
   /** Dolly toward (factor > 1) or away from (factor < 1) the orbit target. */
   zoomBy: (factor: number) => void;
   /** Screenshot the CURRENT camera view (what the user sees, minus UI overlays).
@@ -3699,6 +3705,56 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
       m.matrixWorld.decompose(p, q, sc);
       return { at: [p.x, p.y, p.z], quat: [q.x, q.y, q.z, q.w], scale: sc.x };
+    },
+    seatAttachment(id, rollDeg, halfWidth) {
+      const s = st.current;
+      const m = s?.attachMap.get(id);
+      if (!s?.mesh || !m) return null;
+      m.updateWorldMatrix(true, false);
+      const world = m.getWorldPosition(new THREE.Vector3());
+      const geo = s.mesh.geometry;
+      ensureBoundsTree(geo);
+      const tree = (geo as any).boundsTree;
+      if (!tree) return null;
+      // NEAREST point on the model, not a ray: a dragged layer can end up beside the
+      // body or inside it, and both should snap it back to the closest wall rather than
+      // to whatever happens to lie along one chosen direction.
+      s.mesh.updateWorldMatrix(true, false);
+      const local = s.mesh.worldToLocal(world.clone());
+      const near = tree.closestPointToPoint(local, {});
+      if (!near) return null;
+      const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+      const ix = geo.index;
+      const f = near.faceIndex * 3;
+      const a = ix ? ix.getX(f) : f, b2 = ix ? ix.getX(f + 1) : f + 1, c = ix ? ix.getX(f + 2) : f + 2;
+      const va = new THREE.Vector3().fromBufferAttribute(pos, a);
+      const n = new THREE.Vector3()
+        .crossVectors(
+          new THREE.Vector3().fromBufferAttribute(pos, b2).sub(va),
+          new THREE.Vector3().fromBufferAttribute(pos, c).sub(va),
+        )
+        .transformDirection(s.mesh.matrixWorld)
+        .normalize();
+      const at = s.mesh.localToWorld(near.point.clone()).addScaledVector(n, 0.02);
+      const quat = faceDecalQuat(n, rollDeg);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+      const bend = wallRadius(s.mesh, at, right, n, halfWidth);
+      // Move it here NOW as well as reporting it. The caller records the pose in state,
+      // but the swap effect that follows only replaces geometry — it leaves the mesh's
+      // transform alone — so a returned-but-unapplied pose left the word re-bent for the
+      // new spot while still hanging in the air at the old one.
+      const parent = m.parent;
+      if (parent) {
+        parent.updateWorldMatrix(true, false);
+        m.position.copy(at).applyMatrix4(new THREE.Matrix4().copy(parent.matrixWorld).invert());
+        m.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(quat));
+      } else {
+        m.position.copy(at);
+        m.quaternion.copy(quat);
+      }
+      m.updateMatrixWorld(true);
+      invalidateRef.current(2);
+      return { at: at.toArray() as [number, number, number], quat: quat.toArray() as [number, number, number, number], bend };
     },
     rollAttachment(id, deltaDeg) {
       const s = st.current;

@@ -3433,10 +3433,19 @@ export default function App() {
     setTimeout(() => commitTexts(`Placed “${t.text}”`, textsForSnap()), 0);
     explainOnce("text", `Text is its own **layer**: move or spin it with Transform, retype anything in the Text panel, and find it in **Objects**. Merge raises it off the surface; Engrave carves it in — both bake the model to a mesh, so do CAD edits first.`);
   }
+  /** One patch, several words, ONE History step. Firing editText per id recorded a
+   *  version each — so changing the font on three layers took three presses of Undo, and
+   *  the intermediate ones looked like the change had half-applied. */
+  async function editMany(ids: string[], patch: Partial<TextSpec>) {
+    if (ids.length <= 1) { if (ids[0]) await editText(ids[0], patch); return; }
+    await Promise.all(ids.map((x) => editText(x, patch, true)));
+    const n = ids.length;
+    setTimeout(() => commitTexts(`Edited ${n} text layers`, textsForSnap(), `many:${ids.join(",")}:${Object.keys(patch).sort().join(",")}`), 0);
+  }
   /** Re-run the pipeline for a placed text with its edited spec. The mesh keeps its
    *  pose — the Viewer swaps geometry under the same id — so editing never re-places. */
   const textEditGen = useRef(new Map<string, number>());
-  async function editText(id: string, patch: Partial<TextSpec>) {
+  async function editText(id: string, patch: Partial<TextSpec>, silent = false) {
     const cur = attachments.find((x) => x.id === id);
     if (!cur?.text) return;
     // A patch that changes nothing must not become a History row. Number spinners and
@@ -3459,7 +3468,7 @@ export default function App() {
       // to undo, so Undo silently skips past it to whatever came before.
       const pose = viewer.current?.attachPose?.(id);
       if (pose) setAttachments((l) => l.map((x) => (x.id === id ? { ...x, place: { ...x.place, at: pose.at, quat: pose.quat, scale: pose.scale } } : x)));
-      setTimeout(() => commitTexts(`Turned “${spec.text}”`, textsForSnap(), `${id}:roll`), 0);
+      if (!silent) setTimeout(() => commitTexts(`Turned “${spec.text}”`, textsForSnap(), `${id}:roll`), 0);
       return;
     }
     const gen = (textEditGen.current.get(id) ?? 0) + 1;
@@ -3488,7 +3497,7 @@ export default function App() {
       if (wrap && !Number.isFinite(bend)) await reseatText([id]);
       // One burst per (layer, field): typing a word is one step, and so is winding a
       // number field, but changing the size and THEN the font are two.
-      setTimeout(() => commitTexts(`Edited “${spec.text}”`, textsForSnap(), `${id}:${Object.keys(patch).sort().join(",")}`), 0);
+      if (!silent) setTimeout(() => commitTexts(`Edited “${spec.text}”`, textsForSnap(), `${id}:${Object.keys(patch).sort().join(",")}`), 0);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild that text: ${String(err?.message ?? err)}`, error: true }]);
     }
@@ -6886,6 +6895,10 @@ export default function App() {
           editId: textEditId,
           select: (id: string | null) => { setTextEditId(id); if (id) selectAttach(id); },
           edit: (id: string, patch: Partial<TextSpec>) => void editText(id, patch),
+          // Only TEXT layers — a selection can hold a logo or a part too, and those have
+          // no spec to patch.
+          selected: selAttachIds.filter((x) => attachments.some((a) => a.id === x && a.text)),
+          editMany: (ids: string[], patch: Partial<TextSpec>) => void editMany(ids, patch),
           duplicate: (id: string) => void duplicateText(id),
           remove: (id: string) => {
             // removeAttachment records the version itself. This used to schedule a SECOND

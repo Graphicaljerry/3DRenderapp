@@ -917,6 +917,28 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 387 — edits reach the whole selection, and errors leave the transcript
+
+**One edit, every selected word.** `TextFly` only ever patched `ctl.editId`, so selecting
+three layers and changing the font changed one — which reads as the change failing at
+random depending on which was last touched. It now patches every selected TEXT layer
+(logos and parts in the selection are skipped, they have no spec), through a new
+`editMany` that records ONE History step for the lot.
+
+**Errors are a banner on the canvas, not chat messages.** `CanvasToast` shows the newest
+failure at the bottom-left of the stage and dismisses itself after nine seconds or on a
+tap; the transcript filters `error` messages out entirely. A failed operation is a status
+about the model, and a run of them used to push the actual conversation off the screen.
+The messages still exist in the chat data — they are simply not rendered there.
+
+**The rail flyout fits an iPad.** It is anchored to its TOOL, and the Text tool sits
+halfway down a tall rail, so on a tablet the Placed list ran off the bottom with no way
+to reach it. On touch (or any window under 820px tall) the panel now pins to the RAIL
+instead — a known 63px into the stage whatever tool opened it — and caps its height so
+the list scrolls inside it. Two wrong turns on the way, both worth remembering: `100cqh`
+needs `container-type: size` on the stage and silently does nothing without it, and
+`position: fixed` bounds to the viewport, so the panel rode up over the topbar.
+
 ## Build 386 — the last two undo holes closed
 
 **`commitTexts` was missing `logos` AND `partColors`.** The 385 edit meant to add them

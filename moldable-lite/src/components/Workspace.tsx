@@ -35,7 +35,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy} from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -1938,8 +1938,12 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
     return () => cancelAnimationFrame(t);
   }, [ctl.editId]);
   const spec = editing ? editing.spec : ctl.tool!;
+  // Edits go to EVERY selected word, not just the one the panel is pointed at. Picking
+  // three layers and changing the font changed one of them, which reads as the change
+  // failing at random depending on which was last touched.
+  const targets = ctl.selected.length ? ctl.selected : editing ? [editing.id] : [];
   const patch = (p: Partial<TextSpec>) => {
-    if (editing) ctl.edit(editing.id, p);
+    if (targets.length) ctl.editMany(targets, p);
     else ctl.set({ ...ctl.tool!, ...p });
   };
   // The dropdown lists Google families plus whatever this session has learned about —
@@ -2039,6 +2043,33 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/** The newest failure, as a small banner along the bottom of the canvas.
+ *
+ *  Errors used to be assistant messages, so a run of failed operations pushed the actual
+ *  conversation off the screen and the user had to delete them one by one. A failure is a
+ *  status about the thing on the canvas, so it belongs on the canvas: it appears where
+ *  the work is, says what went wrong, and goes away on its own or on a tap. The message
+ *  still exists in the transcript data — it is simply not rendered there. */
+function CanvasToast({ messages }: { messages: ChatMessage[] }) {
+  const newest = [...messages].reverse().find((m) => m.error) ?? null;
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!newest || newest.id === dismissed) return;
+    // Long enough to read a sentence and act on it; errors that matter are re-raised by
+    // the next attempt, so nothing is lost by letting it go.
+    const t = setTimeout(() => setDismissed(newest.id), 9000);
+    return () => clearTimeout(t);
+  }, [newest?.id, dismissed]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!newest || newest.id === dismissed) return null;
+  return (
+    <div className="canvas-toast" role="status" aria-live="polite">
+      <IconWarn size={15} />
+      <span className="canvas-toast-text">{newest.text}</span>
+      <button className="x" aria-label="Dismiss" onClick={() => setDismissed(newest.id)}><IconX /></button>
     </div>
   );
 }
@@ -2432,6 +2463,10 @@ interface Props {
     editId: string | null;
     select: (id: string | null) => void;
     edit: (id: string, patch: Partial<TextSpec>) => void;
+    /** Ids of every selected text layer — an edit applies to all of them. */
+    selected: string[];
+    /** Apply one patch to several layers as a single History step. */
+    editMany: (ids: string[], patch: Partial<TextSpec>) => void;
     /** Copy a placed word, offset down the face, wrapped to where the copy lands. */
     duplicate: (id: string) => void;
     remove: (id: string) => void;
@@ -3470,6 +3505,7 @@ export function Workspace(p: Props) {
                   </AnchoredMenu>
                 );
               })()}
+              <CanvasToast messages={p.messages} />
               {(p.tab === "3d" || p.tab === "params") && (
                 <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
                   {/* Move leads: it's the first tool in every 3D app people
@@ -4621,11 +4657,14 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
           </div>
         </div>
       )}
-      {messages.map((m, i) => (
+      {/* Errors are STATUS, not conversation. They surface as a banner on the canvas
+          (see .canvas-toast) where the thing that failed actually is, instead of pushing
+          the conversation up the screen — sixty-one of them in a session buried it. */}
+      {messages.filter((m) => !m.error).map((m, i) => (
         <Fragment key={m.id}>
           {/* Day separator wherever the calendar date changes between stamped
               messages — the transcript spans weeks of a project's life. */}
-          {m.ts != null && new Date(m.ts).toDateString() !== new Date(messages[i - 1]?.ts ?? 0).toDateString() && (
+          {m.ts != null && new Date(m.ts).toDateString() !== new Date(messages.filter((x) => !x.error)[i - 1]?.ts ?? 0).toDateString() && (
             <div className="day-sep" role="separator">
               {new Date(m.ts).toLocaleDateString([], {
                 month: "long", day: "numeric",

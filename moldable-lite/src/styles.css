@@ -2298,6 +2298,68 @@ details.guide { margin-top: 10px; }
 }
 /* (top-right canvas cluster retired — undo/View/Objects/Help live in the header again) */
 
+/* A rail flyout must never run off the bottom of the screen. On an iPad the Text panel's
+   Placed list did exactly that — the layers you needed to pick were below the fold with
+   no way to reach them, because the panel is anchored to its TOOL and the tool is
+   halfway down a tall rail.
+   On a pointer that can hover, the panel is short and tool-anchoring reads better, so it
+   keeps it and just gains a ceiling. On touch — and on any short window — it detaches to
+   the viewport instead: pinned between the head pill and the bottom edge, scrolling its
+   own body. Anchored to the left of the screen rather than the tool, so it cannot be
+   pushed off either end. */
+.canvas-rail .rail-fly { overscroll-behavior: contain; overflow-y: auto; }
+@media (hover: hover) and (pointer: fine) {
+  .canvas-rail .rail-fly { max-height: calc(100dvh - 150px); }
+}
+@media (pointer: coarse), (max-height: 820px) {
+  /* The panel detaches from its TOOL and anchors to the rail, so its top is a known
+     63px inside the stage however far down the rail the tool sits — and its height can
+     then be bounded by the stage itself. Anchoring to the tool is what put the Placed
+     list below the fold on an iPad; `position: fixed` fixed that and broke something
+     else, riding up over the topbar because a fixed box has no idea where the stage is. */
+  .canvas-rail > .rail-tool { position: static; }
+  .canvas-rail .rail-fly {
+    top: 0;
+    /* Measured, not derived: with the panel pinned to the rail its top is a fixed 63px
+       into the stage, and on an iPad in portrait the stage is a little over 530px tall —
+       so this is what fits with the foot of the panel still clear of the plate bar. The
+       list scrolls inside it rather than running off the bottom, which is the whole
+       point. (cqh would express this exactly, but it needs size containment on the
+       stage, and that is a bigger change than this is worth.) */
+    max-height: min(48dvh, 460px);
+  }
+  /* The rail lies along the bottom on a phone; there the panel opens upward from it. */
+  @media (max-width: 760px) {
+    .canvas-rail .rail-fly { left: 8px; right: 8px; top: 60px; bottom: 74px; }
+  }
+}
+
+/* ---------- canvas toast: a failure, where the work is ----------
+   Bottom-LEFT of the stage, clear of the plate bar and the zoom cluster, and never wider
+   than a comfortable line. It replaces error bubbles in the transcript: a failed
+   operation is a status about the model, and a run of them used to push the actual
+   conversation off the screen. */
+.canvas-toast {
+  position: absolute; left: 12px; bottom: 12px; z-index: var(--z-popover);
+  display: flex; align-items: flex-start; gap: 9px;
+  max-width: min(420px, calc(100% - 24px));
+  padding: 10px 10px 10px 12px;
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--danger); border-left-width: 3px;
+  border-radius: var(--r-md); box-shadow: var(--shadow-md);
+  font-size: var(--fs-md); line-height: 1.4;
+}
+.canvas-toast > svg { flex: 0 0 auto; margin-top: 1px; color: var(--danger); }
+.canvas-toast-text { min-width: 0; overflow-wrap: anywhere; }
+.canvas-toast .x { flex: 0 0 auto; margin: -2px -2px 0 2px; color: var(--subt); }
+.canvas-toast .x:hover { color: var(--ink); }
+@media (prefers-reduced-motion: no-preference) {
+  .canvas-toast { animation: toast-in .18s cubic-bezier(.22,1,.36,1); }
+  @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+}
+/* The phone puts the rail along the bottom, so the toast sits above it. */
+@media (max-width: 760px) { .canvas-toast { bottom: 68px; } }
+
 /* Rail popovers (Material / Surface / Snap / Resize) open to the RIGHT of the
    rail — their default right-aligned drop (from the old top toolbar) opened
    leftward, off the canvas edge and clipped under the chat panel. */

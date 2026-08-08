@@ -63,6 +63,13 @@ export const IconCopy = ({ size = 13 }: { size?: number }) => (
     <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
   </svg>
 );
+/** Triangle-bang: something needs your attention, not something is broken forever. */
+export const IconWarn = ({ size = 14 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2}>
+    <path d="M12 4.5 2.8 20h18.4L12 4.5Z" />
+    <path d="M12 10v4M12 17.2v.1" />
+  </svg>
+);
 export const IconCheck = ({ size = 13 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={2.4}>
     <path d="M20 6 9 17l-5-5" />

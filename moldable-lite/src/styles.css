@@ -2727,6 +2727,70 @@ details.guide { margin-top: 10px; }
 .sheet-grab-pill { width: 42px; height: 5px; border-radius: var(--r-full); background: var(--bord-strong); }
 .sheet-grab:active .sheet-grab-pill { background: var(--mut); }
 
+/* ---------- focus mode ----------
+   Everything that isn't the model steps off. Written as a subtraction from the normal
+   shell rather than a second layout, so nothing can drift out of step with it: the same
+   canvas, the same camera, just no furniture. */
+.app.focus-mode > .topbar,
+.app.focus-mode .statusbar,
+.app.focus-mode .chat,
+.app.focus-mode .chat-rail,
+.app.focus-mode .chat-resize,
+.app.focus-mode .viewer-head,
+.app.focus-mode .canvas-rail,
+.app.focus-mode .right-dock,
+.app.focus-mode .inspector-dock,
+.app.focus-mode .dock-rail,
+.app.focus-mode .zoom-ctl,
+.app.focus-mode .view-snaps,
+.app.focus-mode .plate-bar,
+.app.focus-mode .showcase-bar { display: none !important; }
+.app.focus-mode .split { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr); padding: 0; gap: 0; }
+.app.focus-mode .viewer { grid-row: 1; grid-column: 1; }
+.app.focus-mode .viewer-body { border-radius: 0; }
+.focus-exit {
+  position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px; z-index: 60;
+  display: grid; place-items: center; width: 40px; height: 40px;
+  border: 1px solid var(--bord); border-radius: var(--r-full);
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+  color: var(--ink2); cursor: pointer;
+  transition: opacity .2s ease, color .15s ease;
+}
+.focus-exit:hover { color: var(--ink); }
+/* Out of the way while you are actually looking; back on approach. */
+@media (hover: hover) and (pointer: fine) { .focus-exit { opacity: .35; } .focus-exit:hover { opacity: 1; } }
+
+/* ---------- handedness ----------
+   Shapr3D treats which side the menu lives on as a first-class preference, and it is one:
+   a left rail is a RIGHT-hander's assumption, because with a Pencil in your left hand
+   your wrist covers the tools you are reaching for. Flipping moves the canvas furniture
+   only — the model, the camera and the chat column stay put, so this is a change of
+   reach, not a different app. */
+[data-hand="left"] .canvas-rail { left: auto; right: 10px; }
+[data-hand="left"] .canvas-rail .rail-fly { left: auto; right: calc(100% + 8px); }
+[data-hand="left"] .inspector-dock { right: auto; left: 12px; }
+[data-hand="left"] .dock-rail { right: auto; left: 0; }
+[data-hand="left"] .right-dock { right: auto; left: 12px; }
+[data-hand="left"] .viewer-body:has(.inspector-dock:not([style*="none"])) .right-dock { left: calc(var(--dock-w, 262px) + 24px); right: auto; }
+[data-hand="left"] .viewer-body:has(.dock-rail) .right-dock { left: 52px; right: auto; }
+[data-hand="left"] .viewer:has(.inspector-dock:not([style*="none"])) .viewer-head { padding-right: 10px; padding-left: calc(var(--dock-w, 262px) + 32px); }
+[data-hand="left"] .viewer-body:has(.inspector-dock:not([style*="none"])) .export-menu { right: 12px; left: auto; }
+[data-hand="left"] .zoom-ctl { left: auto; right: 12px; }
+[data-hand="left"] .pin-panel { left: auto; right: calc(10px + var(--rail-w) + 12px); }
+[data-hand="left"] .split-panel { left: auto; right: 12px; }
+[data-hand="left"] .canvas-toast { left: auto; right: 12px; }
+/* The head pill sits on the same side as the rail it belongs with. */
+[data-hand="left"] .viewer-head { flex-direction: row-reverse; }
+@media (min-width: 901px) and (max-height: 860px) and (orientation: landscape) {
+  [data-hand="left"] .zoom-ctl { left: auto; right: calc(10px + var(--rail-w) + 8px); }
+}
+@media (max-width: 760px) {
+  /* The phone rail is a bottom row, not a side column — handedness has nothing to flip. */
+  [data-hand="left"] .canvas-rail { left: 50%; right: auto; }
+  [data-hand="left"] .canvas-rail .rail-fly { left: 6px; right: auto; }
+}
+
 /* ---------- tablets, both ways up ----------
    An iPad is neither a phone nor a desktop, and it used to get whichever tier its pixel
    width happened to land in. Measured across six iPad viewports before this block

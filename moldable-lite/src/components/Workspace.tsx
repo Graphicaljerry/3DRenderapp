@@ -35,7 +35,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn} from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -2634,6 +2634,18 @@ export function Workspace(p: Props) {
   const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
+  // Focus mode: every panel steps off and the model has the screen. Spline hides its UI
+  // on a keystroke, Shapr3D ships an Immersive View — both exist because at some point
+  // you stop building and start looking, and here it doubles as the way to show someone
+  // a finished part. Escape is the way out, and the one button that stays is the way
+  // back for a finger that has no Escape key.
+  const [focus, setFocus] = useState(false);
+  useEffect(() => {
+    if (!focus) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); setFocus(false); } };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [focus]);
   const [showLayers, setShowLayers] = useState(false); // legacy gate: context-menu Rename still opens Objects
   const [dockPanel, setDockPanel] = useState<DockPanel>("selection");
   // Open by default, EXCEPT where it would eat the canvas. The dock is a fixed 262px
@@ -2899,7 +2911,14 @@ export function Workspace(p: Props) {
   );
 
   return (
-    <div className="app">
+    <div className={`app${focus ? " focus-mode" : ""}`}>
+      {/* The one control focus mode keeps. A finger has no Escape key, and a screen with
+          no way out of it is a trap rather than a mode. */}
+      {focus && (
+        <button className="focus-exit" onClick={() => setFocus(false)} title="Leave focus mode (Esc)" aria-label="Leave focus mode">
+          <IconFocusExit />
+        </button>
+      )}
       <header className="topbar">
         <div className="brand">
           {/* The wordmark is the way back to the Launchpad — the convention every app
@@ -3314,6 +3333,9 @@ export function Workspace(p: Props) {
                     toggleOverhang={p.printPrep.toggleOverhang}
                     onResetView={() => p.viewerRef.current?.resetView()}
                   />
+                  <button className="ghost sm iconbtn" aria-label="Focus mode" title="Focus mode — hide every panel (Esc to come back)" onClick={() => setFocus(true)}>
+                    <IconFocus />
+                  </button>
                   <button className={`ghost sm iconbtn${showHelp ? " on" : ""}`} aria-pressed={showHelp} aria-label="Help" title="What every tool and gesture does" onClick={() => setShowHelp((h) => !h)}>
                     <IconHelp />
                   </button>
@@ -3394,6 +3416,9 @@ export function Workspace(p: Props) {
                 onTransformCommit={p.transformCtl.commit}
                 onAttachPose={p.transformCtl.attachPose}
                 onAltDragCopy={p.transformCtl.altDragCopy}
+                bare={focus}
+                onTapUndo={() => { if (p.undoCtl.canUndo && !p.undoCtl.busy) p.undoCtl.undo(); }}
+                onTapRedo={() => { if (p.undoCtl.canRedo && !p.undoCtl.busy) p.undoCtl.redo(); }}
                 onMeasurePoint={p.measureCtl.point}
                 onMeasureSegment={p.measureCtl.segment}
                 onMeasureDelete={p.measureCtl.remove}

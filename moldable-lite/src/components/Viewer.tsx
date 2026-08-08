@@ -229,6 +229,14 @@ interface Props {
   /** Alt was held as a gizmo drag began: leave a copy of the selection where it stands
    *  and let the drag carry the original away — Alt-drag, as every editor does it. */
   onAltDragCopy?: (ids: string[]) => void;
+  /** Two fingers tapped the canvas / three fingers tapped it. The undo gesture every
+   *  iPad artist already has in their hands from Procreate and Nomad Sculpt. */
+  onTapUndo?: () => void;
+  onTapRedo?: () => void;
+  /** Focus mode: the model, and nothing else. Suppresses the editing overlays that live
+   *  INSIDE the scene and so cannot be hidden with CSS — the transform gizmo, the
+   *  selection box and its anchor dots, and the corner orientation axes. */
+  bare?: boolean;
   textPlace: {
     geometry: THREE.BufferGeometry | null;
     /** Extra spin about the face normal, degrees — the panel's Angle field. */
@@ -551,14 +559,18 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace, onAttachPose, onAltDragCopy }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace, onAttachPose, onAltDragCopy, onTapUndo, onTapRedo, bare }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   /** Whether the scene-wide floor grid should be on. Held in a ref because the theme
    *  effect REPLACES the GridHelper object and has to restore the state it was in. */
   const gridVisibleRef = useRef(false);
-  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onAltDragCopy, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onAltDragCopy, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  // Focus mode, read per frame inside the animate loop (which closes over its first
+  // render), so it never needs the loop rebuilt.
+  const bareRef = useRef(!!bare);
+  bareRef.current = !!bare;
+  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onAltDragCopy, onTapUndo, onTapRedo, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onAltDragCopy, onTapUndo, onTapRedo, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -1088,6 +1100,46 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     for (const ev of ["pointerdown", "pointermove", "pointerup", "wheel"] as const) {
       renderer.domElement.addEventListener(ev, () => invalidate(3), { passive: true });
     }
+
+    // ---- two fingers undo, three redo -----------------------------------------
+    // Procreate taught this to every iPad artist and Nomad Sculpt kept it, so it is
+    // reached for before any button is looked for. The whole difficulty is telling a
+    // TAP from the orbit and pinch that own the same two fingers: track how far the
+    // midpoint travels AND how much the fingers spread, and let either one disqualify
+    // the gesture. A pinch barely moves its midpoint, which is why spread is checked
+    // separately — without it, zooming counted as an undo.
+    const TAP_MS = 260, TAP_SLOP = 14;
+    let tap: { n: number; at: number; x: number; y: number; spread: number } | null = null;
+    const centre = (t: TouchList) => {
+      let x = 0, y = 0;
+      for (let i = 0; i < t.length; i++) { x += t[i].clientX; y += t[i].clientY; }
+      return { x: x / t.length, y: y / t.length };
+    };
+    const spreadOf = (t: TouchList) => (t.length < 2 ? 0 : Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY));
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length < 2) { tap = null; return; } // one finger is orbit, or a tool
+      const c = centre(e.touches);
+      // A third finger joining keeps the same candidate alive — the count that matters
+      // is the most fingers that were ever down, not how many landed together.
+      tap = { n: Math.max(e.touches.length, tap?.n ?? 0), at: tap?.at ?? performance.now(), x: c.x, y: c.y, spread: spreadOf(e.touches) };
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      if (!tap) return;
+      const c = centre(e.touches);
+      if (Math.hypot(c.x - tap.x, c.y - tap.y) > TAP_SLOP || Math.abs(spreadOf(e.touches) - tap.spread) > TAP_SLOP) tap = null;
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!tap || e.touches.length > 0) return; // wait until every finger is off the glass
+      const { n, at } = tap;
+      tap = null;
+      if (performance.now() - at > TAP_MS) return;
+      if (n === 2) cb.current.onTapUndo?.();
+      else if (n >= 3) cb.current.onTapRedo?.();
+    };
+    renderer.domElement.addEventListener("touchstart", onTouchStart, { passive: true });
+    renderer.domElement.addEventListener("touchmove", onTouchMove, { passive: true });
+    renderer.domElement.addEventListener("touchend", onTouchEnd, { passive: true });
+    renderer.domElement.addEventListener("touchcancel", () => { tap = null; }, { passive: true });
     // ---- Frame-rate-independent damping --------------------------------------
     // OrbitControls applies damping once per update() CALL, with no notion of elapsed
     // time: `theta += delta * f`, then `delta *= (1 - f)`. So how fast the camera
@@ -1163,6 +1215,23 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         sizeAnchors([s.vertHi], camera, vpH, tan);
         if (s.measures) sizeAnchors(s.measures.children, camera, vpH, tan);
         if (s.selBox) sizeAnchors(s.selBox.children, camera, vpH, tan);
+      }
+      // Focus mode: the editing overlays live in the SCENE, so hiding the panels around
+      // them is not enough — a gizmo and a selection box are furniture too, and this is
+      // the mode for looking at the part. Applied per frame from a ref rather than an
+      // effect: the gizmo is re-shown by half a dozen interaction paths, and every one
+      // of them would otherwise have to remember.
+      if (bareRef.current) {
+        // Hidden for THIS frame only and put straight back — the gizmo's visibility is
+        // owned by half a dozen interaction paths, and a mode that permanently switched
+        // it off would leave it off when the mode ended.
+        const overlays: THREE.Object3D[] = [tc.getHelper(), tcR.getHelper(), s?.selBox, s?.highlight, s?.edgeHi, s?.vertHi].filter(Boolean) as THREE.Object3D[];
+        const was = overlays.map((o) => o.visible);
+        overlays.forEach((o) => { o.visible = false; });
+        renderer.render(scene, camera);
+        overlays.forEach((o, i) => { o.visible = was[i]; });
+        raf = requestAnimationFrame(animate);
+        return; // …and no corner axes either: this is the mode for looking at the part
       }
       renderer.render(scene, camera);
       // Corner orientation gizmo: counter-rotate so it mirrors the world axes on screen.

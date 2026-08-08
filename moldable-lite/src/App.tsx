@@ -1500,6 +1500,18 @@ export default function App() {
     else localStorage.setItem("moldable_theme", themePref);
     scheduleSync(); // no-op until signed in (accountEmailRef guards it)
   }, [theme, themePref]);
+  // Which hand holds the Pencil, expressed as which side the canvas furniture sits on.
+  // "right" (the default) means a rail on the LEFT, which is where a right hand wants it.
+  const [hand, setHandState] = useState<"left" | "right">(() => (localStorage.getItem("moldable_hand") === "left" ? "left" : "right"));
+  const setHand = (h: "left" | "right") => {
+    setHandState(h);
+    try { localStorage.setItem("moldable_hand", h); } catch { /* private mode */ }
+    scheduleSync(); // a preference, so it follows the account like the others
+  };
+  useEffect(() => {
+    if (hand === "left") document.documentElement.dataset.hand = "left";
+    else delete document.documentElement.dataset.hand;
+  }, [hand]);
   const [units, setUnitsState] = useState<"mm" | "in">(() => (localStorage.getItem("moldable_units") === "in" ? "in" : "mm"));
   const setUnits = (f: (u: "mm" | "in") => "mm" | "in") =>
     setUnitsState((u) => {
@@ -7278,6 +7290,8 @@ export default function App() {
           onSetClarify={setClarify}
           units={units}
           onSaveUnits={(u) => setUnits(() => u)}
+          hand={hand}
+          setHand={setHand}
           dimsMode={dimsMode}
           onSaveDimsMode={setDimsMode}
           plateColor={plateColor}
@@ -8498,6 +8512,8 @@ function SettingsModal({
   onSaveTheme,
   units,
   onSaveUnits,
+  hand,
+  setHand,
   dimsMode,
   onSaveDimsMode,
   plateColor,
@@ -8540,6 +8556,8 @@ function SettingsModal({
   onSaveTheme: (t: "light" | "dark") => void;
   units: "mm" | "in";
   onSaveUnits: (u: "mm" | "in") => void;
+  hand: "left" | "right";
+  setHand: (h: "left" | "right") => void;
   dimsMode: "select" | "always" | "off";
   onSaveDimsMode: (m: "select" | "always" | "off") => void;
   plateColor: string | null;
@@ -8780,6 +8798,12 @@ function SettingsModal({
               </div>
             </SGroup>
             <SGroup title="Workspace" hint="also switchable from the viewer's View menu">
+              <label>Tools on the</label>
+              <div className="seg sm" role="radiogroup" aria-label="Which side the tool rail sits on">
+                <button className={hand === "right" ? "on" : ""} onClick={() => setHand("right")} title="Rail on the left — for a right hand">Left (right-handed)</button>
+                <button className={hand === "left" ? "on" : ""} onClick={() => setHand("left")} title="Rail on the right — for a left hand">Right (left-handed)</button>
+              </div>
+              <p className="fine">With a Pencil in your left hand, a rail on the left sits under your wrist. This moves the rail, the Inspector and the zoom controls to the other side.</p>
               <label>Units</label>
               <div className="seg sm" role="radiogroup" aria-label="Units">
                 <button className={units === "mm" ? "on" : ""} onClick={() => onSaveUnits("mm")}>Millimetres</button>

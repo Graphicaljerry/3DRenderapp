@@ -917,6 +917,44 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 391 — borrowed from Shapr3D, Nomad and Spline (1 of 2)
+
+From the design research (artifact: "what to borrow from Shapr3D, Nomad Sculpt and
+Spline"). The three apps share seven reflexes; these are the three cheapest of them.
+
+**Two fingers undo, three redo.** Procreate taught this to every iPad artist and Nomad
+Sculpt kept it, so it is reached for before any button is looked for. The whole
+difficulty is telling a TAP from the orbit and pinch that own the same two fingers:
+the detector tracks how far the midpoint travels AND how much the fingers spread, and
+either one disqualifies it (a pinch barely moves its midpoint — without the spread check
+zooming counted as an undo). 260ms, 14px. Lives on the canvas element, `passive: true`,
+so OrbitControls is untouched.
+
+**Focus mode.** One tap clears every panel and the model has the screen — Spline hides
+its UI on a keystroke, Shapr3D ships an Immersive View. The editing overlays live in the
+SCENE, not the DOM, so hiding panels isn't enough: the `bare` prop also drops the
+transform gizmo, the selection box, the hover highlights and the corner axes. They are
+hidden for the frame and put straight back, because the gizmo's visibility is owned by
+half a dozen interaction paths and a mode that permanently switched it off would leave it
+off. Escape exits; one dimmed chip stays on screen for a finger that has no Escape key.
+
+**Handedness.** Settings → Workspace → "Tools on the". A left rail is a RIGHT-hander's
+assumption — with a Pencil in your left hand your wrist covers the tools you are reaching
+for. `data-hand="left"` flips the rail, its flyouts, the Inspector, the dock rail, the
+stats card, the zoom cluster, the pin and split panels and the toast. The model, camera
+and chat column stay put: a change of reach, not a different app.
+
+Verified at 1180×820 with real CDP touch events: undo/redo fire, a two-finger DRAG and a
+slow press-and-hold do not, focus mode clears six bands of chrome and grows the stage
+542k→968k px², Escape restores, and the rail/Inspector/zoom all cross the canvas midline
+when handedness flips. Probe note: fan the synthetic touch points OUT from centre and the
+third one lands on the Inspector card, where the canvas never sees it — which reads
+exactly like "three fingers do nothing".
+
+Still to come from that list: the contextual action bar at the selection, the armed
+tool's parameter pinned to the rail, Pencil-draws/finger-orbits, and editable History
+steps.
+
 ## Build 390 — a merge never deletes a version (the data loss)
 
 Reported, and real: a project opened on a second device came back as a much older model

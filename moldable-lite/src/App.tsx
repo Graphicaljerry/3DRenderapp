@@ -26,6 +26,7 @@ import { downscaleImage, squareAvatar } from "./lib/downscale";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalFonts, loadLocalFont } from "./text/fonts";
 import { TEXT_DEFAULT, buildTextGeometry, type TextSpec } from "./text/geometry";
+import { bendAroundY } from "./text/bend";
 import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
@@ -57,7 +58,7 @@ import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
-import type { Project, Pin, Version, TextLayerSnap } from "./store/types";
+import type { Project, Pin, Version, TextLayerSnap, LogoLayerSnap } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
 import type { BuildProgress } from "./components/BuildStage";
@@ -571,7 +572,10 @@ export default function App() {
     id: string; geometry: THREE.BufferGeometry; name: string; tint?: string;
     frozenSource?: BuildInput; // a kept model version that can be swapped back to live
     text?: TextSpec; // this attachment IS a text layer — the spec it rebuilds from, forever editable
-    place?: { at: [number, number, number]; quat: [number, number, number, number]; scale?: number }; // live pose: pinned at placement, then updated by the gizmo so it can be saved and undone
+    /** The outline a logo layer was extruded from, kept so the layer can be rebuilt
+     *  after a reload or an undo instead of vanishing with the session. */
+    logo?: { svg: string; sizeMm: number; heightMm: number };
+    place?: { at: [number, number, number]; quat: [number, number, number, number]; scale?: number; bend?: number }; // live pose: pinned at placement, then updated by the gizmo so it can be saved and undone. bend = the wall radius the solid is wrapped to (absent/Infinity = flat)
   }[]>([]); // free-floating objects (logos, badges, text, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
   // Build plates: every object (the model = "model", attachments by id) lives on a plate.
@@ -1084,9 +1088,9 @@ export default function App() {
   }
 
   const attachSelected = selAttachIds.length > 0;
-  const addAttachment = (geometry: THREE.BufferGeometry, name: string, tint?: string): string => {
+  const addAttachment = (geometry: THREE.BufferGeometry, name: string, tint?: string, logo?: { svg: string; sizeMm: number; heightMm: number }): string => {
     const id = mid();
-    setAttachments((a) => [...a, { id, geometry, name, tint }]);
+    setAttachments((a) => [...a, { id, geometry, name, tint, logo }]);
     selectAttach(id);
     return id;
   };
@@ -1216,7 +1220,13 @@ export default function App() {
     }
   }
   const removeAttachment = (id: string) => {
+    // Decided from the ref BEFORE the update: React only runs a state updater eagerly
+    // when its queue happens to be empty, so reading the layer's kind inside one records
+    // the removal sometimes and not others.
+    const gone = attachmentsRef.current.find((x) => x.id === id);
     setAttachments((a) => a.filter((x) => x.id !== id));
+    if (gone?.text) setTimeout(() => commitTexts(`Removed ${gone.name}`, textsForSnap()), 0);
+    else if (gone?.logo) setTimeout(() => commitLogos(`Removed ${gone.name}`), 0);
     setSelAttachIds((sids) => {
       const next = sids.filter((x) => x !== id);
       if (!next.length) setTransformMode("off");
@@ -1535,6 +1545,14 @@ export default function App() {
     // still reading the Launchpad and typing a sentence, so time-to-first-model drops
     // rather than starting the clock at the moment they submit.
     if (sel) return;
+    // …unless the connection says not to. Speculatively spending 11 MB is a good trade
+    // on wifi and a bad one on a metered phone, where it can be the whole session's data
+    // before the user has asked for anything. Save-Data is an explicit "don't", and 2g/3g
+    // means the fetch would take longer than reading the page anyway. Nothing is lost by
+    // waiting: ensureEngine() boots the kernel the moment something actually needs it,
+    // which is the same code path this one uses.
+    const link = (navigator as any).connection;
+    if (link?.saveData === true || /^(slow-)?2g$|^3g$/.test(String(link?.effectiveType ?? ""))) return;
     let alive = true;
     let kicked = false;
     let idleId = 0;
@@ -3053,7 +3071,8 @@ export default function App() {
         // A free-floating object ON the current model: position with the gizmo/anchors,
         // then Merge in the Objects panel fuses it into one printable solid.
         const { geometry: g, dims: d } = extrudeSvg(svgDraft.text, { sizeMm: prm.sizeMm, heightMm: prm.heightMm });
-        addAttachment(g, svgDraft.name);
+        addAttachment(g, svgDraft.name, undefined, { svg: svgDraft.text, sizeMm: prm.sizeMm, heightMm: prm.heightMm });
+        setTimeout(() => commitLogos(`Added ${svgDraft.name}`), 0);
         setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Added **${svgDraft.name}** (${d.x} × ${d.y} × ${d.z} mm) as a movable object on the model. Drag the arrows/rings to place it, corner dots to size it, then press **Merge** in the Objects panel (layers icon) to make it part of the case. Merging produces a mesh — do CAD edits first.` }]);
         URL.revokeObjectURL(svgDraft.url);
         setSvgDraft(null);
@@ -3375,13 +3394,15 @@ export default function App() {
   }, [textTool && JSON.stringify({ ...textTool, roll: 0 })]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Commit the ghost's exact pose as a new text layer. The tool stays armed — placing
    *  a second line is another click, same as the Shape tool. */
-  function placeText(at: [number, number, number], quat: [number, number, number, number]) {
+  function placeText(at: [number, number, number], quat: [number, number, number, number], bend = Infinity) {
     const t = textToolRef.current;
     const g = textGhostRef.current;
     if (!t || !g) return;
+    // Wrapped to the same wall radius the ghost was showing — what you saw is what lands.
+    const solid = bendAroundY(g.clone(), bend);
     const id = mid();
     const name = t.text.length > 18 ? `“${t.text.slice(0, 17)}…”` : `“${t.text}”`;
-    setAttachments((a) => [...a, { id, geometry: g.clone(), name, text: { ...t }, place: { at, quat } }]);
+    setAttachments((a) => [...a, { id, geometry: solid, name, text: { ...t }, place: { at, quat, bend } }]);
     setTextEditId(id); // its numbers are right there to retype, like a just-dropped shape
     // …and its handles are right there to grab. Dropping something and having it come up
     // selected is the universal 3D-app gesture, and without it the only route to the
@@ -3414,7 +3435,7 @@ export default function App() {
     try {
       const font = await getFont(spec.family, !!spec.custom);
       if (textEditGen.current.get(id) !== gen) return;
-      const g = buildTextGeometry(font, spec);
+      const g = bendAroundY(buildTextGeometry(font, spec), cur.place?.bend ?? Infinity);
       setAttachments((l) => l.map((x) => {
         if (x.id !== id) return x;
         const old = x.geometry;
@@ -3951,7 +3972,8 @@ export default function App() {
       }
       const { extrudeSvg } = await import("./svg/extrude");
       const { geometry: g, dims: d } = extrudeSvg(svgText, { sizeMm: 25, heightMm: 1.2 });
-      addAttachment(g, name);
+      addAttachment(g, name, undefined, { svg: svgText, sizeMm: 25, heightMm: 1.2 });
+      setTimeout(() => commitLogos(`Added the ${name} logo`), 0);
       const caveats = traceNotes.length ? `\n\n_${traceNotes.join(" ")}_` : "";
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text:
         `Added **${name}** (${d.x} × ${d.y} × ${d.z} mm) as its own layer. Drag it onto any face with the arrows/rings, corner dots resize it. Then in **Objects**: **Merge** raises it off the surface (embossed), **Engrave** carves it in. Both turn the model into a mesh — do CAD edits first.${caveats}` }]);
@@ -4487,9 +4509,55 @@ export default function App() {
       const at = live?.at ?? a.place?.at ?? [0, 0, 0];
       const quat = live?.quat ?? a.place?.quat ?? [0, 0, 0, 1];
       const scale = live?.scale ?? a.place?.scale ?? 1;
-      return [{ id: a.id, spec: { ...a.text }, at, quat, ...(scale !== 1 ? { scale } : {}) } as TextLayerSnap];
+      const bend = a.place?.bend;
+      return [{ id: a.id, spec: { ...a.text }, at, quat, ...(scale !== 1 ? { scale } : {}), ...(bend !== undefined && Number.isFinite(bend) ? { bend } : {}) } as TextLayerSnap];
     });
     return out.length ? out : undefined;
+  }
+  /** The same three moves text layers get, for logos. Kept beside them deliberately:
+   *  they are the same problem — a layer whose shape is cheap to rebuild and expensive
+   *  to store — and splitting them apart is how the logo half got forgotten the first
+   *  time round, leaving logos to vanish on every reload. */
+  const LOGO_SRC_CAP = 512 * 1024; // an outline past this is a traced photo, not a logo
+  function logosForSnap(): LogoLayerSnap[] | undefined {
+    const out = attachmentsRef.current.flatMap((a) => {
+      if (!a.logo || a.logo.svg.length > LOGO_SRC_CAP) return [];
+      const live = viewer.current?.attachPose?.(a.id);
+      const at = live?.at ?? a.place?.at;
+      const quat = live?.quat ?? a.place?.quat;
+      const scale = live?.scale ?? a.place?.scale ?? 1;
+      return [{ id: a.id, name: a.name, svg: a.logo.svg, sizeMm: a.logo.sizeMm, heightMm: a.logo.heightMm,
+        ...(at ? { at } : {}), ...(quat ? { quat } : {}), ...(scale !== 1 ? { scale } : {}) } as LogoLayerSnap];
+    });
+    return out.length ? out : undefined;
+  }
+  function commitLogos(summary: string) {
+    const proj = projectRef.current;
+    const head = proj?.versions[headIndex(proj)];
+    if (!proj || !head) return;
+    persist(appendVersion(proj, {
+      engine: head.engine, summary,
+      code: head.code, params: head.params, ops: head.ops, spec: head.spec, dims: head.dims,
+      glb: head.glb, meshXform: head.meshXform, importFile: head.importFile, importKind: head.importKind,
+      genSource: head.genSource, splitPieces: head.splitPieces, surfFx: head.surfFx,
+      texts: textsForSnap(), logos: logosForSnap(),
+    }));
+  }
+  async function restoreLogos(snaps: LogoLayerSnap[] | undefined) {
+    const live = attachmentsRef.current;
+    if (!snaps?.length) {
+      if (live.some((a) => a.logo)) setAttachments((l) => l.filter((a) => !a.logo));
+      return;
+    }
+    const { extrudeSvg } = await import("./svg/extrude");
+    const built = snaps.flatMap((t) => {
+      try {
+        const { geometry } = extrudeSvg(t.svg, { sizeMm: t.sizeMm, heightMm: t.heightMm });
+        return [{ id: t.id, geometry, name: t.name, logo: { svg: t.svg, sizeMm: t.sizeMm, heightMm: t.heightMm },
+          place: t.at && t.quat ? { at: t.at, quat: t.quat, scale: t.scale } : undefined }];
+      } catch { return []; } // one unreadable outline must not take the whole restore down
+    });
+    setAttachments((l) => [...l.filter((a) => !a.logo), ...built]);
   }
   /** Append a version whose only change is the text layers — so Undo takes off exactly
    *  the word you just placed, and nothing of the model underneath it. */
@@ -4517,9 +4585,10 @@ export default function App() {
     const built = await Promise.all(snaps.map(async (t) => {
       try {
         const spec = t.spec as TextSpec;
-        const g = buildTextGeometry(await getFont(spec.family, !!spec.custom), spec);
+        const bend = t.bend ?? Infinity;
+        const g = bendAroundY(buildTextGeometry(await getFont(spec.family, !!spec.custom), spec), bend);
         const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
-        return { id: t.id, geometry: g, name, text: spec, place: { at: t.at, quat: t.quat, scale: t.scale } };
+        return { id: t.id, geometry: g, name, text: spec, place: { at: t.at, quat: t.quat, scale: t.scale, bend } };
       } catch { return null; } // a font that won't load must not take the whole restore down
     }));
     const keep = built.filter((x): x is NonNullable<typeof x> => !!x);
@@ -4567,16 +4636,22 @@ export default function App() {
         let pos = new Float32Array(src.getAttribute("position").array as Float32Array);
         if (src !== base) src.dispose();
         // Texture first, pattern on top — the decorative shape rides over the grip.
+        let nrm: Float32Array | null = null;
         for (const slot of [surfFx.texture, surfFx.pattern]) {
           if (!slot) continue;
           const r = await displaceMesh(pos, { pattern: slot.kind, scale: slot.scale, depth: slot.depth });
           if (gen !== fxGen.current) return;
           if (!r) throw new Error("this mesh couldn't be welded into a closed solid");
-          pos = new Float32Array(r);
+          pos = new Float32Array(r.positions);
+          nrm = r.normals;
         }
         const g = new THREE.BufferGeometry();
         g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
-        g.computeVertexNormals();
+        // The worker's normals, not derived ones: it knows the surface is a smooth field
+        // and shades it that way, keeping the model's own hard edges crisp. Deriving them
+        // here from the soup would flat-shade every facet — the gritty-ribs look.
+        if (nrm) g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+        else g.computeVertexNormals();
         g.computeBoundingBox();
         g.userData.textured = true; // tells the Viewer not to draw CAD creases on a rib
         const old = fxCache.current;
@@ -5910,6 +5985,7 @@ export default function App() {
       texture: (hvFx?.texture as SurfFxSlot | null) ?? null,
     });
     void restoreTexts(next.versions[headIndex(next)]?.texts);
+    void restoreLogos(next.versions[headIndex(next)]?.logos);
     if (next.engine === "generative" && next.glb) {
       const g = await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
       // A split version carries its piece layout — revive the per-piece export list
@@ -6550,6 +6626,7 @@ export default function App() {
         onMergeAttachments={(ids?: string[]) => { void mergeAttachments(ids); }}
         onEngraveAttachments={(ids: string[]) => { void engraveAttachments(ids); }}
         onAddLogo={(f: File) => { void addLogoFile(f); }}
+        standDown={standDownTools}
         onRemoveAttachment={removeAttachment}
         partCount={partCount}
         separated={separated}
@@ -6847,11 +6924,13 @@ export default function App() {
             // in there is true sometimes and false others — the move was being recorded
             // intermittently, which is worse than never.
             const touchedText = attachmentsRef.current.some((a) => a.text && poses.some((p2) => p2.id === a.id));
+            const touchedLogo = attachmentsRef.current.some((a) => a.logo && poses.some((p2) => p2.id === a.id));
             setAttachments((l) => l.map((a) => {
               const p2 = poses.find((x) => x.id === a.id);
               return p2 ? { ...a, place: { at: p2.at, quat: p2.quat, scale: p2.scale } } : a;
             }));
             if (touchedText) setTimeout(() => commitTexts("Moved a text layer", textsForSnap()), 0);
+            else if (touchedLogo) setTimeout(() => commitLogos("Moved a logo layer"), 0);
           },
           rotateBy: (axis, deg) => {
             const a: [number, number, number] = axis === "x" ? [1, 0, 0] : axis === "y" ? [0, 1, 0] : [0, 0, 1];

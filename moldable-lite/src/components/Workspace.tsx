@@ -2224,6 +2224,9 @@ interface Props {
   onMergeAttachments: (ids?: string[]) => void;
   onEngraveAttachments: (ids: string[]) => void; // subtract instead of fuse — carved-in logos
   onAddLogo: (f: File) => void; // SVG straight in, PNG/JPG through the tracer
+  /** Put every canvas tool down. The rail calls this before arming anything, so
+   *  exactly one tool is ever lit — see armRail(). */
+  standDown: () => void;
   onRemoveAttachment: (id: string) => void;
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
   separated: boolean; // the dry-fit sandbox is open (model was split into parts)
@@ -2616,12 +2619,33 @@ export function Workspace(p: Props) {
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
   const [markMode, setMarkMode] = useState(false); // "circle it and ask" draw overlay
-  // Mark's state lives HERE while Select/Transform/Measure/Paint live in App, so nothing
-  // kept them mutually exclusive — Mark and Measure could both render as armed at once.
-  // One direction is this effect (another tool wins → Mark stands down); the other is in
-  // Mark's own onClick, which disarms the rest before arming itself.
-  const otherToolOn = p.featureCtl.mode || p.measureCtl.mode || p.cutCtl.mode || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool || !!p.screwCtl.tool;
-  useEffect(() => { if (otherToolOn) setMarkMode(false); }, [otherToolOn]);
+  // Exactly one rail tool is ever lit. That needs two mechanisms, because tool state
+  // lives in two places: Mark, Pattern and Add Logo are this component's, everything
+  // else is App's. armRail() below covers the rail's own clicks; this effect covers
+  // the ways an App tool arms itself WITHOUT the rail — the keyboard shortcuts, the
+  // Objects panel, a tool re-arming itself after an edit.
+  const appToolOn = p.featureCtl.mode || p.measureCtl.mode || p.cutCtl.mode
+    || p.transformCtl.mode !== "off" || p.paintCtl.mode || !!p.magnetCtl.tool
+    || !!p.screwCtl.tool || !!p.shapeCtl.tool || !!p.modifyCtl.op || !!p.textCtl.tool;
+  useEffect(() => {
+    if (!appToolOn) return;
+    setMarkMode(false);
+    setPatternOpen(false);
+    setLogoOpen(false);
+  }, [appToolOn]);
+  /** Arm a rail tool — everything else goes down first, whichever way this one is
+   *  heading. Each toggle used to carry its own hand-rolled stand-down list, so a tool
+   *  was one forgotten line away from lighting up beside another: Add Logo sat lit
+   *  beside Note, and Transform beside Text. One list, in one place, that a new tool
+   *  can't route around. `arm` reads its on/off state from the render scope, so
+   *  standing the others down first can't confuse a toggle into re-arming. */
+  const armRail = (owner: "pattern" | "logo" | "mark" | "app", arm: () => void) => {
+    p.standDown(); // every App-owned tool, via standDownTools()
+    if (owner !== "pattern") setPatternOpen(false);
+    if (owner !== "logo") setLogoOpen(false);
+    if (owner !== "mark") setMarkMode(false);
+    arm();
+  };
 
   // Paste a reference image from the clipboard anywhere in the app.
   const pickRef = useRef(p.onPickImage);
@@ -3413,7 +3437,7 @@ export function Workspace(p: Props) {
                       aria-label="Transform"
                       disabled={p.transformCtl.busy}
                       title="Transform tool: move, rotate (great for print orientation) or scale the whole part — drag the gizmo, no AI, no tokens"
-                      onClick={() => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off")}
+                      onClick={() => armRail("app", () => p.transformCtl.setMode(p.transformCtl.mode === "off" ? "move" : "off"))}
                     >
                       <IconTransform />
                     <span className="rail-name">Move</span>
@@ -3449,7 +3473,7 @@ export function Workspace(p: Props) {
                         title={p.activeKind !== "replicad"
                           ? "Shapes work on the whole CAD model — Regroup parts to use it"
                           : "Shape tool: drop a box, cylinder or ball exactly where you click, added on or cut out — then type its exact size and position. Free, no AI."}
-                        onClick={p.shapeCtl.toggle}
+                        onClick={() => armRail("app", p.shapeCtl.toggle)}
                       >
                         <IconShapes />
                       <span className="rail-name">Shape</span>
@@ -3468,7 +3492,7 @@ export function Workspace(p: Props) {
                         title={p.activeKind !== "replicad"
                           ? "Modify works on the whole CAD model — Regroup parts to use it"
                           : "Modify tool: pick Push/Pull, Round or Bevel and a size, then click the model — each click applies it right there, no AI"}
-                        onClick={p.modifyCtl.toggle}
+                        onClick={() => armRail("app", p.modifyCtl.toggle)}
                       >
                         <IconModify />
                       <span className="rail-name">Modify</span>
@@ -3483,7 +3507,7 @@ export function Workspace(p: Props) {
                       aria-pressed={p.measureCtl.mode}
                       aria-label="Measure"
                       title="Measure tool: click two points on the model to see the distance between them"
-                      onClick={p.measureCtl.toggle}
+                      onClick={() => armRail("app", p.measureCtl.toggle)}
                     >
                       <IconRuler />
                     <span className="rail-name">Measure</span>
@@ -3503,7 +3527,7 @@ export function Workspace(p: Props) {
                       aria-pressed={p.cutCtl.mode}
                       aria-label="Cut"
                       title="Cut tool: draw a line across the part and it splits along it"
-                      onClick={p.cutCtl.toggle}
+                      onClick={() => armRail("app", p.cutCtl.toggle)}
                     >
                       <IconCut />
                     <span className="rail-name">Cut</span>
@@ -3555,11 +3579,11 @@ export function Workspace(p: Props) {
                       title={p.magnetCtl.canUse
                         ? "Fasteners: magnet pockets and screw holes. Pick which in the panel, hover the model for a preview, click to cut."
                         : "Fasteners work on Precise (CAD) models — mesh models can't be drilled"}
-                      onClick={() => {
+                      onClick={() => armRail("app", () => {
                         if (p.magnetCtl.tool) p.magnetCtl.toggle();
                         else if (p.screwCtl.tool) p.screwCtl.toggle();
                         else (lastFastener === "screw" ? p.screwCtl : p.magnetCtl).toggle();
-                      }}
+                      })}
                     >
                       <IconFastener />
                     <span className="rail-name">Fasteners</span>
@@ -3751,7 +3775,7 @@ export function Workspace(p: Props) {
                       aria-label="Text"
                       disabled={!p.geometry || p.tab !== "3d"}
                       title="Text tool: type a word, pick a font (Google Fonts or your own file), and the text rides the cursor — click the model to place it as its own editable layer"
-                      onClick={p.textCtl.toggle}
+                      onClick={() => armRail("app", p.textCtl.toggle)}
                     >
                       <IconTextTool size={19} />
                     <span className="rail-name">Text</span>
@@ -3768,7 +3792,7 @@ export function Workspace(p: Props) {
                       aria-label="Pattern"
                       disabled={!p.geometry || p.tab !== "3d" || p.status === "generating"}
                       title="Pattern tool: wrap the outer surface in real printable relief — scales, chevrons, studs, knurl. Nondestructive, so you can change or remove it any time."
-                      onClick={() => setPatternOpen((v) => !v)}
+                      onClick={() => armRail("pattern", () => setPatternOpen(!patternOpen))}
                     >
                       <IconPattern />
                     <span className="rail-name">Pattern</span>
@@ -3785,7 +3809,7 @@ export function Workspace(p: Props) {
                       aria-label="Add Logo"
                       disabled={!p.geometry || p.tab !== "3d"}
                       title="Add a logo or emblem: drop an SVG, PNG or JPG. It arrives as its own layer you drag onto any face, then Merge (raised) or Engrave (carved)."
-                      onClick={() => setLogoOpen((v) => !v)}
+                      onClick={() => armRail("logo", () => setLogoOpen(!logoOpen))}
                     >
                       <IconBadge />
                     <span className="rail-name">Add Logo</span>
@@ -3847,7 +3871,7 @@ export function Workspace(p: Props) {
                         title={p.activeKind !== "replicad"
                           ? "Notes work on the whole CAD model — Regroup parts to use it"
                           : "Note tool: click an exact spot to pin a marker there, then write what should change — the AI gets the coordinates, not a description"}
-                        onClick={p.featureCtl.togglePin}
+                        onClick={() => armRail("app", p.featureCtl.togglePin)}
                       >
                         <IconPointSel size={19} />
                         <span className="rail-name">Note</span>
@@ -3861,18 +3885,7 @@ export function Workspace(p: Props) {
                       aria-label="Mark"
                       disabled={!p.geometry || p.tab !== "3d"}
                       title="Mark tool: draw around a part of the model — a marked screenshot attaches to the chat so the AI knows exactly where your change goes"
-                      onClick={() => setMarkMode((v) => {
-                        if (!v) {
-                          if (p.featureCtl.mode) p.featureCtl.toggleMode();
-                          if (p.measureCtl.mode) p.measureCtl.toggle();
-                          if (p.transformCtl.mode !== "off") p.transformCtl.setMode("off");
-                          if (p.paintCtl.mode) p.paintCtl.setMode(false);
-                          if (p.magnetCtl.tool) p.magnetCtl.toggle();
-                          if (p.screwCtl.tool) p.screwCtl.toggle();
-                          if (p.textCtl.tool) p.textCtl.toggle();
-                        }
-                        return !v;
-                      })}
+                      onClick={() => armRail("mark", () => setMarkMode(!markMode))}
                     >
                       <IconMarker />
                     <span className="rail-name">Mark</span>
@@ -3892,7 +3905,7 @@ export function Workspace(p: Props) {
                       aria-label="Paint"
                       disabled={!p.geometry || p.tab !== "3d"}
                       title="Colour Painting: pick a filament, then click a region of the model to fill it — the slicer prints that region in that filament colour"
-                      onClick={() => p.paintCtl.setMode(!p.paintCtl.mode)}
+                      onClick={() => armRail("app", () => p.paintCtl.setMode(!p.paintCtl.mode))}
                     >
                       <IconPaint />
                     <span className="rail-name">Paint</span>

@@ -917,6 +917,61 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Builds 379 — one lit tool, smooth ribs, text that wraps, layers that persist
+
+**Rail: exactly one tool armed, ever.** Every rail button now routes through
+`armRail()` in `Workspace.tsx` — one stand-down list in one place, instead of each
+toggle carrying its own. Add Logo sat lit beside Note (and Transform beside Text)
+because Mark/Pattern/Add Logo live in Workspace state while everything else lives in
+App's `standDownTools()`, and neither side knew about the other. Both directions are
+covered now: `armRail()` for rail clicks, plus an effect for the paths that arm a tool
+without the rail (keyboard shortcuts, the Objects panel).
+
+**Armed state is a FILL, not a ring.** It used to be a fixed-size hairline circle on a
+`::before`, drawn over a rounded-*rectangle* button — an outline belonging to no shape
+on screen. At 35/36 px it could not shrink with the button, so on the compact rail
+(30 px rows) and on coarse pointers it ran past its own button into the pill wall and
+its neighbour: "two half rings poking outside the clipping mask". A background cannot
+overflow the box that paints it. The rail's buttons are round-ended in every state now.
+
+**The two floating toolbars stopped touching**: 3 px → 10 px, and their left edges
+line up (the head pill was inset 12 px against the rail's 10 px).
+
+**Ribbed patterns look turned instead of gritty.** Two causes, both measured. (1) The
+displaced mesh travelled as a triangle soup and the main thread derived normals from
+it — flat-shading every one of a million facets. The worker now returns shading
+normals with it, smoothing the surface while keeping the model's own hard edges: which
+corners are creases is decided BEFORE displacement, on the smooth body, because a deep
+flute turns the surface through 100° in a millimetre and any after-the-fact test reads
+every crest as an edge. (2) Refinement was driven by edge LENGTH, which is isotropic —
+and a rib is not, so the budget went on resolving the direction a flute doesn't vary
+in. It is now driven by the displacement FIELD: sample both ends of an edge and its
+middle, split only where the middle isn't where a straight line would put it.
+
+**Text wraps curved bodies.** `src/text/bend.ts`: three rays fit the wall under the
+word to a cylinder, and the solid is bent around it, so the ghost you hover with is the
+shape that lands. Flat faces report an infinite radius and cost two rays. The radius
+rides in `TextLayerSnap.bend`, so the wrap survives undo and reload.
+
+**Logo layers persist**, the way text layers did in 378 — `LogoLayerSnap` stores the
+OUTLINE (uploaded SVG, or the trace of a bitmap), never the mesh, so a reload rebuilds
+the identical solid from a few kB. Placing, moving and removing one is a History step.
+Outlines over 512 kB aren't stored (a traced photo isn't a logo) — that layer still
+works for the session, it just doesn't come back.
+
+**One type scale.** The stylesheet had eighteen font sizes, half of them half-pixel
+siblings (11 beside 11.5, 12 beside 12.5, 13 beside 13.5). All of them now name one of
+seven tokens (`--fs-micro` … `--fs-2xl`). The composer went up a step to 15 px and the
+transcript matches it. `button, input, select, textarea { font: inherit }` — the
+family was inherited but the SIZE wasn't, so every icon-only button sat at Chrome's
+13.333 px default.
+
+**Kernel warm-up is connection-aware** — the eager 11 MB OCCT compile is skipped on
+Save-Data and 2g/3g, where speculatively spending it can be the whole session's data.
+`ensureEngine()` still boots it the moment something needs it. (This replaces the
+audit's precache recommendation, which was wrong: excluding the wasm from the service
+worker would have kept the download and lost offline.)
+
 ## Builds 365–367 — durable edge anchors, one editing tool, faster picking
 
 **The blocker that made fillets disposable is gone.** A `PointOp` used to carry one

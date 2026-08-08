@@ -115,7 +115,12 @@ export const FX_TIP: Record<SurfacePattern, string> = {
   ring: "Horizontal rings stacked up the body, the way a coiled pot reads.",
 };
 
-export async function displaceMesh(positions: Float32Array, opts: { pattern: SurfacePattern; scale: number; depth: number }): Promise<Float32Array | null> {
+/** Displaced positions AND the normals to shade them with — the surface is smooth, and
+ *  a triangle soup can't tell you that on its own. */
+export async function displaceMesh(
+  positions: Float32Array,
+  opts: { pattern: SurfacePattern; scale: number; depth: number },
+): Promise<{ positions: Float32Array; normals: Float32Array } | null> {
   const r = await ensure().displace(positions, opts);
-  return r.ok ? r.positions : null;
+  return r.ok ? { positions: r.positions, normals: r.normals } : null;
 }

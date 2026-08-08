@@ -4,6 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { mergeGeometries, toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { installBVH, ensureBoundsTree } from "../three/bvh";
+import { bendAroundY, wallRadius } from "../text/bend";
 
 installBVH();
 
@@ -219,7 +220,8 @@ interface Props {
     geometry: THREE.BufferGeometry | null;
     /** Extra spin about the face normal, degrees — the panel's Angle field. */
     roll: number;
-    onPlace: (at: [number, number, number], quat: [number, number, number, number]) => void;
+    /** `bend` is the wall radius the ghost is wrapped to — Infinity on a flat face. */
+    onPlace: (at: [number, number, number], quat: [number, number, number, number], bend: number) => void;
   } | null;
 }
 
@@ -558,6 +560,11 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   const textIx = useRef<Props["textPlace"]>(textPlace);
   textIx.current = textPlace;
   const textGhost = useRef<THREE.Mesh | null>(null);
+  // The flat source the ghost re-bends from every hover, and the radius it is bent to
+  // right now — which is also what gets reported on placement, so the layer that lands
+  // is the shape that was on screen.
+  const textFlat = useRef<THREE.BufferGeometry | null>(null);
+  const textBend = useRef<number>(Infinity);
   /** The face normal under the cursor at the last hover — so typing a new Angle can
    *  re-spin the ghost where it already sits, without waiting for the mouse to twitch. */
   const textNrm = useRef(new THREE.Vector3(0, 0, 1));
@@ -1382,6 +1389,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
           textIx.current.onPlace(
             [g.position.x, g.position.y, g.position.z],
             [g.quaternion.x, g.quaternion.y, g.quaternion.z, g.quaternion.w],
+            textBend.current,
           );
         }
         return;
@@ -2232,6 +2240,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
             textNrm.current.copy(wn);
             g.position.copy(hit.point).addScaledVector(wn, 0.02); // a hair proud — no z-fight
             g.quaternion.copy(faceDecalQuat(wn, textIx.current.roll));
+            textBend.current = bendGhostToWall(s3.mesh, g, textFlat.current);
             g.visible = true;
           } else g.visible = false;
           renderer.domElement.style.cursor = hit?.face ? "crosshair" : "";
@@ -3432,8 +3441,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       textGhost.current = null;
     }
     if (!textPlace?.geometry) { invalidateRef.current(2); return; }
+    // The ghost gets its OWN copy: hovering a curved wall bends it to fit (below), and
+    // that must not reach back into App's flat source geometry, which every later hover
+    // re-bends from and which the placed layer is built from.
+    textFlat.current = textPlace.geometry;
+    textBend.current = Infinity;
     const m = new THREE.Mesh(
-      textPlace.geometry,
+      textPlace.geometry.clone(),
       new THREE.MeshBasicMaterial({ color: 0x498a6f, transparent: true, opacity: 0.55, depthTest: false }),
     );
     m.renderOrder = 4;
@@ -3449,6 +3463,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const g = textGhost.current;
     if (!g || !g.visible || !textPlace) return;
     g.quaternion.copy(faceDecalQuat(textNrm.current, textPlace.roll));
+    if (st.current?.mesh) textBend.current = bendGhostToWall(st.current.mesh, g, textFlat.current);
     invalidateRef.current(2);
   }, [textPlace?.roll]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -4708,6 +4723,31 @@ function enterTransform(s: Internals, mode: "move" | "rotate" | "scale", target:
  *  on the +Y wall; on a cylinder the roll just tracked the azimuth. Naming the up
  *  vector is the whole fix. */
 const WORLD_UP = new THREE.Vector3(0, 0, 1);
+/** Wrap the text ghost onto the wall it is standing on, and report the radius used.
+ *
+ *  Flat text on a curved body is a chord: its middle sinks in and its ends lift off, and
+ *  on a print those ends come away as tabs. Re-bent from the FLAT source every time — not
+ *  from the last bend — so moving from a curved wall to a flat one straightens it back
+ *  out instead of accumulating curvature. A flat face costs two rays and a memcpy. */
+function bendGhostToWall(mesh: THREE.Object3D, ghost: THREE.Mesh, flat: THREE.BufferGeometry | null): number {
+  const src = flat?.getAttribute("position") as THREE.BufferAttribute | undefined;
+  const dst = ghost.geometry.getAttribute("position") as THREE.BufferAttribute | undefined;
+  if (!flat || !src || !dst || src.count !== dst.count) return Infinity;
+  if (!flat.boundingBox) flat.computeBoundingBox();
+  const half = (flat.boundingBox!.max.x - flat.boundingBox!.min.x) / 2;
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(ghost.quaternion);
+  const out = new THREE.Vector3(0, 0, 1).applyQuaternion(ghost.quaternion);
+  const r = wallRadius(mesh, ghost.position, right, out, half);
+  (dst.array as Float32Array).set(src.array as Float32Array);
+  dst.needsUpdate = true;
+  if (Number.isFinite(r)) bendAroundY(ghost.geometry, r);
+  else {
+    ghost.geometry.computeVertexNormals();
+    ghost.geometry.computeBoundingSphere();
+  }
+  return r;
+}
+
 function faceDecalQuat(n: THREE.Vector3, rollDeg = 0): THREE.Quaternion {
   const up = WORLD_UP.clone().addScaledVector(n, -WORLD_UP.dot(n));
   // A top or bottom face has no "up" inside its own plane. Read those from the front,

@@ -254,7 +254,9 @@ export interface PreviewApi {
   preview(prism: Float32Array, op: "add" | "cut" | "intersect"): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
   /** Physical surface texture: weld → subdivide until edges suit the pattern scale →
    *  displace along vertex normals. Returns a closed triangle soup. */
-  displace(positions: Float32Array, opts: { pattern: string; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
+  /** Normals come back WITH the positions: the displaced surface is smooth, and letting
+   *  the main thread derive normals from the triangle soup would shade every facet flat. */
+  displace(positions: Float32Array, opts: { pattern: string; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array; normals: Float32Array } | { ok: false; error: string }>;
   /** Uniform outward surface offset (~delta mm): weld, then displace every vertex along
    *  its area-weighted normal. Correct on non-convex shapes (interior steps move OUT,
    *  where bbox scaling would pull them in) — powers "Make it fit" clearance. */
@@ -264,9 +266,30 @@ export interface PreviewApi {
 const MAX_TRIS = 700_000; // displacement subdivision budget
 // Ribs get a bigger one. They are fine, regular and read against a curved silhouette,
 // so anywhere the refinement stops short shows up as a visible seam down the wall —
-// where an organic texture would just look slightly softer there. A ribbed vase is a
-// small part, and a couple of million triangles of it still slices in seconds.
-const MAX_TRIS_RIB = 2_000_000;
+// where an organic texture would just look slightly softer there.
+// It used to be 2M, back when refinement was driven by edge LENGTH and most of those
+// triangles were spent resolving the direction a rib doesn't vary in. The field-driven
+// rule below puts them where the surface actually bends, and a ribbed vase now lands
+// around 150k — so the ceiling is headroom, not a target, and it stays low enough that
+// positions AND normals both fit in memory on a tablet.
+const MAX_TRIS_RIB = 1_200_000;
+
+/** Area-weighted vertex normals over a welded index buffer. */
+function vertexNormals(verts: Float32Array, tris: Uint32Array): Float32Array {
+  const n = new Float32Array(verts.length);
+  for (let t = 0; t < tris.length; t += 3) {
+    const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+    const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
+    const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
+    const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
+    for (const i of [a, b, c]) { n[i] += cx; n[i + 1] += cy; n[i + 2] += cz; }
+  }
+  for (let i = 0; i < n.length; i += 3) {
+    const l = Math.hypot(n[i], n[i + 1], n[i + 2]) || 1;
+    n[i] /= l; n[i + 1] /= l; n[i + 2] /= l;
+  }
+  return n;
+}
 
 const api: PreviewApi = {
   async displace(positions, opts) {
@@ -318,18 +341,38 @@ const api: PreviewApi = {
         // with crests of uneven height, which reads as random dark streaks down the wall.
         ribPitchMin = (2 * Math.PI * Math.max(1, Math.min(x1 - x0, y1 - y0) / 2)) / rib.n;
       }
-      // Subdivide (1 tri → 4) until edges are fine enough to carry the pattern.
-      // Fuzzy skin's effective wavelength is a fraction of the cell size — go finer.
-      // Ribs need finer still: at ~2 samples per rib the crests alias into a lumpy mess,
-      // and "clean ribs" is the entire point of the family.
-      // Samples per feature. A rib is a 1-D wave — fine across, needs almost nothing
-      // along — so ~4 samples of its pitch is plenty. An all-over pattern is 2-D and
-      // most of them have a hard rim (a stud's dome, a scale's cap), so they need three
-      // times that. 0.45 was in here for a long time and looked fine only because the
-      // old subdivision split EVERY triangle every pass and blew straight past it; with
-      // refinement that actually stops at the target, 0.45 shows as visible facets.
-      const detail = opts.pattern === "fuzzy" ? 0.05 : rib ? 0.22 : 0.08;
-      const targetEdge = Math.max(0.18, (rib ? ribPitchMin : opts.scale) * detail);
+      // How fine the mesh has to be, decided by the PATTERN rather than by edge length.
+      //
+      // Refining every edge longer than one target was isotropic, and a rib is not: it
+      // is a wave across the body and a constant along it, so a length rule refined the
+      // boring direction exactly as hard as the interesting one. The budget ran out
+      // resolving the length of a flute, and its crests — the only part anyone looks at
+      // — came out of a million triangles still visibly stepped.
+      //
+      // Instead: sample the displacement at both ends of an edge and at its middle. If
+      // the middle sits where a straight line between the ends would put it, splitting
+      // buys nothing and the edge is left long. Crests, creases and the shoulder of a
+      // stud fail that test and get refined; flat walls, rims, the inside of a shelled
+      // pot and the length of a rib pass it and stay coarse.
+      const feat = rib ? ribPitchMin : opts.pattern === "fuzzy" ? opts.scale * 0.18 : opts.scale;
+      // Two hard bounds around that test. The coarse one is Nyquist: with no edge longer
+      // than half a cycle, a whole feature cannot hide between the three samples and
+      // fool the test into passing. The fine one is where refinement stops regardless.
+      const coarseEdge = Math.max(0.3, feat * 0.5);
+      // …and the fine one is a samples-per-feature budget, which is the honest way to say
+      // "how good does this need to look": six facets across a rib, twelve across an
+      // all-over pattern (those have hard rims — a stud's dome, a scale's cap — and a rib
+      // does not). Bounding it here rather than letting the tolerance below decide keeps
+      // the triangle count predictable on any part, instead of depending on how sharply
+      // that particular body curves.
+      const minEdge = Math.max(0.07, feat / (rib ? 6 : 12));
+      // Tolerated departure from a straight line, in millimetres of relief. An eighth of
+      // the relief lands around five facets across a rib — well under a 0.4 mm nozzle,
+      // and smooth to the eye because the surface is SHADED smooth (below) rather than
+      // relying on facet size to hide itself. A twentieth looked no better and cost four
+      // times the triangles, which on a real vase meant hitting the ceiling and stopping
+      // refinement mid-wall — a visible seam, from asking for more than could be paid.
+      const tol = Math.max(0.004, opts.depth * 0.125);
       // ADAPTIVE refinement: split only the edges that are still too long.
       //
       // This used to split every triangle into four, every pass. On a CAD part that is
@@ -344,12 +387,30 @@ const api: PreviewApi = {
       // children respectively; one with none is passed through untouched.
       const ekey = (i: number, j: number) => (i < j ? `${i}_${j}` : `${j}_${i}`);
       for (let pass = 0; pass < 12; pass++) {
+        // The field is evaluated along the surface normal, so the pass needs normals
+        // for the mesh as it stands — the same ones the displacement will use.
+        const vn = vertexNormals(verts, tris);
+        const fieldAt = (px: number, py: number, pz: number, nx: number, ny: number, nz: number) =>
+          opts.depth * patternAt(opts.pattern, px, py, pz, nx, ny, nz, opts.scale, rib);
         const need = new Set<string>();
         for (let t = 0; t < tris.length; t += 3) {
           for (let e = 0; e < 3; e++) {
             const i = tris[t + e], j = tris[t + ((e + 1) % 3)];
+            const k = ekey(i, j);
+            if (need.has(k)) continue; // the other triangle sharing it already decided
             const a = i * 3, b = j * 3;
-            if (Math.hypot(verts[a] - verts[b], verts[a + 1] - verts[b + 1], verts[a + 2] - verts[b + 2]) > targetEdge) need.add(ekey(i, j));
+            const len = Math.hypot(verts[a] - verts[b], verts[a + 1] - verts[b + 1], verts[a + 2] - verts[b + 2]);
+            if (len <= minEdge) continue;
+            if (len > coarseEdge) { need.add(k); continue; }
+            const da = fieldAt(verts[a], verts[a + 1], verts[a + 2], vn[a], vn[a + 1], vn[a + 2]);
+            const db = fieldAt(verts[b], verts[b + 1], verts[b + 2], vn[b], vn[b + 1], vn[b + 2]);
+            let mx = vn[a] + vn[b], my = vn[a + 1] + vn[b + 1], mz = vn[a + 2] + vn[b + 2];
+            const ml = Math.hypot(mx, my, mz) || 1;
+            const dm = fieldAt(
+              (verts[a] + verts[b]) / 2, (verts[a + 1] + verts[b + 1]) / 2, (verts[a + 2] + verts[b + 2]) / 2,
+              mx / ml, my / ml, mz / ml,
+            );
+            if (Math.abs(dm - (da + db) / 2) > tol) need.add(k);
           }
         }
         if (!need.size) break;
@@ -408,29 +469,67 @@ const api: PreviewApi = {
         verts = merged;
         tris = nt;
       }
-      // Area-weighted vertex normals.
-      const nrm = new Float32Array(verts.length);
+      // WHERE THE MODEL'S OWN EDGES ARE — recorded now, on the smooth surface, because
+      // after displacement they are impossible to tell from the pattern. A deep flute
+      // turns the surface through 100° inside a millimetre, so any after-the-fact crease
+      // test reads every rib crest as an edge and shades it flat: the crests, the one
+      // part that has to look turned, came out as hard little planes. On the smooth
+      // surface the question is easy — a corner whose face disagrees with its own vertex
+      // fan by more than 38° is a box edge or a rim, and nothing else is.
+      const CREASE = Math.cos((38 * Math.PI) / 180);
+      const hard = new Uint8Array(tris.length); // one flag per triangle corner
+      {
+        const fan = vertexNormals(verts, tris);
+        for (let t = 0; t < tris.length; t += 3) {
+          const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+          const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
+          const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
+          let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+          const fl = Math.hypot(fx, fy, fz) || 1;
+          fx /= fl; fy /= fl; fz /= fl;
+          for (let k = 0; k < 3; k++) {
+            const v = tris[t + k] * 3;
+            hard[t + k] = fan[v] * fx + fan[v + 1] * fy + fan[v + 2] * fz >= CREASE ? 0 : 1;
+          }
+        }
+      }
+      // Displace along the vertex normal by depth × pattern.
+      const nrm = vertexNormals(verts, tris);
+      for (let i = 0; i < verts.length; i += 3) {
+        const nx = nrm[i], ny = nrm[i + 1], nz = nrm[i + 2];
+        const d = opts.depth * patternAt(opts.pattern, verts[i], verts[i + 1], verts[i + 2], nx, ny, nz, opts.scale, rib);
+        verts[i] += nx * d; verts[i + 1] += ny * d; verts[i + 2] += nz * d;
+      }
+      // SHADING NORMALS for the displaced surface, computed here rather than left to the
+      // main thread. The mesh below travels as a triangle soup (every downstream stage —
+      // export, split, orientation, thin-wall check — expects one), and deriving normals
+      // from a soup gives every triangle its own flat facet. On a fluted vase that is a
+      // million hard little planes where there should be a smooth curve: the "gritty
+      // ribs" this pattern family kept coming out with.
+      //
+      // The surface is smooth everywhere the model was smooth, however deep the relief,
+      // so it is shaded smooth there — and kept flat only at the corners marked hard on
+      // the model itself, above.
+      const fan = vertexNormals(verts, tris); // on the DISPLACED surface
+      const soup = new Float32Array(tris.length * 3);
+      const nsoup = new Float32Array(tris.length * 3);
       for (let t = 0; t < tris.length; t += 3) {
         const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
         const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
         const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
-        const cx = uy * vz - uz * vy, cy = uz * vx - ux * vz, cz = ux * vy - uy * vx;
-        for (const i of [a, b, c]) { nrm[i] += cx; nrm[i + 1] += cy; nrm[i + 2] += cz; }
+        let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+        const fl = Math.hypot(fx, fy, fz) || 1;
+        fx /= fl; fy /= fl; fz /= fl;
+        for (let k = 0; k < 3; k++) {
+          const v = tris[t + k] * 3, o = (t + k) * 3;
+          soup[o] = verts[v]; soup[o + 1] = verts[v + 1]; soup[o + 2] = verts[v + 2];
+          const smooth = !hard[t + k];
+          nsoup[o] = smooth ? fan[v] : fx;
+          nsoup[o + 1] = smooth ? fan[v + 1] : fy;
+          nsoup[o + 2] = smooth ? fan[v + 2] : fz;
+        }
       }
-      // Displace along the (normalised) vertex normal by depth × pattern.
-      for (let i = 0; i < verts.length; i += 3) {
-        const l = Math.hypot(nrm[i], nrm[i + 1], nrm[i + 2]) || 1;
-        const nx = nrm[i] / l, ny = nrm[i + 1] / l, nz = nrm[i + 2] / l;
-        const d = opts.depth * patternAt(opts.pattern, verts[i], verts[i + 1], verts[i + 2], nx, ny, nz, opts.scale, rib);
-        verts[i] += nx * d; verts[i + 1] += ny * d; verts[i + 2] += nz * d;
-      }
-      // Expand back to a soup for the app's standard pipeline.
-      const soup = new Float32Array(tris.length * 3);
-      for (let i = 0; i < tris.length; i++) {
-        const v = tris[i] * 3;
-        soup[i * 3] = verts[v]; soup[i * 3 + 1] = verts[v + 1]; soup[i * 3 + 2] = verts[v + 2];
-      }
-      return transfer({ ok: true, positions: soup }, [soup.buffer]);
+      return transfer({ ok: true, positions: soup, normals: nsoup }, [soup.buffer, nsoup.buffer]);
     } catch (e: any) {
       return { ok: false, error: String(e?.message ?? e) };
     }

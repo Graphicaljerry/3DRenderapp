@@ -50,6 +50,10 @@ export interface Version {
    *  displaced mesh recomputes from it — so undo/redo/restore replay the exact surface
    *  each version had, and applying one is itself an undoable step. Absent = plain. */
   surfFx?: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null };
+  /** Logo layers standing on the model at this snapshot. Same trick as `texts`: what
+   *  is stored is the OUTLINE the solid was extruded from, not the solid, so a reload
+   *  rebuilds the identical mesh from a few kilobytes of path data. */
+  logos?: LogoLayerSnap[];
   /** Text layers standing on the model at this snapshot. Stored as SPECS, not meshes:
    *  the words plus a pose rebuild the same solid exactly, which is why a text layer
    *  can survive a reload and take part in undo at all. Absent = no text. */
@@ -64,6 +68,23 @@ export interface TextLayerSnap {
   at: [number, number, number];
   quat: [number, number, number, number];
   /** Uniform scale from the gizmo; absent means 1. */
+  scale?: number;
+  /** Radius of the wall the solid is wrapped around, mm. Absent = flat, which is what a
+   *  flat face reports — so only text on a curved body carries it. */
+  bend?: number;
+}
+
+/** One placed logo layer, storable. `svg` is the outline source — the file as uploaded
+ *  when it was an SVG, or the traced outline when it was a PNG/JPG — so the rebuild
+ *  never re-runs the tracer and can never come back looking different. */
+export interface LogoLayerSnap {
+  id: string;
+  name: string;
+  svg: string;
+  sizeMm: number;
+  heightMm: number;
+  at?: [number, number, number];
+  quat?: [number, number, number, number];
   scale?: number;
 }
 

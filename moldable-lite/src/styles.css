@@ -756,6 +756,13 @@ button:disabled { cursor: default; }
   .canvas-rail .rail-sep { margin: 2px 4px; }
   /* The Objects panel would otherwise take most of a narrow canvas. */
   .right-dock { max-width: calc(100% - 74px); }
+  /* Beside an OPEN Inspector there is no room for both the head pill and the stats
+     card: measured on a 1024×768 iPad, 647px of stage less the 262px dock leaves 361,
+     and the two want 412 — they overlapped by 60px. The stats are a readout and every
+     number in them is one tap away in Printability, which is the same trade the phone
+     tier already makes; the head pill is controls, so the readout yields. Closing the
+     Inspector brings it straight back. */
+  .viewer-body:has(.inspector-dock:not([style*="none"])) .mesh-stats { display: none; }
 }
 /* The Face/Edge/Corner/Point control eases in when you click Select. */
 .mode-seg { animation: seg-in .22s cubic-bezier(.23,1,.32,1); transform-origin: left center; }
@@ -1523,7 +1530,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* A shade greyer than --surf in light mode. The plate is drawn in low-alpha accent
    over this, and against a near-white page there was nothing for it to sit against —
    the whole animation washed out. Dark mode already had the contrast. */
-.launchpad { position: relative; min-height: 100vh; display: flex; flex-direction: column; background: var(--launch-bg-page); color: var(--ink); }
+/* dvh, not vh: on iPad/iOS Safari 100vh is the height with the browser chrome RETRACTED,
+   so a 100vh page is always taller than the window it is in and the footer sits under
+   the toolbar until you scroll. */
+.launchpad { position: relative; min-height: 100dvh; display: flex; flex-direction: column; background: var(--launch-bg-page); color: var(--ink); }
 .launch-bg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
 .launchpad > *:not(.launch-bg) { position: relative; z-index: 1; }
 .launch-account { font-size: var(--fs-sm); color: var(--mut); padding: 5px 10px; border: 1px solid var(--bord); border-radius: var(--r-full); }
@@ -2127,7 +2137,7 @@ details.guide { margin-top: 10px; }
    Themed through the same tokens as the app. It previously used literal light-mode
    hex inline, so a dark-mode crash flashed a full-screen white panel over the
    #121213 root that index.html's pre-paint script had already painted. */
-.crash { min-height: 100vh; background: var(--surf); color: var(--ink); padding: 24px; }
+.crash { min-height: 100dvh; background: var(--surf); color: var(--ink); padding: 24px; }
 .crash-inner { max-width: 800px; margin: 0 auto; }
 .crash h2 { margin: 0 0 6px; font-size: var(--fs-2xl); color: var(--ink); }
 .crash p { margin: 0 0 12px; color: var(--mut); font-size: var(--fs-md); }
@@ -2597,6 +2607,14 @@ details.guide { margin-top: 10px; }
    block earlier in the file silently loses that cascade — which is exactly the bug
    this replaces. Head geometry measured in a 390px column: tabs pill 10-43, tools
    pill 49-87, so 96px clears both rows. */
+/* …and gated to phone-sized WINDOWS as well as narrow columns. A column measures
+   narrow for two different reasons: a phone screen, or a big chat beside a small stage.
+   Only the first one wants a full-cover sheet — on a 1024×768 iPad this fired at a
+   579×622 canvas and turned the Inspector into a panel over the whole model, taking
+   the tool rail and the zoom cluster down with it (they draw above the sheet, so they
+   are hidden here). At tablet width the Inspector goes back to being a card the model
+   is still visible beside. */
+@media (max-width: 900px) {
 @container (max-width: 640px) {
   .right-dock { top: 96px; }
   .canvas-rail { top: 96px; }
@@ -2618,6 +2636,7 @@ details.guide { margin-top: 10px; }
   .viewer-body:has(.inspector-dock:not([style*="none"])) .canvas-rail,
   .viewer-body:has(.inspector-dock:not([style*="none"])) .zoom-ctl { display: none; }
 }
+}
 
 /* ---------- the phone shell (skills/mobile-ux) ----------
    Below 760px the app is composed from phone parts, not squeezed desktop ones: the
@@ -2633,12 +2652,6 @@ details.guide { margin-top: 10px; }
   .viewer-body { border-radius: 0; }
   .statusbar { padding-left: 10px; padding-right: 10px; }
 
-  /* The chat sheet. Peek = grabber + composer, nothing else — the model keeps the
-     screen until the conversation is asked for. */
-  .chat.sheet { border-radius: var(--r-card) 16px 0 0; border-top: 1px solid var(--bord); box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.14); overflow: visible; }
-  .chat.sheet.peek .chat-bar, .chat.sheet.peek .messages, .chat.sheet.peek .modebar { display: none; }
-  .chat.sheet.open .messages { max-height: 44dvh; }
-  .chat.sheet .chat-hide { display: none; } /* the grabber owns collapse on the sheet */
 
   /* The tool rail lies down: bottom-centre, capsule, flyouts open UPWARD. No app in
      the researched set ships a left rail on a phone — the thumb arc owns the bottom. */
@@ -2681,15 +2694,102 @@ details.guide { margin-top: 10px; }
   .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock { transition: none; }
 }
 
-/* The sheet grabber: phone-only handle for the chat sheet. */
+/* ---------- the chat sheet ----------
+   Keyed to the class, not to a width: Workspace decides where a sheet is right (SHEET_Q
+   — phones, and tablets held upright) and these rules follow it there. They used to sit
+   inside the ≤760 block, which meant a portrait iPad could be given the class and get
+   none of the styling.
+
+   Peek = grabber + composer, nothing else: the model keeps the screen until the
+   conversation is asked for. */
+.chat.sheet { border-radius: var(--r-card); border-top: 1px solid var(--bord); box-shadow: 0 -10px 28px rgba(0, 0, 0, 0.14); overflow: visible; }
+/* A phone's stage is full-bleed, so the sheet's bottom corners are the screen's; a
+   tablet keeps the floating-card grammar and stays rounded all round. */
+@media (max-width: 760px) { .chat.sheet { border-radius: var(--r-card) var(--r-card) 0 0; } }
+.chat.sheet.peek .chat-bar, .chat.sheet.peek .messages, .chat.sheet.peek .modebar { display: none; }
+.chat.sheet.open .messages { max-height: 44dvh; }
+.chat.sheet .chat-hide { display: none; } /* the grabber owns collapse on the sheet */
+/* One column, model on top. Written with :has so it beats .split.chat-collapsed —
+   equal specificity otherwise, and peek DOES carry that class (chatOpen is false),
+   which on a tablet would have collapsed the chat to a 40px side rail. */
+.split:has(.chat.sheet), .split.chat-collapsed:has(.chat.sheet) {
+  grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto;
+}
+.split:has(.chat.sheet) .viewer { grid-row: 1; }
+.split:has(.chat.sheet) .chat { grid-row: 2; }
+.split:has(.chat.sheet) .chat-resize { display: none; }
+/* The sheet's handle. */
 .sheet-grab { display: none; }
-@media (max-width: 760px) {
-  .sheet-grab {
-    display: flex; align-items: center; justify-content: center;
-    width: 100%; padding: 8px 0 4px; background: none; border: none; cursor: pointer;
-  }
-  .sheet-grab-pill { width: 42px; height: 5px; border-radius: var(--r-full); background: var(--bord-strong); }
-  .sheet-grab:active .sheet-grab-pill { background: var(--mut); }
+.chat.sheet .sheet-grab {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; padding: 8px 0 4px; background: none; border: none; cursor: pointer;
+}
+.sheet-grab-pill { width: 42px; height: 5px; border-radius: var(--r-full); background: var(--bord-strong); }
+.sheet-grab:active .sheet-grab-pill { background: var(--mut); }
+
+/* ---------- tablets, both ways up ----------
+   An iPad is neither a phone nor a desktop, and it used to get whichever tier its pixel
+   width happened to land in. Measured across six iPad viewports before this block
+   existed: PORTRAIT fell into the ≤900 stack — two rows of topbar (93px), a 42vh chat,
+   and a tool rail 554px tall hanging in a 444px canvas, its bottom tools clipped away
+   entirely — while LANDSCAPE fell into the desktop split, where a 1024×768 iPad put a
+   400px chat beside a 579px stage and the Inspector covered the model.
+
+   The split between the two is the shape of the screen, not the device: upright, the
+   model gets the screen and the chat becomes a sheet (see .chat.sheet above, which the
+   JS gate turns on); on its side, the two columns stay and the chrome around them
+   gives back the height it was wasting. */
+
+/* UPRIGHT. The stacking itself comes from the sheet rules; what is left is the chrome
+   that assumed either a phone's shed-everything budget or a desktop's width. */
+@media (min-width: 761px) and (max-width: 1080px) and (orientation: portrait) {
+  /* One row. It wrapped because brand + title + engine + three actions + two icon
+     buttons want ~950px at 820. The engine readout goes — it is a fact, not a control,
+     and the same reasoning already sheds it on a phone — and the title yields width
+     before any action does. */
+  .topbar { flex-wrap: nowrap; height: 54px; flex: 0 0 54px; padding: 0 14px; gap: 8px; }
+  .topbar-right > .pill { display: none; }
+  .topbar .brand { min-width: 0; }
+  .project, .project-edit { max-width: 30vw; }
+  /* One statusbar row: it scrolls sideways rather than stacking a second band under
+     the canvas, and Export keeps its own auto margin. */
+  .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 10px; }
+  .statusbar > * { flex: 0 0 auto; }
+  .build-tag { display: none; }
+  /* The cards still float — full-bleed is the phone's answer, and a tablet has the
+     room to keep the app's grammar. */
+  .split { padding: 0 10px 8px; gap: 8px; }
+  /* Both edges of the canvas belong to the model here: the chat is below it, not
+     beside it, so nothing needs a collapsed rail on the left. */
+  .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
+}
+
+/* ON ITS SIDE. Wide enough for two columns, short enough that every band of chrome is
+   measured against the stage it costs: 58px of topbar and a two-row statusbar left a
+   768px-tall iPad a 622px canvas.
+
+   From 901px up, because that is where the two-column split starts — below it the app
+   is already stacked (the ≤900 tier) and its topbar is allowed to wrap, so a fixed
+   48px height would clip the second row. Every iPad landscape is 1024 or wider. */
+@media (min-width: 901px) and (max-height: 860px) and (orientation: landscape) {
+  .topbar { height: 48px; flex: 0 0 48px; padding: 0 14px; }
+  .split { padding: 0 12px 8px; }
+  .statusbar { flex-wrap: nowrap; overflow-x: auto; }
+  .statusbar > * { flex: 0 0 auto; }
+  .build-tag { display: none; }
+  /* The zoom cluster steps out of the rail's column. Both are pinned to the bottom-left
+     and on a short stage the rail reaches down into the zoom cluster's 132px (measured
+     48×54 of overlap at 1180×820); one rail-width to the right there is nothing else —
+     the plate, showcase and view-snap bars are all centred — so the two stop sharing a
+     corner without either one shrinking a touch target. */
+  .zoom-ctl { left: calc(10px + var(--rail-w) + 8px); }
+}
+
+/* A chat column stops at a third of a small landscape screen. --chat-w is whatever the
+   resize handle last stored — 400px on the iPad that reported this — and on a 1024px
+   screen that is 39% of everything, spent on a transcript. */
+@media (min-width: 901px) and (max-width: 1200px) and (orientation: landscape) {
+  .split { grid-template-columns: min(var(--chat-w, 369px), 33vw) 15px 1fr; }
 }
 
 /* Fingers, not cursors: targets grow toward Apple's 44pt default — never shrink. */

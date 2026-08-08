@@ -1543,6 +1543,16 @@ function useMediaQuery(q: string): boolean {
   return m;
 }
 
+/** Where the chat is a bottom sheet rather than a column: every phone, and every
+ *  tablet held upright. The upper bound is 1080px because the widest iPad is 1024
+ *  across in portrait; past that a screen tall enough to be "portrait" is a desktop
+ *  window, and those already have somewhere to put a column. Kept beside the hook
+ *  because both the initial state and the live gate must read the SAME query — they
+ *  disagreed once (innerWidth > 760 against a media query) and the sheet mounted open.
+ *  The matching CSS is keyed off the .sheet class this sets, not off a second copy of
+ *  these numbers. */
+const SHEET_Q = "(max-width: 760px), (min-width: 761px) and (max-width: 1080px) and (orientation: portrait)";
+
 /** "July 31st, 2026" — the chat head's date, ordinal and all. */
 function chatDate(): string {
   const d = new Date();
@@ -2592,9 +2602,9 @@ export function Workspace(p: Props) {
   const [logoOpen, setLogoOpen] = useState(false);
   const [patternOpen, setPatternOpen] = useState(false);
   const [logoOver, setLogoOver] = useState(false);
-  // Open beside the stage on desktop; on a phone the sheet starts in PEEK, because the
-  // first thing a phone user should see is their model, not an empty transcript.
-  const [chatOpen, setChatOpen] = useState(() => typeof window === "undefined" || window.innerWidth > 760);
+  // Open beside the stage on desktop; where the chat is a sheet it starts in PEEK,
+  // because the first thing to see is the model, not an empty transcript.
+  const [chatOpen, setChatOpen] = useState(() => typeof window === "undefined" || !window.matchMedia(SHEET_Q).matches);
   // Transcript multi-select: null = off; a Set while picking. One confirm deletes the
   // whole selection — the per-message two-step stays for onesies, this is for sweeps.
   const [msgSel, setMsgSel] = useState<Set<string> | null>(null);
@@ -2655,16 +2665,29 @@ export function Workspace(p: Props) {
   const picked = !!p.featureCtl.selected || p.facesCtl.faces.length > 0;
   useEffect(() => { if (picked) { setDockPanel("selection"); setDockOpen(true); } }, [picked]);
   const dockLabel = DOCK_ITEMS.find((d) => d.key === dockPanel)?.label ?? "";
-  // The phone shell (skills/mobile-ux): chat becomes a bottom sheet whose collapsed
-  // "peek" is just the composer, and chatOpen flips peek <-> full instead of hiding
-  // the panel behind a side rail.
+  // The phone shell (skills/mobile-ux) proper: a full-bleed stage and chrome that steps
+  // back under a finger. Those belong to a phone alone — a tablet has the room to keep
+  // the app's floating-card grammar — so this stays the narrow gate.
   const phone = useMediaQuery("(max-width: 760px)");
-  // Phone: a build landing is the payoff, so the sheet drops back to its peek and
-  // hands the screen to the model — it had been keeping ~62% of a 844px phone for
-  // a two-line reply, leaving the 3D view a 240px strip. Swipe up to read on.
+  // The sheet, though, travels: the chat is a bottom sheet whose "peek" is just the
+  // composer on every phone AND every tablet held upright. A portrait iPad has no room
+  // for a chat COLUMN — 820px less a 369px chat leaves the model 450px — so it stacks,
+  // and once stacked the only question is the split. It was 42vh of transcript against
+  // a 534px canvas; the sheet gives the model ~950px and keeps the conversation one tap
+  // away. Landscape keeps the two columns: that is what a wide screen is for.
+  const sheetChat = useMediaQuery(SHEET_Q);
+  // Rotating the iPad re-states the chat in the grammar of the new shape. chatOpen is
+  // one flag meaning two different things — a sheet at peek is "here, one tap away", a
+  // column that is closed is "put away" — so carrying its value across the breakpoint
+  // got both directions wrong: upright, a chat left open filled two thirds of the screen
+  // instead of peeking; on its side, a peeked sheet became a hidden column behind a rail.
+  useEffect(() => { setChatOpen(!sheetChat); }, [sheetChat]);
+  // A build landing is the payoff, so the sheet drops back to its peek and hands the
+  // screen to the model — it had been keeping ~62% of a 844px phone for a two-line
+  // reply, leaving the 3D view a 240px strip. Swipe up to read on.
   const lastGeom = useRef(p.geometry);
   useEffect(() => {
-    if (phone && p.geometry && p.geometry !== lastGeom.current) {
+    if (sheetChat && p.geometry && p.geometry !== lastGeom.current) {
       setChatOpen(false);
       // Re-frame after the sheet has finished collapsing: the canvas roughly
       // triples in height, and a camera framed for the old strip leaves the part
@@ -2674,7 +2697,7 @@ export function Workspace(p: Props) {
       return () => clearTimeout(t);
     }
     lastGeom.current = p.geometry;
-  }, [p.geometry, phone]);
+  }, [p.geometry, sheetChat]);
   // While a finger is on the model, floating chrome steps back — the video-player
   // contract. Phone only: on desktop the pointer lives on the canvas half the time.
   const [stageBusy, setStageBusy] = useState(false);
@@ -2967,14 +2990,14 @@ export function Workspace(p: Props) {
       )}
 
       <main className={`split${chatOpen ? "" : " chat-collapsed"}`} style={{ "--chat-w": `${chatW}px` } as CSSProperties}>
-        {!chatOpen && !phone && (
+        {!chatOpen && !sheetChat && (
           <button className="chat-rail" title="Show chat" aria-label="Show chat" onClick={() => setChatOpen(true)}>
             <span className="chat-rail-label">Chat ›</span>
           </button>
         )}
         <section
-          className={`chat ${dragOver ? "drop" : ""}${phone ? ` sheet ${chatOpen ? "open" : "peek"}` : ""}`}
-          style={chatOpen || phone ? undefined : { display: "none" }}
+          className={`chat ${dragOver ? "drop" : ""}${sheetChat ? ` sheet ${chatOpen ? "open" : "peek"}` : ""}`}
+          style={chatOpen || sheetChat ? undefined : { display: "none" }}
           onDragOver={(e) => {
             e.preventDefault();
             setDragOver(true);

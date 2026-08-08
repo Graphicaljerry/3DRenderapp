@@ -917,6 +917,54 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 388 — an iPad tier, upright and on its side
+
+The app had a phone tier (≤760px) and a desktop tier, and every iPad fell between them.
+Measured on six iPad viewports before any change: PORTRAIT landed in the ≤900 stack — two
+rows of topbar (93px), a 42vh chat, and a 554px tool rail hanging in a 444px canvas with
+its bottom tools clipped away — while LANDSCAPE landed in the desktop split, where a
+1024×768 iPad put a 400px chat beside a 579px stage, the Inspector covered the whole
+model, and the tool rail and zoom cluster were hidden outright. The stage held 42–54% of
+the screen; it now holds 76–84% upright and 55–60% on its side.
+
+**Upright, the model is the page.** The chat becomes the same bottom sheet the phone uses
+— peek is the composer, one tap opens the transcript. The `.chat.sheet` rules moved OUT
+of the `@media (max-width: 760px)` block and are keyed to the class, so `SHEET_Q` in
+Workspace is the single place that decides where a sheet is right (phones, and tablets in
+portrait up to 1080px). The cards still float: full-bleed is the phone's answer, and a
+tablet has the room to keep the app's grammar.
+
+**Rotating re-states the chat.** `chatOpen` is one flag meaning two things — a peeked
+sheet is "one tap away", a closed column is "put away" — so carrying it across the
+breakpoint got both directions wrong: sideways, a peeked sheet became a chat hidden
+behind a rail; upright, an open column filled two thirds of the screen instead of
+peeking. One effect now re-states it on every crossing.
+
+**On its side, the chrome gives back its height.** Topbar 58 → 48, statusbar to one
+scrolling row, and the chat column capped at `min(--chat-w, 33vw)` — the stored 400px was
+39% of a 1024px screen, spent on a transcript. The zoom cluster steps one rail-width
+right: both were pinned bottom-left and on a short stage the rail reached down into it
+(measured 48×54 of overlap at 1180×820). Nothing shrank to fit — every touch target is
+the size it was.
+
+**The Inspector stops being a full-cover sheet on a tablet.** That behaviour lives in an
+`@container (max-width: 640px)` block, and a viewer column measures narrow for two
+different reasons: a phone screen, or a big chat beside a small stage. It is now also
+gated on `@media (max-width: 900px)`, so a 1024×768 iPad keeps its tool rail (the block
+hides the rail and zoom, because they draw over the sheet) and keeps the model visible
+beside a 262px card. Where a narrow column and an open Inspector genuinely can't fit both
+the head pill and the stats card (647px of stage less a 262px dock leaves 361, they want
+412), the stats card yields — it is a readout, and Printability has the same numbers.
+
+Also: `.launchpad` and `.crash` moved from `100vh` to `100dvh` — on iOS/iPadOS 100vh is
+the height with the browser chrome retracted, so those pages were always taller than the
+window they were in.
+
+Verified with Playwright across mini/Air/Pro at both orientations, rotation in both
+directions, and the tiers either side (a 880×700 window still stacks and its topbar is
+still free to wrap; 1440×900 desktop unchanged). The phone shell was re-checked after the
+sheet rules moved: 77% canvas at peek, horizontal rail, flyouts still open upward.
+
 ## Build 387 — edits reach the whole selection, and errors leave the transcript
 
 **One edit, every selected word.** `TextFly` only ever patched `ctl.editId`, so selecting

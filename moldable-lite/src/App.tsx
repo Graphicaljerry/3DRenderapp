@@ -3471,6 +3471,7 @@ export default function App() {
       const to: [number, number, number] = [at[0] + drop.x, at[1] + drop.y, at[2] + drop.z];
       const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
       setAttachments((a) => [...a, { id: newId, geometry: bendAroundY(flat, bend), name, text: spec, place: { at: to, quat, scale: src.place?.scale, bend } }]);
+      setPartColors((m) => (m[id] ? { ...m, [newId]: m[id] } : m)); // same colour, not grey
       setTextEditId(newId);
       selectAttach(newId);
       // The copy lands beside the original and then sits back down on the wall there,
@@ -3479,6 +3480,27 @@ export default function App() {
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't duplicate that text: ${String(err?.message ?? err)}`, error: true }]);
     }
+  }
+  /** Copy any placed layer — a word, a logo, a shape someone dropped on. The colour
+   *  comes with it: a duplicate that arrives grey is a duplicate you have to re-paint,
+   *  which is exactly the retyping this is meant to save. */
+  async function duplicateLayer(id: string) {
+    const src = attachmentsRef.current.find((a) => a.id === id);
+    if (!src) return;
+    if (src.text) { await duplicateText(id); return; }
+    const newId = mid();
+    const at = src.place?.at ?? [0, 0, 0];
+    const quat = src.place?.quat ?? [0, 0, 0, 1];
+    src.geometry.computeBoundingBox();
+    const h = (src.geometry.boundingBox?.max.y ?? 5) - (src.geometry.boundingBox?.min.y ?? 0);
+    const drop = new THREE.Vector3(0, -(h * 1.4), 0).applyQuaternion(new THREE.Quaternion(...quat));
+    setAttachments((a) => [...a, {
+      ...src, id: newId, geometry: src.geometry.clone(), name: `${src.name} copy`,
+      place: { ...src.place, at: [at[0] + drop.x, at[1] + drop.y, at[2] + drop.z] as [number, number, number], quat },
+    }]);
+    setPartColors((m) => (m[id] ? { ...m, [newId]: m[id] } : m));
+    selectAttach(newId);
+    if (src.logo) setTimeout(() => commitLogos(`Duplicated ${src.name}`), 0);
   }
   /** A .ttf/.otf/.woff2 the user handed over — usable immediately, this session. */
   async function useFontFile(file: File) {
@@ -4541,6 +4563,10 @@ export default function App() {
   // between drags; `place` is the last settled value.
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
+  // Keyboard handlers read the selection from a ref: the listener is registered once and
+  // would otherwise close over whatever the selection was at that render.
+  const selAttachIdsRef = useRef(selAttachIds);
+  selAttachIdsRef.current = selAttachIds;
   function textsForSnap(): TextLayerSnap[] | undefined {
     const out = attachmentsRef.current.flatMap((a) => {
       if (!a.text || consumedLayers.current.has(a.id)) return [];
@@ -6294,7 +6320,24 @@ export default function App() {
         if (canRedo) redo();
         return;
       }
+      // Duplicate, the shortcut every editor has.
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
+        e.preventDefault();
+        const ids = selAttachIdsRef.current;
+        if (ids.length) void Promise.all(ids.map((x) => duplicateLayer(x)));
+        return;
+      }
       if (e.metaKey || e.ctrlKey || e.altKey) return; // leave every other combo to the OS
+      // Delete/Backspace removes the selected layer — and is SWALLOWED either way.
+      // Unhandled, it falls through to the browser, where Backspace is still "go back"
+      // in some and closes the tab in others: the app looked like it had vanished. A 3D
+      // app has to own this key whenever it has a selection, and eat it when it doesn't.
+      if (e.key === "Delete" || e.key === "Backspace") {
+        e.preventDefault();
+        const ids = selAttachIdsRef.current;
+        if (ids.length) { ids.forEach((x) => removeAttachment(x)); setTextEditId(null); }
+        return;
+      }
       // Escape mirrors clicking empty canvas: put the tool down, close what's open.
       if (e.key === "Escape") { dismissOverlays(); return; }
       // 1–3 pick the Modify operation. They used to switch what KIND of thing you were
@@ -6708,6 +6751,7 @@ export default function App() {
         onMergeAttachments={(ids?: string[]) => { void mergeAttachments(ids); }}
         onEngraveAttachments={(ids: string[]) => { void engraveAttachments(ids); }}
         onAddLogo={(f: File) => { void addLogoFile(f); }}
+        onDuplicateAttachment={(id: string) => void duplicateLayer(id)}
         standDown={standDownTools}
         onRemoveAttachment={removeAttachment}
         partCount={partCount}
@@ -7001,6 +7045,7 @@ export default function App() {
           // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
           setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
+          altDragCopy: (ids) => { void Promise.all(ids.map((x) => duplicateLayer(x))); },
           attachPose: (poses) => {
             // The gizmo has already moved the mesh; this catches the settled numbers up
             // into state and records one history step, so a moved word survives a reload

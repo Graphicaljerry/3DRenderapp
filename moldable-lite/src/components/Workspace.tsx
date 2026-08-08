@@ -2257,6 +2257,8 @@ interface Props {
    *  exactly one tool is ever lit — see armRail(). */
   standDown: () => void;
   onRemoveAttachment: (id: string) => void;
+  /** Copy a layer — same colour, same words, offset just below it. */
+  onDuplicateAttachment: (id: string) => void;
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
   separated: boolean; // the dry-fit sandbox is open (model was split into parts)
   separatedIds: string[]; // which objects came out of the split (shown grouped under the model)
@@ -2477,6 +2479,8 @@ interface Props {
     commit: (c: TransformCommit) => void;
     /** A layer finished being dragged — record where it ended up. */
     attachPose: (poses: { id: string; at: [number, number, number]; quat: [number, number, number, number]; scale: number }[]) => void;
+    /** Alt-drag: leave a copy of the selection behind as the drag starts. */
+    altDragCopy: (ids: string[]) => void;
     rotateBy: (axis: "x" | "y" | "z", deg: number) => void; // exact typed rotation, rested on the plate
     busy: boolean;
   };
@@ -2762,7 +2766,9 @@ export function Workspace(p: Props) {
                             <button className="lp-edit" title="Edit this version — it becomes the live model; the current live model is duplicated in its place"
                               onClick={(e) => { e.stopPropagation(); p.onEditFrozen(a.id); }}>Edit</button>
                           )}
-                          <button className="x" aria-label={`Remove ${a.name}`} onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
+                          <button className="x" aria-label={`Duplicate ${a.name}`} title={`Copy ${a.name} just below it — same colour, same everything (⌘D, or Alt-drag it)`}
+                            onClick={(e) => { e.stopPropagation(); p.onDuplicateAttachment(a.id); }}><IconCopy size={13} /></button>
+                          <button className="x" aria-label={`Remove ${a.name}`} title="Remove this layer (Delete)" onClick={(e) => { e.stopPropagation(); p.onRemoveAttachment(a.id); }}><IconX /></button>
                         </div>
                       );
                     };
@@ -3329,6 +3335,7 @@ export function Workspace(p: Props) {
                 onSelectPin={p.pinCtl.select}
                 onTransformCommit={p.transformCtl.commit}
                 onAttachPose={p.transformCtl.attachPose}
+                onAltDragCopy={p.transformCtl.altDragCopy}
                 onMeasurePoint={p.measureCtl.point}
                 onMeasureSegment={p.measureCtl.segment}
                 onMeasureDelete={p.measureCtl.remove}

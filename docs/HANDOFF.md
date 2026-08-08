@@ -917,6 +917,24 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 382 — Delete belongs to the app; duplicating carries everything
+
+**Delete/Backspace was falling through to the browser.** Nothing in the app handled
+it, so the key reached whatever the browser does with it — go back in some, close the
+tab in others. A 3D app has to own that key. It now removes the selected layer(s) and
+is `preventDefault`ed either way, so it never escapes even with nothing selected.
+
+**Duplicate, three ways**: ⌘/Ctrl-D, a button on every row of the Objects panel, and
+Alt-drag. The Alt-drag trick: TransformControls doesn't pass the event through, so the
+modifier is tracked off the pointer/key stream, and the COPY is the one left standing
+while the drag carries the original away — which means the gizmo never has to be
+re-attached mid-drag and the result is what the gesture means everywhere else.
+
+**A copy keeps its colour.** `partColors` is keyed by layer id, so the new id started
+grey — a duplicate you have to re-paint is the retyping this was meant to save.
+`duplicateLayer` handles any layer (word, logo, dropped shape); text still routes
+through `duplicateText`, which also re-seats the copy on the wall where it lands.
+
 ## Build 381 — the "canvas zooms out on every commit" was a keyboard shortcut
 
 Measured first: across three placements, at two zoom levels, with the Objects panel

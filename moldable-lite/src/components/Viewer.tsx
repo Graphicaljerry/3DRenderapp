@@ -222,6 +222,9 @@ interface Props {
    *  on the three.js mesh, invisible to React — which is why a moved text layer could
    *  never be saved or undone. Reporting the settled pose is what makes it state. */
   onAttachPose?: (poses: { id: string; at: [number, number, number]; quat: [number, number, number, number]; scale: number }[]) => void;
+  /** Alt was held as a gizmo drag began: leave a copy of the selection where it stands
+   *  and let the drag carry the original away — Alt-drag, as every editor does it. */
+  onAltDragCopy?: (ids: string[]) => void;
   textPlace: {
     geometry: THREE.BufferGeometry | null;
     /** Extra spin about the face normal, degrees — the panel's Angle field. */
@@ -544,14 +547,14 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace, onAttachPose }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace, onAttachPose, onAltDragCopy }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   /** Whether the scene-wide floor grid should be on. Held in a ref because the theme
    *  effect REPLACES the GridHelper object and has to restore the state it was in. */
   const gridVisibleRef = useRef(false);
-  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onAltDragCopy, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onAltDragCopy, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -818,9 +821,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     tcR.setMode("rotate");
     tcR.setRotationSnap(THREE.MathUtils.degToRad(15));
     scene.add(tcR.getHelper());
+    // Alt at the moment a drag BEGINS. TransformControls doesn't hand the event over, so
+    // the modifier is tracked from the pointer/key stream instead.
+    let altNow = false;
+    const trackAlt = (ev: PointerEvent | KeyboardEvent) => { altNow = ev.altKey; };
+    window.addEventListener("pointerdown", trackAlt, true);
+    window.addEventListener("keydown", trackAlt, true);
+    window.addEventListener("keyup", trackAlt, true);
     const onDragChange = (e: any) => {
       const s = st.current;
       if (!s) return;
+      // Alt-drag: drop a copy where the selection stands and drag the original off it.
+      // Copying the STATIONARY one means the gizmo never has to be re-attached mid-drag,
+      // and the result is what the gesture means everywhere else — two of them, one moved.
+      if (e.value && altNow && s.selAttach?.length) cb.current.onAltDragCopy?.([...s.selAttach]);
       controls.enabled = !e.value;
       s.transforming = e.value;
       renderer.domElement.style.cursor = e.value ? "grabbing" : "";
@@ -2423,6 +2437,9 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      window.removeEventListener("pointerdown", trackAlt, true);
+      window.removeEventListener("keydown", trackAlt, true);
+      window.removeEventListener("keyup", trackAlt, true);
       renderer.domElement.removeEventListener("pointerdown", onCtxDown);
       renderer.domElement.removeEventListener("contextmenu", onCtxMenu);
       renderer.domElement.removeEventListener("pointerleave", dropHover);

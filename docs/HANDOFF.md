@@ -917,6 +917,23 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 386 — the last two undo holes closed
+
+**`commitTexts` was missing `logos` AND `partColors`.** The 385 edit meant to add them
+matched the wrong function, so every version recorded for a TEXT change carried neither.
+Two symptoms fell out of that one line: undoing a word erased your logos, and undoing a
+recolour changed nothing — because the version undo lands on had no colours at all, and
+"absent" correctly means "leave what's on screen alone".
+
+**`editText` never conformed.** Placing, duplicating, moving and restoring all lay the
+solid on the real wall; editing left it cylinder-bent. So the same word had two different
+shapes depending on how you arrived at it, and redoing an edit landed on a solid that
+didn't match the edit — which is what "redo doesn't come forward" actually was. It is the
+fifth and last call site of `conformAt`.
+
+`undoall.mjs` now drives retype, resize, wrap toggle, duplicate, recolour and remove, and
+asserts change → undo → redo for each: 18/18.
+
 ## Build 385 — undo actually steps back one action
 
 **Root cause, and the one that produced the report: a pose change was invisible to the
@@ -946,10 +963,6 @@ neither text nor logo recorded nothing; and colours are now carried on every ver
 
 Found by a 15-agent audit of the mutation surface (map → adversarial refute → plan) plus
 a runtime probe that drives place → duplicate → move and steps back through all three.
-
-**Still open**: undoing a RECOLOUR does not restore the previous colour (it no longer
-deletes the layer, which is what it used to do); and REDO after retyping or resizing a
-word does not come forward. Both reproduce in `undoall.mjs`.
 
 ## Build 384 — letters sit on the wall, whatever shape the wall is
 

@@ -3469,7 +3469,14 @@ export default function App() {
       if (textEditGen.current.get(id) !== gen) return;
       const wrap = spec.wrap !== false;
       const bend = wrap ? cur.place?.bend ?? Infinity : Infinity;
-      const g = bendAroundY(buildTextGeometry(font, spec), bend);
+      const flat = buildTextGeometry(font, spec);
+      const g = bendAroundY(flat.clone(), bend);
+      // Conform, exactly as placing, duplicating, moving and restoring all do. Without
+      // it an edited word stayed cylinder-bent while the SAME word restored from history
+      // was surface-fitted — so the shape changed depending on how you arrived at it, and
+      // redoing an edit landed on a different solid than the edit itself produced.
+      if (wrap && cur.place?.at && cur.place?.quat) viewer.current?.conformAt?.(g, flat, cur.place.at, cur.place.quat);
+      flat.dispose();
       setAttachments((l) => l.map((x) => {
         if (x.id !== id) return x;
         const old = x.geometry;
@@ -4738,7 +4745,11 @@ export default function App() {
       importFile: head.importFile, importKind: head.importKind,
       spec: head.spec, dims: head.dims, glb: head.glb, meshXform: head.meshXform,
       genSource: head.genSource, splitPieces: head.splitPieces,
-      surfFx: fxForSnap(), texts,
+      // logos and colours ride along, or a version recorded for a TEXT change would
+      // restore with the logos missing and the paint left at whatever is on screen —
+      // undoing a word would quietly delete your logos, and undoing a recolour would
+      // change nothing at all.
+      surfFx: fxForSnap(), texts, logos: logosForSnap(), partColors: { ...partColorsRef.current },
     }));
   }
   /** Rebuild the text layers a restored version carried. Geometry comes back from the

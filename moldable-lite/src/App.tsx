@@ -604,13 +604,21 @@ export default function App() {
   // Painted parts render tinted in the viewer and export as filament slots the slicer picks up.
   const [partColors, setPartColors] = useState<Record<string, string>>({});
   const colorFor = (key: string): string | undefined => partColors[key];
-  const setPartColor = (key: string, hex: string | null) =>
+  const partColorsRef = useRef(partColors);
+  partColorsRef.current = partColors;
+  const setPartColor = (key: string, hex: string | null) => {
     setPartColors((m) => {
       const next = { ...m };
       if (hex) next[key] = hex;
       else delete next[key];
       return next;
     });
+    // Recolouring is a change you can see, so it is a step you can take back. It used to
+    // record nothing at all, which meant the next Undo skipped past it and took away
+    // whatever you did BEFORE — placing the word, usually. Bursted, so dragging through
+    // a palette is one step rather than one per swatch.
+    setTimeout(() => commitLogos(`Recoloured ${attachmentsRef.current.find((a) => a.id === key)?.name ?? "the model"}`, `colour:${key}`), 0);
+  };
   // Memoised on purpose: this is a Viewer prop, and a fresh identity on every render made the
   // plate-rebuild effect dispose and reconstruct every slab's geometry and materials —
   // on every AI token, every drag tick, every unrelated setState.
@@ -1219,13 +1227,16 @@ export default function App() {
       setStatus("idle");
     }
   }
-  const removeAttachment = (id: string) => {
+  const removeAttachment = (id: string, silent = false) => {
     // Decided from the ref BEFORE the update: React only runs a state updater eagerly
     // when its queue happens to be empty, so reading the layer's kind inside one records
     // the removal sometimes and not others.
     const gone = attachmentsRef.current.find((x) => x.id === id);
     setAttachments((a) => a.filter((x) => x.id !== id));
-    if (gone?.text) setTimeout(() => commitTexts(`Removed ${gone.name}`, textsForSnap()), 0);
+    // `silent` is for callers removing SEVERAL at once — they record one step for the
+    // whole gesture instead of one per layer, so one Undo puts the whole lot back.
+    if (silent) { /* the caller records it */ }
+    else if (gone?.text) setTimeout(() => commitTexts(`Removed ${gone.name}`, textsForSnap()), 0);
     else if (gone?.logo) setTimeout(() => commitLogos(`Removed ${gone.name}`), 0);
     setSelAttachIds((sids) => {
       const next = sids.filter((x) => x !== id);
@@ -2282,6 +2293,10 @@ export default function App() {
       // so, or undoing PAST it would strip the surface along with the edit.
       surfFx: fxForSnap(),
       texts: textsForSnap(),
+      logos: logosForSnap(),
+      // Every version carries the colours, so undo never lands on one that has none and
+      // has to leave whatever is on screen alone.
+      partColors: { ...partColorsRef.current },
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
       glb: res.glb,
@@ -3424,6 +3439,10 @@ export default function App() {
   async function editText(id: string, patch: Partial<TextSpec>) {
     const cur = attachments.find((x) => x.id === id);
     if (!cur?.text) return;
+    // A patch that changes nothing must not become a History row. Number spinners and
+    // re-selecting the current font both fire these, and each one was a step the user
+    // then had to undo past to reach a change they actually made.
+    if (Object.keys(patch).every((k) => (cur.text as unknown as Record<string, unknown>)[k] === (patch as unknown as Record<string, unknown>)[k])) return;
     const spec: TextSpec = { ...cur.text, ...patch };
     const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
     setAttachments((l) => l.map((x) => (x.id === id ? { ...x, text: spec, name } : x)));
@@ -3433,7 +3452,16 @@ export default function App() {
     if (patch.roll !== undefined && patch.roll !== cur.text.roll) {
       viewer.current?.rollAttachment(id, patch.roll - (cur.text.roll ?? 0));
     }
-    if (Object.keys(patch).every((k) => k === "roll")) return; // nothing to re-tessellate
+    if (Object.keys(patch).every((k) => k === "roll")) {
+      // Nothing to re-tessellate — but the turn still has to reach `place` and History.
+      // Without the first, the attachment-sync effect sees the mesh disagreeing with
+      // `place` and snaps the turn straight back; without the second there is no step
+      // to undo, so Undo silently skips past it to whatever came before.
+      const pose = viewer.current?.attachPose?.(id);
+      if (pose) setAttachments((l) => l.map((x) => (x.id === id ? { ...x, place: { ...x.place, at: pose.at, quat: pose.quat, scale: pose.scale } } : x)));
+      setTimeout(() => commitTexts(`Turned “${spec.text}”`, textsForSnap(), `${id}:roll`), 0);
+      return;
+    }
     const gen = (textEditGen.current.get(id) ?? 0) + 1;
     textEditGen.current.set(id, gen);
     try {
@@ -3451,14 +3479,16 @@ export default function App() {
       // Wrap just turned on: the layer has no radius yet, and only a re-seat can measure
       // the wall it is standing on.
       if (wrap && !Number.isFinite(bend)) await reseatText([id]);
-      setTimeout(() => commitTexts(`Edited “${spec.text}”`, textsForSnap()), 0);
+      // One burst per (layer, field): typing a word is one step, and so is winding a
+      // number field, but changing the size and THEN the font are two.
+      setTimeout(() => commitTexts(`Edited “${spec.text}”`, textsForSnap(), `${id}:${Object.keys(patch).sort().join(",")}`), 0);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild that text: ${String(err?.message ?? err)}`, error: true }]);
     }
   }
   /** Copy a placed word, offset a little along the surface so the copy is visible and
    *  grabbable rather than hidden exactly under the original. */
-  async function duplicateText(id: string) {
+  async function duplicateText(id: string, silent = false) {
     const src = attachmentsRef.current.find((a) => a.id === id);
     if (!src?.text) return;
     const spec = { ...src.text };
@@ -3479,7 +3509,7 @@ export default function App() {
       selectAttach(newId);
       // The copy lands beside the original and then sits back down on the wall there,
       // so a duplicate on a curved body is wrapped to ITS spot, not the original's.
-      setTimeout(() => void reseatText([newId]).then(() => setTimeout(() => commitTexts(`Duplicated ${name}`, textsForSnap()), 0)), 0);
+      setTimeout(() => void reseatText([newId]).then(() => { if (!silent) setTimeout(() => commitTexts(`Duplicated ${name}`, textsForSnap()), 0); }), 0);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't duplicate that text: ${String(err?.message ?? err)}`, error: true }]);
     }
@@ -3487,10 +3517,19 @@ export default function App() {
   /** Copy any placed layer — a word, a logo, a shape someone dropped on. The colour
    *  comes with it: a duplicate that arrives grey is a duplicate you have to re-paint,
    *  which is exactly the retyping this is meant to save. */
-  async function duplicateLayer(id: string) {
+  /** Copy a whole selection as ONE undoable step. Fanning out to duplicateLayer recorded
+   *  a version per copy, so duplicating three layers took three presses of Undo to put
+   *  back — and the first two looked like Undo was doing nothing. */
+  async function duplicateSelection(ids: string[]) {
+    if (!ids.length) return;
+    await Promise.all(ids.map((x) => duplicateLayer(x, true)));
+    const label = ids.length === 1 ? attachmentsRef.current.find((a) => a.id === ids[0])?.name ?? "layer" : `${ids.length} layers`;
+    setTimeout(() => commitLogos(`Duplicated ${label}`), 0);
+  }
+  async function duplicateLayer(id: string, silent = false) {
     const src = attachmentsRef.current.find((a) => a.id === id);
     if (!src) return;
-    if (src.text) { await duplicateText(id); return; }
+    if (src.text) { await duplicateText(id, silent); return; }
     const newId = mid();
     const at = src.place?.at ?? [0, 0, 0];
     const quat = src.place?.quat ?? [0, 0, 0, 1];
@@ -3503,7 +3542,9 @@ export default function App() {
     }]);
     setPartColors((m) => (m[id] ? { ...m, [newId]: m[id] } : m));
     selectAttach(newId);
-    if (src.logo) setTimeout(() => commitLogos(`Duplicated ${src.name}`), 0);
+    // Every layer kind records, not just logos: a duplicated part or import used to
+    // change the scene with nothing at all in History behind it.
+    if (!silent) setTimeout(() => commitLogos(`Duplicated ${src.name}`), 0);
   }
   /** A .ttf/.otf/.woff2 the user handed over — usable immediately, this session. */
   async function useFontFile(file: File) {
@@ -4606,16 +4647,20 @@ export default function App() {
     });
     return out.length ? out : undefined;
   }
-  function commitLogos(summary: string) {
+  function commitLogos(summary: string, burst?: string) {
     const proj = projectRef.current;
     const head = proj?.versions[headIndex(proj)];
     if (!proj || !head) return;
-    persist(appendVersion(proj, {
+    const now = Date.now();
+    const open = burst && editBurst.current && editBurst.current.key === burst && now - editBurst.current.at < 2500;
+    editBurst.current = burst ? { key: burst, at: now } : null;
+    const write = open && head.summary === summary ? replaceHeadVersion : appendVersion;
+    persist(write(proj, {
       engine: head.engine, summary,
       code: head.code, params: head.params, ops: head.ops, spec: head.spec, dims: head.dims,
       glb: head.glb, meshXform: head.meshXform, importFile: head.importFile, importKind: head.importKind,
       genSource: head.genSource, splitPieces: head.splitPieces, surfFx: head.surfFx,
-      texts: textsForSnap(), logos: logosForSnap(),
+      texts: textsForSnap(), logos: logosForSnap(), partColors: { ...partColorsRef.current },
     }));
   }
   async function restoreLogos(snaps: LogoLayerSnap[] | undefined) {
@@ -4673,11 +4718,21 @@ export default function App() {
   }
   /** Append a version whose only change is the text layers — so Undo takes off exactly
    *  the word you just placed, and nothing of the model underneath it. */
-  function commitTexts(summary: string, texts: TextLayerSnap[] | undefined) {
+  /** `burst` collapses a run of related edits into ONE step. Typing five characters into
+   *  the words field fires five of these, and five History rows for one word is five
+   *  presses of Undo to get back — which reads as undo not working. The writer is chosen
+   *  at commit time, not when the burst opened, so an unrelated version landing mid-burst
+   *  is never overwritten. */
+  const editBurst = useRef<{ key: string; at: number } | null>(null);
+  function commitTexts(summary: string, texts: TextLayerSnap[] | undefined, burst?: string) {
     const proj = projectRef.current;
     const head = proj?.versions[headIndex(proj)];
     if (!proj || !head) return; // no history yet — the layer still works, just isn't recorded
-    persist(appendVersion(proj, {
+    const now = Date.now();
+    const open = burst && editBurst.current && editBurst.current.key === burst && now - editBurst.current.at < 2500;
+    editBurst.current = burst ? { key: burst, at: now } : null;
+    const write = open && head.summary === summary ? replaceHeadVersion : appendVersion;
+    persist(write(proj, {
       engine: head.engine, summary,
       code: head.code, params: head.params, ops: head.ops,
       importFile: head.importFile, importKind: head.importKind,
@@ -6106,6 +6161,10 @@ export default function App() {
     });
     void restoreTexts(next.versions[headIndex(next)]?.texts);
     void restoreLogos(next.versions[headIndex(next)]?.logos);
+    // Absent (a version recorded before colours were tracked) means "leave them alone"
+    // rather than "clear them" — an old project must not lose its paint on an undo.
+    const hvColors = next.versions[headIndex(next)]?.partColors;
+    if (hvColors) setPartColors({ ...hvColors });
     if (next.engine === "generative" && next.glb) {
       const g = await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
       // A split version carries its piece layout — revive the per-piece export list
@@ -6341,8 +6400,7 @@ export default function App() {
       // Duplicate, the shortcut every editor has.
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "d") {
         e.preventDefault();
-        const ids = selAttachIdsRef.current;
-        if (ids.length) void Promise.all(ids.map((x) => duplicateLayer(x)));
+        void duplicateSelection(selAttachIdsRef.current);
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey) return; // leave every other combo to the OS
@@ -6353,7 +6411,14 @@ export default function App() {
       if (e.key === "Delete" || e.key === "Backspace") {
         e.preventDefault();
         const ids = selAttachIdsRef.current;
-        if (ids.length) { ids.forEach((x) => removeAttachment(x)); setTextEditId(null); }
+        if (ids.length) {
+          const label = ids.length === 1 ? attachmentsRef.current.find((a) => a.id === ids[0])?.name ?? "layer" : `${ids.length} layers`;
+          ids.forEach((x) => removeAttachment(x, true));
+          setTextEditId(null);
+          // ONE step for the gesture. commitLogos snapshots texts and logos together, so
+          // a mixed selection comes back whole on a single Undo.
+          setTimeout(() => commitLogos(`Removed ${label}`), 0);
+        }
         return;
       }
       // Escape mirrors clicking empty canvas: put the tool down, close what's open.
@@ -6812,10 +6877,13 @@ export default function App() {
           edit: (id: string, patch: Partial<TextSpec>) => void editText(id, patch),
           duplicate: (id: string) => void duplicateText(id),
           remove: (id: string) => {
-            const gone = attachmentsRef.current.find((a) => a.id === id)?.text?.text ?? "text";
+            // removeAttachment records the version itself. This used to schedule a SECOND
+            // one, so one click on the X wrote two identical History rows — and the first
+            // press of Undo then appeared to do nothing at all, because it only stepped
+            // between two snapshots that were the same. That was the whole "it doesn't
+            // undo the last thing I did" report.
             removeAttachment(id);
             if (textEditId === id) setTextEditId(null);
-            setTimeout(() => commitTexts(`Removed “${gone}”`, textsForSnap()), 0);
           },
         }}
         shapeCtl={{
@@ -7063,7 +7131,7 @@ export default function App() {
           // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
           setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
-          altDragCopy: (ids) => { void Promise.all(ids.map((x) => duplicateLayer(x))); },
+          altDragCopy: (ids) => { void duplicateSelection(ids); },
           attachPose: (poses) => {
             // The gizmo has already moved the mesh; this catches the settled numbers up
             // into state and records one history step, so a moved word survives a reload

@@ -54,6 +54,10 @@ export interface Version {
    *  is stored is the OUTLINE the solid was extruded from, not the solid, so a reload
    *  rebuilds the identical mesh from a few kilobytes of path data. */
   logos?: LogoLayerSnap[];
+  /** Per-object fill colour at this snapshot, so recolouring a layer is a step you can
+   *  take back like any other. Absent on versions recorded before colours were tracked;
+   *  those restore whatever is already on screen rather than clearing it. */
+  partColors?: Record<string, string>;
   /** Text layers standing on the model at this snapshot. Stored as SPECS, not meshes:
    *  the words plus a pose rebuild the same solid exactly, which is why a text layer
    *  can survive a reload and take part in undo at all. Absent = no text. */

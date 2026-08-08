@@ -2699,6 +2699,38 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         // Same id, new geometry = an in-place edit (retyping a placed text). The mesh
         // keeps its transform — the whole point of editing over re-placing.
         if (existing.geometry !== a.geometry) existing.geometry = a.geometry;
+        // …but a pose that has CHANGED must be applied. This branch used to ignore
+        // `place` entirely, which meant undo and redo of a MOVE did nothing on screen:
+        // the version was recorded correctly and restored correctly, and then the mesh
+        // sat exactly where the user had dragged it, because nothing ever told it to go
+        // back. Editing in place doesn't touch `place`, so the case this branch was
+        // written for is still a no-op. Skipped mid-drag — during a gizmo drag the mesh
+        // is ahead of `place` by design, and snapping it back would fight the pointer.
+        if (a.place?.at && a.place.quat && !s.transforming) {
+          const want = new THREE.Vector3(...a.place.at);
+          const wq = new THREE.Quaternion(...a.place.quat);
+          const ws = a.place.scale ?? 1;
+          existing.updateWorldMatrix(true, false);
+          const moved =
+            existing.getWorldPosition(new THREE.Vector3()).distanceToSquared(want) > 1e-6 ||
+            Math.abs(existing.getWorldQuaternion(new THREE.Quaternion()).dot(wq)) < 0.999999 ||
+            Math.abs(existing.scale.x - ws) > 1e-4;
+          if (moved) {
+            // In the PARENT's space: a gizmo may have left the mesh under a pivot, and a
+            // world pose written straight onto position/quaternion would be doubly applied.
+            const parent = existing.parent;
+            if (parent) {
+              parent.updateWorldMatrix(true, false);
+              existing.position.copy(want).applyMatrix4(new THREE.Matrix4().copy(parent.matrixWorld).invert());
+              existing.quaternion.copy(parent.getWorldQuaternion(new THREE.Quaternion()).invert().multiply(wq));
+            } else {
+              existing.position.copy(want);
+              existing.quaternion.copy(wq);
+            }
+            existing.scale.setScalar(ws);
+            existing.updateMatrixWorld(true);
+          }
+        }
         continue;
       }
       if (s.attachMap.has(a.id)) continue;

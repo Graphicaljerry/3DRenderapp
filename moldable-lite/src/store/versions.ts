@@ -19,6 +19,7 @@ export interface Snapshot {
   surfFx?: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null };
   texts?: TextLayerSnap[];
   logos?: LogoLayerSnap[];
+  partColors?: Record<string, string>;
 }
 
 /** Append a version capturing the new state AND advance HEAD to match. Pure.
@@ -45,6 +46,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     surfFx: snap.surfFx,
     texts: snap.texts,
     logos: snap.logos,
+    partColors: snap.partColors,
   };
   const kept = project.versions.slice(0, headIndex(project) + 1); // drop any redo branch past HEAD
   return {
@@ -101,6 +103,7 @@ export function replaceHeadVersion(project: Project, snap: Snapshot): Project {
     surfFx: snap.surfFx,
     texts: snap.texts,
     logos: snap.logos,
+    partColors: snap.partColors,
   };
   const versions = [...project.versions];
   versions[i] = v;

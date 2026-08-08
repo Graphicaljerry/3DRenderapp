@@ -917,6 +917,40 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 385 — undo actually steps back one action
+
+**Root cause, and the one that produced the report: a pose change was invisible to the
+Viewer.** The attachment-sync effect only swapped GEOMETRY for a layer it already knew
+(`Viewer.tsx:2696`), deliberately, so retyping a word wouldn't move it. But undo and redo
+of a MOVE change nothing else — so the version was recorded correctly, restored
+correctly, and the mesh then sat exactly where the user had dragged it because nothing
+ever told it to go back. It now applies a pose that has CHANGED, in the parent's space,
+skipped mid-drag.
+
+**Second cause: one gesture, two History rows.** The Text panel's X called
+`removeAttachment` (which records) and then recorded again. Two identical snapshots, so
+the first Undo press was a visible no-op — the exact "it doesn't undo the last thing I
+did" signature. Multi-delete and multi-duplicate had the same shape, one row per layer.
+All three are one row per gesture now, via a `silent` flag on the per-item helpers.
+
+**Third: edits streamed one version per keystroke.** Typing five characters was five
+Undos. `commitTexts`/`commitLogos` take a burst key and coalesce with
+`replaceHeadVersion` inside 2500 ms — the writer chosen at commit time, so an unrelated
+version landing mid-burst is never overwritten. Patches that change nothing no longer
+record at all.
+
+**Also**: the Angle field wrote to the mesh and returned before committing, so a turn was
+un-undoable AND got snapped back by the sync effect; `commitTexts` dropped `logos`
+entirely, so editing a word erased your logos on undo; a duplicated layer that was
+neither text nor logo recorded nothing; and colours are now carried on every version.
+
+Found by a 15-agent audit of the mutation surface (map → adversarial refute → plan) plus
+a runtime probe that drives place → duplicate → move and steps back through all three.
+
+**Still open**: undoing a RECOLOUR does not restore the previous colour (it no longer
+deletes the layer, which is what it used to do); and REDO after retyping or resizing a
+word does not come forward. Both reproduce in `undoall.mjs`.
+
 ## Build 384 — letters sit on the wall, whatever shape the wall is
 
 One cylinder radius, fitted from three rays, was never going to hold. It is right for a

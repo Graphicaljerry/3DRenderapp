@@ -664,10 +664,13 @@ button:disabled { cursor: default; }
    top-left corner. The tab strip that used to sit there duplicated the Inspector's
    section list, so it's gone — one pill, one row. */
 .viewer-head .viewer-tools { align-items: stretch; }
-/* 39px, matching the rail's button box exactly. Both pills are now
-   1px border + 5px padding + 39px control + 5px padding + 1px border = 51px across
-   their short axis, so neither reads as the skinny one. */
-.viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 39px; box-sizing: border-box; }
+/* 43px tall against the rail's 43px… no — against the rail's 51px WIDE, and that is
+   the point. Matching the two numerically made the horizontal one look fatter, which is
+   the vertical–horizontal illusion doing what it always does: a horizontal bar reads
+   thicker than a vertical bar of the same measure. So this one is drawn 15% under the
+   rail's width to LOOK the same weight, which is the only comparison anyone can make.
+   1px border + 4px padding + 33px control + 4px padding + 1px border = 43px. */
+.viewer-head .viewer-tools .ghost.sm.iconbtn, .viewer-head .viewer-tools .seg.sm { height: 33px; box-sizing: border-box; }
 .viewer-head .viewer-tools .seg.sm { align-items: stretch; }
 /* Radii nest cleanly inside the round capsule: the undo/redo track ran 9px corners
    with 6px buttons inside a fully-round pill — three radii in 32px of height. */
@@ -688,7 +691,7 @@ button:disabled { cursor: default; }
 .viewer-head .viewer-tools {
   background: var(--chrome); border-radius: var(--r-full);
   border: 1px solid transparent; box-shadow: var(--shadow-float);
-  padding: 5px 6px; gap: 3px; flex-wrap: nowrap;
+  padding: 4px 6px; gap: 3px; flex-wrap: nowrap;
 }
 /* …and the same icon size. These were rendering ~15px against the rail's 17px, which
    is exactly the kind of difference you feel without being able to name. */
@@ -2224,11 +2227,11 @@ details.guide { margin-top: 10px; }
 .canvas-rail {
   position: absolute;
   left: 10px;
-  /* 10 (the head pill's top inset) + 51 (its height) + 10 (the gap). The gap used to be
+  /* 10 (the head pill's top inset) + 43 (its height) + 10 (the gap). The gap used to be
      3px: two capsules of the same material, a hairline apart, read as one control that
      had come unstuck rather than two. The gap now matches the inset above the pill and
      the one to the left of both, so the corner is a consistent 10px all round. */
-  top: 71px;
+  top: 63px;
   /* No overflow here: the tool flyouts are absolutely-positioned children that
      extend to the RIGHT of the rail, and any overflow value other than visible
      (even overflow-y alone — the other axis then computes to auto) would clip them.
@@ -2706,6 +2709,9 @@ details.guide { margin-top: 10px; }
   /* Segmented controls and chips: 40px is comfortable without the composer stack
      growing a whole row taller. */
   .seg button, .web-toggle, .mp-trigger, .pm-opt { min-height: 40px; }
+  /* …except inside the head pill, whose whole 43px row is the target: a 40px minimum
+     on its inner segments would inflate the capsule past the rail it is matched to. */
+  .viewer-head .viewer-tools .seg button { min-height: 0; }
   .theme-toggle, .navlink { min-height: 44px; min-width: 44px; }
   .zoom-ctl button { width: 40px; height: 40px; }
   .view-snaps button { min-height: 40px; }

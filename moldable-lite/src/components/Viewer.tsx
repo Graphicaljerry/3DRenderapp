@@ -4,7 +4,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { mergeGeometries, toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { installBVH, ensureBoundsTree } from "../three/bvh";
-import { bendAroundY, wallRadius } from "../text/bend";
+import { bendAroundY, wallRadius, conformToSurface } from "../text/bend";
 
 installBVH();
 
@@ -53,6 +53,10 @@ export interface ViewerHandle {
    *  off the surface and keep the curvature of the spot it started at. `halfWidth` is
    *  the flat word's half-width, which only the caller (who rebuilds it) knows. */
   seatAttachment: (id: string, rollDeg: number, halfWidth: number) => { at: [number, number, number]; quat: [number, number, number, number]; bend: number } | null;
+  /** Lay a solid on the real surface at a given pose, vertex by vertex. Takes the
+   *  geometry rather than a layer id on purpose: the caller conforms BEFORE handing the
+   *  result to React, so there is no race against the Viewer's own geometry swap. */
+  conformAt: (geom: THREE.BufferGeometry, flat: THREE.BufferGeometry, at: [number, number, number], quat: [number, number, number, number]) => boolean;
   /** Dolly toward (factor > 1) or away from (factor < 1) the orbit target. */
   zoomBy: (factor: number) => void;
   /** Screenshot the CURRENT camera view (what the user sees, minus UI overlays).
@@ -3773,6 +3777,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       invalidateRef.current(2);
       return { at: at.toArray() as [number, number, number], quat: quat.toArray() as [number, number, number, number], bend };
     },
+    conformAt(geom, flat, at, quat) {
+      const s = st.current;
+      if (!s?.mesh) return false;
+      ensureBoundsTree(s.mesh.geometry);
+      s.mesh.updateWorldMatrix(true, false);
+      return conformToSurface(geom, flat, s.mesh, new THREE.Vector3(...at), new THREE.Quaternion(...quat));
+    },
     rollAttachment(id, deltaDeg) {
       const s = st.current;
       const m = s?.attachMap.get(id);
@@ -4813,10 +4824,12 @@ function bendGhostToWall(mesh: THREE.Object3D, ghost: THREE.Mesh, flat: THREE.Bu
   const r = wallRadius(mesh, ghost.position, right, out, half);
   (dst.array as Float32Array).set(src.array as Float32Array);
   dst.needsUpdate = true;
-  if (Number.isFinite(r)) bendAroundY(ghost.geometry, r);
-  else {
-    ghost.geometry.computeVertexNormals();
-    ghost.geometry.computeBoundingSphere();
+  // The real surface first — one radius can't be right across a rounded box, where the
+  // wall is flat in the middle and curved at the corners. The cylinder is the fallback
+  // for a word hanging off the edge, where there's no surface to sit on.
+  if (!conformToSurface(ghost.geometry, flat, mesh, ghost.position, ghost.quaternion)) {
+    if (Number.isFinite(r)) bendAroundY(ghost.geometry, r);
+    else { ghost.geometry.computeVertexNormals(); ghost.geometry.computeBoundingSphere(); }
   }
   return r;
 }

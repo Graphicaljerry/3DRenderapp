@@ -3401,6 +3401,9 @@ export default function App() {
     // Wrapped to the same wall radius the ghost was showing — what you saw is what lands.
     const r = t.wrap === false ? Infinity : bend;
     const solid = bendAroundY(g.clone(), r);
+    // …then onto the real wall, the same as a duplicate or a move gets. The cylinder is
+    // the starting point; conforming is what keeps every letter out of the body.
+    if (r !== Infinity) viewer.current?.conformAt?.(solid, g, at, quat);
     const id = mid();
     const name = t.text.length > 18 ? `“${t.text.slice(0, 17)}…”` : `“${t.text}”`;
     setAttachments((a) => [...a, { id, geometry: solid, name, text: { ...t }, place: { at, quat, bend: r } }]);
@@ -4648,7 +4651,14 @@ export default function App() {
         const half = (flat.boundingBox!.max.x - flat.boundingBox!.min.x) / 2;
         const seat = viewer.current?.seatAttachment?.(a.id, spec.roll ?? 0, half);
         if (!seat) { flat.dispose(); return null; }
-        return { id: a.id, geometry: bendAroundY(flat, seat.bend), place: { at: seat.at, quat: seat.quat, bend: seat.bend } };
+        // Conform to the REAL wall here, before this ever reaches React: one cylinder
+        // radius is over-bent on a flat face and under-bent at a corner, and on a rounded
+        // box the middle letters sink into the body. The cylinder stays as the starting
+        // point, and as the answer for whatever hangs off the edge of the part.
+        const solid = bendAroundY(flat.clone(), seat.bend);
+        viewer.current?.conformAt?.(solid, flat, seat.at, seat.quat);
+        flat.dispose();
+        return { id: a.id, geometry: solid, place: { at: seat.at, quat: seat.quat, bend: seat.bend } };
       } catch { return null; }
     }));
     const ok = rebuilt.filter((x): x is NonNullable<typeof x> => !!x);
@@ -4688,7 +4698,15 @@ export default function App() {
       try {
         const spec = t.spec as TextSpec;
         const bend = t.bend ?? Infinity;
-        const g = bendAroundY(buildTextGeometry(await getFont(spec.family, !!spec.custom), spec), bend);
+        const flat = buildTextGeometry(await getFont(spec.family, !!spec.custom), spec);
+        const g = bendAroundY(flat.clone(), bend);
+        // Conform to the wall, same as placing does — otherwise a reload brings the word
+        // back cylinder-bent while the one you placed was surface-fitted, and the shape
+        // quietly changes under you. Retried once: the model's own mesh may still be
+        // going up when the layers are restored, and there is nothing to fit to until it is.
+        if (t.at && t.quat && Number.isFinite(bend) && !viewer.current?.conformAt?.(g, flat, t.at, t.quat)) {
+          setTimeout(() => { viewer.current?.conformAt?.(g, flat, t.at!, t.quat!); flat.dispose(); }, 400);
+        } else flat.dispose();
         const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
         return { id: t.id, geometry: g, name, text: spec, place: { at: t.at, quat: t.quat, scale: t.scale, bend } };
       } catch { return null; } // a font that won't load must not take the whole restore down

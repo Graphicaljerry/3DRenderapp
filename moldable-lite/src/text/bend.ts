@@ -63,3 +63,65 @@ export function wallRadius(
   const r = -(halfWidth * halfWidth + w * w) / (2 * w);
   return Math.abs(r) > 1e4 ? Infinity : r; // a 10 m radius is flat for anything printable
 }
+
+/** Lay a flat decal on the ACTUAL surface, vertex by vertex.
+ *
+ *  `wallRadius` + `bendAroundY` fit the whole word to one cylinder, which is right for a
+ *  bottle and wrong for almost anything else. On a rounded box — a pen holder, a case —
+ *  the wall is flat across the middle and curved only at the corners, so a single radius
+ *  is over-bent on the flat part and under-bent on the corner, and the middle letters
+ *  sink into the body. A word must never do that: every letter sits ON the outer wall or
+ *  the part is wrong.
+ *
+ *  So each vertex is dropped onto whatever is underneath it and re-raised by its own
+ *  height in the extrusion. That holds on any shape, curved in one direction or two,
+ *  because it never assumes a shape at all. Vertices whose ray misses the body (a word
+ *  overhanging an edge) keep the position they came in with, so an overhang degrades to
+ *  the old cylindrical answer instead of collapsing.
+ *
+ *  Returns false when too little of the word found the surface to trust the result. */
+export function conformToSurface(
+  geom: THREE.BufferGeometry,
+  flat: THREE.BufferGeometry,
+  mesh: THREE.Object3D,
+  origin: THREE.Vector3,
+  quat: THREE.Quaternion,
+): boolean {
+  const src = flat.getAttribute("position") as THREE.BufferAttribute | undefined;
+  const dst = geom.getAttribute("position") as THREE.BufferAttribute | undefined;
+  if (!src || !dst || src.count !== dst.count) return false;
+  if (!flat.boundingBox) flat.computeBoundingBox();
+  const reach = Math.max(20, (flat.boundingBox!.max.x - flat.boundingBox!.min.x) * 2);
+  const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quat);
+  const up = new THREE.Vector3(0, 1, 0).applyQuaternion(quat);
+  const out = new THREE.Vector3(0, 0, 1).applyQuaternion(quat);
+  const inv = quat.clone().invert();
+  const rc = new THREE.Raycaster();
+  rc.far = reach * 2.5;
+  (rc as unknown as { firstHitOnly: boolean }).firstHitOnly = true; // three-mesh-bvh
+  const a = src.array as Float32Array;
+  const b = dst.array as Float32Array;
+  const from = new THREE.Vector3();
+  const dir = out.clone().negate();
+  const p = new THREE.Vector3();
+  let hits = 0;
+  for (let i = 0; i < a.length; i += 3) {
+    from.copy(origin).addScaledVector(right, a[i]).addScaledVector(up, a[i + 1]).addScaledVector(out, reach);
+    rc.set(from, dir);
+    const h = rc.intersectObject(mesh, false)[0];
+    if (!h?.face) continue;
+    hits++;
+    // Raise by this vertex's own place in the extrusion, along the LOCAL normal — so the
+    // face of a letter stays parallel to the wall under it rather than to the wall under
+    // the middle of the word.
+    const n = h.face.normal.clone().transformDirection(mesh.matrixWorld).normalize();
+    p.copy(h.point).addScaledVector(n, a[i + 2]).sub(origin).applyQuaternion(inv);
+    b[i] = p.x; b[i + 1] = p.y; b[i + 2] = p.z;
+  }
+  if (hits < src.count * 0.5) return false; // mostly off the part — not a decal, leave it
+  dst.needsUpdate = true;
+  geom.computeVertexNormals();
+  geom.computeBoundingBox();
+  geom.computeBoundingSphere();
+  return true;
+}

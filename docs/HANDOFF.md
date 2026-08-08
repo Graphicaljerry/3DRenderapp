@@ -917,6 +917,29 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 384 — letters sit on the wall, whatever shape the wall is
+
+One cylinder radius, fitted from three rays, was never going to hold. It is right for a
+bottle and wrong for a rounded box — a pen holder, a case — where the wall is flat
+across the middle and curved only at the corners: over-bent on the flat part,
+under-bent at the corner, and the middle letters sink into the body.
+
+`conformToSurface` in `src/text/bend.ts` drops every vertex onto whatever is under it
+and re-raises it by its own height in the extrusion, along the local normal at that
+point. It assumes no shape, so it holds on any of them. Vertices whose ray misses the
+body keep the cylindrical answer, so a word overhanging an edge degrades instead of
+collapsing; under 50% hits it declines entirely and leaves the cylinder alone.
+
+It is applied at four points, all BEFORE the geometry reaches React — `conformAt` takes
+a geometry and a pose rather than a layer id, which was the first attempt and lost every
+race against the Viewer's own geometry swap. Placing, duplicating, moving and restoring
+all go through it. Restoring matters as much as the rest: a reload that brought the word
+back cylinder-bent while the placed one was surface-fitted changed the shape under you
+(caught by textwrap: 5.742 mm of bow becoming 7.029).
+
+Measured on a rounded holder, deepest penetration of any vertex into the body:
+placed 0.45 mm → 0, duplicate 1.4 mm → 0.
+
 ## Build 382 — Delete belongs to the app; duplicating carries everything
 
 **Delete/Backspace was falling through to the browser.** Nothing in the app handled

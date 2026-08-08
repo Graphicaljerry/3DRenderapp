@@ -14,7 +14,8 @@
 //   Tripo/Meshy/fal on the hosted site (DEFAULT_RELAY).
 
 import { encryptPayload, decryptPayload, encryptBytes, decryptBytes, gatherSettings, isLocalOnlyKey } from "./backup";
-import { listProjects, getProject, putProject, deleteProject } from "../store/projects";
+import { listProjects, getProject, putProject, deleteProject, CLOUD_WRITER } from "../store/projects";
+import { mergeProjects, mergeChanged } from "../store/merge";
 import type { Project } from "../store/types";
 import { IS_DESKTOP } from "./desktopUpdate";
 
@@ -477,27 +478,40 @@ async function reconcileRemote(c: any, uid: string, force = false): Promise<{ ad
       for (const r of remote) {
         if ((tombs[r.id] ?? 0) >= r.updatedAt) continue; // deleted somewhere — don't resurrect
         const local = await getProject(r.id);
-        if (local && local.updatedAt >= r.updatedAt) {
-          // Local wins on content — but a mesh the bucket holds and this device lacks
-          // still restores (the "synced project opens empty on another device" fix).
-          if (!local.glb && !local.importFile && r.cloudMesh) {
+        // Two copies of one project are MERGED, never chosen between. updatedAt used to
+        // decide which whole list survived, which meant a copy that had merely been left
+        // open — the chat autosave restamps it every few seconds — could delete a day of
+        // history it had never seen. mergeProjects unions the versions instead; the most
+        // a wrong guess costs now is a longer History panel. See store/merge.ts.
+        if (local) {
+          const hydrated: Project = {
+            ...r,
+            versions: r.versions.map((v) => {
+              const lv = local.versions.find((x) => x.id === v.id);
+              return { ...v, glb: lv?.glb, importFile: lv?.importFile };
+            }),
+          };
+          const next = mergeProjects(local, hydrated);
+          const changed = mergeChanged(local, next);
+          // The bucket holds the head mesh; fetch it when this device has no geometry at
+          // all (the "synced project opens empty on another device" fix).
+          if (!next.glb && !next.importFile && r.cloudMesh) {
             const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
             if (m) {
-              await putProject(r.cloudMesh.src === "glb" ? { ...local, glb: m, cloudMesh: r.cloudMesh } : { ...local, importFile: m, cloudMesh: r.cloudMesh });
+              if (r.cloudMesh.src === "glb") next.glb = m; else next.importFile = m;
+              next.cloudMesh = r.cloudMesh;
               meshes++;
-              adopted.push(r.id);
             }
+          }
+          if (changed || next.glb !== local.glb || next.importFile !== local.importFile) {
+            await putProject(next, CLOUD_WRITER);
+            adopted.push(r.id);
           }
           continue;
         }
         const merged: Project = {
           ...r,
-          glb: local?.glb,
-          importFile: local?.importFile,
-          versions: r.versions.map((v) => {
-            const lv = local?.versions.find((x) => x.id === v.id);
-            return { ...v, glb: lv?.glb, importFile: lv?.importFile };
-          }),
+          versions: r.versions.map((v) => ({ ...v })),
         };
         // Adopting the remote project: fetch its mesh unless this device already holds
         // exactly those bytes (marker matches AND a blob is actually present).
@@ -509,7 +523,7 @@ async function reconcileRemote(c: any, uid: string, force = false): Promise<{ ad
             meshes++;
           }
         }
-        await putProject(merged);
+        await putProject(merged, CLOUD_WRITER);
         adopted.push(r.id);
       }
     }

@@ -917,6 +917,52 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 390 — a merge never deletes a version (the data loss)
+
+Reported, and real: a project opened on a second device came back as a much older model
+and the day's work was gone. Three things in combination.
+
+1. A project lived in three storage containers — Safari, the home-screen web app (iOS
+   gives an installed web app its OWN IndexedDB, separate from the browser's), and a
+   desktop browser. So an old copy existed without anyone doing anything wrong.
+2. `reconcileRemote` merged whole projects by `updatedAt`, last writer wins: the copy
+   with the newer stamp REPLACED the other, version list and all. And the chat autosave
+   rewrites a project every few seconds with a fresh `updatedAt` whether or not anything
+   was edited — so a stale copy left open makes itself "newest" by sitting there.
+3. `appendVersion` drops everything after HEAD (correct for undo-then-edit). Once a stale
+   HEAD landed, the next edit destroyed the newer history permanently.
+
+Plus a fourth: `persist()` blind-wrote the in-memory project over whatever was on disk,
+so even a correct pull was immediately paved over by the stale tab; `onRemoteProjects`
+only showed a notice and left the stale copy authoritative.
+
+**The rule is now: a merge never deletes a version.** New `store/merge.ts` unions the two
+version lists by id, decides HEAD by which VERSION is newer (not which device wrote most
+recently — that is the line that defuses the autosave), and makes the live fields mirror
+that head. Worst case after a wrong guess is a longer History panel; every snapshot is
+still there to jump back to.
+
+Wired in three places so no caller has to remember:
+- `putProject` merges whenever the stored record was last written by anyone but this
+  running instance (a per-load `INSTANCE` id; sync writes stamp `CLOUD_WRITER`, which is
+  never a live instance). It now RETURNS what it stored — without that the rescue lasted
+  one save, because the caller still held its pre-merge copy.
+- Every autosave path adopts that return via `adoptStored`.
+- `onRemoteProjects` folds a sibling device's steps into the OPEN project with
+  `keepHead: true` — history arrives, a half-finished edit is not yanked away.
+
+Verified two ways. `mergeguard.mjs` drives the real store modules off the dev server: a
+stale 3-step copy carrying a NEWER `updatedAt` saved over a 5-step one leaves 5 on disk
+with HEAD still the newest, and the next save keeps it. `syncloss.mjs` runs the whole
+thing end to end through the real sync code against a scripted Supabase, two containers,
+and reproduces the exact report — before the fix B's push deleted A's text steps
+everywhere; now both converge on all 5 with the same HEAD.
+
+Still open: `MAX_VERSIONS` is 60 and trims from the old end, so a long session of small
+ops can still push early steps off. Union merges make hitting that cap more likely, not
+less. Projects have no export/restore of their own either — `lib/backup.ts` is settings
+and keys only.
+
 ## Build 389 — zoom goes where you point
 
 `OrbitControls.zoomToCursor` defaults to `false` and had never been set, so every wheel

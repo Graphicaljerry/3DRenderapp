@@ -57,6 +57,7 @@ import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine, costLabel, co
 import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
+import { mergeProjects, mergeChanged } from "./store/merge";
 import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
 import type { Project, Pin, Version, TextLayerSnap, LogoLayerSnap } from "./store/types";
 import { uid } from "./lib/id";
@@ -1618,8 +1619,18 @@ export default function App() {
     // silently dropping the version the first one recorded.
     projectRef.current = next;
     setProject(next);
-    void putProject(next);
+    void putProject(next).then(adoptStored);
     scheduleSync();
+  }
+
+  /** The store merges when the record was last written by another tab, window or the
+   *  sync cycle, and hands back what it actually saved. Take it — holding the pre-merge
+   *  copy in memory is how the rescued history gets deleted again on the next save. */
+  function adoptStored(stored: Project) {
+    const cur = projectRef.current;
+    if (!cur || cur.id !== stored.id || !mergeChanged(cur, stored)) return;
+    projectRef.current = stored;
+    setProject(stored);
   }
 
   // ---- chat memory: every message is saved into the project, continuously ----
@@ -1638,7 +1649,7 @@ export default function App() {
         const next = { ...pr, chat, pins, updatedAt: Date.now() };
         projectRef.current = next;
         setProject(next);
-        void putProject(next);
+        void putProject(next).then(adoptStored);
         scheduleSync();
       } else {
         // No project yet (e.g. every attempt failed) — create a shell so the
@@ -1662,7 +1673,7 @@ export default function App() {
       const next = { ...pr, plates: { count: plateCount, of: plateOf, names: plateNames }, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next);
+      void putProject(next).then(adoptStored);
       scheduleSync();
     }, 600);
     return () => clearTimeout(t);
@@ -1677,7 +1688,7 @@ export default function App() {
       const next = { ...pr, partColors, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next);
+      void putProject(next).then(adoptStored);
       scheduleSync();
     }, 600);
     return () => clearTimeout(t);
@@ -1693,7 +1704,7 @@ export default function App() {
       const next = { ...pr, facePaint: nextFp, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next);
+      void putProject(next).then(adoptStored);
       scheduleSync();
     }, 700);
     return () => clearTimeout(t);
@@ -1712,7 +1723,7 @@ export default function App() {
       const next = { ...pr, thumb, thumbV: THUMB_V, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next);
+      void putProject(next).then(adoptStored);
       scheduleSync();
     }, 500);
     return () => clearTimeout(t);
@@ -2329,7 +2340,7 @@ export default function App() {
       const next = { ...p, versions };
       projectRef.current = next;
       setProject(next);
-      void putProject(next); // quiet save — the next real change carries it to the cloud
+      void putProject(next).then(adoptStored); // quiet save — the next real change carries it to the cloud
     }, 400);
   }
 
@@ -6491,7 +6502,20 @@ export default function App() {
           }
         });
       } else {
-        setAuthNotice("This project changed on another device — reopen it from the Library to load the latest.");
+        // The copy on disk just gained another device's history. Leaving the in-memory
+        // project untouched here is what lost a day's work: the next autosave wrote this
+        // stale version list straight back over the merged one. Fold the steps in NOW,
+        // keeping the head where it is so a half-finished edit isn't yanked away — the
+        // other device's steps appear in History, and nothing can overwrite them.
+        void getProject(open).then((fresh) => {
+          const cur = projectRef.current;
+          if (!fresh || !cur || cur.id !== fresh.id) return;
+          const next = mergeProjects(cur, fresh, { keepHead: true });
+          if (!mergeChanged(cur, next)) return;
+          projectRef.current = next;
+          setProject(next);
+          setAuthNotice(`This project also changed on another device — its steps are in History (${next.versions.length} in total). Nothing here was overwritten.`);
+        });
       }
     }
   }

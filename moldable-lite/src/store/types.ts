@@ -123,6 +123,11 @@ export interface Project {
   chat?: ChatTurn[];
   versions: Version[]; // append-only, oldest -> newest
   headId?: string; // which version the HEAD (live) fields mirror; enables undo/redo over `versions`
+  /** Which running copy of the app last wrote this record. Not an identity or a device —
+   *  just "was it me". A second tab, a second browser, or the sync cycle writing a copy
+   *  it pulled down all leave a different mark here, and that is the signal to MERGE the
+   *  two histories instead of overwriting one with the other. See store/merge.ts. */
+  writerId?: string;
 }
 
 export interface Backend {

@@ -57,7 +57,7 @@ import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
-import type { Project, Pin, Version } from "./store/types";
+import type { Project, Pin, Version, TextLayerSnap } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
 import type { BuildProgress } from "./components/BuildStage";
@@ -571,7 +571,7 @@ export default function App() {
     id: string; geometry: THREE.BufferGeometry; name: string; tint?: string;
     frozenSource?: BuildInput; // a kept model version that can be swapped back to live
     text?: TextSpec; // this attachment IS a text layer — the spec it rebuilds from, forever editable
-    place?: { at: [number, number, number]; quat: [number, number, number, number] }; // pose pinned at placement (text lands ON a face, not staged beside the model)
+    place?: { at: [number, number, number]; quat: [number, number, number, number]; scale?: number }; // live pose: pinned at placement, then updated by the gizmo so it can be saved and undone
   }[]>([]); // free-floating objects (logos, badges, text, parts…)
   const [selAttachIds, setSelAttachIds] = useState<string[]>([]);
   // Build plates: every object (the model = "model", attachments by id) lives on a plate.
@@ -2263,6 +2263,7 @@ export default function App() {
       // A model edit while a pattern is on keeps the pattern — the new version must say
       // so, or undoing PAST it would strip the surface along with the edit.
       surfFx: fxForSnap(),
+      texts: textsForSnap(),
       spec: res.source.kind === "spec" ? res.source.spec : undefined,
       dims: res.dims,
       glb: res.glb,
@@ -2386,6 +2387,7 @@ export default function App() {
       importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: res.dims,
       surfFx: fxForSnap(),
+      texts: textsForSnap(),
     };
     const next = coalesce ? replaceHeadVersion(proj, snap) : appendVersion(proj, snap);
     next.chat = projectRef.current?.chat ?? proj.chat;
@@ -2713,6 +2715,7 @@ export default function App() {
       importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: result.dims,
       surfFx: fxForSnap(),
+      texts: textsForSnap(),
     });
     persist(next);
     setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
@@ -3384,6 +3387,10 @@ export default function App() {
     // selected is the universal 3D-app gesture, and without it the only route to the
     // gizmo was hunting for the layer's row in the Placed list.
     selectAttach(id);
+    // Recorded as its own step, so Undo lifts the word back off and a reload finds it
+    // still standing there. Deferred a tick: setAttachments above hasn't flushed yet,
+    // and textsForSnap reads the settled list.
+    setTimeout(() => commitTexts(`Placed “${t.text}”`, textsForSnap()), 0);
     explainOnce("text", `Text is its own **layer**: move or spin it with Transform, retype anything in the Text panel, and find it in **Objects**. Merge raises it off the surface; Engrave carves it in — both bake the model to a mesh, so do CAD edits first.`);
   }
   /** Re-run the pipeline for a placed text with its edited spec. The mesh keeps its
@@ -3414,6 +3421,7 @@ export default function App() {
         setTimeout(() => old.dispose(), 0); // after the Viewer's swap effect has run
         return { ...x, geometry: g };
       }));
+      setTimeout(() => commitTexts(`Edited “${spec.text}”`, textsForSnap()), 0);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild that text: ${String(err?.message ?? err)}`, error: true }]);
     }
@@ -4464,6 +4472,60 @@ export default function App() {
   const [fxBusy, setFxBusy] = useState(false);
   const fxCache = useRef<{ key: string; geom: THREE.BufferGeometry } | null>(null);
   const fxGen = useRef(0);
+  // ---- Text layers as real state -------------------------------------------------
+  // A text layer used to be a three.js mesh and nothing else: it vanished on reload and
+  // Undo stepped straight past it. It is now stored as its SPEC plus a pose, which is
+  // all it takes to rebuild the identical solid — so it saves, restores, and undoes
+  // like anything else. The live pose is read from the Viewer because the gizmo owns it
+  // between drags; `place` is the last settled value.
+  const attachmentsRef = useRef(attachments);
+  attachmentsRef.current = attachments;
+  function textsForSnap(): TextLayerSnap[] | undefined {
+    const out = attachmentsRef.current.flatMap((a) => {
+      if (!a.text) return [];
+      const live = viewer.current?.attachPose?.(a.id);
+      const at = live?.at ?? a.place?.at ?? [0, 0, 0];
+      const quat = live?.quat ?? a.place?.quat ?? [0, 0, 0, 1];
+      const scale = live?.scale ?? a.place?.scale ?? 1;
+      return [{ id: a.id, spec: { ...a.text }, at, quat, ...(scale !== 1 ? { scale } : {}) } as TextLayerSnap];
+    });
+    return out.length ? out : undefined;
+  }
+  /** Append a version whose only change is the text layers — so Undo takes off exactly
+   *  the word you just placed, and nothing of the model underneath it. */
+  function commitTexts(summary: string, texts: TextLayerSnap[] | undefined) {
+    const proj = projectRef.current;
+    const head = proj?.versions[headIndex(proj)];
+    if (!proj || !head) return; // no history yet — the layer still works, just isn't recorded
+    persist(appendVersion(proj, {
+      engine: head.engine, summary,
+      code: head.code, params: head.params, ops: head.ops,
+      importFile: head.importFile, importKind: head.importKind,
+      spec: head.spec, dims: head.dims, glb: head.glb, meshXform: head.meshXform,
+      genSource: head.genSource, splitPieces: head.splitPieces,
+      surfFx: fxForSnap(), texts,
+    }));
+  }
+  /** Rebuild the text layers a restored version carried. Geometry comes back from the
+   *  spec, so a reload or an undo reproduces the exact solid rather than a stored mesh. */
+  async function restoreTexts(snaps: TextLayerSnap[] | undefined) {
+    const live = attachmentsRef.current;
+    if (!snaps?.length) {
+      if (live.some((a) => a.text)) setAttachments((l) => l.filter((a) => !a.text));
+      return;
+    }
+    const built = await Promise.all(snaps.map(async (t) => {
+      try {
+        const spec = t.spec as TextSpec;
+        const g = buildTextGeometry(await getFont(spec.family, !!spec.custom), spec);
+        const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
+        return { id: t.id, geometry: g, name, text: spec, place: { at: t.at, quat: t.quat, scale: t.scale } };
+      } catch { return null; } // a font that won't load must not take the whole restore down
+    }));
+    const keep = built.filter((x): x is NonNullable<typeof x> => !!x);
+    setAttachments((l) => [...l.filter((a) => !a.text), ...keep]);
+  }
+
   /** Re-run printability against whatever surface is actually on screen. Same idle +
    *  job-token dance as the build path, because a treated mesh is 100× the triangles. */
   function restat(geo: THREE.BufferGeometry) {
@@ -4562,6 +4624,7 @@ export default function App() {
       genSource: head.genSource,
       splitPieces: head.splitPieces,
       surfFx: next.pattern || next.texture ? next : undefined,
+      texts: textsForSnap(),
     });
     persist(snap);
     stampHeadThumb();
@@ -5846,6 +5909,7 @@ export default function App() {
       pattern: (hvFx?.pattern as SurfFxSlot | null) ?? null,
       texture: (hvFx?.texture as SurfFxSlot | null) ?? null,
     });
+    void restoreTexts(next.versions[headIndex(next)]?.texts);
     if (next.engine === "generative" && next.glb) {
       const g = await showFromGlb(next.glb, { kind: "gen", provider: next.genSource?.provider ?? "", model: next.genSource?.model ?? "", prompt: next.genSource?.prompt }, next.meshXform);
       // A split version carries its piece layout — revive the per-piece export list
@@ -6522,7 +6586,12 @@ export default function App() {
           editId: textEditId,
           select: (id: string | null) => { setTextEditId(id); if (id) selectAttach(id); },
           edit: (id: string, patch: Partial<TextSpec>) => void editText(id, patch),
-          remove: (id: string) => { removeAttachment(id); if (textEditId === id) setTextEditId(null); },
+          remove: (id: string) => {
+            const gone = attachmentsRef.current.find((a) => a.id === id)?.text?.text ?? "text";
+            removeAttachment(id);
+            if (textEditId === id) setTextEditId(null);
+            setTimeout(() => commitTexts(`Removed “${gone}”`, textsForSnap()), 0);
+          },
         }}
         shapeCtl={{
           tool: shapeTool,
@@ -6769,6 +6838,21 @@ export default function App() {
           // Entering Transform turns off Select/Measure and clears any pick (one tool owns the pointer).
           setMode: (m) => { setTransformMode(m); setModelSelected(m !== "off"); if (m !== "off") { setSelectMode(false); setMeasureMode(false); setPaintModeState(false); setActivePinId(null); setPinText(""); setSelectedFeature(null); setSelectedFaces([]); } },
           commit: authorObjectOp,
+          attachPose: (poses) => {
+            // The gizmo has already moved the mesh; this catches the settled numbers up
+            // into state and records one history step, so a moved word survives a reload
+            // and Undo puts it back where it was.
+            // Decided from the ref BEFORE the update, not inside the updater: React only
+            // runs an updater eagerly when its queue happens to be empty, so a flag set
+            // in there is true sometimes and false others — the move was being recorded
+            // intermittently, which is worse than never.
+            const touchedText = attachmentsRef.current.some((a) => a.text && poses.some((p2) => p2.id === a.id));
+            setAttachments((l) => l.map((a) => {
+              const p2 = poses.find((x) => x.id === a.id);
+              return p2 ? { ...a, place: { at: p2.at, quat: p2.quat, scale: p2.scale } } : a;
+            }));
+            if (touchedText) setTimeout(() => commitTexts("Moved a text layer", textsForSnap()), 0);
+          },
           rotateBy: (axis, deg) => {
             const a: [number, number, number] = axis === "x" ? [1, 0, 0] : axis === "y" ? [0, 1, 0] : [0, 0, 1];
             void rotateOntoPlate(a, deg, `Rotated ${deg}° about ${axis.toUpperCase()}`);

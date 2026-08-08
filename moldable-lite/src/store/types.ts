@@ -50,6 +50,21 @@ export interface Version {
    *  displaced mesh recomputes from it — so undo/redo/restore replay the exact surface
    *  each version had, and applying one is itself an undoable step. Absent = plain. */
   surfFx?: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null };
+  /** Text layers standing on the model at this snapshot. Stored as SPECS, not meshes:
+   *  the words plus a pose rebuild the same solid exactly, which is why a text layer
+   *  can survive a reload and take part in undo at all. Absent = no text. */
+  texts?: TextLayerSnap[];
+}
+
+/** One placed text layer, storable. The spec half mirrors TextSpec — declared
+ *  structurally because the store must not import engine or text types. */
+export interface TextLayerSnap {
+  id: string;
+  spec: { text: string; family: string; custom?: boolean; size: number; depth: number; bevel: number; spacing: number; roll: number };
+  at: [number, number, number];
+  quat: [number, number, number, number];
+  /** Uniform scale from the gizmo; absent means 1. */
+  scale?: number;
 }
 
 /** One surface treatment, storable: which pattern, its pitch, its relief (negative =

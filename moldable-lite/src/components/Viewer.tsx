@@ -39,6 +39,8 @@ export interface ViewerHandle {
   bakeAttachment: (id: string) => Float32Array | null;
   /** Settle a floating attachment back onto the build plate (bbox min z → 0). */
   dropAttachment: (id: string) => void;
+  /** The layer's settled world pose, for recording into history. */
+  attachPose: (id: string) => { at: [number, number, number]; quat: [number, number, number, number]; scale: number } | null;
   /** Spin a placed attachment about its OWN facing axis by a delta, in degrees — the
    *  Text panel's Angle field once the text is down. A delta rather than an absolute
    *  angle so it composes with whatever the gizmo has already done instead of
@@ -139,7 +141,7 @@ interface Props {
   /** Free-floating objects. `place` pins the initial transform (text snapped to a
    *  face); without it new arrivals stage beside the model. A geometry swap under an
    *  existing id (editing a placed text) keeps the mesh's transform. */
-  attachments: { id: string; geometry: THREE.BufferGeometry; tint?: string; place?: { at: [number, number, number]; quat: [number, number, number, number] } }[];
+  attachments: { id: string; geometry: THREE.BufferGeometry; tint?: string; place?: { at: [number, number, number]; quat: [number, number, number, number]; scale?: number } }[];
   selAttachIds: string[]; // which of them are selected (>1 → group transform)
   onAttachSelect: (id: string | null, additive?: boolean) => void;
   snap: { move: number; rotate: number }; // gizmo snapping (mm / degrees; 0 = off)
@@ -209,6 +211,10 @@ interface Props {
   /** Text tool: a ghost of the actual text solid rides the cursor over the model,
    *  lying on the surface (+Z along the face normal); a tap commits that spot. The
    *  geometry is prebuilt by App (fonts load async) — null means still loading. */
+  /** A gizmo drag on a free-floating layer finished. The transform used to live only
+   *  on the three.js mesh, invisible to React — which is why a moved text layer could
+   *  never be saved or undone. Reporting the settled pose is what makes it state. */
+  onAttachPose?: (poses: { id: string; at: [number, number, number]; quat: [number, number, number, number]; scale: number }[]) => void;
   textPlace: {
     geometry: THREE.BufferGeometry | null;
     /** Extra spin about the face normal, degrees — the panel's Angle field. */
@@ -530,14 +536,14 @@ interface Internals {
   axBalls: THREE.Mesh[]; // clickable ±X/±Y/±Z balls
 }
 
-export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace }, ref) {
+export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry, analysisOverlay, wireframe, showDims, units, theme, pins, selectedPin, selectMode, selectKind, featureSelected, boxSelectionActive, transformMode, cutMode, onCutStroke, cutStroke, measureMode, measurePending, measurements, pushArrow, modelSelected, onModelSelect, onModelDblClick, attachments, selAttachIds, onAttachSelect, snap, visiblePlate, plateCount, plateFor, showcase, showcaseScene, appearance, partColors, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, facePaint, onPaintStroke, texture, clay, bed, showPlate, plateColor, gridOpacity, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onEmptyTap, diff, paramPeek, holeGhost, holePlace, magnetPlace, textPlace, onAttachPose }, ref) {
   const mount = useRef<HTMLDivElement>(null);
   const st = useRef<Internals | null>(null);
   /** Whether the scene-wide floor grid should be on. Held in a ref because the theme
    *  effect REPLACES the GridHelper object and has to restore the state it was in. */
   const gridVisibleRef = useRef(false);
-  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
-  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
+  const cb = useRef({ selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap });
+  cb.current = { selectMode, selectKind, transformMode, cutMode, onCutStroke, measureMode, measurePending, units, paintMode, paintTool, paintMirror, onPickSlot, paintSlot, paintAngle, brushSize, paintPalette, onModelSelect, onModelDblClick, onAttachSelect, onPickPoint, onPickFeature, onPickFaces, onSelectPin, onTransformCommit, onAttachPose, onMeasurePoint, onMeasureSegment, onMeasureDelete, onPushPull, onPushPullLive, onContext, onPaintStroke, onEmptyTap };
   // Latest persisted paint, read (not depended-on) when the overlay (re)builds on geometry load.
   const facePaintRef = useRef(facePaint);
   facePaintRef.current = facePaint;
@@ -813,7 +819,10 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         const moved = !!s.pivot && (s.pivot.position.lengthSq() > 1e-6 || Math.abs(s.pivot.scale.x - 1) > 1e-6 || Math.abs(s.pivot.quaternion.w - 1) > 1e-6);
         s.dims.visible = e.value ? false : !moved && s.grid.visible; // grid.visible ⇔ not showcase
       }
-      if (!e.value) commitTransform(s, cb.current.onTransformCommit); // released → emit one op
+      if (!e.value) {
+        commitTransform(s, cb.current.onTransformCommit); // released → emit one op
+        reportAttachPoses(s, cb.current.onAttachPose); // …or, for a layer, its settled pose
+      }
     };
     tc.addEventListener("dragging-changed", onDragChange);
     tcR.addEventListener("dragging-changed", onDragChange);
@@ -2673,6 +2682,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
         // Text placed on a face arrives with its pose decided — put it exactly there.
         m.position.set(...a.place.at);
         m.quaternion.set(...a.place.quat);
+        if (a.place.scale && a.place.scale !== 1) m.scale.setScalar(a.place.scale);
       } else m.position.set(s.attachMap.size * 8, 0, z - (a.geometry.boundingBox!.min.z ?? 0) + 0.01);
       s.scene.add(m);
       s.attachMap.set(a.id, m);
@@ -3666,6 +3676,14 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       m.position.z -= bb.min.z;
       m.updateWorldMatrix(true, false);
       if (rearm) enterTransform(s, cb.current.transformMode as "move" | "rotate" | "scale", "attach");
+    },
+    attachPose(id) {
+      const m = st.current?.attachMap.get(id);
+      if (!m) return null;
+      m.updateWorldMatrix(true, false);
+      const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+      m.matrixWorld.decompose(p, q, sc);
+      return { at: [p.x, p.y, p.z], quat: [q.x, q.y, q.z, q.w], scale: sc.x };
     },
     rollAttachment(id, deltaDeg) {
       const s = st.current;
@@ -4730,6 +4748,26 @@ function exitTransform(s: Internals) {
     s.content.remove(pivot);
   }
   s.pivot = null;
+}
+
+/** Hand the selected layers' settled world poses back to App so they can be recorded.
+ *  Read from matrixWorld rather than the local transform, because while the gizmo is
+ *  armed each mesh hangs off a temporary pivot group and its local numbers are
+ *  relative to that pivot, not to the scene. */
+function reportAttachPoses(s: Internals, emit?: (p: { id: string; at: [number, number, number]; quat: [number, number, number, number]; scale: number }[]) => void) {
+  if (!emit) return;
+  const ids = s.selAttach ?? [];
+  if (!ids.length) return;
+  const out: { id: string; at: [number, number, number]; quat: [number, number, number, number]; scale: number }[] = [];
+  for (const id of ids) {
+    const m = s.attachMap.get(id);
+    if (!m) continue;
+    m.updateWorldMatrix(true, false);
+    const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
+    m.matrixWorld.decompose(p, q, sc);
+    out.push({ id, at: [p.x, p.y, p.z], quat: [q.x, q.y, q.z, q.w], scale: sc.x });
+  }
+  if (out.length) emit(out);
 }
 
 /** Read the pivot's net transform and emit one rotate/scale op (display coords; App adds recenter). */

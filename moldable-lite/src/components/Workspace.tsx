@@ -2441,6 +2441,8 @@ interface Props {
     mode: TransformMode;
     setMode: (m: TransformMode) => void;
     commit: (c: TransformCommit) => void;
+    /** A layer finished being dragged — record where it ended up. */
+    attachPose: (poses: { id: string; at: [number, number, number]; quat: [number, number, number, number]; scale: number }[]) => void;
     rotateBy: (axis: "x" | "y" | "z", deg: number) => void; // exact typed rotation, rested on the plate
     busy: boolean;
   };
@@ -3271,6 +3273,7 @@ export function Workspace(p: Props) {
                 onPickFeature={p.featureCtl.pick}
                 onSelectPin={p.pinCtl.select}
                 onTransformCommit={p.transformCtl.commit}
+                onAttachPose={p.transformCtl.attachPose}
                 onMeasurePoint={p.measureCtl.point}
                 onMeasureSegment={p.measureCtl.segment}
                 onMeasureDelete={p.measureCtl.remove}

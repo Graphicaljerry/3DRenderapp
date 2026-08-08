@@ -8,7 +8,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "probes": "node ../scripts/run-probes.mjs"
   },
   "dependencies": {
     "@mlc-ai/web-llm": "^0.2.84",

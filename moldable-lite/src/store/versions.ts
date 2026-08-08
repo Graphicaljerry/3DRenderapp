@@ -1,4 +1,4 @@
-import type { Project, Version, StoredEngineKind, GenSource, SurfFxSnap } from "./types";
+import type { Project, Version, StoredEngineKind, GenSource, SurfFxSnap, TextLayerSnap } from "./types";
 import type { CadOp } from "../engine/types";
 import { uid } from "../lib/id";
 
@@ -17,6 +17,7 @@ export interface Snapshot {
   meshXform?: number[];
   genSource?: GenSource;
   surfFx?: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null };
+  texts?: TextLayerSnap[];
 }
 
 /** Append a version capturing the new state AND advance HEAD to match. Pure.
@@ -41,6 +42,7 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
     genSource: snap.genSource,
     splitPieces: snap.splitPieces,
     surfFx: snap.surfFx,
+    texts: snap.texts,
   };
   const kept = project.versions.slice(0, headIndex(project) + 1); // drop any redo branch past HEAD
   return {
@@ -95,6 +97,7 @@ export function replaceHeadVersion(project: Project, snap: Snapshot): Project {
     genSource: snap.genSource,
     splitPieces: snap.splitPieces,
     surfFx: snap.surfFx,
+    texts: snap.texts,
   };
   const versions = [...project.versions];
   versions[i] = v;

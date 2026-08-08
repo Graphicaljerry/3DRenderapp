@@ -24,6 +24,9 @@ The app lives in `moldable-lite/`; it deploys to GitHub Pages from `main`.
 - **Anti-slop guardrail**: before designing/restyling UI, writing microcopy, or
   reviewing code, apply `skills/no-ai-slop/SKILL.md` — and run its review pass
   on every feature's diff before shipping.
+- **Audits**: when Jerry asks to audit, clean up, speed up, or deploy-check a
+  codebase, follow `skills/code-audit/SKILL.md` (evidence-first: baseline numbers,
+  tests, slop sweep, measured perf, honest AUDIT.md report).
 
 ## Documentation upkeep (standing instruction)
 

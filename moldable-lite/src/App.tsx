@@ -6303,6 +6303,12 @@ export default function App() {
         setModifyOp({ op: (["push", "round", "bevel"] as const)[Number(e.key) - 1], size: modifyOpRef.current.size });
         return;
       }
+      // …but NOT while the Text tool is out. Its panel is a text field, so letters
+      // belong to the word being typed — and after a placement the click that committed
+      // it leaves focus on the canvas, where the very next keystroke would otherwise
+      // land here. "f" frames the whole model, which reads as the canvas zooming out on
+      // every commit; the rest silently swap tools. Escape and the rail still put it down.
+      if (textToolRef.current) return;
       // Single-key tools, like every 3D app. Each toggles, and the setters below
       // already enforce one-tool-at-a-time.
       switch (e.key.toLowerCase()) {

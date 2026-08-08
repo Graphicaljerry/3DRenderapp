@@ -917,6 +917,28 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 381 — the "canvas zooms out on every commit" was a keyboard shortcut
+
+Measured first: across three placements, at two zoom levels, with the Objects panel
+open, the camera's position, target, fov, aspect, canvas size and the model's projected
+pixel size were all byte-identical. Nothing zoomed. What DOES zoom is `f` — bound to
+"frame the model", which fits the whole part in view. Committing a placement is a click
+on the CANVAS, and the Viewer's pointerdown deliberately blurs any focused field (so
+Cmd-Z means "undo my model edit" from then on) — so the next letter typed went to the
+shortcut handler instead of into the word. Type "Front" and the view snaps out on the
+f. Every other letter in v/n/t/g/m/b silently swapped tools, which is the same bug
+wearing a quieter hat.
+
+Two fixes: the single-key tool shortcuts don't fire while the Text tool is out (its
+panel is a text field — letters belong to the word; Escape and the rail still put it
+down), and placing a word puts the caret back in the words field on the next frame. The
+next-frame part matters: React flushes effects at the end of the click handler and the
+browser then finishes dispatching that same click, taking focus with it.
+
+Transform stays lit beside Text after a placement, and that is honest rather than a
+regression of the one-tool-at-a-time rule — `selectAttach` puts the new word's handles
+up on purpose, so both statements are true at once.
+
 ## Build 380 — text you can actually edit, and the see-through-letter bug
 
 **The see-through polygon in the "D" was a coincident copy, not a hole.** The text

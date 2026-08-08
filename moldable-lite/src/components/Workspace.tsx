@@ -1920,6 +1920,23 @@ function fmtMm(v: number): string {
  *  pattern), so editing after placement is the same motion as setting up before it. */
 function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
   const editing = ctl.editId ? ctl.placed.find((t) => t.id === ctl.editId) ?? null : null;
+  // Committing a placement is a click on the CANVAS, which takes focus with it — so the
+  // next thing typed went to the canvas's keyboard shortcuts instead of into the word.
+  // Putting the caret back is both the fix for that and what makes placing → retyping →
+  // placing again feel like one motion instead of three.
+  const words = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    // On the NEXT frame, not this one: React flushes effects at the end of the click
+    // handler, and the browser then finishes dispatching that same click — which moves
+    // focus to the canvas and would take it straight back off us.
+    const t = requestAnimationFrame(() => {
+      const el = words.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    });
+    return () => cancelAnimationFrame(t);
+  }, [ctl.editId]);
   const spec = editing ? editing.spec : ctl.tool!;
   const patch = (p: Partial<TextSpec>) => {
     if (editing) ctl.edit(editing.id, p);
@@ -1934,6 +1951,7 @@ function TextFly({ ctl }: { ctl: Props["textCtl"] }) {
   return (
     <div className="rail-fly text-fly">
       <input
+        ref={words}
         className="text-words"
         type="text"
         value={spec.text}

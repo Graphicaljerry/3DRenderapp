@@ -636,6 +636,13 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.target.set(0, 0, 15);
+    // Zoom goes where you are POINTING, not to the middle of the view. OrbitControls
+    // defaults this off: every wheel notch then dollies along the camera→target axis, so
+    // a detail you have put the cursor on slides away as you close in and you spend the
+    // gesture re-panning. Fusion, Onshape and Shapr3D all zoom to the cursor, and it is
+    // the difference between a trackpad being usable and reaching up to pinch the glass.
+    // Also applies to a two-finger pinch, which zooms about the centre of the pinch.
+    controls.zoomToCursor = true;
     // Middle-drag pans (CAD convention — wheel still zooms); right-drag pans too.
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
     if (dynamicRes) {

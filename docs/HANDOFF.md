@@ -917,6 +917,33 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 389 — zoom goes where you point
+
+`OrbitControls.zoomToCursor` defaults to `false` and had never been set, so every wheel
+notch dollied along the camera→target axis: whatever you had put the cursor on slid away
+as you closed in, and the gesture turned into zoom-then-pan-then-zoom. Reported from an
+iPad Pro with the Magic Keyboard trackpad — "it doesn't zoom into the canvas where the
+cursor is, I have to use my hands" — because reaching up to pinch the glass was the
+faster way to get to a spot. One line: `controls.zoomToCursor = true`.
+
+Measured, since "feels right" is not evidence: raycast the world point under an
+off-centre pixel, zoom 305mm → 183mm, raycast the same pixel. Drift **0.00mm** — three
+dollies the camera along the pointer ray, so the point stays exactly put. It also covers
+the touchscreen: a two-finger pinch now zooms about the centre of the pinch (the touch
+path sets the same cursor parameters).
+
+The failure mode this introduces is zooming with the pointer over empty sky, which drags
+the orbit target off the part. Checked: 25 notches into the background moves the target
+51mm and flies past the part, orbiting from there still behaves, and Frame (`f`) puts
+both the part and the target back. Bounded, recoverable, left alone.
+
+Probe note: a first measurement read 39mm of drift and was wrong — the render loop is
+demand-driven, so a raycast taken while the camera is still damping (or after it has
+stopped drawing) uses a `matrixWorld` from a pose that no longer exists. Poll until the
+camera stops, then `updateMatrixWorld(true)` before raycasting. `zoom-check.mjs` in the
+scratchpad is stale — it clicks a "Skip" button from a retired onboarding flow and
+asserts the zoom cluster hugs the bottom-RIGHT, which it has not done for many builds.
+
 ## Build 388 — an iPad tier, upright and on its side
 
 The app had a phone tier (≤760px) and a desktop tier, and every iPad fell between them.

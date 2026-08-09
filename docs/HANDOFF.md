@@ -917,6 +917,38 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 395 — the 3MF gives the slicer text it can actually print
+
+Build 394 fixed how text LOOKS. This fixes what the slicer RECEIVES — the Bambu preview
+showed "Dry Erase Markers" as scattered floating islands with a floating-regions warning
+and supports demanded, which is not a rendering problem at all. Two causes, both real:
+
+**1. The letters were exactly tangent to the wall.** `conformToSurface` drops each vertex
+onto the surface and re-raises it by its own extrusion height, so the base landed at
+penetration ZERO. Two solids touching along a zero-thickness contact give a slicer nothing
+to fuse: at every layer the letter outline merely kissed the wall perimeter. Text now
+sinks `BITE_MM` (0.25mm — two layer lines at 0.12) into whatever it stands on, taken out
+of the depth so a letter still stands its full `depth` proud. Measured: penetration
+0.000 → 0.227mm.
+
+**2. Every layer was exported as its own free-standing 3MF object.** `collectPlateParts`
+pushed each attachment into the parts list beside the model, so Bambu received the holder
+plus three unrelated objects and dropped each word on the bed to be sliced alone — hence
+"Magnetic_Pen_Holder (3) has floating regions". Layers standing on the model are now
+written as **components of one object**: `Solid3MF.parts` carries them, the writer emits a
+mesh `<object>` per layer plus a `<components>` wrapper, `<build>` references only the
+wrapper, and `model_settings.config` lists each as a `normal_part` with its own extruder —
+so a black word on a grey holder still prints in two colours. A layer deliberately sent to
+a DIFFERENT plate stays its own object; that one really is a separate print.
+
+Verified by exporting a real 3MF and reading the XML back: 3 objects, **1 build item**,
+2 components under it, 2 `normal_part` entries in the config. Plate bounds now include
+layer geometry. textwrap, textsink (0.25mm — the intended bite) and the reload path all
+green.
+
+Note for existing projects: placed text keeps its old geometry until it rebuilds. Retype
+a character or nudge any setting on the layer and it regenerates with the bite.
+
 ## Build 394 — text curves are curves, in the app and in the slicer
 
 Reported with side-by-side screenshots: letter bowls visibly polygonal in Bambu Studio

@@ -656,7 +656,7 @@ export default function App() {
   /** Everything on the canvas, with its plate — the shared input for EVERY 3MF export.
    *  `modelGeom` overrides the model's mesh: preflight may have repaired it, and the
    *  repaired result isn't in React state yet when the export runs. */
-  function collectPlateParts(modelGeom?: THREE.BufferGeometry): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[] }[] | null {
+  function collectPlateParts(modelGeom?: THREE.BufferGeometry): { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[]; parts?: { geometry: THREE.BufferGeometry; name?: string; color?: string }[] }[] | null {
     const geometry = modelGeom ?? geometryRef.current;
     if (!geometry) return null;
     // The model's per-face paint rides along only when its triangle count still matches
@@ -675,14 +675,26 @@ export default function App() {
           return { geometry: g, name: `Part ${i + 1}`, plate: pc.plate ?? 1, color: pc.color, paint: undefined as Uint8Array | undefined, paintPalette: undefined as string[] | undefined };
         })
       : [{ geometry, name: project?.name ?? "model", plate: plateFor("model"), color: colorFor("model"), paint: modelPaint, paintPalette: modelPaint ? palette : undefined }];
+    type Part = { geometry: THREE.BufferGeometry; name: string; plate: number; color?: string; paint?: Uint8Array; paintPalette?: string[]; parts?: { geometry: THREE.BufferGeometry; name?: string; color?: string }[] };
+    const out: Part[] = parts;
     for (const a of attachments) {
       const baked = viewer.current?.bakeAttachment(a.id);
       if (!baked) continue;
       const g = new THREE.BufferGeometry();
       g.setAttribute("position", new THREE.BufferAttribute(baked, 3));
-      parts.push({ geometry: g, name: a.name, plate: plateFor(a.id), color: colorFor(a.id), paint: undefined, paintPalette: undefined });
+      // A layer standing on the model ships as a PART of it, not as an object of its
+      // own. Exported as separate objects, Bambu dropped each word on the bed as its
+      // own free-floating solid — sliced into islands, with a floating-regions warning
+      // — because nothing told it they belong to the holder. Only a layer the user has
+      // deliberately sent to a different plate is a print in its own right.
+      const host = out.find((pt) => pt.plate === plateFor(a.id) && pt.name === (project?.name ?? "model"));
+      if (host && !plated) {
+        (host.parts ??= []).push({ geometry: g, name: a.name, color: colorFor(a.id) });
+        continue;
+      }
+      out.push({ geometry: g, name: a.name, plate: plateFor(a.id), color: colorFor(a.id), paint: undefined, paintPalette: undefined });
     }
-    return parts;
+    return out;
   }
   /** Analyse + auto-repair once, ahead of ANY export. Every download path runs this —
       shipping an unchecked mesh out of one menu and a checked one out of another is

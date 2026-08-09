@@ -20,6 +20,11 @@ import { reverseWinding } from "../three/winding";
  *  0.05mm layer line — and letters scaled up simply spend more vertices. */
 const CHORD_MM = 0.3;
 
+/** How far a letter sinks into the surface it stands on, in mm. Two layer lines at
+ *  0.12mm — enough that a slicer always finds overlapping material to fuse, small
+ *  enough to be invisible. Clamped against thin text in buildTextGeometry. */
+const BITE_MM = 0.25;
+
 /** Re-sample a shape's curves by arc length so every chord is ≈CHORD_MM long. The
  *  result carries straight lines only — ExtrudeGeometry then tessellates exactly what
  *  is here, nothing resampled behind our back. */
@@ -112,7 +117,15 @@ export function buildTextGeometry(font: Font, spec: TextSpec): THREE.BufferGeome
   reverseWinding(g);
   g.computeBoundingBox();
   const bb = g.boundingBox!;
-  g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);
+  // The base sits slightly BELOW the surface, not exactly on it. A letter placed exactly
+  // tangent shares a zero-thickness contact with the wall, and a slicer has nothing to
+  // fuse: Bambu sliced "Dry Erase Markers" into scattered floating islands and warned
+  // about floating regions, because at every layer the letter's outline merely touched
+  // the wall's perimeter instead of overlapping it. A bite makes the union unambiguous
+  // for the slicer AND for the CSG in Merge. It comes out of the depth the user asked
+  // for, so a letter still stands `depth` proud of the surface.
+  const bite = Math.min(BITE_MM, spec.depth * 0.35);
+  g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z - bite);
   smoothTextNormals(g);
   return g;
 }

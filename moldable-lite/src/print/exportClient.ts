@@ -36,13 +36,14 @@ function normHex(c?: string): string {
  *  Whole-part colours are folded FIRST (so existing per-part slot numbering is stable),
  *  then any per-face PAINT palette colours join the SAME palette — a painted-red region
  *  and a whole-red part resolve to the identical filament slot (keyed on normalised hex). */
-function buildFilaments(parts: { color?: string; paintPalette?: string[] }[]): { palette: string[]; slotOf: (c?: string) => number; painted: boolean } {
+function buildFilaments(parts: { color?: string; paintPalette?: string[]; parts?: { color?: string }[] }[]): { palette: string[]; slotOf: (c?: string) => number; painted: boolean } {
   const anyUnpainted = parts.some((p) => !normHex(p.color));
   const slot = new Map<string, number>();
   const palette: string[] = [];
   if (anyUnpainted) { palette.push(DEFAULT_FILAMENT); slot.set("", 1); } // slot 1 = default filament
   const add = (raw?: string) => { const c = normHex(raw); if (!c || slot.has(c)) return; palette.push(c); slot.set(c, palette.length); };
   for (const p of parts) add(p.color);                              // whole-part colours first
+  for (const p of parts) for (const sub of (p as { parts?: { color?: string }[] }).parts ?? []) add(sub.color); // …including layers stuck to them
   for (const p of parts) for (const c of p.paintPalette ?? []) add(c); // then painted-region colours
   const distinctPainted = palette.length - (anyUnpainted ? 1 : 0);
   return { palette, slotOf: (c?: string) => slot.get(normHex(c)) ?? 1, painted: distinctPainted > 0 };
@@ -100,6 +101,15 @@ export interface Solid3MF {
   paintPalette?: string[];
   /** Which build plate this belongs on. Absent = the only plate. */
   plate?: number;
+  /** Solids that are STUCK TO this one — text and logo layers standing on the model.
+   *
+   *  They are written as components of one 3MF object rather than as objects of their
+   *  own, which is the difference between a slicer fusing them into the wall and a
+   *  slicer treating each word as a separate part dropped on the bed. Bambu did the
+   *  latter: "Dry Erase Markers" arrived as three free-floating objects, sliced into
+   *  scattered islands, with a floating-regions warning. Each keeps its own filament
+   *  slot, so a black word on a grey holder still prints in two colours. */
+  parts?: { geometry: THREE.BufferGeometry; name?: string; color?: string }[];
 }
 
 export interface Write3MFOpts {
@@ -146,11 +156,15 @@ export function write3MF(solids: Solid3MF[], opts: Write3MFOpts = {}): Blob {
     const stride = bed.x * 1.2;
     const groups = new Map<number, { min: THREE.Vector3; max: THREE.Vector3 }>();
     for (const s of solids) {
-      s.geometry.computeBoundingBox();
-      const bb = s.geometry.boundingBox!;
-      const g = groups.get(plateOf(s));
-      if (!g) groups.set(plateOf(s), { min: bb.min.clone(), max: bb.max.clone() });
-      else { g.min.min(bb.min); g.max.max(bb.max); }
+      // Layers count toward the group bounds too — a word standing proud of the wall is
+      // part of what has to fit on the plate.
+      for (const geom of [s.geometry, ...(s.parts ?? []).map((sp) => sp.geometry)]) {
+        geom.computeBoundingBox();
+        const bb = geom.boundingBox!;
+        const g = groups.get(plateOf(s));
+        if (!g) groups.set(plateOf(s), { min: bb.min.clone(), max: bb.max.clone() });
+        else { g.min.min(bb.min); g.max.max(bb.max); }
+      }
     }
     return (plate: number): [number, number, number] => {
       const g = groups.get(plate)!;
@@ -168,7 +182,16 @@ export function write3MF(solids: Solid3MF[], opts: Write3MFOpts = {}): Blob {
   const assembleItems: string[] = [];
   const instancesByPlate = new Map<number, string[]>();
   // A single <basematerials> resource holds the palette; objects point at it by pindex.
-  const MAT_ID = solids.length + 1;
+  // Ids are handed out per emitted <object>: one per mesh, plus a wrapper for any solid
+  // that carries layers. basematerials shares the resource id space, so it goes last.
+  const idOf = new Map<number, { self: number; subs: number[]; wrapper?: number }>();
+  let nextId = 1;
+  solids.forEach((part, pi) => {
+    const self = nextId++;
+    const subs = (part.parts ?? []).map(() => nextId++);
+    idOf.set(pi, { self, subs, wrapper: subs.length ? nextId++ : undefined });
+  });
+  const MAT_ID = nextId;
 
   solids.forEach((part, pi) => {
     const g = part.geometry;
@@ -193,22 +216,54 @@ export function write3MF(solids: Solid3MF[], opts: Write3MFOpts = {}): Blob {
     if (idx) { let t = 0; for (let i = 0; i < idx.count; i += 3, t++) tris.push(`<triangle v1="${idx.getX(i)}" v2="${idx.getX(i + 1)}" v3="${idx.getX(i + 2)}"${paintAttr(t)}/>`); }
     else { let t = 0; for (let i = 0; i < pos.count; i += 3, t++) tris.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"${paintAttr(t)}/>`); }
 
-    const id = pi + 1;
+    const ids = idOf.get(pi)!;
+    const id = ids.self;
     const plate = plateOf(part);
     const safe = xml(part.name ?? `Part ${id}`);
     const matAttr = painted ? ` pid="${MAT_ID}" pindex="${ex - 1}"` : "";
     const [tx, ty, tz] = shift(plate);
     const transform = `1 0 0 0 1 0 0 0 1 ${f(tx)} ${f(ty)} ${f(tz)}`;
     objects.push(`<object id="${id}" type="model" name="${safe}"${matAttr}><mesh><vertices>${verts.join("")}</vertices><triangles>${tris.join("")}</triangles></mesh></object>`);
-    items.push(laidOut ? `<item objectid="${id}" transform="${transform}" printable="1"/>` : `<item objectid="${id}" printable="1"/>`);
+
+    // Layers stuck to this solid become sibling meshes gathered under one wrapper
+    // object, so the slicer treats the lot as ONE part with several volumes — the
+    // difference between text fusing into the wall and text landing on the bed as its
+    // own object. They are NOT in <build> on their own; only the wrapper is.
+    const subParts = part.parts ?? [];
+    const subMeta: string[] = [];
+    subParts.forEach((sub, si) => {
+      const sid = ids.subs[si];
+      const sg = sub.geometry;
+      const sp = sg.getAttribute("position") as THREE.BufferAttribute;
+      const sidx = sg.index;
+      const sv: string[] = [];
+      for (let i = 0; i < sp.count; i++) sv.push(`<vertex x="${f(sp.getX(i))}" y="${f(sp.getY(i))}" z="${f(sp.getZ(i))}"/>`);
+      const st: string[] = [];
+      if (sidx) for (let i = 0; i < sidx.count; i += 3) st.push(`<triangle v1="${sidx.getX(i)}" v2="${sidx.getX(i + 1)}" v3="${sidx.getX(i + 2)}"/>`);
+      else for (let i = 0; i < sp.count; i += 3) st.push(`<triangle v1="${i}" v2="${i + 1}" v3="${i + 2}"/>`);
+      const sex = slotOf(sub.color);
+      const sName = xml(sub.name ?? `Layer ${si + 1}`);
+      const sMat = painted ? ` pid="${MAT_ID}" pindex="${sex - 1}"` : "";
+      objects.push(`<object id="${sid}" type="model" name="${sName}"${sMat}><mesh><vertices>${sv.join("")}</vertices><triangles>${st.join("")}</triangles></mesh></object>`);
+      subMeta.push(`    <part id="${sid}" subtype="normal_part">\n      <metadata key="name" value="${sName}"/>\n      <metadata key="extruder" value="${sex}"/>\n    </part>`);
+    });
+
+    // What <build> points at, and what the config describes: the wrapper when there are
+    // layers, the mesh itself when there aren't.
+    const buildId = ids.wrapper ?? id;
+    if (ids.wrapper) {
+      const comps = [id, ...ids.subs].map((cid) => `<component objectid="${cid}"/>`).join("");
+      objects.push(`<object id="${ids.wrapper}" type="model" name="${safe}"${matAttr}><components>${comps}</components></object>`);
+    }
+    items.push(laidOut ? `<item objectid="${buildId}" transform="${transform}" printable="1"/>` : `<item objectid="${buildId}" printable="1"/>`);
     settingsObjects.push(
-      `  <object id="${id}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="1" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n  </object>`,
+      `  <object id="${buildId}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="${id}" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n${subMeta.join("\n")}${subMeta.length ? "\n" : ""}  </object>`,
     );
     if (!instancesByPlate.has(plate)) instancesByPlate.set(plate, []);
     instancesByPlate.get(plate)!.push(
-      `    <model_instance>\n      <metadata key="object_id" value="${id}"/>\n      <metadata key="instance_id" value="0"/>\n      <metadata key="identify_id" value="${100 + id}"/>\n    </model_instance>`,
+      `    <model_instance>\n      <metadata key="object_id" value="${buildId}"/>\n      <metadata key="instance_id" value="0"/>\n      <metadata key="identify_id" value="${100 + buildId}"/>\n    </model_instance>`,
     );
-    assembleItems.push(`   <assemble_item object_id="${id}" instance_id="0" transform="${transform}" offset="0 0 0" />`);
+    assembleItems.push(`   <assemble_item object_id="${buildId}" instance_id="0" transform="${transform}" offset="0 0 0" />`);
   });
 
   // Every plate the user created is declared — empty ones included, so the layout round-trips.

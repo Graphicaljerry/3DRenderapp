@@ -2147,6 +2147,7 @@ export default function App() {
         .makeTranslation(c.x, c.y, c.z)
         .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(axis[0], axis[1], axis[2]).normalize(), THREE.MathUtils.degToRad(angleDeg)))
         .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+      carryLayers(m); // the words turn with the part, same matrix
       const baked = bakeMeshTransform(geometry, m);
       const dd = baked.dims;
       applyResult(
@@ -4939,24 +4940,51 @@ export default function App() {
    *  MESH models can't take parametric ops — their transform is BAKED into the geometry
    *  instead (and recorded as meshXform so it survives reopen). Before this branch existed,
    *  a gizmo scale/rotate/move on a generated mesh silently reverted — real user report. */
+  /** The world matrix a transform commit applies to the part, in display coords. Shared
+   *  by the CAD and mesh branches below AND by the layer carry, so a word can never be
+   *  moved by a different transform than the model it is standing on. */
+  function commitMatrix(commit: TransformCommit): THREE.Matrix4 {
+    if (commit.kind === "translate") return new THREE.Matrix4().makeTranslation(...commit.delta);
+    const c = new THREE.Vector3(...commit.center);
+    const inner = commit.kind === "rotate"
+      ? new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(...commit.axis).normalize(), THREE.MathUtils.degToRad(commit.angleDeg))
+      : new THREE.Matrix4().makeScale(commit.factor, commit.factor, commit.factor);
+    return new THREE.Matrix4()
+      .makeTranslation(c.x, c.y, c.z)
+      .multiply(inner)
+      .multiply(new THREE.Matrix4().makeTranslation(-c.x, -c.y, -c.z));
+  }
+
+  /** Text and logo layers ride WITH the part when the part is moved, turned or scaled.
+   *
+   *  They didn't: a layer's pose is stored in world space and was only ever rewritten by
+   *  dragging the layer itself, so rotating the model turned the geometry and left every
+   *  word behind — measured at 61.55mm out of place after a 90° turn, hanging in mid-air
+   *  beside a part that was no longer under it. Nothing about a decal is independent of
+   *  the surface it is stuck to, so every path that transforms the part comes through
+   *  here. The Viewer's meshes are moved in the same breath because the history snapshot
+   *  reads the live pose, not this state. */
+  function carryLayers(m: THREE.Matrix4) {
+    if (!attachmentsRef.current.length) return;
+    const rot = new THREE.Quaternion(), pos = new THREE.Vector3(), sc = new THREE.Vector3();
+    m.decompose(pos, rot, sc);
+    const next = attachmentsRef.current.map((a) => {
+      if (!a.place) return a;
+      const at = new THREE.Vector3(...a.place.at).applyMatrix4(m);
+      const q = rot.clone().multiply(new THREE.Quaternion(...a.place.quat));
+      return { ...a, place: { ...a.place, at: [at.x, at.y, at.z] as [number, number, number], quat: [q.x, q.y, q.z, q.w] as [number, number, number, number], scale: (a.place.scale ?? 1) * sc.x } };
+    });
+    attachmentsRef.current = next;
+    setAttachments(next);
+    viewer.current?.carryAttachments?.(m.toArray());
+  }
+
   async function authorObjectOp(commit: TransformCommit) {
     if (!result || status === "generating") return;
+    carryLayers(commitMatrix(commit));
     if (!(result.source.kind === "code" && sel && activeKind === "replicad")) {
       if (result.kind !== "generative" || !result.geometry) return; // primitive spec models: no transform ops
-      const c = commit.kind === "translate" ? null : new THREE.Vector3(...commit.center);
-      const m =
-        commit.kind === "translate"
-          ? new THREE.Matrix4().makeTranslation(...commit.delta)
-          : commit.kind === "rotate"
-            ? new THREE.Matrix4()
-                .makeTranslation(c!.x, c!.y, c!.z)
-                .multiply(new THREE.Matrix4().makeRotationAxis(new THREE.Vector3(...commit.axis).normalize(), THREE.MathUtils.degToRad(commit.angleDeg)))
-                .multiply(new THREE.Matrix4().makeTranslation(-c!.x, -c!.y, -c!.z))
-            : new THREE.Matrix4()
-                .makeTranslation(c!.x, c!.y, c!.z)
-                .multiply(new THREE.Matrix4().makeScale(commit.factor, commit.factor, commit.factor))
-                .multiply(new THREE.Matrix4().makeTranslation(-c!.x, -c!.y, -c!.z));
-      const baked = bakeMeshTransform(result.geometry, m);
+      const baked = bakeMeshTransform(result.geometry, commitMatrix(commit));
       const label =
         commit.kind === "translate"
           ? "Moved the part"
@@ -5015,7 +5043,9 @@ export default function App() {
       const c = geometry.boundingBox!.getCenter(new THREE.Vector3());
       await authorObjectOp({ kind: "scale", factor: Math.round(s[0] * 1000) / 1000, center: [c.x, c.y, c.z] });
     } else if (result.kind === "generative") {
-      const baked = bakeMeshTransform(result.geometry, scaleAboutBase(result.geometry, s));
+      const sm = scaleAboutBase(result.geometry, s);
+      carryLayers(sm);
+      const baked = bakeMeshTransform(result.geometry, sm);
       applyResult(
         { ...result, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(result.meshXform, baked.applied) },
         project?.name ?? "Model",

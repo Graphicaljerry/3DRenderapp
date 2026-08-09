@@ -917,6 +917,36 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 393 — text rides with the part it is stuck to
+
+Reported: rotate a model with text on it and only the model turns. Measured before
+touching anything — a word placed on the +X wall of an 87 × 60 × 70 holder, then a 90°
+turn about Z: the footprint went 87×60 → 60×87 and the word did not move by a single
+millimetre. **61.55mm out of place**, hanging in mid-air beside a part that was no longer
+under it.
+
+Cause: a layer's pose is stored in WORLD space and was only ever rewritten by dragging
+the layer itself (`attachPose`) or re-seating it. Every path that transforms the part —
+`authorObjectOp` for both CAD and mesh, `rotateOntoPlate`'s mesh branch, `resizeModel`'s
+mesh branch — rebuilt the geometry and left the attachments exactly where they were.
+Nothing about a decal is independent of the surface it is stuck to.
+
+`commitMatrix(commit)` now yields the world matrix a transform applies (the mesh branch
+already built one inline; it is shared rather than duplicated), and `carryLayers(m)` puts
+every layer's pose through the same matrix. The Viewer's meshes are moved in the same
+breath, via a new `carryAttachments` handle, because `textsForSnap` reads the LIVE mesh
+pose — a layer whose state had moved but whose mesh had not would have been recorded
+where it used to be.
+
+Verified: after a 90° turn the word lands 0.00mm from where it belongs and its
+orientation turns with it; Undo brings model and word back together (0.00mm); scaling the
+part ×1.51 carries the word 22.6mm along with it. The undo/redo suite still passes.
+
+Known limit: a rigid turn keeps the conform correct because the wall shape is unchanged,
+but SCALING changes the wall's curvature and the text solid keeps the bend it was built
+with. It follows the part and stays attached; on a heavily scaled curved wall it may want
+a re-seat. Re-conforming on scale is the follow-up.
+
 ## Build 392 — what the selection can do, on the stage
 
 Shapr3D's adaptive menu, the biggest single item on the research list. You tap a face on

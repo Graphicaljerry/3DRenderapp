@@ -42,6 +42,11 @@ export interface ViewerHandle {
   dropAttachment: (id: string) => void;
   /** The layer's settled world pose, for recording into history. */
   attachPose: (id: string) => { at: [number, number, number]; quat: [number, number, number, number]; scale: number } | null;
+  /** Carry every layer through a transform the MODEL just took. Applied to the meshes
+   *  here and now rather than left to the props sync, because the history snapshot reads
+   *  the LIVE pose — a layer whose state had moved but whose mesh had not would be
+   *  recorded where it used to be. */
+  carryAttachments: (m: number[]) => void;
   /** Spin a placed attachment about its OWN facing axis by a delta, in degrees — the
    *  Text panel's Angle field once the text is down. A delta rather than an absolute
    *  angle so it composes with whatever the gizmo has already done instead of
@@ -3826,6 +3831,20 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       m.position.z -= bb.min.z;
       m.updateWorldMatrix(true, false);
       if (rearm) enterTransform(s, cb.current.transformMode as "move" | "rotate" | "scale", "attach");
+    },
+    carryAttachments(elements) {
+      const s = st.current;
+      if (!s) return;
+      const m4 = new THREE.Matrix4().fromArray(elements);
+      for (const mesh of s.attachMap.values()) {
+        mesh.updateWorldMatrix(true, false);
+        // Compose in WORLD space, then hand the result back through the parent — the
+        // layers hang off the content group, which the model's own transform moves.
+        const world = mesh.matrixWorld.clone().premultiply(m4);
+        const parentInv = mesh.parent ? mesh.parent.matrixWorld.clone().invert() : new THREE.Matrix4();
+        world.premultiply(parentInv).decompose(mesh.position, mesh.quaternion, mesh.scale);
+        mesh.updateMatrixWorld(true);
+      }
     },
     attachPose(id) {
       const m = st.current?.attachMap.get(id);

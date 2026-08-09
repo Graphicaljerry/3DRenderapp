@@ -917,6 +917,29 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 397 — a reload stops greeting you with an old error
+
+Reported: "Couldn't rebuild that text: Nothing to build — type some text first" on every
+page reload. Two separate faults behind it, both reproduced with Playwright first.
+
+**The banner replayed history.** Chat is saved with the project including `error` turns,
+and `openProjectById` restored them as ordinary messages, so `CanvasToast` — which shows
+the newest error — announced a months-old failure as a live one on every load, forever.
+Proved with a *different* error (a bad font file), so this was never text-specific.
+Restored turns now carry `replayed: true` (a session-only flag, never written back to
+the store) and the toast ignores them. Live failures still raise the banner, verified.
+
+**And the error should not have existed.** Clearing the words field to retype a placed
+word is the middle of typing, not a failure — `editText` rebuilt on "" and threw. It now
+keeps the layer's name and glyphs, skips the rebuild, records no History step, and bumps
+the generation counter so a slow font can't drop a stale word back on the model.
+
+Found while verifying: **you could not place a second word.** The Text panel's Done
+cleared `editId` but left the word selected on the canvas, and the panel's edit target
+follows the *selection* while the field shows the *tool's* spec — so the next thing typed
+silently retitled the word just placed and the field snapped back. Done now clears the
+selection too. `multitext.mjs` was failing all the way back to build 388 on this.
+
 ## Build 396 — filament slots you can predict (the "colours are inverted" report)
 
 Reported: a white part with black text arrives in Bambu with the colours swapped.

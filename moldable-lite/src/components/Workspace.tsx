@@ -2161,7 +2161,10 @@ function SelectionActions({ p, onMore }: { p: Props; onMore: () => void }) {
 }
 
 function CanvasToast({ messages }: { messages: ChatMessage[] }) {
-  const newest = [...messages].reverse().find((m) => m.error) ?? null;
+  // Only failures from this session. A saved error is a record, not an event: replaying
+  // one meant every reload of the project opened with an alarm about something that had
+  // already been dealt with, and no way to make it stop.
+  const newest = [...messages].reverse().find((m) => m.error && !m.replayed) ?? null;
   const [dismissed, setDismissed] = useState<string | null>(null);
   useEffect(() => {
     if (!newest || newest.id === dismissed) return;

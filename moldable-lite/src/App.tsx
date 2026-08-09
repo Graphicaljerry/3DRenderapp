@@ -104,6 +104,9 @@ function scheduleIdle(fn: () => void): void {
 export type ChatMessage = {
   id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode;
   ts?: number; // when it was said (epoch ms) — older saved chats predate the field
+  /** Read back from the saved project rather than said just now. Alerts are about what
+   *  is happening, so replaying one on load announces an old failure as a new one. */
+  replayed?: boolean;
   model?: string; // which AI produced this reply (shown small under the bubble)
   // While streaming, the bubble is a step timeline: `steps` are the COMPLETED stages
   // (checked off, connector line drawn) and `text` is the ACTIVE one — so in-place
@@ -3489,7 +3492,11 @@ export default function App() {
     // then had to undo past to reach a change they actually made.
     if (Object.keys(patch).every((k) => (cur.text as unknown as Record<string, unknown>)[k] === (patch as unknown as Record<string, unknown>)[k])) return;
     const spec: TextSpec = { ...cur.text, ...patch };
-    const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
+    // An empty field is the middle of typing, not a mistake: selecting the word and
+    // retyping it passes through "" for a keystroke. The layer keeps its name here and
+    // its glyphs below, so the model doesn't flicker while you retype.
+    const blank = !spec.text.trim();
+    const name = blank ? cur.name : (spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`);
     setAttachments((l) => l.map((x) => (x.id === id ? { ...x, text: spec, name } : x)));
     // Angle is a pose: spin the layer where it stands rather than rebuilding a font.
     // Applied as a DELTA so it composes with any gizmo rotation instead of yanking the
@@ -3507,6 +3514,10 @@ export default function App() {
       if (!silent) setTimeout(() => commitTexts(`Turned “${spec.text}”`, textsForSnap(), `${id}:roll`), 0);
       return;
     }
+    // Nothing to tessellate yet, and nothing worth recording — the step lands with the
+    // next character. Cancels any rebuild already in flight so a slow font can't drop a
+    // stale word back onto the model after the field was emptied.
+    if (blank) { textEditGen.current.set(id, (textEditGen.current.get(id) ?? 0) + 1); return; }
     const gen = (textEditGen.current.get(id) ?? 0) + 1;
     textEditGen.current.set(id, gen);
     try {
@@ -6578,7 +6589,7 @@ export default function App() {
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
-    setMessages((p.chat ?? []).map((c) => ({ id: mid(), ts: Date.now(), role: c.role, text: c.text, error: c.error, image: c.image })));
+    setMessages((p.chat ?? []).map((c) => ({ id: mid(), ts: Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, replayed: true })));
     setPins(p.pins ?? []);
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);
@@ -6971,7 +6982,10 @@ export default function App() {
           uploadFont: (f: File) => void useFontFile(f),
           placed: attachments.flatMap((a) => (a.text ? [{ id: a.id, spec: a.text }] : [])),
           editId: textEditId,
-          select: (id: string | null) => { setTextEditId(id); if (id) selectAttach(id); },
+          // Done drops the canvas selection too. A still-selected word stayed the panel's
+          // edit target, so the next thing typed retitled the word just placed instead of
+          // arming the tool — and placing a second word took a click on empty space first.
+          select: (id: string | null) => { setTextEditId(id); selectAttach(id); },
           edit: (id: string, patch: Partial<TextSpec>) => void editText(id, patch),
           // Only TEXT layers — a selection can hold a logo or a part too, and those have
           // no spec to patch.

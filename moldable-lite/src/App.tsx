@@ -12,7 +12,7 @@ import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMes
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import type { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp, SolidOp } from "./engine/types";
-import { MODELS, type ApiMsg } from "./llm/anthropic";
+import { MODELS, type ApiMsg, type MsgPart } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
 import { localSupported, localDownloaded } from "./llm/local";
@@ -22,7 +22,7 @@ import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } fro
 import { draftPlan, planToPrompt, type BuildPlan } from "./llm/plan";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
-import { downscaleImage, squareAvatar } from "./lib/downscale";
+import { downscaleImage, fitPhotoBudget, squareAvatar, MAX_PHOTOS, MAX_UPLOAD_BYTES } from "./lib/downscale";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalFonts, loadLocalFont } from "./text/fonts";
 import { TEXT_DEFAULT, buildTextGeometry, type TextSpec } from "./text/geometry";
@@ -2053,19 +2053,43 @@ export default function App() {
   /** A multi-file attach (drop, paste, picker): first raster becomes THE reference,
    *  the rest ride along as unlabelled extra references — nobody is made to say which
    *  photo is the front. Non-rasters (SVG, 3D files) keep their special handling via
-   *  pickImage, one at a time. */
+   *  pickImage, one at a time. Up to MAX_PHOTOS in total, counting the front one; what
+   *  doesn't fit is named rather than silently dropped, because a photo that vanishes
+   *  without a word looks exactly like a photo the AI ignored. */
   function pickImages(files: File[]) {
-    const rasters = files.filter((f) => f.type.startsWith("image/") && f.type !== "image/svg+xml");
-    const rest = files.filter((f) => !rasters.includes(f));
+    const all = files.filter((f) => f.type.startsWith("image/") && f.type !== "image/svg+xml");
+    const rest = files.filter((f) => !all.includes(f));
     if (rest.length) pickImage(rest[0]); // svg/3d: single-file semantics, unchanged
+    const huge = all.filter((f) => f.size > MAX_UPLOAD_BYTES);
+    const rasters = all.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+    if (huge.length) {
+      const mb = (n: number) => `${Math.round(n / (1024 * 1024))} MB`;
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", error: true,
+        text: `Too big to read: ${huge.map((f) => `${f.name} (${mb(f.size)})`).join(", ")}. The limit is ${mb(MAX_UPLOAD_BYTES)} per picture — export it smaller and try again.` }]);
+    }
     if (!rasters.length) return;
     if (!image) pickImage(rasters[0]);
-    const extras = (image ? rasters : rasters.slice(1)).slice(0, 5 - refs.length);
+    const room = MAX_PHOTOS - 1 - refs.length; // −1: the front photo holds a slot
+    const wanted = image ? rasters : rasters.slice(1);
+    const extras = wanted.slice(0, Math.max(0, room));
+    const overflow = wanted.length - extras.length;
+    if (overflow > 0) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", error: true,
+        text: `${MAX_PHOTOS} pictures is the limit for one request, so ${overflow === 1 ? "the last one" : `the last ${overflow}`} didn't attach. Remove one to make room.` }]);
+    }
     if (extras.length) {
       void Promise.all(extras.map((f) => downscaleImage(f))).then((slim) => {
         setRefs((r) => [...r, ...slim.map((b) => ({ blob: b, url: URL.createObjectURL(b) }))]);
       });
     }
+  }
+  /** Drop one extra reference without clearing the whole attachment. */
+  function removeRef(i: number) {
+    setRefs((r) => {
+      const gone = r[i];
+      if (gone) URL.revokeObjectURL(gone.url);
+      return r.filter((_, n) => n !== i);
+    });
   }
 
   // Paste an image straight from the clipboard (screenshot, copied file) anywhere
@@ -2075,16 +2099,14 @@ export default function App() {
     const onPaste = (e: ClipboardEvent) => {
       const items = e.clipboardData?.items;
       if (!items) return;
-      for (const it of items) {
-        if (it.type.startsWith("image/")) {
-          const f = it.getAsFile();
-          if (f) {
-            e.preventDefault();
-            pickImage(f);
-          }
-          return;
-        }
-      }
+      // Every image on the clipboard, not just the first: a multi-select copy out of
+      // Photos or Finder arrives as one paste with several items, and taking one of
+      // them looked like the paste had half-failed.
+      const pics = [...items].filter((it) => it.type.startsWith("image/"))
+        .map((it) => it.getAsFile()).filter((f): f is File => !!f);
+      if (!pics.length) return;
+      e.preventDefault();
+      pickImages(pics);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -5942,23 +5964,39 @@ export default function App() {
       : (["left", "back", "right"] as const)
           .filter((s) => views[s])
           .map((s) => ({ label: s, blob: views[s]!.blob }));
-    const extraViewParts = (await Promise.all(extraViews.map(async (v) => {
-      const b64 = (await blobToDataURL(v.blob)).split(",")[1];
-      return [
-        { type: "text" as const, text: `Additional reference — the ${v.label} side of the same object:` },
-        { type: "image" as const, mediaType: v.blob.type || "image/png", dataBase64: b64 },
-      ];
-    }))).flat();
+    // Every picture in this request, fitted to one byte budget as a SET. Each was already
+    // resized on attach, which is enough for photographs; a stack of PNG screenshots is
+    // what runs a body past what the provider will accept, and a rejected request reads
+    // as "the AI broke" rather than "that was too much to send". Front photo first so it
+    // is the one every downstream index counts from.
+    const unfitted = [
+      ...(visionImage ? [visionImage.blob] : []),
+      ...extraViews.map((v) => v.blob),
+      ...(markupEdit ? [] : visionRefs.map((r) => r.blob)),
+    ];
+    const fitted = await fitPhotoBudget(unfitted);
+    const bytes = (bs: Blob[]) => bs.reduce((n, b) => n + b.size, 0);
+    const shrunk = bytes(fitted) < bytes(unfitted);
+    const nFront = visionImage ? 1 : 0;
+    const viewBlobs = fitted.slice(nFront, nFront + extraViews.length);
+    const refBlobs = fitted.slice(nFront + extraViews.length);
+    const frontThumb = shrunk && visionImage ? await blobToDataURL(fitted[0]) : visionThumb;
+    const part = async (blob: Blob) => ({
+      type: "image" as const,
+      mediaType: blob.type || "image/png",
+      dataBase64: (await blobToDataURL(blob)).split(",")[1],
+    });
+    const extraViewParts = (await Promise.all(extraViews.map(async (v, i) => [
+      { type: "text" as const, text: `Additional reference — the ${v.label} side of the same object:` },
+      await part(viewBlobs[i]),
+    ]))).flat();
     // Unlabelled extras from a multi-photo drop — same object, angle unstated. The model
     // is told exactly that, so it treats them as additional observations rather than
     // inventing a side for each.
-    const refParts = (await Promise.all((markupEdit ? [] : visionRefs).map(async (r) => {
-      const b64 = (await blobToDataURL(r.blob)).split(",")[1];
-      return [
-        { type: "text" as const, text: "Additional reference photo of the same object (angle unspecified):" },
-        { type: "image" as const, mediaType: r.blob.type || "image/png", dataBase64: b64 },
-      ];
-    }))).flat();
+    const refParts = (await Promise.all(refBlobs.map(async (b) => [
+      { type: "text" as const, text: "Additional reference photo of the same object (angle unspecified):" },
+      await part(b),
+    ]))).flat();
     // Product photos the research found, by URL — the PROVIDER fetches them, the only
     // route a browser app has to third-party images. Gated to APIs that accept URL
     // image parts; everyone else still gets the researched TEXT and the chat thumbnails.
@@ -5971,13 +6009,13 @@ export default function App() {
       : [];
     const extraCount = extraViews.length + (markupEdit ? 0 : visionRefs.length);
     if (extraCount) {
-      pushStep(`Reading ${extraCount + 1} reference photos${extraViews.length ? ` (front, ${extraViews.map((v) => v.label).join(", ")})` : ""}`);
+      pushStep(`Reading ${extraCount + 1} reference photos${extraViews.length ? ` (front, ${extraViews.map((v) => v.label).join(", ")})` : ""}${shrunk ? " — resized to fit one upload" : ""}`);
     }
     const userMsg: ApiMsg = visionImage
       ? {
           role: "user",
           content: [
-            { type: "image", mediaType: visionImage.blob.type || "image/png", dataBase64: visionThumb!.split(",")[1] },
+            { type: "image", mediaType: fitted[0].type || "image/png", dataBase64: frontThumb!.split(",")[1] },
             ...extraViewParts,
             ...refParts,
             ...webRefParts,
@@ -6006,8 +6044,10 @@ export default function App() {
       spent.est ||= !!u.est;
     };
     const msgUsage = () => (spent.any ? { inTok: spent.inTok, outTok: spent.outTok, usd: spent.priced ? spent.usd : null, est: spent.est } : undefined);
-    // Cap the rolling context so long sessions don't slow down / blow the window.
-    let history: ApiMsg[] = [...apiHistory.current.slice(-16), userMsg];
+    // Cap the rolling context so long sessions don't slow down / blow the window, and
+    // carry ONE set of pictures — this turn's if it has any, otherwise the last set that
+    // did. Attaching new photos supersedes the old ones rather than stacking on them.
+    let history: ApiMsg[] = keepNewestPhotos([...apiHistory.current.slice(-16), userMsg]);
     let finalRaw = "";
     let ok = false;
     let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
@@ -6127,7 +6167,7 @@ export default function App() {
     } catch (err: any) {
       setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: friendlyNet(String(err?.message ?? err)), error: true, streaming: false, thinking: thinkTrail() || undefined } : x)));
     } finally {
-      if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }];
+      if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }]; // already normalised above
       setStatus("idle");
       setStreamingText("");
     }
@@ -6722,7 +6762,9 @@ export default function App() {
           void send(text, engine === "auto" ? undefined : engine, engine === "auto" ? { routeAuto: true } : undefined);
         }}
         imageUrl={image && !image.markup ? image.url : null}
-        refsCount={refs.length}
+        refUrls={refs.map((r) => r.url)}
+        maxPhotos={MAX_PHOTOS}
+        onRemoveRef={removeRef}
         onPickFiles={pickImages}
         onClearImage={clearImage}
         webMode={webMode}
@@ -6812,7 +6854,9 @@ export default function App() {
         imageNote={image?.region ? `covers ≈ ${Math.max(0.1, Math.round((image.region.max[0] - image.region.min[0]) * 10) / 10)} × ${Math.max(0.1, Math.round((image.region.max[1] - image.region.min[1]) * 10) / 10)} × ${Math.max(0.1, Math.round((image.region.max[2] - image.region.min[2]) * 10) / 10)} mm` : null}
         onPickImage={pickImage}
         onPickImages={pickImages}
-        refsCount={refs.length}
+        refUrls={refs.map((r) => r.url)}
+        maxPhotos={MAX_PHOTOS}
+        onRemoveRef={removeRef}
         photoAdvice={imageAdvice({ provider: llm.provider, mesh: mode === "generative" })}
         onMarkup={attachMarkup}
         onClearImage={clearImage}
@@ -7392,6 +7436,27 @@ export default function App() {
       )}
     </>
   );
+}
+
+/** Carry ONE set of reference pictures in the rolling context — the newest — and reduce
+ *  every earlier set to a line saying it was there.
+ *
+ *  The history is what the next turn re-uploads. Pictures left in it meant a ten-photo
+ *  ask cost ten more images on the following message, twenty on the one after, growing
+ *  until the provider refused the body — and every one of those re-uploads was billed as
+ *  fresh input. Keeping the newest set is what actually matters: "make the clip on the
+ *  left thicker" still has the photo to look at, while the sets from six turns ago are
+ *  already baked into the code the model wrote. */
+function keepNewestPhotos(msgs: ApiMsg[]): ApiMsg[] {
+  const pics = (m: ApiMsg) => (Array.isArray(m.content) ? m.content.filter((c) => c.type === "image" || c.type === "image_url").length : 0);
+  let newest = -1;
+  msgs.forEach((m, i) => { if (pics(m)) newest = i; });
+  return msgs.map((m, i) => {
+    const n = pics(m);
+    if (!n || i === newest) return m;
+    const text = (m.content as MsgPart[]).filter((c) => c.type === "text").map((c) => c.text).join("\n");
+    return { ...m, content: `(${n === 1 ? "A reference photo was" : `${n} reference photos were`} attached here.)\n${text}` };
+  });
 }
 
 /** Never show a bare "Failed to fetch" — but leave already-crafted messages alone. */
@@ -8078,7 +8143,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refsCount, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -8091,7 +8156,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onFree: () => void;
   onSubmit: (text: string, engine: ModePref) => void;
   imageUrl: string | null;
-  refsCount: number;
+  refUrls: string[];
+  maxPhotos: number;
+  onRemoveRef: (i: number) => void;
   onPickFiles: (fs: File[]) => void;
   onClearImage: () => void;
   webMode: "auto" | "on" | "off";
@@ -8178,12 +8245,23 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             <div className="launch-imgchip">
               <img src={imageUrl} alt="reference" />
               <span>
-                {refsCount > 0 ? `${refsCount + 1} reference pictures` : "reference picture"}
+                {refUrls.length > 0 ? `${refUrls.length + 1} reference pictures` : "reference picture"}
                 {/* The advice is most actionable right here — while re-shooting is
                     still one tap away. */}
                 <em className="imgchip-advice">{photoAdvice}</em>
               </span>
               <button type="button" aria-label="Remove reference pictures" onClick={onClearImage}><IconX /></button>
+            </div>
+          )}
+          {imageUrl && refUrls.length > 0 && (
+            <div className="refstrip" aria-label="Extra reference pictures">
+              {refUrls.map((u, i) => (
+                <div className="refthumb" key={u}>
+                  <img src={u} alt={`Reference ${i + 2}`} />
+                  <button type="button" className="mv-x" aria-label={`Remove reference ${i + 2}`} onClick={() => onRemoveRef(i)}><IconX /></button>
+                </div>
+              ))}
+              <span className="refstrip-count">{refUrls.length + 1} of {maxPhotos}</span>
             </div>
           )}
           <textarea
@@ -8210,7 +8288,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           <div className="launch-composer-foot">
             {/* Attaches, like every chat app's clip — drop and paste land in the same
                 place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}
-            <button type="button" className="launch-attach" title={photoAdvice} onClick={() => fileRef.current?.click()}>
+            <button type="button" className="launch-attach" title={`Up to ${maxPhotos} pictures in one request. ${photoAdvice}`} onClick={() => fileRef.current?.click()}>
               <IconPaperclip /> Photos &amp; sketches
             </button>
             <input

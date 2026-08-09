@@ -1436,6 +1436,12 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .imgchip img { width: 40px; height: 40px; object-fit: cover; border-radius: var(--r-sm); }
 .imgchip span { flex: 1; font-size: var(--fs-sm); color: var(--ink2); }
 .imgchip button { border: none; background: none; color: var(--subt); font-size: var(--fs-lg); }
+/* The unlabelled extras, thumbnail-sized so ten of them still fit above the composer.
+   Wraps rather than scrolls: a hidden row of photos is the problem this replaced. */
+.refstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 12px 0; }
+.refthumb { position: relative; width: 40px; height: 40px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--bord); }
+.refthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.refstrip-count { font-size: var(--fs-tiny); color: var(--subt); margin-left: 2px; }
 /* Multi-view reference angles (generative). */
 .mv { margin: 6px 12px 0; }
 .mv-slots { display: flex; gap: 6px; }

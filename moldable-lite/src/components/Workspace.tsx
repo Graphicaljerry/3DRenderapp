@@ -645,6 +645,24 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine, mode }: {
   );
 }
 
+/** The unlabelled extra photos, as thumbnails you can drop one at a time. A count on its
+ *  own ("6 reference pictures") is unusable at this size — with ten attached, throwing out
+ *  the blurry one meant clearing the lot and re-picking the other nine. */
+function RefStrip({ refs, max, onRemove }: { refs: string[]; max: number; onRemove: (i: number) => void }) {
+  if (!refs.length) return null;
+  return (
+    <div className="refstrip" aria-label="Extra reference pictures">
+      {refs.map((u, i) => (
+        <div className="refthumb" key={u}>
+          <img src={u} alt={`Reference ${i + 2}`} />
+          <button type="button" className="mv-x" aria-label={`Remove reference ${i + 2}`} onClick={() => onRemove(i)}><IconX /></button>
+        </div>
+      ))}
+      <span className="refstrip-count">{refs.length + 1} of {max}</span>
+    </div>
+  );
+}
+
 /** Glanceable mesh + print stats on the model (Meshy's Faces/Vertices, reframed
     for slicing: triangles, watertight, volume, bed fit). */
 /** Dictation into the chat box via the Web Speech API. Renders nothing where the
@@ -2336,7 +2354,9 @@ interface Props {
   };
   onPickImage: (f: File) => void;
   onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
-  refsCount: number; // extra unlabelled reference photos riding with the composer image
+  refUrls: string[]; // extra unlabelled reference photos riding with the composer image
+  maxPhotos: number; // how many pictures one request carries, front photo included
+  onRemoveRef: (i: number) => void;
   photoAdvice: string; // model-aware format/resolution guidance for attachments
   onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
@@ -3244,7 +3264,7 @@ export function Workspace(p: Props) {
               <div className="imgchip">
                 <img src={p.imageUrl} alt={p.imageMarkup ? "marked screenshot" : "reference"} />
                 <span>
-                  {p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : p.refsCount > 0 ? `${p.refsCount + 1} reference pictures` : "reference picture"}
+                  {p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : p.refUrls.length > 0 ? `${p.refUrls.length + 1} reference pictures` : "reference picture"}
                   {!p.imageMarkup && <Hint text={p.photoAdvice} />}
                 </span>
                 {p.mode === "precise" && !p.imageMarkup && (
@@ -3253,6 +3273,8 @@ export function Workspace(p: Props) {
                 <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
               </div>
             )}
+
+            {p.imageUrl && !p.imageMarkup && <RefStrip refs={p.refUrls} max={p.maxPhotos} onRemove={p.onRemoveRef} />}
 
             {/* Shown for ANY engine now: extra angles help the CAD path just as much
                 as the mesh engines (one photo leaves the far side to guesswork), and
@@ -3278,7 +3300,7 @@ export function Workspace(p: Props) {
                 <button
                   type="button"
                   className="attach"
-                  title={`Upload photos or sketches → 3D. ${p.photoAdvice}`}
+                  title={`Upload photos or sketches → 3D — up to ${p.maxPhotos} pictures in one request. ${p.photoAdvice}`}
                   aria-label="Upload photos or sketches to turn into a 3D model"
                   onClick={() => fileRef.current?.click()}
                 >

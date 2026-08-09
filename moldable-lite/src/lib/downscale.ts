@@ -13,6 +13,21 @@
 
 export const MAX_IMAGE_DIM = 1568; // Anthropic's ceiling; comfortably ≥ everyone's tiles
 
+/** How many reference pictures one request carries: the front photo plus nine more.
+ *  More angles is strictly better context — the far side and the depth stop being
+ *  guesswork — and ten right-sized photos is ~4 MB and ~16k vision tokens, which every
+ *  routed model takes. Past that the returns flatten and the upload starts to hurt. */
+export const MAX_PHOTOS = 10;
+
+/** Refused before decoding. Nothing legitimate arrives this big (a 48 MP HEIC is ~10 MB),
+ *  and decoding a 100 MP file to a bitmap is how an iPad tab dies. */
+export const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
+
+/** The whole picture payload of one request, encoded. Providers cap the body, not the
+ *  count — OpenRouter passes the body straight through to whichever model it routed to,
+ *  so the ceiling that matters is the strictest one downstream. */
+export const PHOTO_BUDGET_BYTES = 9 * 1024 * 1024;
+
 /** A square profile photo as a small data URL. Centre-crops to a square (the disc is
  *  round, so the corners were never going to show), then ALWAYS re-encodes — a tiny
  *  but multi-megabyte PNG would otherwise pass straight through and this string is
@@ -43,7 +58,7 @@ export async function squareAvatar(file: Blob, size = 160): Promise<string | nul
   }
 }
 
-export async function downscaleImage(file: Blob, maxDim = MAX_IMAGE_DIM): Promise<Blob> {
+export async function downscaleImage(file: Blob, maxDim = MAX_IMAGE_DIM, forceJpeg = false): Promise<Blob> {
   let bmp: ImageBitmap;
   try {
     // from-image: bake the EXIF rotation in — a resized photo that loses its
@@ -54,10 +69,10 @@ export async function downscaleImage(file: Blob, maxDim = MAX_IMAGE_DIM): Promis
   }
   try {
     const { width, height } = bmp;
-    const isPng = file.type === "image/png";
+    const isPng = file.type === "image/png" && !forceJpeg;
     const oversized = Math.max(width, height) > maxDim;
     // Right-sized and already in a format every provider takes → untouched.
-    if (!oversized && (isPng || file.type === "image/jpeg" || file.type === "image/webp")) return file;
+    if (!oversized && !forceJpeg && (isPng || file.type === "image/jpeg" || file.type === "image/webp")) return file;
 
     const scale = oversized ? maxDim / Math.max(width, height) : 1;
     const w = Math.max(1, Math.round(width * scale));
@@ -78,9 +93,29 @@ export async function downscaleImage(file: Blob, maxDim = MAX_IMAGE_DIM): Promis
     // A re-encode that GREW (tiny PNGs do this) helps nobody — keep the original,
     // unless the original was a format (HEIC…) providers reject.
     const originalOk = ["image/png", "image/jpeg", "image/webp"].includes(file.type);
-    if (!out || (originalOk && out.size >= file.size && !oversized)) return file;
+    if (!out || (originalOk && out.size >= file.size && !oversized && !forceJpeg)) return file;
     return out;
   } finally {
     bmp.close();
   }
+}
+
+/** Hold a whole set of reference photos under a byte budget, shrinking the SET rather
+ *  than the newest arrival: the model reads them as equal observations of one object,
+ *  and one mushy photo among nine sharp ones is worse context than ten even ones.
+ *
+ *  Ten camera photos are already ~4 MB after the attach-time resize and never reach
+ *  this. Screenshots do: PNG stays PNG (line art has to stay crisp) and ten of those
+ *  can run to tens of megabytes — a body the provider rejects outright, which reads to
+ *  the user as "the AI is broken" rather than "that was too much to upload". JPEG at
+ *  full resolution is tried before any resolution is given up. */
+export async function fitPhotoBudget(blobs: Blob[], budget = PHOTO_BUDGET_BYTES): Promise<Blob[]> {
+  const total = (bs: Blob[]) => bs.reduce((n, b) => n + b.size, 0);
+  if (blobs.length < 2 || total(blobs) <= budget) return blobs;
+  let out = blobs;
+  for (const dim of [MAX_IMAGE_DIM, 1280, 1024, 768]) {
+    out = await Promise.all(blobs.map((b) => downscaleImage(b, dim, true)));
+    if (total(out) <= budget) break;
+  }
+  return out;
 }

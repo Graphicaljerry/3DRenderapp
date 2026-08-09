@@ -917,6 +917,31 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 398 — ten reference photos, and only one album in flight
+
+Asked for: attach up to 10 pictures, with a size limit, so the routed model has the best
+context to build from. Was 6 (one front plus five extras).
+
+**Ten now** (`MAX_PHOTOS` in `lib/downscale.ts`) — front photo plus nine. What doesn't
+fit says so instead of vanishing, and a file over 30 MB (`MAX_UPLOAD_BYTES`) is refused
+by name before it's decoded, which is what used to kill an iPad tab.
+
+**The set is budgeted, not each picture.** `fitPhotoBudget` holds the whole payload
+under 9 MB by re-encoding the SET — JPEG at full resolution first, then 1280 / 1024 /
+768 — so nothing is ever dropped to make room and no photo ends up mush among nine sharp
+ones. Camera photos never reach it (ten are ~4 MB after the attach-time resize); PNG
+screenshots do, and forty megabytes of them now leaves as 7.1 MB with all ten intact.
+
+**Found while measuring: every turn re-uploaded every earlier photo.** `apiHistory` kept
+the image parts, so a ten-photo ask cost ten more images on the next message, twenty on
+the one after — billed as fresh input each time — until the body was refused.
+`keepNewestPhotos` carries one live set (this turn's, or the last that had any) and
+reduces older sets to a line saying they were there. Measured: turn two was 20 pictures,
+now 10.
+
+Also: paste takes every image on the clipboard, not just the first; the extras render as
+a thumbnail strip with a per-photo X, so one bad shot no longer means clearing all ten.
+
 ## Build 397 — a reload stops greeting you with an old error
 
 Reported: "Couldn't rebuild that text: Nothing to build — type some text first" on every

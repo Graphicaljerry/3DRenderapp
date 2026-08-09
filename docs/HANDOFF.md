@@ -917,6 +917,42 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 396 — filament slots you can predict (the "colours are inverted" report)
+
+Reported: a white part with black text arrives in Bambu with the colours swapped.
+
+**The file itself is right.** Measured by driving the real writer with a known white
+holder + black word and reading the zip back: basematerials `[#FFFFFF, #000000]`,
+`filament_colour` the same, the holder's mesh `pindex=0` and the word's `pindex=1`, and
+the config giving the holder extruder 1 and the word extruder 2. Correct in the core-3MF
+path AND the Bambu path.
+
+**The swap happens in how the file is opened.** A 3MF can only say "this part uses
+filament 2" — which colour that is belongs to the slicer. Open the file and its own
+colours load into the AMS slots; IMPORT it into a project that already has filaments
+(five of them, on a dual-nozzle H2C) and the numbers land on whatever is already loaded
+there. Nothing in the file decides that, so the Export panel now SAYS what the numbers
+mean: a Filaments list — slot number, swatch, and which parts use it — plus the one line
+that matters, "use File → Open, not Import". Only shown when there are two or more
+colours, since with one there is nothing to get wrong.
+
+Two real defects found while checking, both introduced by 395's components change:
+
+- **Part ids ran off the end.** `<part id>` in Bambu's config is the object's OWN 1-based
+  volume number, and the writer was emitting the global 3MF object id. With a single
+  solid the two coincided (1, 2, 3…) so it looked fine; a SECOND top-level solid produced
+  `<part id="4">` inside an object with two volumes — out of range, and an out-of-range
+  part is a volume with no extruder assignment. Now numbered per object; verified with
+  two solids each carrying a layer: ids `[1,2,1,2]`, and all four colours land right.
+- **The components wrapper carried the model's material.** It holds no triangles, so a
+  `pid`/`pindex` there is an invitation for a reader to paint every component with the
+  model's colour. Removed — each component mesh carries its own.
+
+Not verifiable from here: Bambu's exact import-time remapping. The file is provably
+self-consistent; if opening (rather than importing) still shows a swap, the next place to
+look is `project_settings.config` — it declares only six keys, and a dual-nozzle machine
+also expects a `filament_map`.
+
 ## Build 395 — the 3MF gives the slicer text it can actually print
 
 Build 394 fixed how text LOOKS. This fixes what the slicer RECEIVES — the Bambu preview

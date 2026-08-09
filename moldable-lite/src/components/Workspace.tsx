@@ -1173,6 +1173,48 @@ const FORMATS_WHAT =
 const READINESS_WHAT =
   "Four checks that run before every export: the model is closed, it fits your bed, its size looks sane, " +
   "and it is not so dense your slicer will struggle.";
+/** Which filament slot each colour lands in — stated BEFORE the file leaves.
+ *
+ *  The 3MF can only say "this part uses filament 2". Which colour that turns out to be
+ *  is the slicer's business, and Bambu answers it differently depending on how the file
+ *  is opened: OPEN it and the file's own colours load into the slots, IMPORT it into a
+ *  project that already has filaments and the numbers land on whatever is loaded there —
+ *  which is how a white part with black text arrives looking inverted. Nothing in the
+ *  file can decide that, so the app says what the numbers mean instead of leaving the
+ *  user to work it out from a wrong-coloured preview. */
+function FilamentSlots({ p }: { p: Props }) {
+  const DEFAULT_FILAMENT = "#D9D9D9";
+  const norm = (c?: string) => (c && /^#?[0-9a-fA-F]{6}$/.test(c.trim()) ? `#${c.trim().replace("#", "").toUpperCase()}` : "");
+  // Mirrors the writer's palette order exactly: the default slot first when anything is
+  // unpainted, then whole-part colours, then the layers standing on them.
+  const model = { name: p.projectName || "Model", color: norm(p.partColors?.["model"]) };
+  const layers = p.attachments.map((a) => ({ name: a.name, color: norm(p.partColors?.[a.id]) }));
+  const all = [model, ...layers];
+  const slots: { color: string; users: string[] }[] = [];
+  if (all.some((x) => !x.color)) slots.push({ color: DEFAULT_FILAMENT, users: [] });
+  for (const x of all) {
+    const key = x.color || DEFAULT_FILAMENT;
+    const hit = slots.find((s) => s.color === key) ?? (slots.push({ color: key, users: [] }), slots[slots.length - 1]);
+    hit.users.push(x.name);
+  }
+  if (slots.length < 2) return null; // one colour: nothing to get wrong
+  return (
+    <>
+      <p className="dock-sub">Filaments</p>
+      <div className="xslots">
+        {slots.map((s, i) => (
+          <div className="xslot" key={i}>
+            <span className="xslot-n">{i + 1}</span>
+            <span className="xslot-sw" style={{ background: s.color }} aria-hidden="true" />
+            <span className="xslot-who">{s.users.length ? s.users.join(", ") : "unused"}</span>
+          </div>
+        ))}
+      </div>
+      <p className="dock-note">In Bambu Studio use <b>File → Open</b> (not Import) so these colours load into the AMS slots. Importing into a project keeps that project's filaments, and slot 1 there may not be slot 1 here.</p>
+    </>
+  );
+}
+
 function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
   const [override, setOverride] = useState(false);
   const [pieceFmt, setPieceFmt] = useState<"stl" | "3mf">("stl");
@@ -1287,6 +1329,8 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
           </div>
         )
       )}
+
+      <FilamentSlots p={p} />
 
       <p className="dock-sub">File <Hint text={FORMATS_WHAT} /></p>
       <input

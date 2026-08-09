@@ -2759,6 +2759,14 @@ details.guide { margin-top: 10px; }
   .viewer-body:has(.sel-acts) .showcase-bar { bottom: 116px; }
 }
 
+/* Filament slots in the Export panel: the number the 3MF actually writes, the colour it
+   means, and what is using it. Numerals are mono so the slot column lines up. */
+.xslots { display: flex; flex-direction: column; gap: 4px; margin: 2px 0 8px; }
+.xslot { display: flex; align-items: center; gap: 8px; font-size: var(--fs-sm); color: var(--ink2); }
+.xslot-n { font-family: var(--font-mono); font-size: var(--fs-tiny); font-weight: 600; color: var(--mut); width: 12px; text-align: right; font-variant-numeric: tabular-nums; }
+.xslot-sw { width: 14px; height: 14px; border-radius: var(--r-xs); flex: none; border: 1px solid color-mix(in srgb, var(--ink) 22%, transparent); }
+.xslot-who { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
 /* ---------- focus mode ----------
    Everything that isn't the model steps off. Written as a subtraction from the normal
    shell rather than a second layout, so nothing can drift out of step with it: the same

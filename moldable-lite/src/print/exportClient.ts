@@ -245,7 +245,12 @@ export function write3MF(solids: Solid3MF[], opts: Write3MFOpts = {}): Blob {
       const sName = xml(sub.name ?? `Layer ${si + 1}`);
       const sMat = painted ? ` pid="${MAT_ID}" pindex="${sex - 1}"` : "";
       objects.push(`<object id="${sid}" type="model" name="${sName}"${sMat}><mesh><vertices>${sv.join("")}</vertices><triangles>${st.join("")}</triangles></mesh></object>`);
-      subMeta.push(`    <part id="${sid}" subtype="normal_part">\n      <metadata key="name" value="${sName}"/>\n      <metadata key="extruder" value="${sex}"/>\n    </part>`);
+      // Part ids are the object's OWN 1-based volume numbers — Bambu reads them as an
+      // index into the object's volumes, not as 3MF object ids. Emitting the global id
+      // here worked only while the two happened to coincide (a single solid, ids 1,2,3);
+      // a second top-level solid pushed them out of range, and an out-of-range part is a
+      // volume with no extruder assignment.
+      subMeta.push(`    <part id="${si + 2}" subtype="normal_part">\n      <metadata key="name" value="${sName}"/>\n      <metadata key="extruder" value="${sex}"/>\n    </part>`);
     });
 
     // What <build> points at, and what the config describes: the wrapper when there are
@@ -253,11 +258,14 @@ export function write3MF(solids: Solid3MF[], opts: Write3MFOpts = {}): Blob {
     const buildId = ids.wrapper ?? id;
     if (ids.wrapper) {
       const comps = [id, ...ids.subs].map((cid) => `<component objectid="${cid}"/>`).join("");
-      objects.push(`<object id="${ids.wrapper}" type="model" name="${safe}"${matAttr}><components>${comps}</components></object>`);
+      // No pid/pindex on the wrapper: it holds no triangles, and a material there is a
+      // standing invitation for a reader to paint every component with the model's
+      // colour. Each component mesh carries its own.
+      objects.push(`<object id="${ids.wrapper}" type="model" name="${safe}"><components>${comps}</components></object>`);
     }
     items.push(laidOut ? `<item objectid="${buildId}" transform="${transform}" printable="1"/>` : `<item objectid="${buildId}" printable="1"/>`);
     settingsObjects.push(
-      `  <object id="${buildId}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="${id}" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n${subMeta.join("\n")}${subMeta.length ? "\n" : ""}  </object>`,
+      `  <object id="${buildId}">\n    <metadata key="name" value="${safe}"/>\n    <metadata key="extruder" value="${ex}"/>\n    <part id="1" subtype="normal_part">\n      <metadata key="name" value="${safe}"/>\n      <metadata key="extruder" value="${ex}"/>\n    </part>\n${subMeta.join("\n")}${subMeta.length ? "\n" : ""}  </object>`,
     );
     if (!instancesByPlate.has(plate)) instancesByPlate.set(plate, []);
     instancesByPlate.get(plate)!.push(

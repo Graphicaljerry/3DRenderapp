@@ -6,6 +6,7 @@
 // as loose tabs. Bending the solid around the same cylinder the wall follows is what
 // makes it a decal instead of a plank.
 import * as THREE from "three";
+import { smoothTextNormals } from "./geometry";
 
 /** Bend a flat, +Z-extruded solid around a cylinder whose axis runs along local Y.
  *
@@ -27,7 +28,7 @@ export function bendAroundY(geom: THREE.BufferGeometry, radius: number): THREE.B
     a[i + 2] = r * Math.cos(t) - radius;
   }
   pos.needsUpdate = true;
-  geom.computeVertexNormals();
+  smoothTextNormals(geom); // computeVertexNormals would re-flatten the walls into bands
   geom.computeBoundingBox();
   geom.computeBoundingSphere();
   return geom;
@@ -120,7 +121,7 @@ export function conformToSurface(
   }
   if (hits < src.count * 0.5) return false; // mostly off the part — not a decal, leave it
   dst.needsUpdate = true;
-  geom.computeVertexNormals();
+  smoothTextNormals(geom); // same reason as bendAroundY: keep the walls smooth
   geom.computeBoundingBox();
   geom.computeBoundingSphere();
   return true;

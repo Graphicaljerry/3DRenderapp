@@ -3,8 +3,51 @@
 // bevel/extrude control a designer expects from a 3D text tool.
 import * as THREE from "three";
 import { SVGLoader } from "three/examples/jsm/loaders/SVGLoader.js";
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { Font } from "opentype.js";
 import { reverseWinding } from "../three/winding";
+
+/** How far a chord may run before the curve gets another vertex, in mm.
+ *
+ *  ExtrudeGeometry's own `curveSegments` divides every curve into the same fixed count,
+ *  whatever its length — and font outlines are wildly uneven: an OTF (Inter) draws a
+ *  whole bowl of a "D" as one or two long cubics, a TTF (Poppins) draws it as a dozen
+ *  short quadratics. A fixed count leaves the long cubics as visible polygons (measured
+ *  before this: p95 facet angle 22.7°, worst 59.8° — real corners in the slicer, not a
+ *  shading artifact) while wasting points on the short quads. Sampling by ARC LENGTH
+ *  makes smoothness a physical property of the print instead: a 0.3mm chord on a 2mm
+ *  glyph corner deviates ~6µm from the true curve — an order of magnitude under a
+ *  0.05mm layer line — and letters scaled up simply spend more vertices. */
+const CHORD_MM = 0.3;
+
+/** Re-sample a shape's curves by arc length so every chord is ≈CHORD_MM long. The
+ *  result carries straight lines only — ExtrudeGeometry then tessellates exactly what
+ *  is here, nothing resampled behind our back. */
+function flattenShape(shape: THREE.Shape): THREE.Shape {
+  const flat = (path: THREE.Path): THREE.Vector2[] => {
+    const pts: THREE.Vector2[] = [];
+    for (const curve of path.curves) {
+      let n = 1;
+      if (!(curve as THREE.Curve<THREE.Vector2> & { isLineCurve?: boolean }).isLineCurve) {
+        // Two criteria, take the stricter. Length alone under-samples TIGHT curves: a
+        // 0.5mm corner round is barely 1mm long, so 0.3mm chords turn ~34° each — a
+        // visible knuckle. Estimating the total turn from three tangents (slightly low
+        // on an S-curve, close enough for glyphs) caps every step at ~12° regardless
+        // of how small the feature is.
+        const byLength = Math.ceil(curve.getLength() / CHORD_MM);
+        const t0 = curve.getTangent(0), t1 = curve.getTangent(0.5), t2 = curve.getTangent(1);
+        const byTurn = Math.ceil((t0.angleTo(t1) + t1.angleTo(t2)) / (Math.PI / 15));
+        n = Math.min(64, Math.max(2, byLength, byTurn));
+      }
+      const p = curve.getPoints(n);
+      for (let i = pts.length ? 1 : 0; i < p.length; i++) pts.push(p[i]); // skip the shared joint
+    }
+    return pts;
+  };
+  const out = new THREE.Shape(flat(shape));
+  out.holes = shape.holes.map((h) => new THREE.Path(flat(h)));
+  return out;
+}
 
 export interface TextSpec {
   text: string;
@@ -44,7 +87,7 @@ export function buildTextGeometry(font: Font, spec: TextSpec): THREE.BufferGeome
   }
   if (!d) throw new Error("Nothing to build — type some text first.");
   const svg = new SVGLoader().parse(`<svg xmlns="http://www.w3.org/2000/svg"><path d="${d}"/></svg>`);
-  const shapes = svg.paths.flatMap((p) => SVGLoader.createShapes(p));
+  const shapes = svg.paths.flatMap((p) => SVGLoader.createShapes(p)).map(flattenShape);
   if (!shapes.length) throw new Error("That font gave no outlines for this text.");
   // The bevel eats into the glyph silhouette (bevelSize) — compensate a hair with
   // bevelOffset so thin strokes don't vanish at print size. Clamp bevel to the depth.
@@ -57,8 +100,7 @@ export function buildTextGeometry(font: Font, spec: TextSpec): THREE.BufferGeome
     bevelThickness: bevel,
     bevelSize: bevel,
     bevelOffset: 0,
-    bevelSegments: 2,
-    curveSegments: 8,
+    bevelSegments: 3, // the rim reads round instead of two flat bands
   });
   // Font paths are y-down; flip to y-up, then centre XY and rest the base at z=0.
   // The negative Y is a REFLECTION (det = -1), which reverses every triangle's winding
@@ -71,6 +113,23 @@ export function buildTextGeometry(font: Font, spec: TextSpec): THREE.BufferGeome
   g.computeBoundingBox();
   const bb = g.boundingBox!;
   g.translate(-(bb.min.x + bb.max.x) / 2, -(bb.min.y + bb.max.y) / 2, -bb.min.z);
-  g.computeVertexNormals();
+  smoothTextNormals(g);
   return g;
+}
+
+/** Wall shading without the venetian blinds.
+ *
+ *  ExtrudeGeometry is non-indexed, so `computeVertexNormals()` is flat shading: every
+ *  wall quad carries its own normal and a curved glyph renders as a run of lighting
+ *  bands, however fine the tessellation (measured: 0% of shared wall positions agreed
+ *  on a normal). Creased normals average across neighbours within 40° — the curved
+ *  walls become one continuous surface — while anything sharper (the stem of a D, the
+ *  arris where wall meets bevel) stays a crisp edge. In place: our text geometry is
+ *  always non-indexed, and toCreasedNormals only clones when it must de-index first.
+ *
+ *  bend.ts calls this after bending/conforming too — moving vertices invalidates
+ *  normals, and re-running computeVertexNormals there would re-flatten everything
+ *  this just smoothed. */
+export function smoothTextNormals(g: THREE.BufferGeometry): void {
+  toCreasedNormals(g, THREE.MathUtils.degToRad(40));
 }

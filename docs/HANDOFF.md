@@ -917,6 +917,43 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 394 — text curves are curves, in the app and in the slicer
+
+Reported with side-by-side screenshots: letter bowls visibly polygonal in Bambu Studio
+AND banded in Moldable. Two separate defects, measured on a placed "Dog" (Inter, curved
+wall, conformed) before touching anything:
+
+1. **Coarse geometry** — `curveSegments: 8` gives every outline curve eight chords
+   whatever its length, and font tech decides the damage: an OTF (Inter) draws a whole
+   bowl as one or two long cubics → visible polygons; a TTF's many short quadratics were
+   fine. Measured: p95 wall facet step 22.7°, worst 59.8°. The slicer shows exactly this.
+2. **Flat shading** — ExtrudeGeometry is non-indexed, so `computeVertexNormals()` bakes
+   one normal per facet. 0% of shared wall positions agreed on a normal: lighting bands
+   even where the geometry was fine.
+
+Fixes in `text/geometry.ts`:
+- `flattenShape` re-samples every outline curve BEFORE extruding, by two criteria (the
+  stricter wins): arc length (`CHORD_MM` 0.3 — ~6µm deviation on a 2mm corner, an order
+  under a layer line, and bigger letters automatically spend more vertices) and total
+  turn (three-tangent estimate, ≤~12° per step, so a 0.5mm corner round doesn't become
+  a knuckle). ExtrudeGeometry then gets line-only shapes — nothing resampled behind us.
+- `smoothTextNormals` = `toCreasedNormals(g, 40°)`: walls shade as one continuous
+  surface, real arrises (glyph corners, wall→bevel) stay crisp. In place — the geometry
+  is always non-indexed. **bend.ts calls it after bending AND after conforming** — its
+  old `computeVertexNormals()` calls would have re-flattened everything on placement.
+- `bevelSegments` 2 → 3, so the rim profile reads round.
+
+After: wall-normal agreement 0% → 95.1%; a 26mm letter close-up shows genuinely round
+bowls. Triangles scale with physical size (6.1k at 12mm → 12.2k at 26mm for one word) —
+the budget follows print scale instead of curve count. The remaining "worst step" in the
+metric (~30°) is real glyph anatomy (bowl-to-stem joints), not tessellation — it stays,
+as it should. textwrap (bend + flat-face + reload) and textsolid (watertight, manifold,
+0 open edges after conform) both green.
+
+Not covered: **logo layers** (`svg/extrude.ts`) share the fixed-`curveSegments` pattern
+but extrude in SVG units and scale to mm afterwards, so a mm chord tolerance needs the
+scale factor threaded in first. Same treatment, small refactor — follow-up.
+
 ## Build 393 — text rides with the part it is stuck to
 
 Reported: rotate a model with text on it and only the model turns. Measured before

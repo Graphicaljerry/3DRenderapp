@@ -13,6 +13,7 @@ comes from. Details live in the code and in `moldable-lite/README.md`.
 | 3D viewer | **three.js** (`src/components/Viewer.tsx`) — render-on-demand, not a game loop. |
 | CAD engine | **replicad** (JavaScript CAD API) running on the **OpenCascade (OCCT) B-rep kernel compiled to WebAssembly**, inside a Web Worker (`src/worker/`). This is what turns AI-written code into real solids and STL/3MF/STEP/OBJ exports. |
 | Live-drag previews | **Manifold** (WASM mesh booleans) for extrude drags; OCCT for fillets. OCCT is always the source of truth. |
+| Model import | `STEP/STP` → editable CAD solid. `STL`/`3MF` → the same, via OCCT's mesh solidifier (so a MakerWorld download is AI-editable); anything it can't solidify falls back to the mesh pipeline. `GLB/GLTF` → mesh. Reader: `src/gen/load3mf.ts`, `src/gen/loadMesh.ts`. |
 | Fallback engine | A primitive+CSG engine (three-bvh-csg) boots silently if OCCT WASM fails — everything works except STEP export. |
 | Mesh engines | Text/photo → mesh via provider APIs (see keys below); cleaned with meshoptimizer. |
 | Storage | Browser-local: IndexedDB (`idb`) for projects, localStorage for settings. No server required to run. |

@@ -2023,7 +2023,7 @@ export default function App() {
       return;
     }
     // 3D files import directly instead of becoming a reference photo.
-    if (/\.(glb|gltf|stl|step|stp|shapr)$/i.test(file.name)) {
+    if (/\.(glb|gltf|stl|3mf|step|stp|shapr)$/i.test(file.name)) {
       void importModelFile(file);
       return;
     }
@@ -3182,18 +3182,21 @@ export default function App() {
     }
   }
 
-  /** Import a 3D file directly. STEP/STP → a live, AI-editable CAD solid;
-   *  GLB/STL → the mesh pipeline (measure/repair/export). */
+  /** Import a 3D file directly. STEP/STP → a live, AI-editable CAD solid; STL and 3MF
+   *  take the same road through the kernel and come out editable faceted solids (the
+   *  point being that a model downloaded from MakerWorld can then be told what to
+   *  change); GLB, and anything the kernel can't solidify, land in the mesh pipeline
+   *  where measure, repair, resize and export still work. */
   async function importModelFile(f: File) {
     if (status === "generating") return;
 
     // A model is already on the canvas → a dropped mesh becomes a NEW OBJECT next to it
     // (Objects panel: position, Merge, or remove) instead of silently replacing the work.
-    if (geometry && /\.(glb|gltf|stl)$/i.test(f.name)) {
+    if (geometry && /\.(glb|gltf|stl|3mf)$/i.test(f.name)) {
       setStatus("generating");
       try {
         const { geometry: g, dims: d } = await loadAnyMesh(f);
-        const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
+        const cleanName = f.name.replace(/\.(glb|gltf|stl|3mf)$/i, "");
         addAttachment(g, cleanName);
         setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Added **${cleanName}** (${d.x} × ${d.y} × ${d.z} mm) as a new object on the canvas — it's in the Objects panel. Position it with the gizmo, **Merge** to fuse it into the model, or ✕ to remove. (To open it on its own instead, start a + New chat first.)` }]);
       } catch (err: any) {
@@ -3217,11 +3220,23 @@ export default function App() {
     // fillets won't work on facets. If the conversion fails (huge/organic/broken meshes),
     // the file falls through to the plain mesh pipeline below with a note.
     const isStep = /\.(step|stp)$/i.test(f.name);
-    if (isStep || /\.stl$/i.test(f.name)) {
+    const is3mf = /\.3mf$/i.test(f.name);
+    if (isStep || is3mf || /\.stl$/i.test(f.name)) {
       // The kernel warm-up is deferred to post-paint idle — boot it here rather than
       // bouncing a STEP import ("try again") or quietly routing an STL to the mesh path.
       const s = sel ?? (await ensureEngine());
       const asCad = isStep ? ("step" as const) : s.kind === "replicad" && s.engine.setImport ? ("stl" as const) : null;
+      // 3MF carries the same triangles an STL does, just zipped and with real units, so
+      // it goes into the kernel down the STL road: same editable faceted solid, same AI
+      // edits on top of it. The kernel is handed STL bytes because that is the reader it
+      // has; nothing about the model changes on the way through.
+      let cadFile: Blob = f;
+      if (is3mf && asCad) {
+        const { threeMfToGeometry, geometryToStl } = await import("./gen/load3mf");
+        const { geometry } = await threeMfToGeometry(f);
+        cadFile = geometryToStl(geometry);
+        geometry.dispose();
+      }
       if (asCad === "step" && (s.kind !== "replicad" || !s.engine.setImport)) {
         setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "STEP import needs the OpenCascade engine, which failed to boot on this device (the app fell back to the primitive engine).", error: true }]);
         return;
@@ -3229,11 +3244,11 @@ export default function App() {
       if (asCad) {
         setStatus("generating");
         try {
-          await s.engine.setImport!(f, asCad);
-          importFileRef.current = f;
+          await s.engine.setImport!(cadFile, asCad);
+          importFileRef.current = cadFile;
           importKindRef.current = asCad;
           const res = await s.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
-          const cleanName = f.name.replace(/\.(step|stp|stl)$/i, "");
+          const cleanName = f.name.replace(/\.(step|stp|stl|3mf)$/i, "");
           applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
           seedHistory("replicad", IMPORT_PASSTHROUGH, undefined);
           setMode("precise");
@@ -3248,7 +3263,9 @@ export default function App() {
               text: `Imported ${f.name} as an editable CAD solid${caveat} (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
             },
           ]);
-          if (asCad === "stl") {
+          if (asCad === "stl" && !is3mf) {
+            // 3MF declares its units, so there is nothing to second-guess — only STL
+            // hands over bare numbers that might be inches.
             maybeOfferInches(res.dims); // STEP carries real units; STL just carries numbers
             // Downloaded STLs arrive lying however they were modelled — same offer as
             // the mesh path, and only once units are settled (see above).
@@ -3273,7 +3290,7 @@ export default function App() {
     setStatus("generating");
     try {
       const { geometry: g, dims: d, texture } = await loadAnyMesh(f);
-      const cleanName = f.name.replace(/\.(glb|gltf|stl)$/i, "");
+      const cleanName = f.name.replace(/\.(glb|gltf|stl|3mf)$/i, "");
       const res: EngineResult = {
         kind: "generative",
         geometry: g,
@@ -8284,7 +8301,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           onDrop={(e) => {
             e.preventDefault();
             setDragOver(false);
-            const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
+            const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|3mf|step|stp|shapr)$/i.test(x.name));
             if (fs.length) onPickFiles(fs);
           }}
         >
@@ -8341,7 +8358,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             <input
               ref={fileRef}
               type="file"
-              accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
+              accept="image/*,.svg,.glb,.gltf,.stl,.3mf,.step,.stp,.shapr"
               multiple
               hidden
               onChange={(e) => {

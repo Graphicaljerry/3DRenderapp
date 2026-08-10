@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { threeMfToGeometry, looksLike3MF } from "./load3mf";
 
 export interface MeshLoad {
   geometry: THREE.BufferGeometry;
@@ -10,13 +11,20 @@ export interface MeshLoad {
 }
 
 /**
- * Load a mesh file of either supported kind (GLB/GLTF or STL) — used for
+ * Load a mesh file of any supported kind (GLB/GLTF, STL or 3MF) — used for
  * user-imported models (e.g. generated for free in Tripo Studio, downloaded
  * from Printables, …) and for re-opening stored generative results.
  */
 export async function loadAnyMesh(file: Blob): Promise<MeshLoad> {
   const name = ((file as File).name ?? "").toLowerCase();
   if (name.endsWith(".stl")) return stlToGeometry(file);
+  // 3MF is checked by CONTENT as well as by name: the blob stored with a project has no
+  // filename by the time it is re-read, so an imported MakerWorld model would come back
+  // from a reload as an unreadable file if this went by extension alone.
+  if (name.endsWith(".3mf") || (await looksLike3MF(file))) {
+    const { geometry, dims } = await threeMfToGeometry(file);
+    return { geometry, dims };
+  }
   try {
     return await glbToGeometry(file);
   } catch (e) {

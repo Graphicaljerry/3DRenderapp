@@ -917,6 +917,33 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 400 — 3MF import: the models you already have
+
+The importer took `glb gltf stl step stp shapr` — everything except the format
+MakerWorld, Printables, Bambu Studio and Orca actually hand you. A downloaded model
+simply could not be opened.
+
+`src/gen/load3mf.ts` reads the zip's model XML: declared units (micron through foot —
+Bambu exports micron, and getting it wrong is a model a thousand times too big), the
+`<build>` items rather than the resource list (a resource nothing references is a spare
+part, not something on the plate), nested `<components>` assemblies with a depth cap,
+and the 4×3 row-major transform **transposed correctly** — the classic 3MF bug is that
+single-object files look fine and every assembly comes out scrambled.
+
+**It imports as an editable solid, not a frozen mesh.** 3MF is triangles, so it takes the
+STL road into OCCT via `geometryToStl` and comes out a faceted B-rep — which is the
+difference between looking at a MakerWorld model and telling the AI to put two M4 holes
+in it. Anything the kernel can't solidify (a plate of several disjoint bodies, say) falls
+back to the mesh pipeline with a note, exactly as STL already did.
+
+`loadAnyMesh` sniffs 3MF by content as well as by name, because the blob stored with a
+project has no filename by the time it is re-read.
+
+Verified with hand-built fixtures — mm/inch/micron units, a component transform, a
+3-item plate, reload — plus a round-trip through the app's own `write3MF`, which is the
+closest thing to a real Bambu file available offline (components wrapper, basematerials,
+per-part config). The mm box comes back Watertight: Yes.
+
 ## Build 399 — the other computer stops showing the old model
 
 Reported: a second machine keeps rendering a stale version of a project no matter how

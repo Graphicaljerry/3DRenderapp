@@ -2909,7 +2909,7 @@ export function Workspace(p: Props) {
     setDragOver(false);
     setDragOverCanvas(false);
     // ALL usable files, not the first: extra photos become unlabelled references.
-    const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|step|stp|shapr)$/i.test(x.name));
+    const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|3mf|step|stp|shapr)$/i.test(x.name));
     if (fs.length) p.onPickImages(fs);
   }
 
@@ -3302,8 +3302,8 @@ export function Workspace(p: Props) {
                 <button
                   type="button"
                   className="attach"
-                  title={`Upload photos or sketches → 3D — up to ${p.maxPhotos} pictures in one request. ${p.photoAdvice}`}
-                  aria-label="Upload photos or sketches to turn into a 3D model"
+                  title={`Photos or sketches → 3D (up to ${p.maxPhotos} pictures in one request), or drop a model you already have: STEP, STL, 3MF, GLB. ${p.photoAdvice}`}
+                  aria-label="Upload photos, sketches, or an existing 3D model"
                   onClick={() => fileRef.current?.click()}
                 >
                   <IconPaperclip />
@@ -3311,7 +3311,7 @@ export function Workspace(p: Props) {
                 <input
                   ref={fileRef}
                   type="file"
-                  accept="image/*,.svg,.glb,.gltf,.stl,.step,.stp,.shapr"
+                  accept="image/*,.svg,.glb,.gltf,.stl,.3mf,.step,.stp,.shapr"
                   multiple
                   hidden
                   onChange={(e) => {

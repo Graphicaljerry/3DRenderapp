@@ -917,6 +917,30 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 401 — pictures by address, not just by file
+
+"Copy image address" is how most people hand over a picture they found, and it used to
+paste a wall of URL into the prompt. Now a pasted address is fetched, resized and
+attached like any photo, with its thumbnail in the composer and in the sent message.
+
+Deliberately narrow on PASTE: only an address that says it is a picture in its own
+extension (or a `data:`/`blob:` URL) is taken, because a link somebody meant as text has
+to land as text. A DROP is not ambiguous — you dragged a picture — so that path accepts
+any address and lets the fetch decide. It also reads the `<img src>` a browser puts on
+the clipboard when you copy an image off a page, which on Safari is often the ONLY thing
+there: no bitmap, no file.
+
+The bytes are fetched rather than the URL handed to the model — a link works only on
+providers that accept URL images and only while the page it came from stays up, whereas
+the bytes give the same thumbnail, the same resize and the same behaviour everywhere.
+Falls back to the relay when the host blocks cross-site reads (most image CDNs do), and
+says so plainly when it can't. `sniffImageType` reads the format out of the bytes, since
+a CDN serving pictures as `application/octet-stream` would otherwise be thrown away by
+the MIME check the rest of the attach path does.
+
+Probe: `imgurl.mjs` — paste, second paste, a page link left alone, copy-from-page HTML,
+a mislabelled CDN, a dragged image, a blocked host, and the thumbnails in the bubble.
+
 ## Build 400 — 3MF import: the models you already have
 
 The importer took `glb gltf stl step stp shapr` — everything except the format

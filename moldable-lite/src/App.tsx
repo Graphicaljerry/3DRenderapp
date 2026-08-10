@@ -23,6 +23,7 @@ import { draftPlan, planToPrompt, type BuildPlan } from "./llm/plan";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
 import { downscaleImage, fitPhotoBudget, squareAvatar, MAX_PHOTOS, MAX_UPLOAD_BYTES } from "./lib/downscale";
+import { fetchAsBlob } from "./gen/util";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalFonts, loadLocalFont } from "./text/fonts";
 import { TEXT_DEFAULT, buildTextGeometry, type TextSpec } from "./text/geometry";
@@ -2092,6 +2093,82 @@ export default function App() {
     });
   }
 
+  /** A pasted or dropped web address that is plainly a picture. Deliberately narrow for
+   *  PASTE: a link somebody meant as text has to land as text, so only an address that
+   *  says "image" in its own extension (or a data:/blob: URL) is taken. A DROP is not
+   *  ambiguous — you dragged a picture — so that path accepts any address and lets the
+   *  fetch decide. */
+  const IMG_URL = /^(data:image\/|blob:)|\.(png|jpe?g|webp|gif|avif|bmp|heic)(\?|#|$)/i;
+  /** Everything in a clipboard/drop payload that could be a picture's address, including
+   *  the `<img src>` that a browser puts on the clipboard when you copy an image from a
+   *  page (Safari often provides ONLY that — no bitmap, no file). */
+  function imageUrlsIn(dt: DataTransfer | null | undefined, strict: boolean): string[] {
+    if (!dt) return [];
+    const out: string[] = [];
+    const add = (u: string) => {
+      const t = u.trim();
+      if (!t || out.includes(t)) return;
+      if (!/^(https?:|data:|blob:)/i.test(t)) return;
+      if (strict && !IMG_URL.test(t)) return;
+      out.push(t);
+    };
+    for (const line of (dt.getData("text/uri-list") || "").split(/[\r\n]+/)) if (!line.startsWith("#")) add(line);
+    const html = dt.getData("text/html");
+    if (html) for (const m of html.matchAll(/<img[^>]+src=["']([^"']+)["']/gi)) add(m[1]);
+    const text = (dt.getData("text/plain") || "").trim();
+    if (text && !/\s/.test(text)) add(text);
+    return out.slice(0, MAX_PHOTOS);
+  }
+  /** Plenty of CDNs serve pictures as application/octet-stream, and the rest of the app
+   *  routes on the MIME type — so a picture that arrives mislabelled would be dropped on
+   *  the floor. Read the type out of the bytes, which is the only source that can't lie,
+   *  and fall back to decoding it for formats without a signature worth checking. */
+  async function sniffImageType(b: Blob): Promise<string | null> {
+    const h = new Uint8Array(await b.slice(0, 12).arrayBuffer());
+    const be = (i: number) => String.fromCharCode(h[i], h[i + 1], h[i + 2], h[i + 3]);
+    if (h[0] === 0x89 && be(1) === "PNG\r") return "image/png";
+    if (h[0] === 0xff && h[1] === 0xd8) return "image/jpeg";
+    if (be(0) === "RIFF" && be(8) === "WEBP") return "image/webp";
+    if (be(0) === "GIF8") return "image/gif";
+    if (be(4) === "ftyp" && /avif|heic|heif|mif1/.test(be(8))) return be(8).startsWith("avif") ? "image/avif" : "image/heic";
+    if (h[0] === 0x42 && h[1] === 0x4d) return "image/bmp";
+    try { (await createImageBitmap(b)).close(); return "image/png"; } catch { return null; }
+  }
+  const [fetchingImages, setFetchingImages] = useState(0);
+  /** A picture dragged straight off a web page: no file, just an address (and often the
+   *  page's own <img> markup). Not strict about the extension — you dragged a picture,
+   *  so the fetch gets to decide whether it is one. */
+  const dropImageUrls = (dt: DataTransfer) => void pickImageUrls(imageUrlsIn(dt, false));
+  /** Attach pictures by address. The bytes are fetched rather than the URL handed to the
+   *  model: a link works only on providers that accept URL images and only while the page
+   *  it came from stays up, whereas the bytes give the same thumbnail, the same resize,
+   *  and the same behaviour on every engine. Falls back to the relay when the host blocks
+   *  cross-site reads, which most image CDNs do. */
+  async function pickImageUrls(urls: string[]) {
+    if (!urls.length) return;
+    setFetchingImages((n) => n + urls.length);
+    const files: File[] = [];
+    const failed: string[] = [];
+    await Promise.all(urls.map(async (u) => {
+      try {
+        const blob = u.startsWith("data:") || u.startsWith("blob:") ? await (await fetch(u)).blob() : await fetchAsBlob(u, effectiveProxy);
+        const type = blob.type.startsWith("image/") ? blob.type : await sniffImageType(blob);
+        if (!type) throw new Error("that address isn't a picture");
+        const base = decodeURIComponent(u.split(/[?#]/)[0].split("/").pop() || "").replace(/[^\w.-]+/g, "_");
+        const name = /\.(png|jpe?g|webp|gif|avif|bmp|heic)$/i.test(base) ? base : `${base || "picture"}.${type.split("/")[1].replace(/[^\w]/g, "")}`;
+        files.push(new File([blob], name, { type }));
+      } catch (err: any) {
+        failed.push(`${u.length > 60 ? u.slice(0, 57) + "…" : u} (${String(err?.message ?? err).slice(0, 60)})`);
+      }
+    }));
+    setFetchingImages((n) => Math.max(0, n - urls.length));
+    if (files.length) pickImages(files);
+    if (failed.length) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", error: true,
+        text: `Couldn't fetch ${failed.length === 1 ? "that picture" : `${failed.length} of those pictures`}: ${failed.join("; ")}. Some sites block other pages from reading their images — saving the picture and dropping the file in always works.` }]);
+    }
+  }
+
   // Paste an image straight from the clipboard (screenshot, copied file) anywhere
   // in the app — INCLUDING the Launchpad, where it lands in the launch composer's
   // attachment chip. The old `entered` gate made paste dead on the front door.
@@ -2104,9 +2181,18 @@ export default function App() {
       // them looked like the paste had half-failed.
       const pics = [...items].filter((it) => it.type.startsWith("image/"))
         .map((it) => it.getAsFile()).filter((f): f is File => !!f);
-      if (!pics.length) return;
+      if (pics.length) {
+        e.preventDefault();
+        pickImages(pics);
+        return;
+      }
+      // No bitmap on the clipboard — but "Copy image address" is how most people hand a
+      // picture over, and it arrives as plain text that would otherwise be pasted into
+      // the prompt as a wall of URL.
+      const urls = imageUrlsIn(e.clipboardData, true);
+      if (!urls.length) return;
       e.preventDefault();
-      pickImages(pics);
+      void pickImageUrls(urls);
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
@@ -6827,6 +6913,8 @@ export default function App() {
         refUrls={refs.map((r) => r.url)}
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
+        onDropUrls={dropImageUrls}
+        fetchingImages={fetchingImages}
         onPickFiles={pickImages}
         onClearImage={clearImage}
         webMode={webMode}
@@ -6919,6 +7007,8 @@ export default function App() {
         refUrls={refs.map((r) => r.url)}
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
+        onDropUrls={dropImageUrls}
+        fetchingImages={fetchingImages}
         photoAdvice={imageAdvice({ provider: llm.provider, mesh: mode === "generative" })}
         onMarkup={attachMarkup}
         onClearImage={clearImage}
@@ -8207,7 +8297,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -8223,6 +8313,8 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   refUrls: string[];
   maxPhotos: number;
   onRemoveRef: (i: number) => void;
+  onDropUrls: (dt: DataTransfer) => void;
+  fetchingImages: number;
   onPickFiles: (fs: File[]) => void;
   onClearImage: () => void;
   webMode: "auto" | "on" | "off";
@@ -8303,6 +8395,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             setDragOver(false);
             const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|3mf|step|stp|shapr)$/i.test(x.name));
             if (fs.length) onPickFiles(fs);
+            else onDropUrls(e.dataTransfer); // an image dragged straight off a web page
           }}
         >
           {imageUrl && (
@@ -8316,6 +8409,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
               </span>
               <button type="button" aria-label="Remove reference pictures" onClick={onClearImage}><IconX /></button>
             </div>
+          )}
+          {fetchingImages > 0 && (
+            <div className="refstrip"><span className="refstrip-count">Fetching {fetchingImages === 1 ? "a picture" : `${fetchingImages} pictures`}…</span></div>
           )}
           {imageUrl && refUrls.length > 0 && (
             <div className="refstrip" aria-label="Extra reference pictures">

@@ -2357,6 +2357,8 @@ interface Props {
   refUrls: string[]; // extra unlabelled reference photos riding with the composer image
   maxPhotos: number; // how many pictures one request carries, front photo included
   onRemoveRef: (i: number) => void;
+  onDropUrls: (dt: DataTransfer) => void;
+  fetchingImages: number;
   photoAdvice: string; // model-aware format/resolution guidance for attachments
   onMarkup: (blob: Blob, view: { azimuthDeg: number; elevationDeg: number } | null, region: MarkRegion | null) => void;
   onClearImage: () => void;
@@ -2911,6 +2913,7 @@ export function Workspace(p: Props) {
     // ALL usable files, not the first: extra photos become unlabelled references.
     const fs = Array.from(e.dataTransfer.files).filter((x) => x.type.startsWith("image/") || /\.(svg|glb|gltf|stl|3mf|step|stp|shapr)$/i.test(x.name));
     if (fs.length) p.onPickImages(fs);
+    else p.onDropUrls(e.dataTransfer); // an image dragged straight off a web page
   }
 
   const objectsPanel = (
@@ -3277,6 +3280,9 @@ export function Workspace(p: Props) {
             )}
 
             {p.imageUrl && !p.imageMarkup && <RefStrip refs={p.refUrls} max={p.maxPhotos} onRemove={p.onRemoveRef} />}
+            {p.fetchingImages > 0 && (
+              <div className="refstrip"><span className="refstrip-count">Fetching {p.fetchingImages === 1 ? "a picture" : `${p.fetchingImages} pictures`}…</span></div>
+            )}
 
             {/* Shown for ANY engine now: extra angles help the CAD path just as much
                 as the mesh engines (one photo leaves the far side to guesswork), and

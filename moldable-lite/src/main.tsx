@@ -25,6 +25,31 @@ window.addEventListener("vite:preloadError", (e) => {
 // A load that stays healthy for a while re-arms the auto-reload for the NEXT deploy.
 setTimeout(() => sessionStorage.removeItem("moldable_chunk_reload"), 20_000);
 
+// One refresh should be enough to be on the new build. The service worker serves the
+// app out of its precache, so a refresh after a deploy paints the OLD bundle while the
+// new worker installs behind it — you only see the new version on the refresh AFTER
+// that. Two refreshes to pick up a fix is indistinguishable from "the app is stuck on
+// an old version", which is exactly what it got reported as.
+//
+// `controllerchange` fires the moment the new worker claims this page. Reloading there
+// lands on the new build immediately. Guarded on there having BEEN a controller: the
+// very first visit installs a worker and claims the page with nothing stale to replace,
+// and reloading a first-time visitor for no reason is its own bug.
+if ("serviceWorker" in navigator) {
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloading = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => {
+    if (!hadController || reloading) return;
+    reloading = true;
+    location.reload();
+  });
+  // A tab left open for a day never asks whether it is current. Ask on every return to
+  // the tab, and hourly while it sits there, so a long-lived window still catches up.
+  const poke = () => void navigator.serviceWorker.getRegistration().then((r) => r?.update()).catch(() => {});
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") poke(); });
+  setInterval(poke, 60 * 60 * 1000);
+}
+
 // Shown while the app chunk loads. Invisible for the first ~250 ms (CSS delay), so
 // fast/cached loads never flash it; on slow networks it replaces a blank screen.
 // Theme comes from the index.html pre-paint script (data-theme + backdrop).

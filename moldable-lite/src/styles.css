@@ -1436,6 +1436,14 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .imgchip img { width: 40px; height: 40px; object-fit: cover; border-radius: var(--r-sm); }
 .imgchip span { flex: 1; font-size: var(--fs-sm); color: var(--ink2); }
 .imgchip button { border: none; background: none; color: var(--subt); font-size: var(--fs-lg); }
+/* "Save this version": a deliberate act, so it gets its own row above the list rather
+   than hiding behind a row's hover state. */
+.vsave { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 0 0 10px; border-bottom: 1px solid var(--bord); margin-bottom: 10px; }
+.vsave form { display: flex; gap: 6px; flex: 1 1 100%; }
+.vsave input { flex: 1; min-width: 0; padding: 6px 9px; border: 1px solid var(--bord); border-radius: var(--r-sm); background: var(--bg); color: var(--ink); }
+.vsave .fine { flex: 1 1 100%; }
+.vtag.kept { background: var(--accent-w); color: var(--accent-d); }
+
 /* The unlabelled extras, thumbnail-sized so ten of them still fit above the composer.
    Wraps rather than scrolls: a hidden row of photos is the problem this replaced. */
 .refstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 6px 12px 0; }

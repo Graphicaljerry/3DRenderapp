@@ -917,6 +917,46 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 399 — the other computer stops showing the old model
+
+Reported: a second machine keeps rendering a stale version of a project no matter how
+many times it is refreshed. Three separate causes, all reproduced before being touched.
+
+**1. An open project was pinned to its old HEAD, on purpose.** `onRemoteProjects` merged
+an incoming sync with `keepHead: true` so a half-finished edit couldn't be yanked away —
+but a device that is merely SHOWING a project has no edit to protect. It sat on the
+superseded version while History filled with steps it refused to display, and
+republished that stale head on its next push. HEAD is now held only while a build is
+actually running; otherwise the project catches up, re-renders and says so.
+Measured two real devices against a mocked account: device 2 stayed at 70 mm while
+device 1 was at 82.5 mm, refresh after refresh. Now it follows within one sync cycle.
+
+**2. Mesh blobs were fetched by "do I have anything", not "do I have THIS".** For
+generative and imported projects, `reconcileRemote` only downloaded the bucket mesh when
+the device had no geometry at all — so a device holding an older mesh never got the new
+one, and re-advertised the stale hash. Now it compares the account's hash against this
+device's marker, and only when the merge actually moved HEAD (so unpushed local bytes,
+which HEAD already prefers, are never clobbered).
+
+**3. Two refreshes to pick up a deploy.** The service worker precaches the shell, so a
+refresh after a deploy paints the OLD bundle while the new worker installs behind it.
+`controllerchange` now reloads once (guarded on there having been a controller, so a
+first visit doesn't bounce), plus an update check on tab focus and hourly.
+
+**Save this version** (History panel): name what's on screen and it becomes a checkpoint
+— exempt from the 60-step trim, marked in the list, and pushed to the account
+immediately rather than on the autosave debounce. It is an APPEND, which is the whole
+trick: merge picks HEAD by the version's own createdAt, so a fresh checkpoint wins on
+every device without any of them being told which copy is right. Restoring one appends
+too, so a restore also lands everywhere.
+
+Fixed while in there: `restoreVersion` dropped `texts`, `logos`, `surfFx` and
+`partColors`, so restoring a version came back as the right solid with its text, logos,
+surface treatment and colours stripped off — a state that had never existed.
+
+Known stale probe: `sync-check.mjs` scenarios B–D still click a retired "Skip" button
+and can't run; scenario A passes. `stalehead.mjs` covers the two-device case directly.
+
 ## Build 398 — ten reference photos, and only one album in flight
 
 Asked for: attach up to 10 pictures, with a size limit, so the routed model has the best

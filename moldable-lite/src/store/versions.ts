@@ -73,9 +73,16 @@ export function appendVersion(project: Project, snap: Snapshot): Project {
  *  makes the panel crawl. The oldest steps fall off the end. */
 export const MAX_VERSIONS = 60;
 
-function trimVersions(list: Version[]): Version[] {
+/** Age out the oldest steps, but never a named checkpoint. Trimming one would silently
+ *  delete the exact thing the user asked the app to hold on to — and on a busy project
+ *  sixty steps go by in an afternoon. */
+export function trimVersions(list: Version[]): Version[] {
   if (list.length <= MAX_VERSIONS) return list;
-  return list.slice(list.length - MAX_VERSIONS);
+  const kept = list.filter((v) => v.keep);
+  const rest = list.filter((v) => !v.keep);
+  const room = Math.max(0, MAX_VERSIONS - kept.length);
+  const survivors = new Set([...kept, ...rest.slice(rest.length - room)].map((v) => v.id));
+  return list.filter((v) => survivors.has(v.id));
 }
 
 /** Rewrite the HEAD version in place, keeping its id (so redo branches stay valid).
@@ -145,6 +152,14 @@ export function restoreVersion(project: Project, versionId: string): Project {
     meshXform: t.meshXform,
     genSource: t.genSource,
     splitPieces: t.splitPieces,
+    // The layers travel too. Without these a restore came back as the right SOLID with
+    // its text, logos, surface treatment and colours stripped off — a version that had
+    // never existed. Every other writer here carries them; this one didn't.
+    surfFx: t.surfFx,
+    texts: t.texts,
+    logos: t.logos,
+    partColors: t.partColors,
+    thumb: t.thumb,
   };
   return {
     ...project,
@@ -194,3 +209,34 @@ export function navigateHead(project: Project, versionId: string): Project {
     headId: t.id,
   };
 }
+
+/** Save what is on screen as a named checkpoint.
+ *
+ *  It copies HEAD rather than re-deriving a snapshot, because HEAD already IS what is on
+ *  screen — every editor here commits through appendVersion/replaceHeadVersion first —
+ *  so a checkpoint can never disagree with the model the user was looking at when they
+ *  pressed the button.
+ *
+ *  And it APPENDS rather than flagging the current version, on purpose: a checkpoint has
+ *  to be the newest version in the project by createdAt, because that is the one thing
+ *  every device agrees on. Merge picks HEAD by the version's own age, so a freshly
+ *  appended checkpoint wins on the work laptop, the Mac app and the iPad alike, with no
+ *  device needing to be told which copy is right. Restoring one is the same move again,
+ *  which is why restoring also lands everywhere. */
+export function saveCheckpoint(project: Project, name: string): Project {
+  const i = headIndex(project);
+  const t = project.versions[i];
+  if (!t) throw new Error("Nothing to save yet — build something first.");
+  const v: Version = { ...t, id: uid(), createdAt: Date.now(), summary: name, keep: true };
+  return {
+    ...project,
+    updatedAt: Date.now(),
+    versions: trimVersions([...project.versions, v]),
+    headId: v.id,
+  };
+}
+
+/** Restoring a checkpoint is restoreVersion — it appends, so the restored state becomes
+ *  the newest version and reaches every device by the same rule. Named separately only
+ *  so callers read as what they mean. */
+export const restoreCheckpoint = restoreVersion;

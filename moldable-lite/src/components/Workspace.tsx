@@ -2530,6 +2530,8 @@ interface Props {
   headId?: string; // which version the model is actually showing
   restoringId: string | null; // a restore is rebuilding this one right now
   onRestore: (id: string) => void;
+  onSaveCheckpoint: (name: string) => void;
+  checkpointNote: string;
   undoCtl: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean; busy: boolean };
   supportsStep: boolean;
   canExport: (f: ExportFormat) => boolean;
@@ -4488,7 +4490,7 @@ export function Workspace(p: Props) {
                 {dockPanel === "code" && (
                   <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
                 )}
-                {dockPanel === "history" && <VersionHistory versions={p.versions} headId={p.headId} restoringId={p.restoringId} onRestore={p.onRestore} />}
+                {dockPanel === "history" && <VersionHistory versions={p.versions} headId={p.headId} restoringId={p.restoringId} onRestore={p.onRestore} onSaveCheckpoint={p.onSaveCheckpoint} syncNote={p.checkpointNote} />}
                 {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
               </div>
             </aside>
@@ -5475,12 +5477,35 @@ function whenLabel(ts: number): string {
   return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore }: {
+const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore, onSaveCheckpoint, syncNote }: {
   versions: Version[];
   headId?: string; // where the model actually IS — undo moves this without touching the list
   restoringId: string | null;
   onRestore: (id: string) => void;
+  onSaveCheckpoint: (name: string) => void;
+  syncNote: string;
 }) {
+  const [naming, setNaming] = useState(false);
+  const [draftName, setDraftName] = useState("");
+  const saveRow = (
+    <div className="vsave">
+      {naming ? (
+        <form
+          onSubmit={(e) => { e.preventDefault(); const n = draftName.trim(); if (n) onSaveCheckpoint(n); setNaming(false); setDraftName(""); }}
+        >
+          <input autoFocus value={draftName} maxLength={60} placeholder="Name this version…" aria-label="Name for this saved version"
+            onChange={(e) => setDraftName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") { setNaming(false); setDraftName(""); } }} />
+          <button type="submit" className="primary sm" disabled={!draftName.trim()}>Save</button>
+        </form>
+      ) : (
+        <button type="button" className="ghost sm" disabled={!versions.length || !!restoringId}
+          title="Save what's on screen as a named version. It's pushed to your account straight away and never ages out, so any computer can open exactly this."
+          onClick={() => setNaming(true)}>Save this version</button>
+      )}
+      <span className="fine">{syncNote}</span>
+    </div>
+  );
   if (versions.length === 0) return <div className="panel muted">No versions yet — each change is saved here.</div>;
   // Newest first, the way every history panel works — and each row carries its step
   // NUMBER counted from the first version, so "which came before which" is readable
@@ -5496,6 +5521,7 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
         <h3>History</h3>
         <span className="fine">{versions.length} step{versions.length === 1 ? "" : "s"} · newest first</span>
       </div>
+      {saveRow}
       <div className="vlist">
         {list.map(({ v, step }) => {
           const { text, restored } = versionLabel(v.summary);
@@ -5522,6 +5548,7 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
                 <span className="vsum">{text}</span>
                 <span className="vmeta">{meta}</span>
                 <span className="vstate">
+                  {v.keep && <span className="vtag kept">Saved</span>}
                   {isHead ? <span className="vtag now">Current</span>
                     : busy ? <span className="vtag">Loading…</span>
                       : <><span className="vgo">Go back to this</span>{restored && <span className="vtag">restored</span>}</>}
@@ -5531,7 +5558,7 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
           );
         })}
       </div>
-      <p className="fine">Restoring adds a step rather than deleting any — nothing is lost. The oldest steps drop off past {MAX_VERSIONS}.</p>
+      <p className="fine">Restoring adds a step rather than deleting any — nothing is lost. Unnamed steps drop off past {MAX_VERSIONS}; versions you save by name never do.</p>
     </div>
   );
 });

@@ -493,9 +493,24 @@ async function reconcileRemote(c: any, uid: string, force = false): Promise<{ ad
           };
           const next = mergeProjects(local, hydrated);
           const changed = mergeChanged(local, next);
-          // The bucket holds the head mesh; fetch it when this device has no geometry at
-          // all (the "synced project opens empty on another device" fix).
-          if (!next.glb && !next.importFile && r.cloudMesh) {
+          // The bucket holds the head mesh. Fetch it when this device has NO geometry
+          // (a project arriving empty), and — the part that was missing — whenever the
+          // bytes it holds are not the bytes the account is advertising.
+          //
+          // The old test was "do I have any geometry at all", so a device that already
+          // held an older mesh for this project never downloaded the new one: History,
+          // chat and dimensions all updated, the model on screen did not, and no number
+          // of refreshes fixed it because the guard stayed false. Worse, the next push
+          // from that device re-advertised the stale hash. Comparing against the marker
+          // (the bytes this device knows are in the bucket) is the honest test.
+          //
+          // Only when the merge actually MOVED head, though: bytes generated here and
+          // not yet pushed are the newer ones, and HEAD already says so — overwriting
+          // them with the account's older copy would put the wrong mesh under the right
+          // version.
+          const held = localStorage.getItem(meshMark(r.id));
+          const staleMesh = !!r.cloudMesh && held !== r.cloudMesh.hash && next.headId !== local.headId;
+          if ((staleMesh || (!next.glb && !next.importFile)) && r.cloudMesh) {
             const m = await fetchMesh(c, uid, r.id, r.cloudMesh.hash);
             if (m) {
               if (r.cloudMesh.src === "glb") next.glb = m; else next.importFile = m;

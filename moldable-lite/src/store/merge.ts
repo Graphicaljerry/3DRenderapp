@@ -19,7 +19,7 @@
 // merge you have a longer History panel than you expected — every snapshot is still
 // there to jump back to.
 import type { Project, Version } from "./types";
-import { MAX_VERSIONS } from "./versions";
+import { trimVersions } from "./versions";
 
 /** Blobs are stripped from a project before it goes to the cloud (they live in the
  *  bucket), so a copy arriving from sync has version records with no geometry. Keep
@@ -46,8 +46,8 @@ function unionVersions(mine: Version[], theirs: Version[]): Version[] {
   }
   const all = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
   // The cap is still the cap — but it now bites a merged list, so trim from the OLD end
-  // only, and never below what a single side already had.
-  return all.length <= MAX_VERSIONS ? all : all.slice(all.length - MAX_VERSIONS);
+  // only, and never a named checkpoint (trimVersions owns both rules).
+  return trimVersions(all);
 }
 
 export interface MergeOpts {

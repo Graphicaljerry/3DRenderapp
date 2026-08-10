@@ -42,6 +42,11 @@ export interface Version {
   importKind?: "step" | "stl"; // how importFile parses — STL-as-CAD imports must NOT be re-read as STEP on undo/reopen
   genSource?: GenSource;
   thumb?: string; // mini canvas capture (data URL) of the model as it looked when this version landed
+  /** A version the user deliberately saved and named, rather than one the app recorded
+   *  because something changed. Two consequences: it is exempt from the MAX_VERSIONS
+   *  trim (a checkpoint you named is not something to quietly age out from under you),
+   *  and History marks it, so a long list still has findable landmarks in it. */
+  keep?: boolean;
   /** Split-to-fit-bed metadata: the merged mesh concatenates the pieces in order, so
    *  [vertex count, colour, dims] per piece is enough to reconstruct the per-piece
    *  export list after undo/redo/reopen without re-running the CSG. */

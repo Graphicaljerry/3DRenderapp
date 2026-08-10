@@ -58,7 +58,7 @@ import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { mergeProjects, mergeChanged } from "./store/merge";
-import { appendVersion, replaceHeadVersion, restoreVersion, navigateHead, headIndex } from "./store/versions";
+import { appendVersion, replaceHeadVersion, restoreVersion, saveCheckpoint, navigateHead, headIndex } from "./store/versions";
 import type { Project, Pin, Version, TextLayerSnap, LogoLayerSnap } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
@@ -6376,6 +6376,35 @@ export default function App() {
   }
   restoreRef.current = (id) => void restoreTo(id);
 
+  /** "Save this version": a named checkpoint, pushed to the account NOW rather than on
+   *  the autosave's debounce. The whole point is to be able to walk to another machine
+   *  and find it there, so a checkpoint that is still sitting in a timer when the laptop
+   *  closes would be the one thing this must never do. */
+  async function saveNamedVersion(name: string) {
+    const cur = projectRef.current;
+    if (!cur) return;
+    if (statusRef.current === "generating") {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", error: true,
+        text: "Still building — give it a moment, then save the version." }]);
+      return;
+    }
+    try {
+      const next = saveCheckpoint(cur, name);
+      persist(next);
+      stampHeadThumb();
+      setCheckpointNote(accountEmailRef.current ? "Saving to your account…" : `Saved “${name}” on this device.`);
+      if (!accountEmailRef.current) return;
+      await runSyncRef.current();
+      setCheckpointNote(cloudOfflineRef.current
+        ? `Saved “${name}” here — it goes to your account as soon as you're back online.`
+        : `Saved “${name}” to your account — open this project anywhere and it's the one you'll get.`);
+    } catch (err: any) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't save that version: ${String(err?.message ?? err)}`, error: true }]);
+      setCheckpointNote("");
+    }
+  }
+  const [checkpointNote, setCheckpointNote] = useState("");
+
   // Undo/redo step HEAD back/forward over the append-only version history, without
   // appending — so a redo stays available until the next real edit.
   const hIdx = project ? headIndex(project) : -1;
@@ -6607,19 +6636,35 @@ export default function App() {
           }
         });
       } else {
-        // The copy on disk just gained another device's history. Leaving the in-memory
-        // project untouched here is what lost a day's work: the next autosave wrote this
-        // stale version list straight back over the merged one. Fold the steps in NOW,
-        // keeping the head where it is so a half-finished edit isn't yanked away — the
-        // other device's steps appear in History, and nothing can overwrite them.
-        void getProject(open).then((fresh) => {
+        // The copy on disk just gained another device's history. Fold the steps in NOW —
+        // leaving the in-memory project untouched is what lost a day's work, because the
+        // next autosave wrote this stale version list back over the merged one.
+        //
+        // Whether HEAD moves with them is the whole "my work computer keeps showing the
+        // old model" report. Holding HEAD unconditionally was meant to protect a
+        // half-finished edit, but a device that is merely SHOWING a project has no edit
+        // to protect: it just sat on a superseded version, refresh after refresh, while
+        // History filled up with steps it refused to display — and republished that stale
+        // head to the account on its next push. So hold HEAD only while a build is
+        // actually running; otherwise catch up and re-render, and say so.
+        void getProject(open).then(async (fresh) => {
           const cur = projectRef.current;
           if (!fresh || !cur || cur.id !== fresh.id) return;
-          const next = mergeProjects(cur, fresh, { keepHead: true });
+          const busy = statusRef.current === "generating";
+          const next = mergeProjects(cur, fresh, { keepHead: busy });
           if (!mergeChanged(cur, next)) return;
           projectRef.current = next;
           setProject(next);
-          setAuthNotice(`This project also changed on another device — its steps are in History (${next.versions.length} in total). Nothing here was overwritten.`);
+          if (next.headId !== cur.headId) {
+            try {
+              await rebuildHead(next);
+              setAuthNotice(`Brought up to date — this project moved on another device, and the newest version is on screen. Every earlier step is still in History (${next.versions.length}).`);
+            } catch {
+              setAuthNotice(`This project changed on another device. The newer steps are in History (${next.versions.length}) — open the newest one to see it.`);
+            }
+          } else {
+            setAuthNotice(`This project also changed on another device — its steps are in History (${next.versions.length} in total). Nothing here was overwritten.`);
+          }
         });
       }
     }
@@ -7184,6 +7229,8 @@ export default function App() {
         headId={project?.headId}
         restoringId={restoringId}
         onRestore={onRestoreStable}
+        onSaveCheckpoint={(n) => void saveNamedVersion(n)}
+        checkpointNote={checkpointNote}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy || status === "generating" }}
         supportsStep={result?.supportsStep ?? false}
         canExport={(f) => (result?.kind === "generative" ? f === "stl" || f === "obj" || f === "3mf" /* = GenerativeEngine.canExport, inlined so the render path never loads the lazy engine */ : sel?.engine.canExport(f) ?? false)}

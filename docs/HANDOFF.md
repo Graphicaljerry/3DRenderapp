@@ -917,6 +917,21 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 408 — Templates/Library actually float now
+
+The topbar comment already said it: "Templates / Library are navigation, so they are
+text with an underline that grows on hover — no box." The CSS underneath it never
+matched — `.navlink` had a full `background`/`border`/`border-radius` box, and the
+`::after` underline it was supposed to use was referenced only in a reduced-motion
+media query, never defined. Three boxed buttons sat next to "+ New chat", so nothing
+read as primary.
+
+Fixed to match the comment: `.navlink` is transparent, borderless, no radius; the
+underline is a `::after` transform (compositor-only, no layout shift) that grows on
+hover. "+ New chat" is the only filled button left in the row. Verified via computed
+style (background/border actually resolve transparent/0, not just visually) in both
+themes, plus that the underline transform actually changes on hover.
+
 ## Build 407 — a real makeThread() helper, and why it isn't a real helix
 
 Build 406 (below) added prompt RULES about threads but no HANDOFF entry — landed here

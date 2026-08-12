@@ -917,6 +917,25 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 404 — undo 403's tessellation overreach
+
+Reported straight after 403: the model stopped loading on refresh. Mine. 403 floored the
+chord tolerance at 0.006 mm and scaled it at 0.0004 × the diagonal, so a 25 mm threaded
+stud asked for 0.01 mm chords on a helical sweep — a mesh big enough that the 25 s build
+watchdog killed it, which presents as an empty canvas.
+
+Density was never that part's problem: the screw in the report was already ~100k
+triangles at the OLD settings, so a finer chord bought nothing and cost everything.
+
+Now: angular tolerance 0.15 rad (~42 segments around a circle, against 21 before — the
+change that actually makes curves look round), chord tolerance 0.02–0.08 mm scaled to the
+part, and shapes with more than 300 faces fall back to the pre-403 settings entirely. A
+model that will not load is worse than one with visible facets. Same part: 2892 (before
+403) → 6940 (403, too heavy) → 4396 triangles, 4.1 s.
+
+Open question this leaves: if the screw STILL doesn't load on 404, the cause is not the
+mesher and the next place to look is the rebuild path itself.
+
 ## Build 403 — three reports: the 404, the missing photos, the faceting
 
 **OpenRouter 404 "only available through the Batch API".** The auto-router was choosing

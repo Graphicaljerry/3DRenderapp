@@ -917,6 +917,68 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 407 — a real makeThread() helper, and why it isn't a real helix
+
+Build 406 (below) added prompt RULES about threads but no HANDOFF entry — landed here
+now. Jerry sent the actual failing screw's source and it was still ragged: rules alone
+weren't enough because every model attempts a thread differently. So the app now owns
+thread construction: `makeThread()`, injected into the `replicad` namespace generated
+code receives (`src/worker/threads.ts`).
+
+**What was tried first, measured, and abandoned:** a real single-lead helix —
+`sketchHelix` + `sweepSketch` for the ridge, fused to a core cylinder. The sweep alone is
+fast (~250 ms). The FUSE is not: booleaning a solid against a long, thin, highly-curved
+sliver is a known-hard case for OCCT's boolean solver, and it hung past the 25 s build
+watchdog on every test — including a trivial 3 mm, 4-turn stud, isolated by calling
+`ReplicadEngine` directly (bypassing the whole chat/UI) to separate "is the geometry
+right" from "is the app slow." It isn't a tuning problem; this construction hangs in this
+kernel, full stop, and a model that never finishes building is worse than one with
+straight grooves. (An earlier attempt also had the sweep profile's local axes backwards —
+`sweepSketch`'s plane puts local X radial and local Y along the path, not the intuitive
+reverse — which independently produced overlapping, non-watertight geometry. Root-caused
+by reading the plane math out of replicad's own source, not by guessing again.)
+
+**What shipped:** one closed 2D profile — root radius / ramp / flat crest (never a knife
+edge) / ramp, repeated once per pitch, bounded by the axis — revolved 360° in a single
+op. No boolean, so it can't hang; the axis bound means it can't self-intersect either.
+This is concentric ribs, not a spiral: an honest tradeoff, documented at length in the
+file header and in the system prompt, because it changes what the AI should tell a user
+who asked for something that "screws in." Measured: the exact report geometry (4.55 mm
+OD, 0.7 mm pitch, 8.8 mm, 12.6 turns) builds in ~250 ms, watertight, clean concentric
+rings on screen. A 30-rib M6 stud: 601 ms. The full report part (base + fillet + fused
+thread): 818 ms.
+
+Prompt updated to match: `makeThread({ diameter, pitch, length, depth? })` is now the
+ONLY sanctioned way to build a thread, with an explicit instruction to tell the user when
+their wording implies a functional screw ("screws onto a nut") that this is ribs, not a
+lead — and that a heat-set insert into a plain hole is the real FDM answer for that.
+
+Also this build: the OpenRouter auto-router label no longer leaks its internal sentinel
+("OpenRouter · auto" → "Auto"); reinforced in the prompt that "add a parameter for X" /
+"make X adjustable" means promoting it into `defaultParams`, not describing the change in
+prose.
+
+**Declined, with reasoning:** Jerry asked for "the batch OpenRouter supports, like you
+mentioned with uploading multiple images." That's a misreading of build 406's fix — the
+`:batch` suffix excluded there is a broken *synchronous* model variant, not a feature.
+OpenRouter's actual Batch API is bulk-asynchronous (submit now, results in minutes to
+24h) — fundamentally incompatible with "type a prompt, see a live preview," the whole
+shape of this app. Not built; explained instead of silently ignored or wrongly built.
+
+**Not done this build:** a redesigned "nice UI" for the Plan flow — open-ended design
+work, not a fix. Flagged rather than rushed.
+
+## Build 406 — clean-solid rules for the CAD prompt (no HANDOFF entry at the time)
+
+The ragged threads in the report were in the generated code, not the renderer. The stud
+was built with `.extrude(len, { twistAngle: 4525° })` — 12.6 turns lofted as ONE ruled
+surface, self-intersecting into stacked lamellae — and a tooth profile whose apex sat
+exactly on the major radius, a zero-width knife edge. Six rules landed in the system
+prompt: never `twistAngle` for a thread, flat crests/roots, a printable pitch/depth
+floor, never fuse on exactly coincident faces, fillet stud roots, prefer one construction
+to a stack of small booleans. Superseded by build 407's `makeThread()`, which replaces
+"tell the AI how" with "the app builds it."
+
 ## Build 404 — undo 403's tessellation overreach
 
 Reported straight after 403: the model stopped loading on refresh. Mine. 403 floored the

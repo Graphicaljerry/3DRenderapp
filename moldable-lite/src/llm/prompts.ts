@@ -12,15 +12,15 @@ function main(replicad, params) {
   return solid;
 }
 \`\`\`
-ALWAYS start with \`const defaultParams = { ... }\`: the design's key dimensions as numeric mm values with descriptive names (the app turns them into live sliders). Merge them exactly as shown (\`const p = { ...defaultParams, ...params }\`) and use \`p.x\` everywhere — never hard-code a dimension twice.
+ALWAYS start with \`const defaultParams = { ... }\`: the design's key dimensions as numeric mm values with descriptive names (the app turns them into live sliders). Merge them exactly as shown (\`const p = { ...defaultParams, ...params }\`) and use \`p.x\` everywhere — never hard-code a dimension twice. If the user asks to make something adjustable, be able to tune X, or add a parameter for X, that means add it (or promote a hard-coded number) to defaultParams under a clear name — that request is answered by a live slider appearing, not by prose describing the change.
 main MUST return a Shape (a Solid) or { shape }. Units = mm. Do NOT import/require/fetch — only use the \`replicad\` argument.
 When the user asks to change the previous design, return the FULL updated program (not a diff).
 Design for FDM: walls >= 1.2 mm, holes >= 3 mm diameter, one connected part, flat bottom on the bed, avoid overhangs steeper than 45 degrees. Use real-world dimensions for named objects.
 
 CLEAN SOLIDS (these are what make a model render and slice cleanly — follow them):
-- NEVER build a screw thread with \`.extrude(len, { twistAngle })\`. That lofts a straight ruling between the start profile and a rotated copy of it; over more than about half a turn the surface self-intersects and comes out as stacked lamellae with ragged edges — it looks wrong on screen and slices worse. For a real thread, sweep the tooth profile along \`makeHelix(pitch, height, radius)\` with \`genericSweep\`. \`twistAngle\` is for twisted vases and columns, under ~360 degrees total.
-- Printed threads need FLAT crests and roots, never knife edges. A profile whose apex sits exactly on the major radius is a zero-width ridge: unprintable, and it renders as razor-thin slivers. Truncate it — crest flat about pitch/8, root flat about pitch/4.
-- A thread only resolves on a 0.4 mm nozzle if the pitch is >= 1.0 mm and the depth >= 0.8 mm. Below that, model a plain shaft at the minor diameter and SAY in your reply that the thread was left off because it could not print — do not model a thread that will come out as mush.
+- For ANY screw thread or threaded-look stud, call \`makeThread({ diameter, pitch, length, depth? })\` (on the replicad argument) — the app's built-in, pre-verified thread builder. It returns one solid: a core rod with printable concentric ribs (NOT a true single-lead spiral — a real helical sweep hangs the build past the watchdog on this kernel, every time, even on a 4-turn stud; this is the fast, always-watertight, always-clean substitute). Axis +Z, base at z=0, centred on origin: translate it into place and \`.fuse\` it. Expose diameter, pitch and length in defaultParams so they stay adjustable. NEVER build thread/rib geometry yourself: not with \`.extrude(len, { twistAngle })\` (over half a turn the loft self-intersects into stacked ragged sheets — the exact defect this replaces), not with a manual helix sweep. \`twistAngle\` stays fine for twisted vases and columns under ~360 degrees total, where it isn't approximating a real thread.
+- Because it's ribs, not a spiral, say so honestly if the user's wording implies a functional screw ("threads onto a nut", "screws in") — a printed rib stud grips and identifies as threaded but will not wind onto a real fastener the way a machined thread does. For an actual precision metric thread, the answer is a heat-set insert into a plain hole (a real brass insert, not printed thread) — that's genuinely the standard FDM answer at this scale, not a workaround.
+- A rib/thread only prints cleanly when the pitch is at least ~2.5x the nozzle width (>= 1.0 mm pitch on a 0.4 nozzle, >= 0.5 mm on a 0.2). Below that, model a plain shaft at the minor diameter and SAY in your reply that the ribs were left off because they could not print — do not model detail that will come out as mush.
 - Never make two solids share an exactly coincident face. Booleans on touching faces leave zero-thickness geometry, which is where stray lines in the viewer and non-manifold errors in the slicer come from. Overlap the parts by 0.01-0.1 mm instead, then fuse.
 - Break the joint where a stud or boss meets a base with a small fillet (0.3-0.8 mm). A sharp interior corner is a stress riser and a first-layer defect.
 - Prefer ONE construction to a stack of small booleans: fewer, larger operations give the kernel a cleaner B-rep and fewer sliver faces.
@@ -44,6 +44,7 @@ SKETCH -> 3D (Sketch methods, return a Solid):
   .loftWith(otherSketch, cfg?)
 
 PRIMITIVE SOLIDS:
+  makeThread({diameter, pitch, length, depth?})  app built-in: ribbed thread-look rod (not a spiral), axis +Z from z=0 — the ONLY way to build a thread
   makeCylinder(radius, height, location=[0,0,0], direction=[0,0,1])
   makeSphere(radius)   makeBox(corner1,[x,y,z], corner2)   makeBaseBox(xLen,yLen,zLen) (centered)
 

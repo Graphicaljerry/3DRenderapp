@@ -3,6 +3,7 @@ import opencascadeWasm from "replicad-opencascadejs/src/replicad_single.wasm?url
 import * as replicad from "replicad";
 import { setOC } from "replicad";
 import { expose, transfer } from "comlink";
+import { makeThread } from "./threads";
 import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, RawFaceMesh, WorkerOp } from "./workerMessages";
 
 // ---- OCCT boot. locateFile MUST return the ?url import so emscripten fetches the hashed wasm. ----
@@ -405,14 +406,17 @@ function runCode(rawCode: string, params?: Record<string, number>): any {
     "XMLHttpRequest",
     `"use strict";\n${code}\n;\nreturn (typeof main !== "undefined") ? main : undefined;`,
   );
-  const mainFn = factory(Object.freeze({ ...replicad }), undefined, undefined, undefined, undefined, undefined, undefined);
+  // The namespace the generated code sees: replicad plus the app's own pre-verified
+  // builders (threads first — the shape every model kept hand-rolling wrong).
+  const rc = Object.freeze({ ...replicad, makeThread: (o: Parameters<typeof makeThread>[1]) => makeThread(replicad, o) });
+  const mainFn = factory(rc, undefined, undefined, undefined, undefined, undefined, undefined);
   if (typeof mainFn !== "function") {
     throw new Error("Your code must define `function main(replicad, params) { ... }` returning a Shape.");
   }
   // NOTE: the imported shape is passed unfrozen — replicad shapes carry internal caches.
   // A CLONE goes in: user code may translate/rotate it, and replicad transforms delete
   // their source — the held original must survive for the next rebuild.
-  const out = mainFn(Object.freeze({ ...replicad }), Object.freeze({ ...(params ?? {}) }), importedShape?.clone() ?? undefined);
+  const out = mainFn(rc, Object.freeze({ ...(params ?? {}) }), importedShape?.clone() ?? undefined);
   const shape = out?.shape ?? out;
   if (!shape || typeof shape.mesh !== "function") {
     throw new Error("main() must return a replicad Shape (a Solid).");

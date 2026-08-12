@@ -40,7 +40,7 @@ import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
 import { localSupported } from "../llm/local";
-import { shortModelName } from "../llm/openrouterModels";
+import { shortModelName, AUTO_MODEL } from "../llm/openrouterModels";
 import { fitClearance, fitCalibration, type FitId } from "../llm/prompts";
 import { PROVIDERS, costLabel } from "../gen/registry";
 
@@ -4701,9 +4701,13 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: 
         const base = pr.label.split(" — ")[0];
         // Surface the active model on the current provider so the picker trigger
         // reads e.g. "OpenRouter · claude-sonnet-4.5" instead of just "OpenRouter".
-        const active = brain?.provider === pr.id && brain.model ? shortModelName(brain.model) : "";
+        // OpenRouter's own auto-router sentinel is a special case: "auto" is not a real
+        // model id, so showing it raw read as "OpenRouter · auto" — a leaked internal
+        // string, not a name. Auto-routing is its own state worth naming plainly.
+        const isAutoRoute = pr.id === "openrouter" && brain?.model === AUTO_MODEL;
+        const active = isAutoRoute ? "" : brain?.provider === pr.id && brain.model ? shortModelName(brain.model) : "";
         const sub = [active, pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
-        return { value: `${pr.id}|`, name: active ? `${base} · ${active}` : base, sub };
+        return { value: `${pr.id}|`, name: isAutoRoute ? "Auto" : active ? `${base} · ${active}` : base, sub };
       }),
     },
   ];

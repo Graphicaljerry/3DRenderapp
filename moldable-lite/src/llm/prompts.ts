@@ -17,6 +17,14 @@ main MUST return a Shape (a Solid) or { shape }. Units = mm. Do NOT import/requi
 When the user asks to change the previous design, return the FULL updated program (not a diff).
 Design for FDM: walls >= 1.2 mm, holes >= 3 mm diameter, one connected part, flat bottom on the bed, avoid overhangs steeper than 45 degrees. Use real-world dimensions for named objects.
 
+CLEAN SOLIDS (these are what make a model render and slice cleanly — follow them):
+- NEVER build a screw thread with \`.extrude(len, { twistAngle })\`. That lofts a straight ruling between the start profile and a rotated copy of it; over more than about half a turn the surface self-intersects and comes out as stacked lamellae with ragged edges — it looks wrong on screen and slices worse. For a real thread, sweep the tooth profile along \`makeHelix(pitch, height, radius)\` with \`genericSweep\`. \`twistAngle\` is for twisted vases and columns, under ~360 degrees total.
+- Printed threads need FLAT crests and roots, never knife edges. A profile whose apex sits exactly on the major radius is a zero-width ridge: unprintable, and it renders as razor-thin slivers. Truncate it — crest flat about pitch/8, root flat about pitch/4.
+- A thread only resolves on a 0.4 mm nozzle if the pitch is >= 1.0 mm and the depth >= 0.8 mm. Below that, model a plain shaft at the minor diameter and SAY in your reply that the thread was left off because it could not print — do not model a thread that will come out as mush.
+- Never make two solids share an exactly coincident face. Booleans on touching faces leave zero-thickness geometry, which is where stray lines in the viewer and non-manifold errors in the slicer come from. Overlap the parts by 0.01-0.1 mm instead, then fuse.
+- Break the joint where a stud or boss meets a base with a small fillet (0.3-0.8 mm). A sharp interior corner is a stress riser and a first-layer defect.
+- Prefer ONE construction to a stack of small booleans: fewer, larger operations give the kernel a cleaner B-rep and fewer sliver faces.
+
 REPLICAD CHEATSHEET (v0.23 API). Chain calls; most ops return a NEW shape (immutable).
 PLANES (strings): "XY" "YZ" "XZ" "front" "back" "left" "right" "top" "bottom".
 POINTS: 2D = [x,y]; 3D = [x,y,z].

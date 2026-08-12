@@ -917,6 +917,39 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 403 — three reports: the 404, the missing photos, the faceting
+
+**OpenRouter 404 "only available through the Batch API".** The auto-router was choosing
+`anthropic/claude-sonnet-5:batch`. `:batch` is half price, which is exactly why the
+cheapest-of-the-family tiebreak in `recommendedForApp` kept picking it — and every
+request then died, because that variant is only reachable from the Batch endpoint. Half
+price is no price when the call 404s. `NOT_INTERACTIVE` excludes `:batch`; `:free`,
+`:nitro`, `:floor`, `:online`, `:thinking` and `:extended` all serve normal requests and
+stay.
+
+**Chat photos didn't reach another machine — two causes.** (1) `ChatTurn` had `image`
+only, so the nine EXTRA reference photos on a message were never persisted at all, on any
+device. (2) The one that was saved was the full 1568 px attached photo as a data URL,
+hundreds of kilobytes, and `sanitizeProject`'s 64 KB per-image budget then dropped it
+from the synced row — so it showed only on the machine it was attached from. Now
+`chatThumb` makes a 420 px webp for the transcript (which is all the bubble and lightbox
+ever needed), `images[]` is persisted/restored/synced, and the budget admits them.
+
+**Faceting.** Display tessellation was `angularTolerance: 0.3` rad — about 21 segments
+around a full circle, which reads as a faceted barrel and as steps across a thread flank.
+Now 0.12 rad (~52 segments, where desktop CAD viewers sit) with a chord tolerance that
+scales with the part instead of a fixed 0.05 mm, so small features stop being the ones
+that suffer most. Measured on the same part: 2892 → 6940 triangles, 4.9 s → 5.3 s.
+STL export tightened to 0.008 mm so what slices matches what was on screen.
+
+Caveat: a finer mesh means a different triangle count, so face paint stored against the
+old count is discarded on rebuild (it already degrades that way by design).
+
+NOT done yet, and asked for: engineering rules in the system prompt (the repo's `cad`,
+`shape`, `step-parts` skills are the source), and the full audit. The thread artifacts in
+the report can't be diagnosed from a screenshot — they need the generated code for that
+version.
+
 ## Build 401 — pictures by address, not just by file
 
 "Copy image address" is how most people hand over a picture they found, and it used to

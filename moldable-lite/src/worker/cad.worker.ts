@@ -47,9 +47,29 @@ function packFaces(raw: RawFaceMesh): FaceMesh {
     faceGroups: raw.faceGroups,
   };
 }
-const MESH_OPTS = { tolerance: 0.05, angularTolerance: 0.3 };
+// How finely the B-rep is tessellated for DISPLAY. `angularTolerance` is radians of
+// surface turn per facet, and it is the number you see: at the old 0.3 rad a full circle
+// got ~21 segments, which reads as a faceted barrel on anything cylindrical and as visible
+// steps across a thread flank. 0.12 rad is ~52 segments — the range desktop CAD viewers
+// sit in — and the chord tolerance drops with it so small features stop being the ones
+// that suffer most (0.05 mm of chord error is nothing on a 100 mm block and everything on
+// an M4 thread).
+//
+// Adaptive, because a fixed absolute tolerance is wrong at one end or the other: it scales
+// with the part so a 200 mm bracket doesn't pay for micron facets and a 10 mm screw
+// doesn't render as a polygon. See meshOptsFor().
+const MESH_OPTS = { tolerance: 0.02, angularTolerance: 0.12 };
 // Live-drag previews trade a little surface fidelity for rebuild speed.
 const MESH_OPTS_COARSE = { tolerance: 0.2, angularTolerance: 0.6 };
+
+/** Display tessellation scaled to the part actually on screen. The chord tolerance is a
+ *  fraction of the bounding-box diagonal, clamped so it never gets absurd in either
+ *  direction; the angular tolerance is fixed, because "how many facets around a circle"
+ *  should not depend on how big the circle is. */
+function meshOptsFor(diag: number): { tolerance: number; angularTolerance: number } {
+  const tol = Math.min(0.06, Math.max(0.006, diag * 0.0004));
+  return { tolerance: tol, angularTolerance: MESH_OPTS.angularTolerance };
+}
 
 /**
  * Some models emit a stray `let main;` / `var main;` alongside `function main(...)`
@@ -491,8 +511,9 @@ const api: CadWorkerApi = {
       // NOTE: no meshEdges() here — the viewer derives its edge overlay from the face mesh
       // itself, so tessellating the B-rep edges on every build was pure wasted time.
       // Live-drag previews mesh coarser (the commit re-meshes at full quality).
-      const raw = shape.mesh(opts?.coarse ? MESH_OPTS_COARSE : MESH_OPTS) as RawFaceMesh;
       const dims = dimsOf(shape);
+      const diag = Math.hypot(dims.x, dims.y, dims.z);
+      const raw = shape.mesh(opts?.coarse ? MESH_OPTS_COARSE : meshOptsFor(diag)) as RawFaceMesh;
       const faces = packFaces(raw);
       // Hand the buffers over rather than cloning them. After this the worker's copies
       // are detached — which is fine, `raw` is a fresh tessellation each build and
@@ -521,7 +542,10 @@ const api: CadWorkerApi = {
       const shape = dropToBed(buildShape(code, params, ops));
       return format === "step"
         ? shape.blobSTEP()
-        : shape.blobSTL({ tolerance: 0.01, angularTolerance: 0.1, binary: true });
+        // Matched to the display tessellation (and never coarser), so the part that
+        // reaches the slicer is the part that was on screen — a mesh exported rounder or
+        // blockier than the preview is exactly the "it looked fine in the app" gap.
+        : shape.blobSTL({ tolerance: 0.008, angularTolerance: 0.1, binary: true });
     } catch (e) {
       throw kernelError(e); // a raw pointer number would otherwise cross comlink verbatim
     }

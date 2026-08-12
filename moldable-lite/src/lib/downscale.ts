@@ -119,3 +119,38 @@ export async function fitPhotoBudget(blobs: Blob[], budget = PHOTO_BUDGET_BYTES)
   }
   return out;
 }
+
+/** A transcript-sized picture. The chat kept the FULL attached photo as its thumbnail —
+ *  a 1568 px data URL, hundreds of kilobytes — which the sync then dropped on the floor,
+ *  because a project row that carries ten of those per message times out on the server.
+ *  That is why photos showed up in the chat on the machine you attached them from and
+ *  nowhere else. The bubble draws these at 40-120 px and the lightbox a few hundred, so
+ *  a few hundred pixels of webp is all the transcript ever needed. */
+export async function chatThumb(file: Blob, maxDim = 420): Promise<string | undefined> {
+  let bmp: ImageBitmap;
+  try {
+    bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  } catch {
+    return undefined; // undecodable here — the message just carries no picture
+  }
+  try {
+    const scale = Math.min(1, maxDim / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return undefined;
+    ctx.fillStyle = "#fff"; // webp/jpeg have no alpha; a black backdrop would be worse
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    for (const [type, q] of [["image/webp", 0.72], ["image/jpeg", 0.72]] as const) {
+      const url = canvas.toDataURL(type, q);
+      if (url.startsWith(`data:${type}`)) return url; // a browser without webp returns png here
+    }
+    return canvas.toDataURL("image/jpeg", 0.6);
+  } finally {
+    bmp.close();
+  }
+}

@@ -22,7 +22,7 @@ import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } fro
 import { draftPlan, planToPrompt, type BuildPlan } from "./llm/plan";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
-import { downscaleImage, fitPhotoBudget, squareAvatar, MAX_PHOTOS, MAX_UPLOAD_BYTES } from "./lib/downscale";
+import { downscaleImage, fitPhotoBudget, chatThumb, squareAvatar, MAX_PHOTOS, MAX_UPLOAD_BYTES } from "./lib/downscale";
 import { fetchAsBlob } from "./gen/util";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalFonts, loadLocalFont } from "./text/fonts";
@@ -1671,7 +1671,7 @@ export default function App() {
     const t = setTimeout(() => {
       const chat = messages
         .filter((m) => !m.streaming)
-        .map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
+        .map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image, images: m.images }));
       const pr = projectRef.current;
       if (pr) {
         const next = { ...pr, chat, pins, updatedAt: Date.now() };
@@ -1941,7 +1941,7 @@ export default function App() {
       // out the debounce (felt like it hadn't saved).
       void runSync();
     } else {
-      const chat = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image }));
+      const chat = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image, images: m.images }));
       const shell = { ...newProject(clean, "replicad"), chat, pins };
       projectRef.current = shell;
       persist(shell);
@@ -5526,8 +5526,11 @@ export default function App() {
     const convo = chatDigest();
     const userMsgId = mid();
     const placeholderId = mid();
-    const preThumb = image ? await blobToDataURL(image.blob) : undefined;
-    const preRefThumbs = refs.length ? await Promise.all(refs.map((r) => blobToDataURL(r.blob))) : undefined;
+    // Transcript-sized, not full-sized: what the bubble shows is a thumbnail, and a
+    // full-resolution copy per attached photo is what kept chat pictures from ever
+    // reaching another machine (see chatThumb).
+    const preThumb = image ? await chatThumb(image.blob) : undefined;
+    const preRefThumbs = refs.length ? (await Promise.all(refs.map((r) => chatThumb(r.blob)))).filter((u): u is string => !!u) : undefined;
     setInput("");
     setMessages((m) => [...m,
       { id: userMsgId, ts: Date.now(), role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
@@ -6777,7 +6780,7 @@ export default function App() {
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
-    setMessages((p.chat ?? []).map((c) => ({ id: mid(), ts: Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, replayed: true })));
+    setMessages((p.chat ?? []).map((c) => ({ id: mid(), ts: Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images, replayed: true })));
     setPins(p.pins ?? []);
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);

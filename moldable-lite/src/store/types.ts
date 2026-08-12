@@ -7,6 +7,10 @@ export interface ChatTurn {
   text: string;
   error?: boolean;
   image?: string; // reference-photo thumbnail (data URL)
+  /** The OTHER reference photos attached to this turn. Saving only `image` meant a
+   *  message sent with ten pictures came back from a reload — or from another machine —
+   *  showing one, with no sign the rest had ever been there. */
+  images?: string[];
 }
 
 export interface Pin {

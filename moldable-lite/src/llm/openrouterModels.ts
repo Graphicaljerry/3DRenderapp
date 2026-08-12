@@ -93,7 +93,7 @@ export function fmtORPrice(inPrice?: number): string {
 
 /** Short display tail for a slug: drop the vendor prefix + any ":free" suffix. */
 export function shortModelName(id: string): string {
-  return id.replace(/^[^/]+\//, "").replace(/:free$/, "");
+  return id.replace(/^[^/]+\//, "").replace(/:(free|batch)$/, "");
 }
 
 // Moldable's brain writes replicad/CAD code from a description, so the models
@@ -115,6 +115,12 @@ const FAMILY: { re: RegExp; score: number }[] = [
   { re: /meta-llama\/llama-[\d.]+-(405b|70b)/i, score: 68 },
 ];
 const EXCLUDE = /(vision-only|image|audio|tts|whisper|embed|guard|moderation|rerank|-nano|-mini-tiny|3b|1\.5b|0\.5b)/i;
+/** OpenRouter variant suffixes that are NOT reachable from chat completions. `:batch` is
+ *  half price, which is exactly why the cheapest-of-the-family tiebreak below kept
+ *  choosing it — and every request then died on "This model is only available through
+ *  the Batch API". Half price is no price when the call 404s. (`:free`, `:nitro`,
+ *  `:floor`, `:online`, `:thinking` and `:extended` all serve normal requests and stay.) */
+const NOT_INTERACTIVE = /:batch\b/i;
 
 /** Coarse family key so we don't recommend eight flavours of the same model —
  *  e.g. claude-sonnet-4, -4.5, -4.6, -latest all collapse to "anthropic/claude-sonnet". */
@@ -135,7 +141,7 @@ export function recommendedForApp(models: ORModel[], reasoningOnly = false): ORM
   const scored = models
     .map((m) => {
       const fam = FAMILY.find((f) => f.re.test(m.id));
-      if (!fam || EXCLUDE.test(m.id)) return null;
+      if (!fam || EXCLUDE.test(m.id) || NOT_INTERACTIVE.test(m.id)) return null;
       const score = fam.score + (m.reasoning ? 8 : 0) + (m.inPrice === 0 ? 1 : 0);
       return { m, score, family: familyKey(m.id) };
     })

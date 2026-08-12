@@ -406,7 +406,12 @@ async function fetchMesh(c: any, uid: string, id: string, hash: string): Promise
     timeout ("canceling statement due to statement timeout", a real user report).
     `lean` drops images entirely — the last-resort retry when even the trimmed
     payload times out; code, chats and settings always survive. */
-const IMG_BUDGET = 64 * 1024;
+// Per inline picture in the synced row. Chat pictures are transcript thumbnails now
+// (see chatThumb) rather than the full attached photo, so this admits them instead of
+// silently dropping every one — which is what "the photos I uploaded don't show on my
+// other computer" was. Still a budget: the row has a server-side statement timeout
+// behind it, and an unbounded one is what found that timeout in the first place.
+const IMG_BUDGET = 96 * 1024;
 function sanitizeProject(p: Project, lean = false): Project {
   const img = (s?: string) => (s && !lean && s.length <= IMG_BUDGET ? s : undefined);
   return {
@@ -414,7 +419,9 @@ function sanitizeProject(p: Project, lean = false): Project {
     glb: undefined,
     importFile: undefined,
     thumb: img(p.thumb),
-    chat: p.chat?.map((t) => (t.image ? { ...t, image: img(t.image) } : t)),
+    chat: p.chat?.map((t) => (t.image || t.images?.length
+      ? { ...t, image: img(t.image), images: t.images?.map(img).filter((u): u is string => !!u) }
+      : t)),
     // History thumbnails: recent ones ride along (small webp), older ones drop — a
     // long project would otherwise inflate the single-row payload; `lean` drops all.
     versions: p.versions.map((v, i, arr) => ({

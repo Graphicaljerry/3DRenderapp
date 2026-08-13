@@ -917,6 +917,39 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 409 — the plan card gets a Parameters section
+
+The last open item from Jerry's big report: "I want to make sure that I can adjust
+parameters, and if I want to tell the chat to add a parameter... I want the chat to
+also have a very nice UI when planning." Build 407 already made "add a parameter for
+X" land in `defaultParams` reliably — but the Plan card (title/summary/steps/
+assumptions/print notes) never surfaced parameters at all, so there was nothing to
+see or edit until AFTER the model built.
+
+`BuildPlan` gained `parameters?: { name, value }[]` (`src/llm/plan.ts`): the planner
+LLM now lists 0-8 numeric dimensions worth leaving adjustable — main sizes, wall
+thickness, hole/peg sizes — each a plain label ("Wall thickness") plus its mm value.
+`planToPrompt()` folds them back in as an explicit instruction to put those exact
+values in `defaultParams` under a clear camelCase key.
+
+The card (`PlanCard` in Workspace.tsx) shows them under "Adjustable after building":
+plain read-only rows normally, name+value inputs while the plan is being edited, plus
+a `+ Add parameter` control and a per-row remove — so adding a parameter is a row you
+type into before anything is built, not a sentence hoping the model notices. New
+`.plan-param-*` CSS matches the existing `.plan-*` design language (same tokens as the
+Adjust panel's `.pnum`/`.punit`).
+
+Verified end-to-end with Playwright against the stub plan response: edited a stub
+value, added a row, removed another, built, and read the actual build request off the
+wire to confirm the edited/added values (and not the removed one) reached the prompt —
+in both themes.
+
+**Also already done, verified against actual repo state before starting this work**
+(the model-name-under-bubble and OpenRouter-naming asks from the same report): both
+existed already — `.msg-model` under every assistant bubble at 11px vs the timestamp's
+10px, and `effLlm.model` resolved to the concrete picked model (never the literal
+`"auto"`) before that label is set. Nothing to build there.
+
 ## Build 408 — Templates/Library actually float now
 
 The topbar comment already said it: "Templates / Library are navigation, so they are

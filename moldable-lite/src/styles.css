@@ -2967,6 +2967,19 @@ details.guide { margin-top: 10px; }
 .plan-edit { width: 100%; font: inherit; font-size: var(--fs-md); padding: 2px 6px; border: 1px solid var(--bord); border-radius: var(--r-xs); background: var(--ctl); color: var(--ink); }
 .plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
 .plan-toggle.on { color: var(--accent-d); border-color: var(--accent); }
+/* Parameters: what "add a parameter for X" or "make X adjustable" actually produces,
+   made visible and editable before the build spends anything — a row per slider,
+   name left, value right, editable in place while the plan is open for editing. */
+.plan-params { display: flex; flex-direction: column; gap: 5px; }
+.plan-param-row { display: flex; align-items: center; gap: 6px; }
+.plan-param-name-ro { font-size: var(--fs-md); color: var(--ink2); }
+.plan-param-val-ro { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--subt); font-variant-numeric: tabular-nums; }
+.plan-param-name { flex: 1; min-width: 0; font: inherit; font-size: var(--fs-md); padding: 4px 6px; border: 1px solid var(--bord); border-radius: var(--r-xs); background: var(--ctl); color: var(--ink); }
+.plan-param-val { width: 64px; flex: 0 0 auto; font: inherit; font-size: var(--fs-md); padding: 4px 6px; border: 1px solid var(--bord); border-radius: var(--r-xs); background: var(--ctl); color: var(--ink); font-variant-numeric: tabular-nums; }
+.plan-param-unit { font-size: var(--fs-tiny); color: var(--subt); }
+.plan-param-del { display: grid; place-items: center; width: 20px; height: 20px; padding: 0; flex: 0 0 auto; border: none; border-radius: var(--r-xs); background: none; color: var(--subt); }
+.plan-param-del:hover { color: var(--ink2); background: var(--ctl); }
+.plan-param-add { display: inline-block; margin-top: 6px; padding: 0; font-size: var(--fs-sm); }
 /* The one action a selected part is usually selected FOR. */
 .ins-adjust { margin-top: 8px; width: 100%; justify-content: center; }
 .msg-act.danger { color: var(--danger, #b4453c); font-weight: 600; }

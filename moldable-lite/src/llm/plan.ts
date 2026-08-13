@@ -30,6 +30,10 @@ export interface BuildPlan {
   assumptions: string[];
   /** Print-side notes: orientation, wall thickness, clearances. */
   printNotes?: string[];
+  /** Numeric dimensions the build will expose as live sliders (defaultParams) — the
+   *  plan's answer to "can I adjust that" and "add a parameter for X": visible and
+   *  editable before anything is built, not just implied by the steps text. */
+  parameters?: { name: string; value: number }[];
 }
 
 const SYS = [
@@ -40,8 +44,9 @@ const SYS = [
   "- steps: 3-7 lines, each a concrete modelling action with its numbers (e.g. \"60 × 40 × 12 mm body, 3 mm corner radius\"). Build order.",
   "- assumptions: 2-5 lines, ONLY things the user did not say that you are deciding for them (wall thickness, tolerance, which way up it prints, a size you inferred). This is the most important field — be specific and numeric.",
   "- printNotes: 0-3 short lines on orientation, supports, wall thickness or fit clearances.",
+  "- parameters: 0-8 numeric dimensions worth leaving adjustable after the build (each becomes a live slider) — main sizes, wall thickness, hole/peg sizes, counts that resize the part. Skip anything already fully captured by size. Each one a plain label a non-engineer would recognise (e.g. \"Wall thickness\", not \"wallThickness\") plus its value in mm.",
   "- Plain language. No markdown, no preamble.",
-  'Reply with JSON only: {"title":"...","summary":"...","size":{"x":0,"y":0,"z":0},"steps":["..."],"assumptions":["..."],"printNotes":["..."]}',
+  'Reply with JSON only: {"title":"...","summary":"...","size":{"x":0,"y":0,"z":0},"steps":["..."],"assumptions":["..."],"printNotes":["..."],"parameters":[{"name":"...","value":0}]}',
 ].join("\n");
 
 function coerce(o: any): BuildPlan | null {
@@ -53,6 +58,12 @@ function coerce(o: any): BuildPlan | null {
   if (!title || !steps.length) return null;
   const n = (v: any) => (typeof v === "number" && isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : null);
   const sx = n(o.size?.x), sy = n(o.size?.y), sz = n(o.size?.z);
+  const parameters = Array.isArray(o.parameters)
+    ? o.parameters
+        .filter((x: any) => x && typeof x.name === "string" && x.name.trim() && typeof x.value === "number" && isFinite(x.value))
+        .slice(0, 8)
+        .map((x: any) => ({ name: x.name.trim().slice(0, 40), value: Math.round(x.value * 100) / 100 }))
+    : [];
   return {
     title,
     summary: typeof o.summary === "string" ? o.summary.trim().slice(0, 240) : "",
@@ -60,6 +71,7 @@ function coerce(o: any): BuildPlan | null {
     steps,
     assumptions: arr(o.assumptions, 5),
     printNotes: arr(o.printNotes, 3),
+    parameters: parameters.length ? parameters : undefined,
   };
 }
 
@@ -112,5 +124,11 @@ export function planToPrompt(request: string, plan: BuildPlan): string {
   ];
   if (plan.assumptions.length) lines.push("Decisions to honour:", ...plan.assumptions.map((s) => `- ${s}`));
   if (plan.printNotes?.length) lines.push("Print notes:", ...plan.printNotes.map((s) => `- ${s}`));
+  if (plan.parameters?.length) {
+    lines.push(
+      "Parameters — put these exact values in defaultParams (pick a clear camelCase key for each label, e.g. \"Wall thickness\" -> wallThickness):",
+      ...plan.parameters.map((p) => `- ${p.name}: ${p.value} mm`),
+    );
+  }
   return lines.join("\n");
 }

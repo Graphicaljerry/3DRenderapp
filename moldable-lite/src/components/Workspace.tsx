@@ -4919,6 +4919,13 @@ function PlanCard({ msgId, st, busy, api }: {
   const p = st.done ? st.plan : draft;
   const setLine = (key: "steps" | "assumptions", i: number, v: string) =>
     setDraft((d) => ({ ...d, [key]: d[key]!.map((x, j) => (j === i ? v : x)) }));
+  const params = p.parameters ?? [];
+  const setParamName = (i: number, v: string) =>
+    setDraft((d) => ({ ...d, parameters: (d.parameters ?? []).map((x, j) => (j === i ? { ...x, name: v } : x)) }));
+  const setParamValue = (i: number, v: number) =>
+    setDraft((d) => ({ ...d, parameters: (d.parameters ?? []).map((x, j) => (j === i ? { ...x, value: v } : x)) }));
+  const addParam = () => setDraft((d) => ({ ...d, parameters: [...(d.parameters ?? []), { name: "", value: 0 }] }));
+  const removeParam = (i: number) => setDraft((d) => ({ ...d, parameters: (d.parameters ?? []).filter((_, j) => j !== i) }));
   const list = (key: "steps" | "assumptions", label: string, items: string[]) => (
     !!items.length && (
       <div className="plan-sect">
@@ -4945,6 +4952,51 @@ function PlanCard({ msgId, st, busy, api }: {
       {p.size && <div className="plan-size">{p.size.x} × {p.size.y} × {p.size.z} mm</div>}
       {list("steps", "What gets built", p.steps)}
       {list("assumptions", "Assuming (change anything that's wrong)", p.assumptions)}
+      {(!!params.length || editing) && (
+        <div className="plan-sect plan-params-sect">
+          <div className="plan-label">Adjustable after building</div>
+          <div className="plan-params">
+            {params.map((prm, i) => (
+              <div className="plan-param-row" key={i}>
+                {editing ? (
+                  <>
+                    <input
+                      className="plan-param-name"
+                      value={prm.name}
+                      placeholder="e.g. Wall thickness"
+                      onChange={(e) => setParamName(i, e.target.value)}
+                      aria-label={`Parameter ${i + 1} name`}
+                    />
+                    <input
+                      className="plan-param-val"
+                      type="number"
+                      value={prm.value}
+                      onChange={(e) => setParamValue(i, Number(e.target.value))}
+                      aria-label={`Parameter ${i + 1} value, mm`}
+                    />
+                    <span className="plan-param-unit">mm</span>
+                    <button
+                      type="button"
+                      className="plan-param-del"
+                      aria-label={`Remove ${prm.name || "this parameter"}`}
+                      onClick={() => removeParam(i)}
+                    >
+                      <IconX size={10} />
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span className="plan-param-name-ro">{prm.name || "Untitled"}</span>
+                    <span className="plan-param-val-ro">{prm.value} mm</span>
+                  </>
+                )}
+              </div>
+            ))}
+            {!params.length && editing && <p className="fine">No parameters yet — every model still ships adjustable, this just decides which sliders show up first.</p>}
+          </div>
+          {editing && <button type="button" className="link plan-param-add" onClick={addParam}>+ Add parameter</button>}
+        </div>
+      )}
       {!!p.printNotes?.length && (
         <div className="plan-sect">
           <div className="plan-label">Printing</div>

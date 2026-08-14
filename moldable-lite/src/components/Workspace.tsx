@@ -4871,13 +4871,46 @@ function brainValue(brain: { provider: LlmProviderId; model: string }): string {
 function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: LlmProviderId; model: string }): PickGroup[] {
   const claudeKey = hasKey("anthropic");
   // Every priced row says what a build roughly costs, in the same unit as the balance
-  // chip — the Chatbase/Gamma pattern. One estimating path (price table × typical build
-  // tokens), so the picker can never disagree with the credits panel.
+  // chip — the Chatbase/Gamma pattern. Per-MODEL rows price off the table alone, never
+  // the ledger: the ledger average is one number, so folding it in here would print the
+  // same figure beside every model and destroy the comparison the list exists for.
   const crFor = (prov: string, model: string): string => {
     const cr = estBuildCredits(priceFor(prov, model));
     return cr != null ? `≈${fmtCredits(cr)} ${PRICING.unitShort}/build` : "";
   };
+  // Auto is the exception, and it is the one row where the ledger is the RIGHT source:
+  // it has no fixed model to price, it deliberately spends little on small edits and
+  // more on hard ones, and what it has actually cost this person is the only honest
+  // answer available. Before there is history, a mid-tier price stands in — that is
+  // where the router lands most often — and says "typical" rather than claiming to know.
+  const ledger = loadLedger();
+  const fromHistory = ledger.builds >= 3 && ledger.usd > 0;
+  const autoCr = estBuildCredits({ in: 3, out: 15 }, ledger);
+  // Kept short on purpose: the menu is ~240px and a longer sentence truncates mid-word,
+  // which loses the cost figure — the half that answers "can I afford this".
+  const autoSub = [
+    "best model per request",
+    autoCr != null ? `≈${fmtCredits(autoCr)} ${PRICING.unitShort}/build${fromHistory ? ", your average" : " typical"}` : "",
+  ].filter(Boolean).join(" · ");
+  const orPreset = LLM_PRESETS.find((pr) => pr.id === "openrouter");
+  const orNeedsKey = !!orPreset?.needsKey && !hasKey("openrouter");
+  const orActive = brain?.provider === "openrouter" && brain.model && brain.model !== AUTO_MODEL
+    ? shortModelName(brain.model) : "";
+
   return [
+    // First, and its own group: Auto is what someone should pick unless they have a
+    // reason not to, and it was sitting fourth inside "Other providers" — below three
+    // things that need a key pasted before they do anything at all.
+    ...(orPreset ? [{
+      label: "Recommended",
+      items: [{
+        value: "openrouter|",
+        name: orActive ? `OpenRouter · ${orActive}` : "Auto",
+        sub: orActive
+          ? [crFor("openrouter", brain!.model), orNeedsKey ? "add key" : ""].filter(Boolean).join(" · ") || undefined
+          : [autoSub, orNeedsKey ? "add key" : ""].filter(Boolean).join(" · "),
+      }],
+    }] : []),
     {
       label: `Claude — most accurate${claudeKey ? "" : " · add key"}`,
       items: MODELS.map((mm) => {
@@ -4891,19 +4924,17 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: 
       // "house" (the site's sponsored built-in AI) is only offered once the relay's
       // health check confirmed it — hasKey("house") carries that answer.
       // "local" (on-device WebLLM) needs WebGPU — hidden on browsers without it.
-      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic" && (pr.id !== "house" || hasKey("house")) && (pr.id !== "local" || localSupported())).map((pr) => {
+      // "openrouter" is excluded because it IS the Recommended row above; leaving it
+      // here too listed the same choice twice, both reading "Auto".
+      items: LLM_PRESETS.filter((pr) => pr.id !== "anthropic" && pr.id !== "openrouter" && (pr.id !== "house" || hasKey("house")) && (pr.id !== "local" || localSupported())).map((pr) => {
         const needs = pr.needsKey && !hasKey(pr.id);
         const base = pr.label.split(" — ")[0];
-        // Surface the active model on the current provider so the picker trigger
-        // reads e.g. "OpenRouter · claude-sonnet-4.5" instead of just "OpenRouter".
-        // OpenRouter's own auto-router sentinel is a special case: "auto" is not a real
-        // model id, so showing it raw read as "OpenRouter · auto" — a leaked internal
-        // string, not a name. Auto-routing is its own state worth naming plainly.
-        const isAutoRoute = pr.id === "openrouter" && brain?.model === AUTO_MODEL;
-        const active = isAutoRoute ? "" : brain?.provider === pr.id && brain.model ? shortModelName(brain.model) : "";
-        const activeCost = brain?.provider === pr.id && brain.model && !isAutoRoute ? crFor(pr.id, brain.model) : "";
+        // Surface the active model on the current provider so the row reads e.g.
+        // "Google Gemini · gemini-3-pro" instead of just the provider name.
+        const active = brain?.provider === pr.id && brain.model ? shortModelName(brain.model) : "";
+        const activeCost = active ? crFor(pr.id, brain!.model) : "";
         const sub = [active, activeCost, pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
-        return { value: `${pr.id}|`, name: isAutoRoute ? "Auto" : active ? `${base} · ${active}` : base, sub };
+        return { value: `${pr.id}|`, name: active ? `${base} · ${active}` : base, sub };
       }),
     },
   ];

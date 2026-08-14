@@ -917,6 +917,31 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 416 — Auto goes first, and says what it costs
+
+Reported: Auto sat fourth in the model picker, inside "Other providers", below three
+entries that need a key pasted before they do anything — and it was the only row with
+no cost at all.
+
+Auto now has its own **Recommended** group at the very top. The OpenRouter entry was
+removed from "Other providers" because it WAS that row (rendering as "Auto" whenever the
+model is the auto sentinel); leaving both listed the same choice twice.
+
+**What Auto's cost figure means, which took some thought.** Auto has no fixed model to
+price — it deliberately spends little on small edits and more on hard ones — so a
+single table figure would be fiction. The rule: once this device has ≥3 builds, the row
+quotes the user's OWN average ("≈50 cr/build, your average"), which is the only honest
+answer to "what does Auto cost me"; before that it quotes a mid-tier price marked
+"typical", since that is where the router usually lands.
+
+The inverse matters just as much and is asserted in the probe: **per-model rows must NOT
+use the ledger.** The average is one number, so folding it into every row would print
+the same figure beside Haiku and Fable and destroy the comparison the list exists for.
+Those stay priced off the table alone (20 / 59 / 293 / 390 cr).
+
+Copy kept short deliberately — the menu is ~240 px and the first draft truncated
+mid-word, which cut the cost figure, the half that answers "can I afford this".
+
 ## Build 415 — text stops sinking into the model on reload
 
 Reported: every refresh embedded placed text into the body, and the only cure was

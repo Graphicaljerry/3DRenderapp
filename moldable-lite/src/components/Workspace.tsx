@@ -36,7 +36,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin} from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin, IconTools} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -856,12 +856,12 @@ function FilamentCount({ facePaint }: { facePaint: Uint8Array | null }) {
   return <div className="paint-count">Prints with <b>{n}</b> filament{n === 1 ? "" : "s"}</div>;
 }
 
-function MaterialMenu({ appearance, setAppearance }: { appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void }) {
+function MaterialMenu({ appearance, setAppearance, onPick }: { appearance: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }; setAppearance: (a: { color: string; finish: "matte" | "satin" | "glossy" | "metal" }) => void; onPick?: () => void }) {
   const [open, setOpen] = useState(false);
   const COLORS = ["#c7ccd3", "#f4f4f2", "#2b2b2e", "#d94040", "#f28c28", "#ecc94b", "#48a860", "#3b82f6", "#8b5cf6", "#14b8a6"];
   return (
     <div style={{ position: "relative", display: "inline-flex" }}>
-      <button className="ghost sm iconbtn has-modes" aria-label="Material" aria-expanded={open} title="Display material — filament colour & finish (visual only)" onClick={() => setOpen((v) => !v)}>
+      <button className="ghost sm iconbtn has-modes" aria-label="Material" aria-expanded={open} title="Display material — filament colour & finish (visual only)" onClick={() => { setOpen((v) => !v); onPick?.(); }}>
         {/* A shaded sphere in the chosen colour — the 3D-app convention for "material",
             where the flat dot read as an empty circle on pale filaments. */}
         <svg className="mat-ball" width="17" height="17" viewBox="0 0 24 24" aria-hidden>
@@ -3049,6 +3049,29 @@ export function Workspace(p: Props) {
     setPatternOpen(false);
     setLogoOpen(false);
   }, [appToolOn]);
+
+  /** Which tool is armed right now — App-owned or this component's — in rail order.
+   *  The phone's tool button wears it, so a folded toolbar is never the reason
+   *  someone cannot tell what is running or get back to it. */
+  const liveTool: { name: string; icon: ReactNode } | null =
+      p.transformCtl.mode !== "off" ? { name: "Move", icon: <IconTransform /> }
+    : p.shapeCtl.tool ? { name: "Shape", icon: <IconShapes /> }
+    : p.modifyCtl.op ? { name: "Modify", icon: <IconModify /> }
+    : p.measureCtl.mode ? { name: "Measure", icon: <IconRuler /> }
+    : p.cutCtl.mode ? { name: "Cut", icon: <IconCut /> }
+    : (p.magnetCtl.tool || p.screwCtl.tool) ? { name: "Fasteners", icon: <IconFastener /> }
+    : p.textCtl.tool ? { name: "Text", icon: <IconTextTool /> }
+    : patternOpen ? { name: "Pattern", icon: <IconPattern size={15} /> }
+    : logoOpen ? { name: "Logo", icon: <IconBadge /> }
+    : markMode ? { name: "Mark", icon: <IconMarker /> }
+    : p.paintCtl.mode ? { name: "Paint", icon: <IconPaint /> }
+    : p.featureCtl.mode ? { name: "Select", icon: <IconPointer /> }
+    : null;
+  /* Phone: a dozen tools is a lot of furniture to leave standing over a 390px canvas,
+     so the toolbar folds into the bottom bar beside the Inspector and the stage gets
+     the room back. Picking a tool folds it away again — the tool's own panel opens in
+     the same slot, and you have to see the model to use it. */
+  const [railOpen, setRailOpen] = useState(false);
   /** Arm a rail tool — everything else goes down first, whichever way this one is
    *  heading. Each toggle used to carry its own hand-rolled stand-down list, so a tool
    *  was one forgotten line away from lighting up beside another: Add Logo sat lit
@@ -3061,6 +3084,7 @@ export function Workspace(p: Props) {
     if (owner !== "logo") setLogoOpen(false);
     if (owner !== "mark") setMarkMode(false);
     arm();
+    setRailOpen(false); // phone: the pick is made, give the stage back (no-op elsewhere)
   };
 
   // Paste a reference image from the clipboard anywhere in the app.
@@ -3876,8 +3900,23 @@ export function Workspace(p: Props) {
               {/* Shapr3D's adaptive menu, on the stage: what this selection can do, where
                   you made it. Hidden in focus mode — that is the mode for looking. */}
               {!focus && <SelectionActions p={p} onMore={() => { setDockPanel("selection"); setDockOpen(true); }} />}
+              {/* Phone only (CSS hides it above 760px): the bottom bar's leading half.
+                  It names the armed tool rather than saying "Tools" so the folded
+                  toolbar never costs you the answer to "what is running?". */}
               {(p.tab === "3d" || p.tab === "params") && (
-                <div className="canvas-rail" role="toolbar" aria-label="Tools" aria-orientation="vertical">
+                <button
+                  className={`rail-toggle${railOpen ? " open" : ""}${liveTool ? " live" : ""}`}
+                  aria-expanded={railOpen}
+                  aria-controls="canvas-rail"
+                  title={railOpen ? "Hide the tools" : liveTool ? `${liveTool.name} is active — tap for the tools` : "Show the tools"}
+                  onClick={() => setRailOpen((v) => !v)}
+                >
+                  {railOpen ? <IconX size={16} /> : liveTool ? liveTool.icon : <IconTools />}
+                  <span>{railOpen ? "Close" : liveTool ? liveTool.name : "Tools"}</span>
+                </button>
+              )}
+              {(p.tab === "3d" || p.tab === "params") && (
+                <div id="canvas-rail" className={`canvas-rail${railOpen ? " rail-open" : ""}`} role="toolbar" aria-label="Tools" aria-orientation="vertical">
                   {/* Move leads: it's the first tool in every 3D app people
                       already know, and the one they reach for most. */}
                   <div className="rail-tool">
@@ -4419,7 +4458,9 @@ export function Workspace(p: Props) {
                     )}
                   </div>
                   <div className="rail-sep" aria-hidden="true" />
-                  <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} />
+                  {/* Same contract as armRail: a pick folds the tray, so this menu opens
+                      into the slot the tray was using instead of inside its scroll box. */}
+                  <MaterialMenu appearance={p.appearance} setAppearance={p.setAppearance} onPick={() => setRailOpen(false)} />
                 </div>
               )}
               {(p.tab === "3d" || p.tab === "params") && p.geometry && !p.showcase && (p.attachments.length > 0 || p.plateCtl.count > 1) && (
@@ -4588,7 +4629,11 @@ export function Workspace(p: Props) {
                 would leave an invisible box capturing clicks over the canvas. */}
             {!dockOpen && (
               <button className="dock-rail" title="Show inspector" aria-label="Show inspector" onClick={() => setDockOpen(true)}>
-                <span className="dock-rail-label">‹ Inspector</span>
+                {/* The chevron and the icon are the same signpost drawn for two
+                    orientations: the phone lies this button down into the bottom bar,
+                    where an edge-pointing chevron means nothing and a glyph does. */}
+                <span className="dock-rail-ico" aria-hidden><IconSliders size={16} /></span>
+                <span className="dock-rail-label"><span className="dock-rail-chev" aria-hidden>{"‹ "}</span>Inspector</span>
               </button>
             )}
             <aside className="inspector-dock" role="region" aria-label="Inspector" style={dockOpen ? ({ width: dockW } as CSSProperties) : { display: "none" }}>

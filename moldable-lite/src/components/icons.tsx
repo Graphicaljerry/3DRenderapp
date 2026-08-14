@@ -330,6 +330,17 @@ export const IconSliders = ({ size = 14 }: { size?: number }) => (
     <circle cx="7" cy="18" r="2.4" fill="var(--bg, #fff)" />
   </svg>
 );
+/* "All the tools" — a grid of tiles, the way a phone says "there is a set behind this",
+   not a picture of any one tool. Borrowing a tool's own glyph here (Move's, say) reads
+   as that tool being armed, which is exactly what this button must not imply. */
+export const IconTools = ({ size = 16 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
+    <rect x="3.5" y="3.5" width="7" height="7" rx="2" />
+    <rect x="13.5" y="3.5" width="7" height="7" rx="2" />
+    <rect x="3.5" y="13.5" width="7" height="7" rx="2" />
+    <rect x="13.5" y="13.5" width="7" height="7" rx="2" />
+  </svg>
+);
 export const IconPrinter = ({ size = 14 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>
     <path d="M7 8V3h10v5M7 16H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-3" />

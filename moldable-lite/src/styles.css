@@ -1864,6 +1864,12 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* Same handling the open dock already gets: canvas furniture steps aside for it. */
 .viewer-body:has(.dock-rail) .right-dock { right: 52px; }   /* clear the 40px rail + 12 */
 .dock-rail-label { writing-mode: vertical-rl; }
+/* Phone-only furniture, declared off here so nothing has to remember to hide it:
+   the tools button that folds the rail away, and the Inspector button's flat glyph
+   (the edge chevron reads as "slide out from this side", which is only true when the
+   button IS on that edge). The ≤760 block turns both on. */
+.rail-toggle { display: none; }
+.dock-rail-ico { display: none; }
 /* Both side panels PAN. They slide in from their own edge and out the same way — no
    scaling, because a panel that grows out of a sliver reads as a popup rather than a
    drawer, and the two sides looked like different mechanisms. One duration and one
@@ -2452,8 +2458,8 @@ details.guide { margin-top: 10px; }
   .canvas-toast { animation: toast-in .18s cubic-bezier(.22,1,.36,1); }
   @keyframes toast-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 }
-/* The phone puts the rail along the bottom, so the toast sits above it. */
-@media (max-width: 760px) { .canvas-toast { bottom: 68px; } }
+/* The phone puts the tool bar along the bottom, so the toast sits above it. */
+@media (max-width: 760px) { .canvas-toast { bottom: calc(62px + env(safe-area-inset-bottom, 0px)); } }
 
 /* Rail popovers (Material / Surface / Snap / Resize) open to the RIGHT of the
    rail — their default right-aligned drop (from the old top toolbar) opened
@@ -2726,6 +2732,7 @@ details.guide { margin-top: 10px; }
      otherwise draw OVER it (the sheet lives at z 7) and truncate its left column.
      Closing the sheet brings them straight back. */
   .viewer-body:has(.inspector-dock:not([style*="none"])) .canvas-rail,
+  .viewer-body:has(.inspector-dock:not([style*="none"])) .rail-toggle,
   .viewer-body:has(.inspector-dock:not([style*="none"])) .zoom-ctl { display: none; }
 }
 }
@@ -2745,44 +2752,124 @@ details.guide { margin-top: 10px; }
   .statusbar { padding-left: 10px; padding-right: 10px; }
 
 
-  /* The tool rail lies down: bottom-centre, capsule, flyouts open UPWARD. No app in
-     the researched set ships a left rail on a phone — the thumb arc owns the bottom.
-     It SCROLLS, because the tool count outgrew the screen: `max-width` alone clipped
-     the last tools with no way to reach them — a control you cannot touch is worse
-     than one you have to swipe to. Momentum scrolling, no visible bar, and a soft
-     fade at each end so the overflow announces itself (Instagram's edit strip). */
-  .canvas-rail {
-    top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-    left: 50%; transform: translateX(-50%);
-    flex-direction: row; align-items: center;
-    max-width: calc(100% - 16px);
-    overflow-x: auto; overflow-y: hidden;
-    scrollbar-width: none; -webkit-overflow-scrolling: touch;
-    scroll-padding: 0 12px; overscroll-behavior-x: contain;
-    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  /* ---- the phone's bottom bar ----
+     One line along the thumb arc: tools at the leading edge, the Inspector at the
+     trailing one, the model in between. The rail used to lie here as a strip of
+     thirteen icons, which is a desktop rail turned sideways — it needed swiping to
+     reach half its tools and it stood over the canvas the whole time you were trying
+     to look at the model. Now it FOLDS: the bar is two buttons, and the tools open
+     over the stage only while you are choosing one.
+
+     The two buttons are one material and one size, because they are peers on the same
+     row — the Inspector's accent-tinted edge tab made sense as a tab hanging off the
+     screen edge, not as half of a toolbar. */
+  .rail-toggle {
+    display: inline-flex; align-items: center; gap: 7px;
+    position: absolute; z-index: var(--z-rail);
+    left: 10px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    height: 40px; padding: 0 14px 0 12px;
+    background: var(--chrome); color: var(--ink2);
+    border: 1px solid transparent; border-radius: var(--r-full);
+    box-shadow: var(--shadow-float);
+    font-size: var(--fs-sm); font-weight: 500; line-height: 1; white-space: nowrap;
+    cursor: pointer;
   }
-  .canvas-rail::-webkit-scrollbar { display: none; }
-  /* Horizontal rail: the desktop hover-expansion contract (fixed width, full-width
-     rows, name labels) makes no sense lying down — undo it even on hover-capable
-     narrow windows. */
-  .canvas-rail, .canvas-rail:hover { width: auto; border-radius: var(--r-full); }
-  .canvas-rail > *, .canvas-rail .ghost.sm.iconbtn { width: auto; }
-  .canvas-rail .ghost.sm.iconbtn { justify-content: center; }
+  .rail-toggle > svg { flex: 0 0 auto; }
+  /* A tool is armed but the tray is folded: the button IS the readout — it wears that
+     tool's icon and name in the accent, so folding the tray never costs you the answer
+     to "what is running, and how do I get back to it?". */
+  .rail-toggle.live { color: var(--accent-d); }
+  .rail-toggle.open { color: var(--ink); }
+  .dock-rail {
+    top: auto; right: 10px; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    z-index: var(--z-rail);
+    width: auto; height: 40px; padding: 0 14px;
+    gap: 7px; border-radius: var(--r-full);
+    background: var(--chrome); border-color: transparent;
+    box-shadow: var(--shadow-float);
+  }
+  .dock-rail:hover { background: var(--chrome); border-color: transparent; }
+  .dock-rail-ico { display: inline-flex; color: var(--ink2); }
+  .dock-rail-label {
+    writing-mode: horizontal-tb;
+    font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0; text-transform: none;
+    color: var(--ink2);
+  }
+  .dock-rail-chev { display: none; } /* an edge chevron means nothing off the edge */
+  .viewer-body:has(.dock-rail) .right-dock { right: 10px; } /* the tab left the right edge */
+  [data-theme="dark"] .rail-toggle,
+  [data-theme="dark"] .dock-rail { background: #24262a; border-color: rgba(255, 255, 255, 0.09); }
+  [data-theme="dark"] .dock-rail:hover { background: #24262a; }
+  /* Left-handers get the pair mirrored — the tools land under the thumb that reaches. */
+  [data-hand="left"] .rail-toggle { left: auto; right: 10px; }
+  [data-hand="left"] .dock-rail { right: auto; left: 10px; }
+
+  /* ---- the tool tray ----
+     Folded, the rail is a zero-height box that still holds its place: its bottom edge
+     and width are what the tool panels below are positioned against (they are
+     `position: fixed` inside a transformed ancestor, so the RAIL is their containing
+     block, not the viewport). Keep the box, hide the furniture. */
+  .canvas-rail {
+    top: auto; bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+    left: 8px; right: 8px; width: auto; max-width: none;
+    transform: translateZ(0); /* the flyouts' containing block — load-bearing, not decoration */
+    overflow: visible;
+  }
+  .canvas-rail:not(.rail-open) {
+    height: 0; min-height: 0; padding: 0; gap: 0;
+    /* border-WIDTH, not just the colour: a transparent 1px still measures 2px of box,
+       and the flyouts below are positioned against this box's edge. */
+    background: none; border-width: 0; box-shadow: none;
+    pointer-events: none;
+  }
+  /* pointer-events INHERITS, and the open tool's panel is a child of the folded rail —
+     without this the panel draws normally and then takes no taps at all. */
+  .canvas-rail:not(.rail-open) .rail-fly,
+  .canvas-rail:not(.rail-open) .snap-menu { pointer-events: auto; }
+  /* Hide the BUTTONS, not their wrappers: a wrapper carries the tool's open panel, and
+     the Material menu's wrapper has an inline `display` that a class cannot outrank. */
+  .canvas-rail:not(.rail-open) > div > button,
+  .canvas-rail:not(.rail-open) > .rail-sep { display: none; }
+  /* Unfolded: a grid of every tool with its name under it, which is the one thing the
+     sideways strip could not do. Thirteen labelled targets, all reachable, no swiping.
+     FIVE columns, not four: thirteen over four is a fourth row holding one tile, and
+     that row cost the model 58% of the stage to show one tool. Five lands 5/5/3 and
+     gives the height back — measured 270px against 192px on an iPhone 13. */
+  .canvas-rail.rail-open {
+    display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 4px; padding: 8px; border-radius: var(--r-lg);
+    max-height: 52vh; overflow-y: auto; overscroll-behavior: contain;
+  }
+  .canvas-rail.rail-open, .canvas-rail.rail-open:hover { width: auto; }
+  .canvas-rail.rail-open > .rail-sep { display: none; } /* grid rows already group them */
+  .canvas-rail.rail-open .ghost.sm.iconbtn {
+    width: 100%; height: auto; min-height: 56px;
+    flex-direction: column; justify-content: center; gap: 5px;
+    padding: 8px 3px; border-radius: var(--r-md); overflow: hidden;
+  }
+  .canvas-rail.rail-open .rail-name {
+    display: block; opacity: 1; transform: none;
+    margin-left: 0; max-width: 100%; text-overflow: ellipsis;
+    font-size: var(--fs-tiny); font-weight: 500;
+  }
+  /* The tray and a tool's panel share one slot above the bar, so only one is ever up:
+     the tray while you choose, the panel once you have. */
+  .canvas-rail.rail-open .rail-fly { display: none; }
+  /* …and the stage furniture that lives on the same band steps aside while it is up. */
+  .viewer-body:has(.canvas-rail.rail-open) .plate-bar,
+  .viewer-body:has(.canvas-rail.rail-open) .showcase-bar,
+  .viewer-body:has(.canvas-rail.rail-open) .sel-acts { display: none; }
+  /* Folded away, the desktop hover-expansion contract (fixed width, full-width rows,
+     names beside the icons) makes no sense — undo it on hover-capable narrow windows too. */
+  .canvas-rail:not(.rail-open), .canvas-rail:not(.rail-open):hover { width: auto; }
   .canvas-rail .rail-name { display: none; }
-  .canvas-rail .rail-sep { width: 1px; height: auto; align-self: stretch; margin: 4px 3px; }
-  /* Flyouts leave the rail entirely and become a panel across the bottom of the screen.
-     `position: fixed` is load-bearing twice over: the rail now scrolls, and any
-     absolutely-positioned child would be clipped by that scroll container — and a
-     panel pinned to the viewport can't be dragged off-screen when the strip is
-     scrolled either. It also buys the phone what a popover never had room for: full
-     width, so the controls inside get real touch targets instead of a cramped
-     two-column wrap. This is the sheet-over-canvas shape the iOS references use. */
+  /* A tool's own panel spans the bar's width and sits directly on top of it: full width
+     is what the phone has and what a cramped popover never gave the controls inside. */
   .canvas-rail > .rail-tool { position: static; }
-  .canvas-rail .rail-fly {
+  .canvas-rail .rail-fly,
+  .canvas-rail .snap-menu {
     position: fixed;
-    left: 8px; right: 8px; top: auto;
-    bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    left: 0; right: 0; top: auto; bottom: 0;
     transform: none; width: auto; max-width: none;
     max-height: 46vh; overflow-y: auto; overscroll-behavior: contain;
   }
@@ -2799,23 +2886,28 @@ details.guide { margin-top: 10px; }
   /* Same for the zoom cluster: it landed ON the horizontal tool row, and pinch
      already zooms. Frame-the-model lives in View > Reset view. */
   .zoom-ctl { display: none; }
-  /* The snaps are gone on a phone, so the showcase scenes take their spot. */
-  .showcase-bar { bottom: 12px; }
-  /* …and so does the plate bar, since nothing is left on the bottom row. */
-  .plate-bar { bottom: 12px; }
-  .viewer-body:has(.plate-bar) .split-panel { bottom: 58px; }
+  /* The snaps are gone on a phone, so the showcase scenes take their spot — one band
+     above the bottom bar (12 inset + 40 button + 10 gap), not on it. They used to be
+     given `bottom: 12px`, which is where the tool row already was. */
+  .showcase-bar { bottom: calc(62px + env(safe-area-inset-bottom, 0px)); }
+  .plate-bar { bottom: calc(62px + env(safe-area-inset-bottom, 0px)); }
+  .viewer-body:has(.plate-bar) .split-panel { bottom: calc(112px + env(safe-area-inset-bottom, 0px)); }
 
   /* A finger is on the model: floating chrome steps back (the video-player contract),
      and returns on release. */
   .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
+  .viewer.stage-busy .rail-toggle, .viewer.stage-busy .dock-rail,
   .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock {
     opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
   }
-  .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock { transition: opacity 0.2s ease; }
+  .viewer .viewer-tools, .viewer .canvas-rail, .viewer .rail-toggle,
+  .viewer .dock-rail, .viewer .zoom-ctl, .viewer .right-dock { transition: opacity 0.2s ease; }
 }
 @media (max-width: 760px) and (prefers-reduced-motion: reduce) {
-  .viewer .viewer-tools, .viewer .canvas-rail, .viewer .zoom-ctl, .viewer .right-dock,
+  .viewer .viewer-tools, .viewer .canvas-rail, .viewer .rail-toggle,
+  .viewer .dock-rail, .viewer .zoom-ctl, .viewer .right-dock,
   .viewer.stage-busy .viewer-tools, .viewer.stage-busy .canvas-rail,
+  .viewer.stage-busy .rail-toggle, .viewer.stage-busy .dock-rail,
   .viewer.stage-busy .zoom-ctl, .viewer.stage-busy .right-dock { transition: none; }
 }
 
@@ -2877,11 +2969,11 @@ details.guide { margin-top: 10px; }
 .viewer-body:has(.sel-acts) .plate-bar,
 .viewer-body:has(.sel-acts) .showcase-bar { bottom: 66px; }
 @media (max-width: 760px) {
-  /* The phone rail lies along the bottom — the bar goes above it, not under it. */
-  .sel-acts { bottom: 62px; }
+  /* The phone's tool bar owns the bottom band — this goes above it, not under it. */
+  .sel-acts { bottom: calc(62px + env(safe-area-inset-bottom, 0px)); }
   .viewer-body:has(.sel-acts) .view-snaps,
   .viewer-body:has(.sel-acts) .plate-bar,
-  .viewer-body:has(.sel-acts) .showcase-bar { bottom: 116px; }
+  .viewer-body:has(.sel-acts) .showcase-bar { bottom: calc(116px + env(safe-area-inset-bottom, 0px)); }
 }
 
 /* Filament slots in the Export panel: the number the 3MF actually writes, the colour it
@@ -2903,6 +2995,7 @@ details.guide { margin-top: 10px; }
 .app.focus-mode .chat-resize,
 .app.focus-mode .viewer-head,
 .app.focus-mode .canvas-rail,
+.app.focus-mode .rail-toggle,
 .app.focus-mode .right-dock,
 .app.focus-mode .inspector-dock,
 .app.focus-mode .dock-rail,
@@ -2951,9 +3044,10 @@ details.guide { margin-top: 10px; }
   [data-hand="left"] .zoom-ctl { left: auto; right: calc(10px + var(--rail-w) + 8px); }
 }
 @media (max-width: 760px) {
-  /* The phone rail is a bottom row, not a side column — handedness has nothing to flip. */
-  [data-hand="left"] .canvas-rail { left: 50%; right: auto; }
-  [data-hand="left"] .canvas-rail .rail-fly { left: 6px; right: auto; }
+  /* The phone tray spans the stage — there is no side for handedness to flip. What
+     does flip is the pair of bar buttons, up in the phone block. */
+  [data-hand="left"] .canvas-rail { left: 8px; right: 8px; }
+  [data-hand="left"] .canvas-rail .rail-fly { left: 0; right: 0; }
 }
 
 /* ---------- tablets, both ways up ----------

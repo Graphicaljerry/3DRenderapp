@@ -917,6 +917,59 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 419 — the phone toolbar folds away
+
+Jerry, after 418: *"Design it properly. Maybe make the toolbar collapsible that
+houses the screw and move tool."* 418 made all thirteen tools **reachable** on a
+phone by letting the strip scroll — but a scrolling strip is still a desktop rail
+turned sideways: it stood over a 390px canvas permanently, and half its tools
+needed a swipe. This replaces it.
+
+**The bottom bar.** One row along the thumb arc: a **Tools** button at the leading
+edge, **Inspector** at the trailing edge, stage in between. Measured on an iPhone
+13: 189px of clear canvas between them where the strip used to run edge to edge,
+and the rail's box drops from 48px tall to **0** when folded.
+
+- The Inspector's vertical `‹ INSPECTOR` edge tab lies down into that row on phone
+  only — same material, same height, same radius as Tools, so the two read as one
+  toolbar rather than a floating pill plus a tab hanging off the screen edge.
+  Desktop and iPad keep the vertical strip (a `.dock-rail-ico` / `.dock-rail-chev`
+  pair swaps the glyph for the chevron; both regression-tested).
+- **Folded is not amnesia**: when a tool is armed the Tools button wears *that
+  tool's* icon and name in the accent (`Text`, `Move`, `Fasteners`…). A folded
+  toolbar must never be the reason you cannot tell what is running. `liveTool` in
+  `Workspace.tsx` derives it in rail order from the same controllers `appToolOn`
+  reads, so a new tool can't quietly fall out of it.
+- Its default glyph is a new `IconTools` (2×2 tiles). It first borrowed
+  `IconTransform`, which read as *Move is armed* — exactly the thing this button
+  must not imply.
+
+**The tray.** Tapping Tools opens a **5-column labelled grid** over the stage —
+every tool visible at once, with its *name*, which the icon strip could never do.
+Five columns, not four: 13 tools over four columns is a fourth row holding one
+tile, and that row cost the stage 270px against 192px measured. Tiles are 56px
+minimum.
+
+- **Picking a tool folds the tray**, and the tool's own panel opens in the same
+  slot — one band above the bar, one occupant. Re-opening the tray while a tool
+  runs hides that panel rather than stacking on it.
+- Structural note for whoever touches this next: the rail keeps a `translateZ(0)`
+  so it stays the **containing block** for its `position: fixed` flyouts. Folding
+  therefore zeroes the box (`height`, `padding`, **`border-width`** — a
+  transparent 1px still measures 2px) and hides the *buttons*, never the wrappers,
+  because a wrapper carries the open panel and `MaterialMenu`'s wrapper has an
+  inline `display` a class cannot outrank. `pointer-events: none` on the folded
+  rail inherits into those panels, so they re-assert `auto`.
+
+**Fixed alongside:** the showcase-scene bar and the plate bar were pinned at
+`bottom: 12px` on phone — which is exactly where the tool row already was. Both
+now sit at 62px, clear of it, as do the canvas toast and the selection actions.
+
+Verified with Playwright at an iPhone 13 viewport in **both themes**
+(`phonebar.mjs`, 27 checks each) plus a desktop / iPad-portrait / iPad-landscape
+regression (`barwide.mjs`) proving the wide layout is byte-for-byte the vertical
+rail it was.
+
 ## Build 418 — the phone's tools become reachable
 
 Reported as "mobile UI still looks a bit unusable", with a request to work from Apple's

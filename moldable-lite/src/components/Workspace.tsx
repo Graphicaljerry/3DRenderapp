@@ -27,6 +27,7 @@ import { MAX_VERSIONS } from "../store/versions";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
 import { fmtTok, fmtUSD } from "../llm/pricing";
+import { fmtCredits, usdToCredits, ageLabel, PRICING } from "../llm/credits";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
 import { IS_DESKTOP } from "../lib/desktopUpdate";
@@ -35,7 +36,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit} from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
@@ -282,6 +283,42 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
       }}
       aria-label="Rename"
     />
+  );
+}
+
+/** What's left to spend, in the app's unit, beside the model that spends it.
+ *
+ *  It sits on the Model row rather than in Settings because a balance you have to go
+ *  looking for is one you find out about by hitting a wall. Tap to re-read; the tooltip
+ *  carries the real dollars and how old the figure is, because a friendly unit must
+ *  never be the only number available for something that is actually money.
+ *
+ *  Renders nothing without an OpenRouter key — there is no balance to speak of, and an
+ *  empty meter would read as "you are out" rather than "not applicable". */
+function BalanceChip({ b }: { b: Props["balance"] }) {
+  if (!b) return null;
+  // Three states, and conflating any two of them lies about money: a real figure, a key
+  // with no cap (so there is nothing to count down), and no answer from OpenRouter at
+  // all. The last one must never borrow the wording of the second.
+  const low = b.credits != null && b.credits < 500; // ≈ $0.50 left
+  const label = !b.known ? (b.busy ? "…" : "—") : b.credits == null ? "no cap" : fmtCredits(b.credits);
+  const title = !b.known
+    ? (b.busy ? "Reading your OpenRouter balance…" : "Couldn't reach OpenRouter to read your balance. Tap to try again.")
+    : b.credits == null
+      ? `No spending cap on this key, so OpenRouter reports no balance to count down. $${(b.usedCredits != null ? b.usedCredits / PRICING.creditsPerUsd : 0).toFixed(2)} spent on it so far. Tap to re-read.`
+      : `${fmtCredits(b.credits)} ${PRICING.unit} left — $${(b.usd ?? 0).toFixed(2)} of real OpenRouter balance. `
+        + `1 credit = $${(1 / PRICING.creditsPerUsd).toFixed(3)}. Read ${ageLabel(b.at)}. Tap to re-read.`;
+  return (
+    <button
+      type="button"
+      className={`balance-chip${low ? " low" : ""}${b.busy ? " busy" : ""}`}
+      title={title}
+      aria-label={title}
+      onClick={b.refresh}
+    >
+      <IconCoin size={12} />
+      <span className="balance-n">{label}</span>
+    </button>
   );
 }
 
@@ -2257,6 +2294,19 @@ interface Props {
   brain: { provider: LlmProviderId; model: string };
   hasBrainKey: (provider: LlmProviderId) => boolean;
   onPickBrain: (provider: LlmProviderId, model: string) => void;
+  /** Live balance readout: what's left, in the app's unit. Absent = no OpenRouter key,
+   *  and the chip does not render at all rather than showing an empty tank. */
+  balance: {
+    /** false = OpenRouter has not answered yet (or could not be reached). Distinct from
+     *  `credits: null`, which means it answered and there is no cap to count down. */
+    known: boolean;
+    credits: number | null;
+    usedCredits: number | null;
+    usd: number | null;
+    at: number;
+    busy: boolean;
+    refresh: () => void;
+  } | null;
   autoPick: string; // "Auto → <model> (<why>)" shown when OpenRouter Auto picks per request
   genProvider: string;
   genModel: string;
@@ -3247,6 +3297,7 @@ export function Workspace(p: Props) {
                     the input forever. They live behind one button now, which states
                     how many are off their default so nothing hides silently. */}
                 <BuildOptions p={p} />
+                <BalanceChip b={p.balance} />
               </div>
               <div className="modebar-row">
                 <div className="seg">
@@ -5408,11 +5459,19 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                 </div>
               )}
               {m.role === "assistant" && !m.streaming && m.model && (
-                <span className="msg-model">
+                <span
+                  className="msg-model"
+                  /* The money stays one hover away. Credits are the readable scale;
+                     the dollars they stand for are the fact, and small print about
+                     spending should never make the real figure unreachable. */
+                  title={m.usage
+                    ? `${fmtTok(m.usage.inTok)} in / ${fmtTok(m.usage.outTok)} out${m.usage.usd != null ? ` · ${fmtUSD(m.usage.usd, m.usage.est)} of real provider spend` : " · no price known for this model"}${m.usage.est ? " (estimated — the provider sent no usage report)" : ""}`
+                    : undefined}
+                >
                   {m.model}
-                  {/* Beta cost meter, small print: tokens and dollars this reply cost
-                      (summed over retries). ≈ marks estimated figures — see pricing.ts. */}
-                  {m.usage && ` · ${fmtTok(m.usage.inTok + m.usage.outTok)} tok · ${fmtUSD(m.usage.usd, m.usage.est)}`}
+                  {/* Beta cost meter, small print: what this reply cost, summed over
+                      retries. ≈ marks estimated figures — see pricing.ts / credits.ts. */}
+                  {m.usage && ` · ${fmtTok(m.usage.inTok + m.usage.outTok)} tok · ${m.usage.usd != null ? `${fmtCredits(usdToCredits(m.usage.usd), m.usage.est)} ${PRICING.unitShort}` : fmtUSD(null, false)}`}
                 </span>
               )}
               {/* Retry / edit any typed prompt — including one sent with a photo, so

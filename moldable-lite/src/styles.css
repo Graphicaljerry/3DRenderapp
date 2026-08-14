@@ -1352,6 +1352,25 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* wrap the model picker to its own line when the toggle + picker won't fit —
    avoids the picker overflowing/overlapping in a narrow chat panel. */
 .modebar-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 6px; }
+/* Balance, beside the model that spends it. Pushed to the end of its row: it is a
+   readout, not the next thing you reach for, so it stays out of the tab order's way
+   visually while remaining one glance from the send button. */
+.balance-chip {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  padding: 4px 9px 4px 7px; border: 1px solid var(--bord); border-radius: var(--r-full);
+  background: none; font-size: var(--fs-tiny); color: var(--mut); cursor: pointer;
+  transition: color var(--ms-ui) var(--ease-ui), border-color var(--ms-ui) var(--ease-ui);
+}
+.balance-chip svg { flex: 0 0 auto; opacity: .8; }
+.balance-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.balance-chip:hover { color: var(--ink2); border-color: var(--bord-strong); }
+.balance-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Running out is the one state worth colouring — and it warms rather than alarms,
+   because a low balance is a thing to top up, not an error. */
+.balance-chip.low { color: #a4691a; border-color: color-mix(in srgb, #a4691a 40%, transparent); }
+[data-theme="dark"] .balance-chip.low { color: #d9a441; border-color: color-mix(in srgb, #d9a441 35%, transparent); }
+.balance-chip.busy { opacity: .55; }
+@media (prefers-reduced-motion: reduce) { .balance-chip { transition: none; } }
 .seg { display: inline-flex; background: var(--ctl); border-radius: var(--r-md); padding: 2px; }
 /* Mode rail: an outlined track, dark pill on the active mode. */
 .modebar .seg { background: transparent; border: 1px solid var(--bord-strong); border-radius: var(--r-full); padding: 3px; }

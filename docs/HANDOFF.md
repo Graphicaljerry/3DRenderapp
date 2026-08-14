@@ -917,6 +917,52 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 412 — what's left in the tank, in a unit you can read
+
+Jerry: show how much OpenRouter credit is left, and skin it as an app-level unit that
+records real currency underneath, because the commercial formula will not be 1:1 later.
+
+**`llm/credits.ts`** keeps the two ideas apart on purpose:
+- BALANCE is real money read live from OpenRouter. Nothing invents it. `fetchBalance()`
+  tries `/api/v1/credits` (the dashboard number: `total_credits - total_usage`) and falls
+  back to `/api/v1/key` (`limit_remaining`, or `limit - usage`), parsing tolerantly across
+  field spellings — a renamed field should degrade a readout, not break it. Cached in
+  localStorage so the chip draws on the first frame, stamped with its age, re-read on
+  mount and whenever a build settles (exactly when it moved).
+- CREDITS is the app's unit: a pure display skin over USD, defined once in `PRICING`
+  (`creditsPerUsd: 1000`, `markup: 1`, `unit`). 1 credit = $0.001, so a CAD build lands
+  around 4 credits and $10 of balance reads as 10,000. **Commercialising = editing
+  `PRICING`, not call sites** — markup, per-build floor, subscription grants are all
+  arithmetic through `usdToCredits`/`creditsToUsd`. The ledger keeps recording true USD
+  underneath either way, which is what makes the two reconcilable later.
+
+**Where it shows.** A `BalanceChip` on the Model row (a balance you have to hunt for is
+one you discover by hitting a wall), tap to re-read, real dollars + figure age in the
+tooltip. Per-bubble cost switched from `$0.00421` to `4.2 cr` with the true dollars on
+hover. Settings gained balance, spend-on-this-key, and "≈ builds left at your average" —
+the number that answers "can I keep working today".
+
+**Naming:** the unit is "credits", not "tokens", because bubbles already print `1,555 tok`
+for raw LLM tokens and two different "tokens" on one line is a real trap. Renaming is one
+line (`PRICING.unit`) if you'd rather.
+
+**Two bugs the probe caught, both about honesty with money:** `fmtCredits` grouped
+thousands only above 10,000, so `1750` and `20,500` appeared side by side; and a failed
+network read fell through to the "no cap on this key" wording — claiming a fact about the
+account from a call that never landed. Three states now render distinctly: a figure,
+"no cap", and "—" (couldn't reach OpenRouter).
+
+Verified with Playwright by ROUTING both OpenRouter endpoints locally (openrouter.ai is
+unreachable from the dev sandbox): account-credits shape, per-key-limit shape with the
+credits endpoint 404ing, low-balance styling, uncapped key, hard failure, no-key (chip
+absent entirely), and a real build's cost rendering as credits with dollars on hover.
+
+**Not verified here:** the live response shape. Egress to openrouter.ai is blocked from
+this sandbox, so the parser was written defensively against both documented endpoints
+rather than confirmed against the wire. First run on a real key is the check — if the
+number disagrees with the OpenRouter dashboard, the fix is in `fetchBalance`'s `num()`
+aliases.
+
 ## Build 411 — the model can read its own history
 
 **Continue, then Build.** The clarify stepper's forward action is now `Continue` until the

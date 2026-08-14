@@ -54,7 +54,7 @@ and Settings → **3D engine** (mesh generation). They live in your browser
 | Google Gemini | aistudio.google.com/apikey | **free** tier ~1,500 req/day |
 | OpenAI | platform.openai.com/api-keys | |
 | Groq | console.groq.com/keys | **free**, fast open models |
-| **OpenRouter** | **openrouter.ai/keys** | `sk-or-…`; one key → hundreds of models. In Settings pick provider "OpenRouter", paste the key, and the model box becomes a type-to-search picker with live prices — models tagged `:free` cost nothing. |
+| **OpenRouter** | **openrouter.ai/keys** | `sk-or-…`; one key → hundreds of models. In Settings pick provider "OpenRouter", paste the key, and the model box becomes a type-to-search picker with live prices — models tagged `:free` cost nothing. With this key set, the app also reads your live balance and shows it on the Model row (see Credits below). |
 | Ollama | ollama.com (install, `ollama pull …`) | local & private; set `OLLAMA_ORIGINS=*` if the hosted site can't see it |
 | On-device / Built-in | — | no key: WebLLM in-browser model, or the site's sponsored relay |
 
@@ -71,6 +71,25 @@ and Settings → **3D engine** (mesh generation). They live in your browser
 The paid mesh engines browsers can't call directly go through the Supabase
 `relay` edge function on the hosted site; a self-hostable Cloudflare Worker
 alternative lives in `moldable-lite/proxy/` (see its `DEPLOY.md`).
+
+## Credits — the app's spend unit
+
+`src/llm/credits.ts` holds two separate things. **Balance** is real money read live
+from OpenRouter (`/api/v1/credits`, falling back to `/api/v1/key`), cached, stamped
+with its age, and re-read after every build. **Credits** are a display skin over USD:
+`1 credit = $0.001`, at cost.
+
+**One place to change when this commercialises: the `PRICING` object.**
+
+```ts
+export const PRICING = { creditsPerUsd: 1000, markup: 1, unit: "credits", unitShort: "cr" };
+```
+
+Markup, per-build floors and subscription grants are all arithmetic inside
+`usdToCredits` / `creditsToUsd` — no call site knows the formula. The ledger keeps
+recording true USD underneath regardless, so app credits and provider dollars stay
+reconcilable. `PRICING.unit` renames the unit everywhere (it is "credits" rather than
+"tokens" because chat bubbles already print raw LLM `tok` counts).
 
 ## How changes get verified
 

@@ -225,6 +225,14 @@ export const IconBadge = ({ size = 15 }: { size?: number }) => (
     <path d="M8.5 14 7 22l5-3 5 3-1.5-8" />
   </svg>
 );
+/** A coin, for the balance. A stack would read as "layers" at 12px — one disc seen
+ *  slightly on edge is the smallest shape that still says currency. */
+export const IconCoin = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.9}>
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5v9M14.6 9.6a3 3 0 0 0-2.6-1.1c-1.6 0-2.6.8-2.6 2s1 1.8 2.6 2 2.6.7 2.6 2-1 2-2.6 2a3 3 0 0 1-2.6-1.1" />
+  </svg>
+);
 /** Two anchor points joined by a distance line — what the tool actually does
  *  (tap two points, read the span). The old diagonal ruler's tick marks turned
  *  to mush at rail size. */

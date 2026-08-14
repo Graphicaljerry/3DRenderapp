@@ -30,6 +30,7 @@ import { TEXT_DEFAULT, buildTextGeometry, type TextSpec } from "./text/geometry"
 import { bendAroundY } from "./text/bend";
 import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
+import { fetchBalance, loadBalance, saveBalance, usdToCredits, fmtCredits, ageLabel, PRICING, type Balance } from "./llm/credits";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
@@ -1313,6 +1314,30 @@ export default function App() {
   const [status, setStatus] = useState<"idle" | "generating">("idle");
   const statusRef = useRef<"idle" | "generating">("idle");
   statusRef.current = status;
+
+  // ---- What's left in the tank ----
+  // Read from OpenRouter, cached so the chip has a number to draw on the first frame,
+  // and re-read whenever a build settles — that is exactly when it moved. A failed
+  // read keeps the last figure rather than flashing a zero; the chip states its age.
+  const orKey = llmKeys["openrouter"] || "";
+  const [balance, setBalance] = useState<Balance | null>(() => loadBalance());
+  const [balanceBusy, setBalanceBusy] = useState(false);
+  const refreshBalance = useCallback(async () => {
+    if (!orKey) { setBalance(null); saveBalance(null); return; }
+    setBalanceBusy(true);
+    try {
+      const b = await fetchBalance(orKey);
+      if (b) { setBalance(b); saveBalance(b); }
+    } finally {
+      setBalanceBusy(false);
+    }
+  }, [orKey]);
+  useEffect(() => { void refreshBalance(); }, [refreshBalance]);
+  const lastStatus = useRef(status);
+  useEffect(() => {
+    if (lastStatus.current === "generating" && status === "idle") void refreshBalance();
+    lastStatus.current = status;
+  }, [status, refreshBalance]);
   const [streamingText, setStreamingText] = useState("");
   const [streamingThink, setStreamingThink] = useState(""); // live model reasoning (chat shows it while generating)
   const [codeBuffer, setCodeBuffer] = useState("");
@@ -7082,6 +7107,19 @@ export default function App() {
         brain={{ provider: llm.provider, model: llm.provider === "anthropic" ? model : llm.model }}
         hasBrainKey={(prov) => (prov === "anthropic" ? !!key : prov === "house" ? !!house : !llmPreset(prov).needsKey || !!llmKeys[prov])}
         onPickBrain={pickBrain}
+        /* Only while OpenRouter is the brain actually spending. The chip sits ON the
+           model row, so it reads as "this model's fuel" — parking an OpenRouter figure
+           next to a Claude model would be a readout about the wrong account. No other
+           provider exposes a balance API, so switching away simply hides it. */
+        balance={orKey && llm.provider === "openrouter" ? {
+          known: !!balance,
+          credits: balance?.remainingUsd != null ? usdToCredits(balance.remainingUsd) : null,
+          usedCredits: balance?.usedUsd != null ? usdToCredits(balance.usedUsd) : null,
+          usd: balance?.remainingUsd ?? null,
+          at: balance?.at ?? Date.now(),
+          busy: balanceBusy,
+          refresh: () => void refreshBalance(),
+        } : null}
         autoPick={autoPick}
         genProvider={genEng.provider}
         genModel={genEng.model}
@@ -8805,32 +8843,63 @@ function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose
  *  and (with an OpenRouter key) the key's account-level usage straight from OpenRouter. */
 function SpendMeter({ orKey }: { orKey?: string }) {
   const [l, setL] = useState(loadLedger);
-  const [orLine, setOrLine] = useState("");
-  useEffect(() => {
+  const [bal, setBal] = useState<Balance | null>(() => loadBalance());
+  const [busy, setBusy] = useState(false);
+  const read = useCallback(async () => {
     if (!orKey) return;
-    fetch("https://openrouter.ai/api/v1/key", { headers: { authorization: `Bearer ${orKey}` } })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j: any) => {
-        const d = j?.data;
-        if (d?.usage != null) setOrLine(`OpenRouter account: $${Number(d.usage).toFixed(2)} used${d.limit != null ? ` of a $${Number(d.limit).toFixed(2)} limit` : ""} on this key (every app, not just Moldable).`);
-      })
-      .catch(() => { /* offline or key without introspection — the local meter stands alone */ });
+    setBusy(true);
+    try {
+      const b = await fetchBalance(orKey);
+      if (b) { setBal(b); saveBalance(b); }
+      else setBal(null);
+    } finally { setBusy(false); }
   }, [orKey]);
+  useEffect(() => { void read(); }, [read]);
   const avg = l.builds ? l.usd / l.builds : 0;
+  const left = bal?.remainingUsd ?? null;
+  // Builds left at THIS project's observed average — the number that answers "can I
+  // keep working today", which a dollar figure alone does not.
+  const runway = left != null && avg > 0 ? Math.floor(left / avg) : null;
   return (
     <>
-      <div className="dock-row"><span className="dock-k">Since {l.since}</span><span className="dock-v">{fmtUSD(l.usd, false)}</span></div>
-      <div className="dock-row"><span className="dock-k">Builds</span><span className="dock-v">{l.builds} · avg {fmtUSD(avg, false)}</span></div>
+      {orKey && (
+        <>
+          <div className="dock-row">
+            <span className="dock-k">Balance left</span>
+            <span className="dock-v">
+              {busy && !bal ? "reading…"
+                : left != null ? `${fmtCredits(usdToCredits(left))} ${PRICING.unit} · $${left.toFixed(2)}`
+                : bal ? "no cap on this key" : "couldn't reach OpenRouter"}
+            </span>
+          </div>
+          {bal?.usedUsd != null && (
+            <div className="dock-row"><span className="dock-k">Spent on this key</span><span className="dock-v">${bal.usedUsd.toFixed(2)} · every app, not just Moldable</span></div>
+          )}
+          {runway != null && (
+            <div className="dock-row"><span className="dock-k">≈ builds left</span><span className="dock-v">{runway.toLocaleString()} at your average</span></div>
+          )}
+        </>
+      )}
+      <div className="dock-row"><span className="dock-k">Since {l.since}</span><span className="dock-v">{fmtCredits(usdToCredits(l.usd))} {PRICING.unitShort} · {fmtUSD(l.usd, false)}</span></div>
+      <div className="dock-row"><span className="dock-k">Builds</span><span className="dock-v">{l.builds} · avg {fmtCredits(usdToCredits(avg))} {PRICING.unitShort}</span></div>
       <div className="dock-row"><span className="dock-k">All calls</span><span className="dock-v">{l.calls} · {fmtTok(l.inTok)} in / {fmtTok(l.outTok)} out</span></div>
-      {orLine && <p className="fine choice-hint">{orLine}</p>}
+      <p className="fine choice-hint">
+        1 {PRICING.unit.replace(/s$/, "")} = ${(1 / PRICING.creditsPerUsd).toFixed(3)} of real provider spend
+        {PRICING.markup !== 1 ? ` × ${PRICING.markup} ` : " — at cost, no markup"}. Credits exist because sub-cent
+        dollars are unreadable; every figure here has its true dollars beside it or one hover away, and the
+        ledger records dollars underneath either way.
+      </p>
       <p className="fine choice-hint">
         cost = tokens ÷ 1M × the model's $/Mtok (in and out priced separately). Figures come from the
         provider's own usage report when it sends one — OpenRouter even reports the exact dollar cost —
         otherwise ≈ estimates: tokens ≈ characters ÷ 4, plus ~1,600 input tokens per attached photo.
         A build = routing + optional research + the generation and its retries; all of it lands here.
-        Device-local, your keys, not billing.
+        The balance is OpenRouter's own figure{bal ? `, read ${ageLabel(bal.at)}` : ""}; the totals are device-local.
       </p>
-      <button className="ghost sm" onClick={() => { resetLedger(); setL(loadLedger()); }}>Reset meter</button>
+      <div className="param-actions">
+        {orKey && <button className="ghost sm" disabled={busy} onClick={() => void read()}>{busy ? "Reading…" : "Refresh balance"}</button>}
+        <button className="ghost sm" onClick={() => { resetLedger(); setL(loadLedger()); }}>Reset meter</button>
+      </div>
     </>
   );
 }

@@ -623,6 +623,12 @@ button:disabled { cursor: default; }
 /* Auto-growing message box: wraps long requests instead of scrolling them off-screen. */
 .compose-field textarea { flex: 1; min-width: 0; height: 38px; min-height: 38px; max-height: 132px; padding: 8px 6px; border: none; background: none; font: inherit; font-size: var(--fs-lg); line-height: 1.4; resize: none; overflow-y: auto; color: var(--ink); }
 .compose-field textarea:focus-visible { outline: none; }
+/* The empty box is pinned one line tall (growComposer — a wrapped placeholder used to
+   balloon it), so a placeholder longer than the box must ellipsize on ONE line, never
+   wrap down into the clip and come out cut mid-word. text-overflow lives on the element
+   because engines don't honour it on ::placeholder itself — the placeholder inherits. */
+.compose-field textarea { text-overflow: ellipsis; }
+.compose-field textarea::placeholder { white-space: nowrap; }
 .send { flex: 0 0 auto; width: 32px; height: 32px; border: none; border-radius: var(--r-full); background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; font-size: var(--fs-md); font-weight: 600; }
 /* Dictation mic — quiet next to Send; pulses while listening. */
 .mic { width: 32px; height: 32px; border: none; border-radius: var(--r-full); background: transparent; color: var(--mut); display: inline-flex; align-items: center; justify-content: center; }
@@ -1728,7 +1734,9 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 
 /* ---------- Vague request → questions, in the transcript ----------
    Styled as a panel rather than an assistant bubble: it is a control the user acts on,
-   and dressing it as speech would make the buttons read as a transcript of buttons. */
+   and dressing it as speech would make the buttons read as a transcript of buttons.
+   One question shows at a time — the form-tool rhythm — so each gets read instead of
+   skimmed; the options are full-width rows for the same reason (and for iPad thumbs). */
 .clarify {
   display: flex; flex-direction: column; gap: 12px;
   padding: 12px 13px; border: 1px solid var(--bord); border-radius: var(--r-md);
@@ -1737,31 +1745,46 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .clarify.done { opacity: .72; box-shadow: none; background: none; }
 .clarify-head { display: flex; align-items: center; gap: 6px; margin: 0; font-size: var(--fs-md); font-weight: 600; color: var(--ink2); }
 .clarify-head svg { color: var(--accent-d); flex: 0 0 auto; }
-.clarify-q { display: flex; flex-direction: column; gap: 6px; }
-.clarify-ask { margin: 0; font-size: var(--fs-md); color: var(--ink); }
+.clarify-count { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-tiny); font-weight: 400; color: var(--subt); font-variant-numeric: tabular-nums; }
+.clarify-step { display: flex; flex-direction: column; gap: 8px; animation: clarify-step-in .18s ease-out; }
+@keyframes clarify-step-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.clarify-ask { margin: 0; font-size: var(--fs-lg); font-weight: 600; color: var(--ink); }
 .clarify-why { margin: 0; font-size: var(--fs-tiny); line-height: 1.45; color: var(--mut); }
-.clarify-opts { display: flex; flex-wrap: wrap; gap: 6px; }
-.clarify-chip {
-  display: inline-flex; align-items: baseline; gap: 6px;
-  padding: 6px 11px; border: 1px solid var(--bord); border-radius: var(--r-full);
-  background: var(--bg); font-size: var(--fs-sm); color: var(--ink2); cursor: pointer;
+.clarify-opts { display: flex; flex-direction: column; gap: 6px; }
+.clarify-opt {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px; width: 100%;
+  padding: 9px 12px; border: 1px solid var(--bord); border-radius: var(--r-md); text-align: left;
+  background: var(--bg); font-size: var(--fs-md); color: var(--ink2); cursor: pointer;
   transition: background-color var(--ms-ui) var(--ease-ui), border-color var(--ms-ui) var(--ease-ui), color var(--ms-ui) var(--ease-ui);
 }
-.clarify-chip:hover:not(.on):not(:disabled) { background: var(--surf); }
-.clarify-chip.on { background: var(--accent-w); border-color: var(--accent); color: var(--accent-d); font-weight: 500; }
-.clarify-chip:disabled { cursor: default; }
-.clarify-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.clarify-opt:hover:not(.on):not(:disabled) { background: var(--surf); }
+.clarify-opt.on { background: var(--accent-w); border-color: var(--accent); color: var(--accent-d); font-weight: 500; }
+.clarify-opt:disabled { cursor: default; }
+.clarify-opt:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Marks the answer the app would have assumed on its own — so a pre-filled card reads
    as the app showing its work, not as a choice already made for you. */
 .clarify-rec { font-size: var(--fs-micro); letter-spacing: .02em; text-transform: uppercase; color: var(--mut); }
-.clarify-chip.on .clarify-rec { color: var(--accent-d); opacity: .75; }
+.clarify-opt.on .clarify-rec { color: var(--accent-d); opacity: .75; }
 .clarify-text {
   width: 100%; padding: 6px 10px; border: 1px solid var(--bord); border-radius: var(--r-sm);
   background: var(--bg); font-size: var(--fs-sm); color: var(--ink);
 }
 .clarify-text:focus-visible { outline: none; border-color: var(--accent); }
-.clarify-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-@media (prefers-reduced-motion: reduce) { .clarify-chip { transition: none; } }
+.clarify-foot { display: flex; flex-direction: column; gap: 10px; }
+.clarify-nav { display: flex; align-items: center; justify-content: center; gap: 7px; }
+.clarify-arrow { display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: none; border-radius: var(--r-full); background: none; color: var(--subt); cursor: pointer; }
+.clarify-arrow:hover:not(:disabled) { color: var(--ink2); background: var(--ctl); }
+.clarify-arrow:disabled { opacity: .35; cursor: default; }
+.clarify-arrow.prev svg { transform: rotate(90deg); }
+.clarify-arrow.next svg { transform: rotate(-90deg); }
+.clarify-dot { width: 7px; height: 7px; padding: 0; border: none; border-radius: var(--r-full); background: var(--bord-strong); cursor: pointer; transition: background-color var(--ms-ui) var(--ease-ui), transform var(--ms-ui) var(--ease-ui); }
+.clarify-dot.on { background: var(--accent); transform: scale(1.25); }
+.clarify-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* The frozen card: what was actually answered, as a record rather than a replayed form. */
+.clarify-recap { margin: 0; display: flex; flex-direction: column; gap: 7px; }
+.clarify-recap dt { font-size: var(--fs-tiny); color: var(--mut); }
+.clarify-recap dd { margin: 1px 0 0; font-size: var(--fs-md); color: var(--ink); }
+@media (prefers-reduced-motion: reduce) { .clarify-opt, .clarify-dot { transition: none; } .clarify-step { animation: none; } }
 
 /* ---------- Inspector dock ----------
    A real column beside the stage, not an overlay that replaces it. Sibling of
@@ -2959,6 +2982,11 @@ details.guide { margin-top: 10px; }
 .plan-title { font-family: var(--font-display); font-size: var(--fs-lg); font-weight: 600; color: var(--ink); }
 .plan-sum { margin: 5px 0 0; font-size: var(--fs-md); color: var(--ink2); }
 .plan-size { margin-top: 6px; font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--ink2); font-variant-numeric: tabular-nums; }
+/* The envelope drawn to proportion, with a bank-card footprint for scale. Lines borrow
+   the text colours so the sketch sits in either theme without its own palette. */
+.plan-sketch { display: block; margin-top: 4px; max-width: 100%; height: auto; color: var(--ink2); }
+.plan-sketch text { font-family: var(--font-mono); font-size: 10px; fill: var(--subt); }
+.plan-sketch .ps-card { fill: none; stroke: var(--subt); stroke-dasharray: 3 3; }
 .plan-sect { margin-top: 11px; }
 .plan-label { font-size: var(--fs-tiny); font-weight: 600; color: var(--mut); margin-bottom: 4px; }
 .plan-list { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-md); color: var(--ink2); }

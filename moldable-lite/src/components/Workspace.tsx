@@ -2700,11 +2700,42 @@ interface Props {
   };
 }
 
+/** Trim a placeholder to one line of the box it sits in, with a real ellipsis. The
+ *  composer's empty state is pinned one line tall, and no engine ellipsizes a textarea
+ *  placeholder from CSS — left alone it either wraps into the clip (cut mid-word at the
+ *  bottom, the reported defect) or clips at the edge. So the STRING is fitted instead. */
+function fitPlaceholder(el: HTMLTextAreaElement | null, text: string): string {
+  if (!el || !el.clientWidth) return text;
+  const w = el.clientWidth - 14; // 6px text inset each side, plus a hair of slack
+  if (w <= 0) return text;
+  const store = fitPlaceholder as unknown as { ctx?: CanvasRenderingContext2D };
+  const ctx = store.ctx ?? (store.ctx = document.createElement("canvas").getContext("2d")!);
+  const cs = getComputedStyle(el);
+  ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+  if (ctx.measureText(text).width <= w) return text;
+  let lo = 0, hi = text.length;
+  while (lo < hi) {
+    const m = (lo + hi + 1) >> 1;
+    if (ctx.measureText(`${text.slice(0, m)}…`).width <= w) lo = m; else hi = m - 1;
+  }
+  return `${text.slice(0, lo).trimEnd()}…`;
+}
+
 export function Workspace(p: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const logoFileRef = useRef<HTMLInputElement>(null);
   // Composer grows with the text (up to ~5 lines) so long requests stay fully readable.
   const composerRef = useRef<HTMLTextAreaElement>(null);
+  // Re-render on composer resize so the fitted placeholder tracks the box width
+  // (chat column drag, window resize, phone rotation).
+  const [, setPhTick] = useState(0);
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setPhTick((t) => t + 1));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const growComposer = () => {
     const el = composerRef.current;
     if (!el) return;
@@ -3339,7 +3370,8 @@ export function Workspace(p: Props) {
                       e.currentTarget.form?.requestSubmit();
                     }
                   }}
-                  placeholder={
+                  placeholder={fitPlaceholder(
+                    composerRef.current,
                     p.mode === "generative"
                       ? "Describe it, or upload / paste a photo…"
                       : p.imageUrl
@@ -3348,8 +3380,8 @@ export function Workspace(p: Props) {
                           : "Add known measurements (e.g. 32 mm wide, M4 holes) — they override estimates…"
                         : p.guided
                           ? "Upload a photo of the part, or describe it with any measurements…"
-                          : "What would you like to build?"
-                  }
+                          : "What would you like to build?",
+                  )}
                 />
                 {/* A button, not an always-on pass. Rewriting what someone typed on their
                     behalf, silently, is the one thing this app should never do to a
@@ -4908,6 +4940,59 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
  *  the finished model costs another whole build (and on a mesh engine, real money).
  *  The assumptions block is deliberately loudest: unstated guesses are what produce a
  *  confidently wrong first model. */
+/** The plan's envelope drawn to proportion: an isometric box with each number on its
+ *  edge, and a dashed bank-card footprint on the same floor for scale — "60 mm" is
+ *  abstract, "two thirds of a card" is not. Decorative only (the exact figures stay in
+ *  the text line above it), so the SVG is hidden from screen readers. */
+function PlanSizeSketch({ size }: { size: { x: number; y: number; z: number } }) {
+  const { x: X, y: Y, z: Z } = size;
+  const c30 = Math.cos(Math.PI / 6), s30 = 0.5;
+  const P = (x: number, y: number, z: number): [number, number] => [(x - y) * c30, (x + y) * s30 - z];
+  const maxDim = Math.max(X, Y, Z);
+  // Bank card, 85.6 x 54 — shown while the part is in a range where the comparison
+  // still reads; beyond it the smaller of the two collapses to a sliver.
+  const CARD_X = 54, CARD_Y = 85.6;
+  const withCard = maxDim >= 15 && maxDim <= 400;
+  const g = Math.max(6, maxDim * 0.15);
+  const faces = {
+    top: [P(0, 0, Z), P(X, 0, Z), P(X, Y, Z), P(0, Y, Z)],
+    left: [P(0, Y, 0), P(X, Y, 0), P(X, Y, Z), P(0, Y, Z)],
+    right: [P(X, 0, 0), P(X, Y, 0), P(X, Y, Z), P(X, 0, Z)],
+  };
+  const card = withCard ? [P(X + g, 0, 0), P(X + g + CARD_X, 0, 0), P(X + g + CARD_X, CARD_Y, 0), P(X + g, CARD_Y, 0)] : [];
+  const pts = [...faces.top, ...faces.left, ...faces.right, ...card];
+  const u0 = Math.min(...pts.map((p) => p[0])), v0 = Math.min(...pts.map((p) => p[1]));
+  const du = Math.max(...pts.map((p) => p[0])) - u0, dv = Math.max(...pts.map((p) => p[1])) - v0;
+  const s = Math.min(228 / du, 150 / dv);
+  const PAD = 20; // the labels sit just outside the geometry
+  const W = Math.round(du * s + PAD * 2), H = Math.round(dv * s + PAD * 2);
+  const px = (u: number) => +((u - u0) * s + PAD).toFixed(1);
+  const py = (v: number) => +((v - v0) * s + PAD).toFixed(1);
+  const T = (poly: [number, number][]) => poly.map(([u, v]) => `${px(u)},${py(v)}`).join(" ");
+  const mid = (a: [number, number], b: [number, number]): [number, number] => [px((a[0] + b[0]) / 2), py((a[1] + b[1]) / 2)];
+  const mx = mid(P(0, Y, 0), P(X, Y, 0)); // width edge, bottom-left
+  const my = mid(P(X, 0, 0), P(X, Y, 0)); // depth edge, bottom-right
+  const mz = mid(P(X, 0, 0), P(X, 0, Z)); // height edge, right silhouette
+  const cc = withCard ? mid(P(X + g, 0, 0), P(X + g + CARD_X, CARD_Y, 0)) : [0, 0];
+  const fmt = (n: number) => `${Math.round(n * 10) / 10}`;
+  return (
+    <svg className="plan-sketch" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+      {([["top", 0.16], ["left", 0.06], ["right", 0.1]] as const).map(([f, o]) => (
+        <polygon key={f} points={T(faces[f])} fill="currentColor" fillOpacity={o} stroke="currentColor" strokeOpacity={0.55} strokeLinejoin="round" />
+      ))}
+      {withCard && (
+        <>
+          <polygon className="ps-card" points={T(card)} />
+          <text x={cc[0]} y={cc[1] + 3} textAnchor="middle">bank card</text>
+        </>
+      )}
+      <text x={mx[0] - 4} y={mx[1] + 12} textAnchor="middle">{fmt(X)}</text>
+      <text x={my[0] + 4} y={my[1] + 12} textAnchor="middle">{fmt(Y)}</text>
+      <text x={mz[0] + 6} y={mz[1] + 3} textAnchor="start">{fmt(Z)}</text>
+    </svg>
+  );
+}
+
 function PlanCard({ msgId, st, busy, api }: {
   msgId: string;
   st: NonNullable<ChatMessage["plan"]>;
@@ -4949,7 +5034,12 @@ function PlanCard({ msgId, st, busy, api }: {
         <b className="plan-title">{p.title}</b>
       </div>
       {p.summary && <p className="plan-sum">{p.summary}</p>}
-      {p.size && <div className="plan-size">{p.size.x} × {p.size.y} × {p.size.z} mm</div>}
+      {p.size && (
+        <>
+          <div className="plan-size">{p.size.x} × {p.size.y} × {p.size.z} mm</div>
+          <PlanSizeSketch size={p.size} />
+        </>
+      )}
       {list("steps", "What gets built", p.steps)}
       {list("assumptions", "Assuming (change anything that's wrong)", p.assumptions)}
       {(!!params.length || editing) && (
@@ -5028,59 +5118,117 @@ function ClarifyCard({ msgId, c, busy, api }: {
   // Free-text lives here rather than in the message: an answer only becomes the message's
   // answer once it is non-empty, so clearing the box cannot silently blank a question.
   const [typed, setTyped] = useState<Record<string, string>>({});
+  // One question on screen at a time. Picking an option answers it and, after a beat,
+  // turns the page itself — the Typeform rhythm. Build it stays on every page because
+  // the card opens with every recommendation pre-filled: the questions are a review,
+  // never a form standing between the user and the build.
+  const [step, setStep] = useState(0);
+  const advanceT = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(advanceT.current), []);
+  const qs = c.questions;
+
+  if (c.done) {
+    // The frozen record reads as the answers, not as a replay of the form.
+    return (
+      <div className="clarify done">
+        <p className="clarify-head"><IconSparkle size={14} />Built with these</p>
+        <dl className="clarify-recap">
+          {qs.map((q) => {
+            const v = c.answers[q.id];
+            const label = q.options.find((o) => o.value === v)?.label ?? v;
+            return (
+              <div className="clarify-recap-row" key={q.id}>
+                <dt>{q.ask}</dt>
+                <dd>{label || "left open"}</dd>
+              </div>
+            );
+          })}
+        </dl>
+      </div>
+    );
+  }
+
+  const q = qs[Math.min(step, qs.length - 1)];
+  const last = step >= qs.length - 1;
+  const picked = c.answers[q.id] ?? "";
+  const goto = (i: number) => { window.clearTimeout(advanceT.current); setStep(Math.max(0, Math.min(i, qs.length - 1))); };
+  const pick = (v: string) => {
+    setTyped((s) => ({ ...s, [q.id]: "" }));
+    api.clarifyAnswer(msgId, q.id, v);
+    window.clearTimeout(advanceT.current);
+    // Long enough for the pick to visibly register before the page turns.
+    if (!last) advanceT.current = window.setTimeout(() => setStep((s) => Math.min(s + 1, qs.length - 1)), 450);
+  };
+
   return (
-    <div className={`clarify${c.done ? " done" : ""}`}>
+    <div className="clarify" role="group" aria-label="Quick questions before building">
       <p className="clarify-head">
         <IconSparkle size={14} />
-        {c.done ? "Built with these" : "Two or three details and this will fit properly"}
+        Quick check
+        {qs.length > 1 && <span className="clarify-count" aria-live="polite">{step + 1} of {qs.length}</span>}
       </p>
-      {c.questions.map((q) => {
-        const picked = c.answers[q.id] ?? "";
-        return (
-          <div className="clarify-q" key={q.id}>
-            <p className="clarify-ask">{q.ask}</p>
-            {q.why && <p className="clarify-why">{q.why}</p>}
-            <div className="clarify-opts" role="radiogroup" aria-label={q.ask}>
-              {q.options.map((o, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  role="radio"
-                  aria-checked={picked === o.value}
-                  className={`clarify-chip${picked === o.value ? " on" : ""}`}
-                  disabled={c.done || busy}
-                  onClick={() => {
-                    setTyped((s) => ({ ...s, [q.id]: "" }));
-                    api.clarifyAnswer(msgId, q.id, o.value);
-                  }}
-                >
-                  {o.label}
-                  {o.recommended && <span className="clarify-rec">suggested</span>}
-                </button>
-              ))}
-            </div>
-            {q.allowText && !c.done && (
-              <input
-                className="clarify-text"
-                value={typed[q.id] ?? ""}
-                placeholder="or type the exact measurement…"
-                aria-label={`${q.ask} — type your own answer`}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  setTyped((s) => ({ ...s, [q.id]: v }));
-                  if (v.trim()) api.clarifyAnswer(msgId, q.id, v.trim());
-                }}
+      {/* Keyed on the question so each page mounts fresh and the enter animation runs. */}
+      <div className="clarify-step" key={q.id}>
+        <p className="clarify-ask">{q.ask}</p>
+        {q.why && <p className="clarify-why">{q.why}</p>}
+        <div className="clarify-opts" role="radiogroup" aria-label={q.ask}>
+          {q.options.map((o, i) => (
+            <button
+              key={i}
+              type="button"
+              role="radio"
+              aria-checked={picked === o.value}
+              className={`clarify-opt${picked === o.value ? " on" : ""}`}
+              disabled={busy}
+              onClick={() => pick(o.value)}
+            >
+              {o.label}
+              {o.recommended && <span className="clarify-rec">suggested</span>}
+            </button>
+          ))}
+        </div>
+        {q.allowText && (
+          <input
+            className="clarify-text"
+            value={typed[q.id] ?? ""}
+            placeholder="or type the exact measurement…"
+            aria-label={`${q.ask} — type your own answer`}
+            onChange={(e) => {
+              const v = e.target.value;
+              setTyped((s) => ({ ...s, [q.id]: v }));
+              window.clearTimeout(advanceT.current); // typing means they are still here
+              if (v.trim()) api.clarifyAnswer(msgId, q.id, v.trim());
+            }}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); if (!last) goto(step + 1); } }}
+          />
+        )}
+      </div>
+      <div className="clarify-foot">
+        {qs.length > 1 && (
+          <div className="clarify-nav">
+            <button type="button" className="clarify-arrow prev" aria-label="Previous question" disabled={step === 0} onClick={() => goto(step - 1)}>
+              <IconChevron size={13} />
+            </button>
+            {qs.map((qq, i) => (
+              <button
+                key={qq.id}
+                type="button"
+                className={`clarify-dot${i === step ? " on" : ""}`}
+                aria-label={`Go to question ${i + 1}`}
+                aria-current={i === step}
+                onClick={() => goto(i)}
               />
-            )}
+            ))}
+            <button type="button" className="clarify-arrow next" aria-label="Next question" disabled={last} onClick={() => goto(step + 1)}>
+              <IconChevron size={13} />
+            </button>
           </div>
-        );
-      })}
-      {!c.done && (
+        )}
         <div className="clarify-actions">
           <button className="primary sm" disabled={busy} onClick={() => api.clarifyBuild(msgId, true)}>Build it</button>
-          <button className="ghost sm" disabled={busy} onClick={() => api.clarifyBuild(msgId, false)}>Build what I asked for</button>
+          <button className="link" disabled={busy} onClick={() => api.clarifyBuild(msgId, false)}>Build what I asked for</button>
         </div>
-      )}
+      </div>
     </div>
   );
 }

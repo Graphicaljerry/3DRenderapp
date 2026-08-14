@@ -917,6 +917,44 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 410 — questions one at a time, a size you can see, a placeholder that fits
+
+Three from Jerry's report (iPad screenshot with the composer circled in red):
+
+**Composer text cut off.** History: the empty box was pinned one line tall in an earlier
+build because the wrapped placeholder ballooned it — which turned the balloon into a
+clip (placeholder wrapped to a second line and got cut mid-word). CSS cannot fix this
+one: engines ignore `text-overflow` on a textarea's `::placeholder` (verified — computed
+style said ellipsis, the render showed a hard clip). So the STRING is fitted instead:
+`fitPlaceholder()` measures the box (canvas `measureText`, live via ResizeObserver) and
+trims to what fits with a real "…". `::placeholder { white-space: nowrap }` stays as the
+belt so the first paint can't wrap either. Typed text still auto-grows to ~5 lines —
+regression-checked.
+
+**The clarify card is now a one-question-at-a-time stepper** (the Typeform rhythm Jerry
+asked for): "Quick check · 1 of 2" counter, ONE question in display type, full-width
+option rows (iPad thumbs), picking an option answers it and turns the page itself after
+450 ms; arrows and dots navigate back and forth without losing changed answers. The
+non-negotiable kept: every recommendation arrives pre-selected and **Build it** sits on
+every page — the questions remain a review, never a form blocking the build. The frozen
+card is now a Q→A record (ask in small muted, answer under it), not a replayed form
+with disabled buttons. Enter in the free-text field advances.
+
+**The plan card draws its size.** `PlanSizeSketch`: the envelope as a proportional
+isometric box, each number on its edge, and a dashed bank-card footprint (85.6 × 54) on
+the same floor for scale — shown when the part is 15-400 mm, where the comparison still
+reads. Pure SVG, `currentColor` + tokens so it sits in both themes; `aria-hidden`
+because the exact figures stay in the text line above it.
+
+Verified with Playwright in both themes (probes `clarifystep.mjs`, `planparams.mjs`):
+pre-filled recs, pick→auto-advance, back/dots keep answers, the changed answers (and
+not the un-picked rec) read off the actual build request on the wire, done-state recap,
+placeholder fitted with a real ellipsis at 300 px chat width, sketch faces/labels/ghost.
+
+Standing directive noted from the same message: keep looking for places where an
+interactive or visual element beats prose — the size sketch and stepper are the first
+two, not the last.
+
 ## Build 409 — the plan card gets a Parameters section
 
 The last open item from Jerry's big report: "I want to make sure that I can adjust

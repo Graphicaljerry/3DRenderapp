@@ -2746,8 +2746,23 @@ details.guide { margin-top: 10px; }
 
 
   /* The tool rail lies down: bottom-centre, capsule, flyouts open UPWARD. No app in
-     the researched set ships a left rail on a phone — the thumb arc owns the bottom. */
-  .canvas-rail { top: auto; bottom: 12px; left: 50%; transform: translateX(-50%); flex-direction: row; align-items: center; max-width: calc(100% - 16px); }
+     the researched set ships a left rail on a phone — the thumb arc owns the bottom.
+     It SCROLLS, because the tool count outgrew the screen: `max-width` alone clipped
+     the last tools with no way to reach them — a control you cannot touch is worse
+     than one you have to swipe to. Momentum scrolling, no visible bar, and a soft
+     fade at each end so the overflow announces itself (Instagram's edit strip). */
+  .canvas-rail {
+    top: auto; bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    left: 50%; transform: translateX(-50%);
+    flex-direction: row; align-items: center;
+    max-width: calc(100% - 16px);
+    overflow-x: auto; overflow-y: hidden;
+    scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    scroll-padding: 0 12px; overscroll-behavior-x: contain;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  }
+  .canvas-rail::-webkit-scrollbar { display: none; }
   /* Horizontal rail: the desktop hover-expansion contract (fixed width, full-width
      rows, name labels) makes no sense lying down — undo it even on hover-capable
      narrow windows. */
@@ -2756,11 +2771,29 @@ details.guide { margin-top: 10px; }
   .canvas-rail .ghost.sm.iconbtn { justify-content: center; }
   .canvas-rail .rail-name { display: none; }
   .canvas-rail .rail-sep { width: 1px; height: auto; align-self: stretch; margin: 4px 3px; }
-  /* Flyouts anchor to the RAIL, not their button: .rail-tool goes static so the rail
-     becomes the containing block, and a leftmost tool's flyout can no longer centre
-     itself off the screen edge. */
+  /* Flyouts leave the rail entirely and become a panel across the bottom of the screen.
+     `position: fixed` is load-bearing twice over: the rail now scrolls, and any
+     absolutely-positioned child would be clipped by that scroll container — and a
+     panel pinned to the viewport can't be dragged off-screen when the strip is
+     scrolled either. It also buys the phone what a popover never had room for: full
+     width, so the controls inside get real touch targets instead of a cramped
+     two-column wrap. This is the sheet-over-canvas shape the iOS references use. */
   .canvas-rail > .rail-tool { position: static; }
-  .canvas-rail .rail-fly { left: 6px; right: auto; top: auto; bottom: calc(100% + 10px); transform: none; max-width: calc(100vw - 24px); flex-wrap: wrap; }
+  .canvas-rail .rail-fly {
+    position: fixed;
+    left: 8px; right: 8px; top: auto;
+    bottom: calc(70px + env(safe-area-inset-bottom, 0px));
+    transform: none; width: auto; max-width: none;
+    max-height: 46vh; overflow-y: auto; overscroll-behavior: contain;
+  }
+  /* The head pill carried desktop density onto a 390px screen: seven controls, two of
+     them with text labels, in a strip that then had no room to breathe. Icons only,
+     and the two that are reference rather than action step out — Help lives in the
+     chat, and Set size is reachable from Adjust and from the dimension readout. What
+     stays is what you reach for mid-gesture: undo/redo, snap, view, fullscreen. */
+  .viewer-head .viewer-tools .btn-label { display: none; }
+  .viewer-head .viewer-tools [aria-label="Help"] { display: none; }
+  .viewer-head .viewer-tools { gap: 2px; }
   /* The view snaps shared that spot; orbit covers their job here. */
   .view-snaps { display: none; }
   /* Same for the zoom cluster: it landed ON the horizontal tool row, and pinch

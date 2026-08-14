@@ -917,6 +917,47 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 418 — the phone's tools become reachable
+
+Reported as "mobile UI still looks a bit unusable", with a request to work from Apple's
+patterns. **Note for future sessions: there is no Apple/HIG skill on this account** — I
+checked. The references used were Mobbin iOS screens (Apple Store, Crate & Barrel, Best
+Buy's 3D viewer, Instagram's edit strip, ChatGPT/Craft sheets) plus `emil-design-eng`.
+
+**The headline defect was functional, not cosmetic — and the numbers are stark.** The
+phone tool rail set `max-width: calc(100% - 16px)` with NO overflow rule, so tools past
+the screen edge could not be reached at all. Measured at iPhone 13: **588px of tools in a
+372px rail** — roughly five tools completely unreachable, silently.
+
+A comment in the CSS explained why overflow had been avoided: the tool flyouts are
+absolutely-positioned children, and any overflow value would clip them. That constraint
+is real, so the fix has two halves that only work together:
+- `.canvas-rail` becomes a scrolling strip — momentum scrolling, hidden scrollbar,
+  `overscroll-behavior-x: contain`, and a `mask-image` fade at each end so the overflow
+  announces itself rather than looking like a hard edge.
+- `.rail-fly` becomes `position: fixed` — which is what lets the rail scroll without
+  clipping it, AND stops a panel drifting off-screen when the strip is scrolled. It
+  also buys the phone what the popover never had room for: full width (356 of 390px),
+  so the controls inside get real touch targets instead of a two-column wrap.
+
+**Top pill:** icons only (`.btn-label` hidden) and Help removed — reference material, not
+something reached for mid-gesture. 266px wide now, comfortably inside the screen.
+
+Caught while writing it: the first attempt hid Help via a `.help-btn` class **that does
+not exist in the markup**, which would have silently done nothing and been reported as
+fixed. The selector is `[aria-label="Help"]`, verified against the JSX.
+
+Probe (`phoneui.mjs`) asserts REACHABILITY, not appearance — a screenshot looks fine
+while a control sits 40px outside the viewport. It scrolls the rail to its end and
+requires the last tool to be fully within the viewport, requires the panel on-screen and
+wide, and measures the canvas's share of the screen (now 70%). Both themes, real iPhone
+13 viewport.
+
+**Still open on phone:** the vertical "‹ INSPECTOR" rail eats a strip of the canvas edge
+and is the least Apple-like thing left in the shell; folding it into the bottom sheet or
+a floating control is the next move, and it needs a real decision about where Objects /
+Adjust / Printability live on a phone rather than a CSS tweak.
+
 ## Build 417 — the Inspector gets a narrower ceiling; icon spacing reverted
 
 Follow-up to 415's icon change, and a correction to it. Clustering the icons left DID

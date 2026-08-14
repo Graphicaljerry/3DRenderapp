@@ -917,7 +917,7 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
-## Build 413 — the credits experience goes consumer-grade (BRANCH ONLY — Jerry decides the deploy)
+## Build 413 — the credits experience goes consumer-grade
 
 **Direction decided by Jerry this session:** Moldable is being commercialized as
 sign-up-and-build — end users will never fetch provider keys. The strategy review
@@ -944,12 +944,24 @@ What shipped, all client-side:
   hints in anthropic.ts labels were deleted — they'd drifted from the price table and
   gave the picker a second currency.
 
-Not done / next: the house-relay per-user metering (backend), pack purchase flow, and
-retiring per-user BYOK from the default UI (Option C of the strategy doc) — all waiting
-on Jerry's go after he reviews this build.
+Reviewed and deployed to `main` at Jerry's go.
 
-**Ship state: committed and pushed to the session branch only. `main` untouched — Jerry
-said he'll say when to deploy.**
+**Not done / next — the commercial backend.** Users must never fetch a provider key, so
+the OpenRouter key stops living in `localStorage` (correct for BYOK, impossible for
+sign-up-and-build) and becomes a server secret. `src/llm/house.ts` already scaffolds
+exactly this and is switched off (`HOUSE_RELAY_URL = ""`). The build is: a credits table
+keyed by Supabase user, a relay that verifies the caller's JWT → checks credits → calls
+OpenRouter → decrements, and the panel's data source swapped from OpenRouter's balance
+to that table. The UI shipped here is deliberately shaped so only the source changes.
+
+Open decision for Jerry: Supabase Edge Function vs the existing Cloudflare Worker in
+`moldable-lite/proxy/`. Recommended the edge function — auth already lives there, so one
+place can verify the JWT and touch the credits table with no cross-service auth invented.
+Also advised, not yet done: a production Supabase project separate from
+`prtpakaxzdmrehpndimy` (which holds dev data), a business domain/mailbox rather than the
+personal Gmail, and a production OpenRouter key distinct from the dev key with a spend
+limit set on it — that limit is what `limit_remaining` reads, so the chip doubles as the
+abuse alarm.
 
 ## Build 412 — what's left in the tank, in a unit you can read
 

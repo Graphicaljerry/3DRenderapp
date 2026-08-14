@@ -56,6 +56,32 @@ export function fmtCredits(credits: number, est = false): string {
   return est ? `≈${s}` : s;
 }
 
+/* ---------- what things cost, before you spend ----------
+   The Gamma/Chatbase pattern: every place a model can be picked or a balance is
+   shown also says what an action will roughly cost — in the same unit as the
+   balance, so "can I afford this" is subtraction, not research. */
+
+/** Token shape of a typical CAD build: the system prompt + code context dominate the
+ *  input; the program dominates the output. Used ONLY when the device's own ledger
+ *  has no history yet — real averages take over as soon as they exist. */
+export const EST_BUILD_TOKENS = { in: 12_000, out: 1_500 };
+
+/** ≈ credits for one build on a given $/Mtok price, from real ledger averages when
+ *  there are enough builds to trust, else from EST_BUILD_TOKENS. Null = price unknown. */
+export function estBuildCredits(
+  price: { in: number; out: number } | null,
+  ledger?: { usd: number; inTok: number; outTok: number; builds: number },
+): number | null {
+  if (ledger && ledger.builds >= 3 && ledger.usd > 0) {
+    // The device's own history — the most honest estimate available, and it already
+    // includes routing/clarify overhead a per-model figure can't know about.
+    return usdToCredits(ledger.usd / ledger.builds);
+  }
+  if (!price) return null;
+  const usd = (EST_BUILD_TOKENS.in / 1e6) * price.in + (EST_BUILD_TOKENS.out / 1e6) * price.out;
+  return usdToCredits(usd);
+}
+
 /* ---------- the live balance ---------- */
 
 export interface Balance {

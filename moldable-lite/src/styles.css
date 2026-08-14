@@ -1371,6 +1371,29 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 [data-theme="dark"] .balance-chip.low { color: #d9a441; border-color: color-mix(in srgb, #d9a441 35%, transparent); }
 .balance-chip.busy { opacity: .55; }
 @media (prefers-reduced-motion: reduce) { .balance-chip { transition: none; } }
+/* The credits card the chip opens: big friendly balance, a bar when there is a cap,
+   what-things-cost in the SAME unit, real dollars in the fine print. */
+.credits-pop { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
+.cp-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.cp-title { font-size: var(--fs-micro); font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--accent-d); }
+.cp-refresh { border: none; background: none; padding: 0; font-size: var(--fs-sm); color: var(--accent-d); cursor: pointer; }
+.cp-refresh:hover:not(:disabled) { text-decoration: underline; }
+.cp-refresh:disabled { opacity: .55; cursor: default; }
+.cp-big { font-family: var(--font-display); font-size: 26px; font-weight: 650; color: var(--ink); line-height: 1.1; display: flex; align-items: baseline; gap: 7px; font-variant-numeric: tabular-nums; }
+.cp-big .cp-unit { font-size: var(--fs-sm); font-weight: 500; color: var(--subt); }
+.cp-big.cp-unknown { font-family: inherit; font-size: var(--fs-md); font-weight: 400; color: var(--mut); }
+.cp-bar { height: 4px; border-radius: var(--r-full); background: var(--ctl); overflow: hidden; }
+.cp-bar span { display: block; height: 100%; border-radius: var(--r-full); background: var(--accent); }
+.cp-fine { margin: 0; font-size: var(--fs-tiny); line-height: 1.45; color: var(--subt); }
+.cp-costs { display: flex; flex-direction: column; gap: 5px; padding: 9px 0 2px; border-top: 1px solid var(--bord); }
+.cp-costs-label { font-size: var(--fs-tiny); font-weight: 600; color: var(--mut); margin-bottom: 2px; }
+.cp-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: var(--fs-sm); color: var(--ink2); }
+.cp-row .cp-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.cp-row.cp-sub { margin-top: -4px; font-size: var(--fs-micro); color: var(--subt); }
+.cp-row.cp-runway { padding-top: 5px; border-top: 1px dashed var(--bord); }
+.cp-row.cp-runway .cp-n { color: var(--accent-d); font-weight: 600; }
+.cp-topup { display: block; text-align: center; padding: 7px 10px; border: 1px solid var(--bord-strong); border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: 500; color: var(--ink2); text-decoration: none; }
+.cp-topup:hover { background: var(--surf); }
 .seg { display: inline-flex; background: var(--ctl); border-radius: var(--r-md); padding: 2px; }
 /* Mode rail: an outlined track, dark pill on the active mode. */
 .modebar .seg { background: transparent; border: 1px solid var(--bord-strong); border-radius: var(--r-full); padding: 3px; }

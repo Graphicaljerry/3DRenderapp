@@ -7115,6 +7115,7 @@ export default function App() {
           known: !!balance,
           credits: balance?.remainingUsd != null ? usdToCredits(balance.remainingUsd) : null,
           usedCredits: balance?.usedUsd != null ? usdToCredits(balance.usedUsd) : null,
+          limitCredits: balance?.limitUsd != null ? usdToCredits(balance.limitUsd) : null,
           usd: balance?.remainingUsd ?? null,
           at: balance?.at ?? Date.now(),
           busy: balanceBusy,

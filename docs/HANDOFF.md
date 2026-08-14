@@ -917,6 +917,40 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 413 — the credits experience goes consumer-grade (BRANCH ONLY — Jerry decides the deploy)
+
+**Direction decided by Jerry this session:** Moldable is being commercialized as
+sign-up-and-build — end users will never fetch provider keys. The strategy review
+("One Key or Many?", artifact) landed on OpenRouter as the spine; the BYOK research
+fact (1M free BYOK req/month since Oct 2025) means his Claude/Gemini keys can ride
+inside OpenRouter at no fee. **The remaining backend step, NOT started:** per-user
+metering through the house relay (Supabase), so new users get credits without any key.
+This build is the front half: the credits UX itself, rebuilt on the patterns Gamma /
+Lovable / Chatbase / Krea converged on (Mobbin research, links in the artifact).
+
+What shipped, all client-side:
+- **The chip opens a Credits panel** (AnchoredMenu) instead of just refreshing: big
+  friendly balance, a usage bar when the key has a cap, "= $X on your OpenRouter
+  account · read N min ago", Refresh inside, top-up link out to openrouter.ai.
+- **"What things cost", in the same unit as the balance** — the core of the Gamma
+  pattern. CAD build row: the device's own ledger average once it has ≥3 builds
+  (honest: includes routing/clarify overhead), else price-table × typical build tokens
+  (`EST_BUILD_TOKENS`, 12k in / 1.5k out) marked ≈. Mesh row: the current engine's
+  listed per-generation price from gen/registry. Plus "That's about N more builds" —
+  the runway number, the single most useful line in the panel.
+- **Picker rows speak credits too** (Chatbase pattern): Claude model rows and the
+  active OpenRouter row show `≈N cr/build` from ONE estimating path (`estBuildCredits`),
+  so the picker can never disagree with the panel. The hand-written "~10¢ per part"
+  hints in anthropic.ts labels were deleted — they'd drifted from the price table and
+  gave the picker a second currency.
+
+Not done / next: the house-relay per-user metering (backend), pack purchase flow, and
+retiring per-user BYOK from the default UI (Option C of the strategy doc) — all waiting
+on Jerry's go after he reviews this build.
+
+**Ship state: committed and pushed to the session branch only. `main` untouched — Jerry
+said he'll say when to deploy.**
+
 ## Build 412 — what's left in the tank, in a unit you can read
 
 Jerry: show how much OpenRouter credit is left, and skin it as an app-level unit that

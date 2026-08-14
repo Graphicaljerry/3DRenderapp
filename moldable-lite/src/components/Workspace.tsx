@@ -26,8 +26,8 @@ import type { Version } from "../store/types";
 import { MAX_VERSIONS } from "../store/versions";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
-import { fmtTok, fmtUSD } from "../llm/pricing";
-import { fmtCredits, usdToCredits, ageLabel, PRICING } from "../llm/credits";
+import { fmtTok, fmtUSD, priceFor, loadLedger } from "../llm/pricing";
+import { fmtCredits, usdToCredits, ageLabel, PRICING, estBuildCredits } from "../llm/credits";
 import { HEAVY_TRIANGLES } from "../print/heavy";
 import type { SlicerTarget } from "../lib/slicer";
 import { IS_DESKTOP } from "../lib/desktopUpdate";
@@ -43,7 +43,7 @@ import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
 import { localSupported } from "../llm/local";
 import { shortModelName, AUTO_MODEL } from "../llm/openrouterModels";
 import { fitClearance, fitCalibration, type FitId } from "../llm/prompts";
-import { PROVIDERS, costLabel } from "../gen/registry";
+import { PROVIDERS, costLabel, getProvider } from "../gen/registry";
 
 // The Select tool's modes, in hotkey order (1–4). "point" is the old Pin.
 // Each carries an icon so the label can collapse on narrow viewer columns (iPad).
@@ -295,30 +295,129 @@ function EditableName({ name, className, editing, onStartEdit, onRename, onDone 
  *
  *  Renders nothing without an OpenRouter key — there is no balance to speak of, and an
  *  empty meter would read as "you are out" rather than "not applicable". */
-function BalanceChip({ b }: { b: Props["balance"] }) {
+function BalanceChip({ b, brain, genProvider, genModel }: {
+  b: Props["balance"];
+  brain: { provider: LlmProviderId; model: string };
+  genProvider: string; genModel: string;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
   if (!b) return null;
   // Three states, and conflating any two of them lies about money: a real figure, a key
   // with no cap (so there is nothing to count down), and no answer from OpenRouter at
   // all. The last one must never borrow the wording of the second.
   const low = b.credits != null && b.credits < 500; // ≈ $0.50 left
   const label = !b.known ? (b.busy ? "…" : "—") : b.credits == null ? "no cap" : fmtCredits(b.credits);
-  const title = !b.known
-    ? (b.busy ? "Reading your OpenRouter balance…" : "Couldn't reach OpenRouter to read your balance. Tap to try again.")
-    : b.credits == null
-      ? `No spending cap on this key, so OpenRouter reports no balance to count down. $${(b.usedCredits != null ? b.usedCredits / PRICING.creditsPerUsd : 0).toFixed(2)} spent on it so far. Tap to re-read.`
-      : `${fmtCredits(b.credits)} ${PRICING.unit} left — $${(b.usd ?? 0).toFixed(2)} of real OpenRouter balance. `
-        + `1 credit = $${(1 / PRICING.creditsPerUsd).toFixed(3)}. Read ${ageLabel(b.at)}. Tap to re-read.`;
   return (
-    <button
-      type="button"
-      className={`balance-chip${low ? " low" : ""}${b.busy ? " busy" : ""}`}
-      title={title}
-      aria-label={title}
-      onClick={b.refresh}
-    >
-      <IconCoin size={12} />
-      <span className="balance-n">{label}</span>
-    </button>
+    <span>
+      <button
+        ref={btn}
+        type="button"
+        className={`balance-chip${low ? " low" : ""}${b.busy ? " busy" : ""}`}
+        title="Your credits — tap for what's left and what things cost"
+        aria-haspopup="dialog"
+        aria-expanded={!!anchor}
+        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}
+      >
+        <IconCoin size={12} />
+        <span className="balance-n">{label}</span>
+      </button>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={296}>
+          <CreditsPanel b={b} brain={brain} genProvider={genProvider} genModel={genModel} />
+        </AnchoredMenu>
+      )}
+    </span>
+  );
+}
+
+/** The credits story in one card: what you have, what things cost, how far it goes.
+ *
+ *  Modelled on the pattern Gamma/Lovable/Chatbase converged on — a big friendly
+ *  balance, a bar when there is a cap, and per-ACTION costs in the same unit as the
+ *  balance, so "can I afford this" is subtraction rather than research. Every figure
+ *  is real: the balance is OpenRouter's own number, the build cost comes from THIS
+ *  device's ledger once it has history (falling back to the price table), and the mesh
+ *  cost is the current engine's listed price. The true dollars stay in the fine print,
+ *  because a friendly unit must never be the only number for actual money. */
+function CreditsPanel({ b, brain, genProvider, genModel }: {
+  b: NonNullable<Props["balance"]>;
+  brain: { provider: LlmProviderId; model: string };
+  genProvider: string; genModel: string;
+}) {
+  const ledger = loadLedger();
+  // On Auto (the default) — or any model the price table can't name — there is still a
+  // useful answer: a mid-tier price, which is what the auto-router typically lands on.
+  // Without this a brand-new user on Auto opened the panel and "What things cost" was
+  // simply empty, which is the exact moment the panel exists for.
+  const price = priceFor(brain.provider, brain.model) ?? { in: 3, out: 15 };
+  const buildCr = estBuildCredits(price, ledger);
+  const fromHistory = ledger.builds >= 3 && ledger.usd > 0;
+  const meshProv = getProvider(genProvider);
+  const meshModel = meshProv?.models.find((m) => m.id === genModel);
+  const meshFree = meshModel?.usd === 0 || meshProv?.free;
+  const meshCr = meshModel?.usd != null && meshModel.usd > 0 ? usdToCredits(meshModel.usd) : null;
+  const left = b.credits;
+  const buildsLeft = left != null && buildCr != null && buildCr > 0 ? Math.floor(left / buildCr) : null;
+  const pct = left != null && b.limitCredits != null && b.limitCredits > 0
+    ? Math.max(0, Math.min(100, (left / b.limitCredits) * 100)) : null;
+  return (
+    <div className="credits-pop" role="dialog" aria-label="Your credits">
+      <div className="cp-head">
+        <span className="cp-title">Credits</span>
+        <button type="button" className="cp-refresh" disabled={b.busy} onClick={b.refresh}>
+          {b.busy ? "Reading…" : "Refresh"}
+        </button>
+      </div>
+      {!b.known ? (
+        <p className="cp-big cp-unknown">{b.busy ? "Reading your balance…" : "Couldn't reach OpenRouter — the number here is only as fresh as the last successful read."}</p>
+      ) : left == null ? (
+        <>
+          <div className="cp-big">no cap<span className="cp-unit">on this key</span></div>
+          <p className="cp-fine">OpenRouter reports nothing to count down. ${(b.usedCredits != null ? b.usedCredits / PRICING.creditsPerUsd : 0).toFixed(2)} spent on it so far, every app included.</p>
+        </>
+      ) : (
+        <>
+          <div className="cp-big">{fmtCredits(left)}<span className="cp-unit">{PRICING.unit}</span></div>
+          {pct != null && (
+            <div className="cp-bar" role="img" aria-label={`${Math.round(pct)}% of your cap remaining`}>
+              <span style={{ width: `${pct}%` }} />
+            </div>
+          )}
+          <p className="cp-fine">= ${(b.usd ?? 0).toFixed(2)} on your OpenRouter account · read {ageLabel(b.at)}</p>
+        </>
+      )}
+
+      <div className="cp-costs">
+        <div className="cp-costs-label">What things cost</div>
+        {buildCr != null && (
+          <div className="cp-row">
+            <span>CAD build{fromHistory ? "" : " (typical)"}</span>
+            <span className="cp-n">≈{fmtCredits(buildCr)} {PRICING.unitShort}</span>
+          </div>
+        )}
+        {fromHistory && (
+          <div className="cp-row cp-sub"><span>your average over {ledger.builds} builds</span><span /></div>
+        )}
+        <div className="cp-row">
+          <span>Mesh model · {meshProv?.label ?? (genProvider === "auto" ? "Auto" : genProvider)}</span>
+          <span className="cp-n">{meshFree ? "free" : meshCr != null ? `≈${fmtCredits(meshCr)} ${PRICING.unitShort}` : "varies"}</span>
+        </div>
+        {buildsLeft != null && (
+          <div className="cp-row cp-runway">
+            <span>That's about</span>
+            <span className="cp-n">{buildsLeft.toLocaleString()} more builds</span>
+          </div>
+        )}
+      </div>
+
+      <p className="cp-fine">1 {PRICING.unit.replace(/s$/, "")} = ${(1 / PRICING.creditsPerUsd).toFixed(3)} of real AI cost — no markup in beta.</p>
+      {b.known && left != null && (
+        <a className="cp-topup" href="https://openrouter.ai/credits" target="_blank" rel="noopener noreferrer">
+          Top up on openrouter.ai
+        </a>
+      )}
+    </div>
   );
 }
 
@@ -2302,6 +2401,8 @@ interface Props {
     known: boolean;
     credits: number | null;
     usedCredits: number | null;
+    /** The cap the remaining figure counts down from, when the key has one. */
+    limitCredits: number | null;
     usd: number | null;
     at: number;
     busy: boolean;
@@ -3297,7 +3398,7 @@ export function Workspace(p: Props) {
                     the input forever. They live behind one button now, which states
                     how many are off their default so nothing hides silently. */}
                 <BuildOptions p={p} />
-                <BalanceChip b={p.balance} />
+                <BalanceChip b={p.balance} brain={p.brain} genProvider={p.genProvider} genModel={p.genModel} />
               </div>
               <div className="modebar-row">
                 <div className="seg">
@@ -4769,10 +4870,21 @@ function brainValue(brain: { provider: LlmProviderId; model: string }): string {
 }
 function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: LlmProviderId; model: string }): PickGroup[] {
   const claudeKey = hasKey("anthropic");
+  // Every priced row says what a build roughly costs, in the same unit as the balance
+  // chip — the Chatbase/Gamma pattern. One estimating path (price table × typical build
+  // tokens), so the picker can never disagree with the credits panel.
+  const crFor = (prov: string, model: string): string => {
+    const cr = estBuildCredits(priceFor(prov, model));
+    return cr != null ? `≈${fmtCredits(cr)} ${PRICING.unitShort}/build` : "";
+  };
   return [
     {
       label: `Claude — most accurate${claudeKey ? "" : " · add key"}`,
-      items: MODELS.map((mm) => { const [name, sub] = splitLabel(mm.label); return { value: `anthropic|${mm.id}`, name, sub }; }),
+      items: MODELS.map((mm) => {
+        const [name, sub] = splitLabel(mm.label);
+        const cost = crFor("anthropic", mm.id);
+        return { value: `anthropic|${mm.id}`, name, sub: [sub, cost].filter(Boolean).join(" · ") || undefined };
+      }),
     },
     {
       label: "Other providers",
@@ -4789,7 +4901,8 @@ function brainGroups(hasKey: (p: LlmProviderId) => boolean, brain?: { provider: 
         // string, not a name. Auto-routing is its own state worth naming plainly.
         const isAutoRoute = pr.id === "openrouter" && brain?.model === AUTO_MODEL;
         const active = isAutoRoute ? "" : brain?.provider === pr.id && brain.model ? shortModelName(brain.model) : "";
-        const sub = [active, pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
+        const activeCost = brain?.provider === pr.id && brain.model && !isAutoRoute ? crFor(pr.id, brain.model) : "";
+        const sub = [active, activeCost, pr.free ? "free" : "", needs ? "add key" : ""].filter(Boolean).join(" · ") || undefined;
         return { value: `${pr.id}|`, name: isAutoRoute ? "Auto" : active ? `${base} · ${active}` : base, sub };
       }),
     },

@@ -240,3 +240,69 @@ export function saveCheckpoint(project: Project, name: string): Project {
  *  the newest version and reaches every device by the same rule. Named separately only
  *  so callers read as what they mean. */
 export const restoreCheckpoint = restoreVersion;
+
+// ---------------------------------------------------------------------------
+// The build log: this history, written so a language model can read it.
+//
+// Every edit in this app already records a version with a human summary ("Added a
+// ⌀4 mm screw hole", "Adjusted wall thickness — 60 × 40 × 24 mm"). The model never
+// saw any of it: it got the CURRENT code and the last few chat bubbles, so it knew
+// what the part is but not how it got there — and "put it back to before the screw
+// hole" referred to something outside its world entirely.
+//
+// One formatter, used for BOTH jobs — the log pasted into the CAD system prompt, and
+// the log the revert resolver picks a step from. Sharing it is the point: the step
+// numbers the model answers with are the step numbers it was shown.
+
+export interface LogEntry {
+  /** 1-based position in the WINDOW shown — what the model cites. */
+  n: number;
+  id: string;
+  summary: string;
+  /** The version the model on screen is at right now. */
+  current: boolean;
+  /** A version the user named and saved (History marks these too). */
+  keep?: boolean;
+  /** Recorded after the current one: a redo branch the user has stepped back past. */
+  ahead: boolean;
+}
+
+/** How many steps the model is shown. Enough to cover a working session's worth of
+ *  edits without spending a thousand tokens on a log every single turn. */
+export const LOG_WINDOW = 14;
+
+/** The recent history as numbered entries, oldest first. Pure. */
+export function buildLog(project: Project, max = LOG_WINDOW): LogEntry[] {
+  const head = headIndex(project);
+  const all = project.versions;
+  const from = Math.max(0, all.length - max);
+  return all.slice(from).map((v, i) => ({
+    n: i + 1,
+    id: v.id,
+    summary: v.summary,
+    current: from + i === head,
+    keep: v.keep,
+    ahead: from + i > head,
+  }));
+}
+
+/** Render entries as the plain text a model reads. `truncated` adds the one line that
+ *  stops it assuming step 1 is the beginning of the part's life. */
+export function formatBuildLog(entries: LogEntry[], truncated = false): string {
+  const lines = entries.map((e) => {
+    const marks = [
+      e.current ? "← ON SCREEN NOW" : "",
+      e.ahead ? "(undone — still redoable)" : "",
+      e.keep ? "(saved version)" : "",
+    ].filter(Boolean).join(" ");
+    return `${e.n}. ${e.summary}${marks ? `  ${marks}` : ""}`;
+  });
+  return (truncated ? "(earlier steps not shown)\n" : "") + lines.join("\n");
+}
+
+/** The log for a project, formatted, or "" when there is nothing worth showing.
+ *  One version is just "the part exists" — no history to reason about yet. */
+export function buildLogText(project: Project | null | undefined, max = LOG_WINDOW): string {
+  if (!project || project.versions.length < 2) return "";
+  return formatBuildLog(buildLog(project, max), project.versions.length > max);
+}

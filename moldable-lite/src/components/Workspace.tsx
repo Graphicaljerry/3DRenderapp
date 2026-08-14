@@ -5119,9 +5119,11 @@ function ClarifyCard({ msgId, c, busy, api }: {
   // answer once it is non-empty, so clearing the box cannot silently blank a question.
   const [typed, setTyped] = useState<Record<string, string>>({});
   // One question on screen at a time. Picking an option answers it and, after a beat,
-  // turns the page itself — the Typeform rhythm. Build it stays on every page because
-  // the card opens with every recommendation pre-filled: the questions are a review,
-  // never a form standing between the user and the build.
+  // turns the page itself — the Typeform rhythm. The primary button is Continue until
+  // the last question, where it becomes Build: one forward action per page, and the
+  // build appears exactly when there is nothing left to answer. The card still opens
+  // pre-filled with every recommendation, so "Build what I asked for" remains available
+  // throughout as the escape hatch for anyone who does not want to answer at all.
   const [step, setStep] = useState(0);
   const advanceT = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(advanceT.current), []);
@@ -5225,7 +5227,11 @@ function ClarifyCard({ msgId, c, busy, api }: {
           </div>
         )}
         <div className="clarify-actions">
-          <button className="primary sm" disabled={busy} onClick={() => api.clarifyBuild(msgId, true)}>Build it</button>
+          {last ? (
+            <button className="primary sm" disabled={busy} onClick={() => api.clarifyBuild(msgId, true)}>Build it</button>
+          ) : (
+            <button className="primary sm" disabled={busy} onClick={() => goto(step + 1)}>Continue</button>
+          )}
           <button className="link" disabled={busy} onClick={() => api.clarifyBuild(msgId, false)}>Build what I asked for</button>
         </div>
       </div>

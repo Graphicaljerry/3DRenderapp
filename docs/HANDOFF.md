@@ -917,6 +917,50 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 411 — the model can read its own history
+
+**Continue, then Build.** The clarify stepper's forward action is now `Continue` until the
+last question, where it becomes `Build it` — one forward action per page, and the build
+appears exactly when there is nothing left to answer. Answering still auto-advances (410).
+"Build what I asked for" stays on every page as the skip-everything escape hatch.
+
+**The build log.** The app has always recorded every change as a version with a human
+summary; the model never saw any of it. It got the current CODE and the last few chat
+bubbles — so it knew what the part *is*, not how it got there, and "the hole I asked for
+earlier" pointed at nothing. `store/versions.ts` gained `buildLog()` / `formatBuildLog()`
+/ `buildLogText()` (pure), and the CAD system prompt now carries a numbered log, oldest
+first, with the live step marked `← ON SCREEN NOW`, undone-but-redoable steps marked, and
+saved checkpoints marked. Window is 14 steps (`LOG_WINDOW`), ~200-300 tokens, rides the
+SYSTEM prompt like `convo` does so it never compounds into `apiHistory`.
+
+**A gap found while building it:** every AI edit recorded the same summary — `Updated the
+model — 87 × 60 × 70 mm` — so ten edits in a row were indistinguishable. Direct tools were
+always descriptive ("Added a ⌀3.4 mm screw hole"); the AI path, the one Jerry actually
+uses, was not. `askSummary()` now appends the request that caused the change, so a step
+reads `Updated the model — 87 × 60 × 70 mm · "add a screw hole in the back"`. That fixes
+History for humans as much as it does the log for the model.
+
+**"Put it back to before I added the screw hole."** New `llm/history.ts`, utility-brain
+shaped (best-effort, null → normal build). Two gates, because a false positive throws away
+work: a regex about *movement through time* (not about parts — "remove the screw hole"
+misses entirely, so ordinary edits never pay for the call), then a model told plainly that
+`none` is the safe answer. It runs in `sendInner` ahead of plan mode and clarify, reads the
+SAME formatted log the CAD prompt gets, and answers with a step number the app maps back to
+a real version id — the model never handles ids. Execution is the existing `restoreTo()`,
+the one the History panel's rows already call. No second restore path.
+
+`restoreTo()` now returns `"ok" | "busy" | "same" | "failed"` and takes `{ quiet }`. That
+came out of the recon pass: the first cut posted "Restored …" *before* awaiting the
+restore, so a refused restore (mid-build) or a mesh version whose glb never reached this
+device would have left a success message next to a failure. Restore first, report second.
+
+Verified end-to-end with Playwright (`history.mjs`, `clarifystep.mjs`): the log reaches the
+real request body with the ON SCREEN NOW marker and per-step asks; "make the screw hole
+bigger" never even calls the resolver; "put it back to before I added the screw hole"
+issues NO code-generation request, lands HEAD on a `Restored "…"` version that is *not* the
+screw-hole step, and leaves every later step in History. Read out of IndexedDB, not off the
+screen.
+
 ## Build 410 — questions one at a time, a size you can see, a placeholder that fits
 
 Three from Jerry's report (iPad screenshot with the composer circled in red):

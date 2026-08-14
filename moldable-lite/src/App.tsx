@@ -59,7 +59,8 @@ import { recordSpend, spendSummary } from "./gen/ledger";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { mergeProjects, mergeChanged } from "./store/merge";
-import { appendVersion, replaceHeadVersion, restoreVersion, saveCheckpoint, navigateHead, headIndex } from "./store/versions";
+import { appendVersion, replaceHeadVersion, restoreVersion, saveCheckpoint, navigateHead, headIndex, buildLog, formatBuildLog, buildLogText } from "./store/versions";
+import { resolveHistoryMove, looksLikeHistoryRequest } from "./llm/history";
 import type { Project, Pin, Version, TextLayerSnap, LogoLayerSnap } from "./store/types";
 import { uid } from "./lib/id";
 import type { PickedPoint } from "./components/Viewer";
@@ -1056,6 +1057,20 @@ export default function App() {
       return null; // no diff ≠ no preview — the bar still shows the proposal
     }
   }
+  /** Tag an AI edit's version summary with the sentence that caused it.
+   *
+   *  Every direct tool records what it did ("Added a ⌀3.4 mm screw hole", "Removed the
+   *  magnet pocket"), but an AI edit only ever knew the new bounding box — so ten AI
+   *  edits in a row all read "Updated the model — 60 × 40 × 24 mm". That is unusable as
+   *  History, and worse as the build log the model now reads: "go back to before the
+   *  screw hole" cannot find a step that never says what it changed. The request is the
+   *  most accurate description of the change available at this point, so it goes in. */
+  function askSummary(base: string, ask: string): string {
+    const a = ask.trim().replace(/\s+/g, " ");
+    if (!a) return base;
+    return `${base} · “${a.length > 70 ? a.slice(0, 69).trimEnd() + "…" : a}”`;
+  }
+
   /** Route an AI-built result: auto → commit now; ask → hold it as an on-canvas
       proposal. Returns which happened so callers can word their chat message. */
   async function deliverResult(res: EngineResult, name: string, summary: string, promptText: string, clearImageAfter = false): Promise<"applied" | "pending"> {
@@ -5617,6 +5632,57 @@ export default function App() {
     const useGen = (routedMode ?? forceMode ?? mode) === "generative";
     setGenProgress((g) => (g ? { ...g, kind: useGen ? "mesh" : "cad" } : g));
 
+    // ---- "Put it back to before the screw hole" ----
+    // Before planning, before clarify, before any build: a request that points at the
+    // model's PAST is answered from the recorded history rather than by asking a model
+    // to write code for it — the one thing it cannot write. The log the resolver reads
+    // is character-for-character the log the CAD prompt gets, so the step it names is a
+    // step the user could have clicked in History, and the restore is that same restore.
+    // Ahead of plan mode because planning a revert is nonsense; ahead of clarify for the
+    // same reason. Gated on a regex first, so an ordinary edit never pays for the call.
+    if (p && !image && result && !guided && projectRef.current && looksLikeHistoryRequest(p)) {
+      const entries = buildLog(projectRef.current);
+      if (entries.length >= 2) {
+        setStage("Checking the build history…");
+        const move = await resolveHistoryMove(
+          p,
+          formatBuildLog(entries, projectRef.current.versions.length > entries.length),
+          entries.length,
+          brainLlm,
+          brainKeys,
+          effectiveProxy,
+        );
+        const target = move ? entries[move.step - 1] : undefined;
+        // Already sitting on it: say so rather than "restoring" to where we are.
+        if (target && target.current) {
+          setMessages((m) => m.map((x) => (x.id === placeholderId
+            ? { ...x, streaming: false, text: `That's what's on screen already — “${target.summary}”. History (the clock icon) lists every step if you want a different one.` }
+            : x)));
+          return;
+        }
+        if (target) {
+          // Restore FIRST, report second. Worded the other way round, a restore that is
+          // refused (mid-build) or that fails to rebuild (a mesh version whose glb never
+          // reached this device) still left "Restored …" sitting in the transcript.
+          setStage("Going back…");
+          const how = await restoreTo(target.id, { quiet: true });
+          setMessages((m) => m.map((x) => (x.id === placeholderId
+            ? {
+                ...x,
+                streaming: false,
+                error: how !== "ok",
+                text: how === "ok"
+                  ? `${move!.say || "Went back."} Restored **${target.summary}** — step ${target.n} of ${entries.length}. **Undo** returns to where you were, and nothing was thrown away: every later step is still in History.`
+                  : how === "busy"
+                    ? "Still finishing the last change — give it a moment and ask again."
+                    : `Found the step you meant — **${target.summary}** — but it wouldn't rebuild: ${restoreErr.current || "unknown error"}. It's still in History (the clock icon) if you want to try it there.`,
+              }
+            : x)));
+          return;
+        }
+      }
+    }
+
     // ---- Plan first: agree the spec before spending the build. ----
     // Ahead of clarify and of every expensive step, because the whole point is to get
     // the FIRST model right rather than converge over four paid rounds. Fresh builds
@@ -6044,6 +6110,9 @@ export default function App() {
     const factsBlock = researched ? `\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : "";
     const extras = factsBlock + fitLine;
     const pWithFacts = p + extras;
+    // projectRef, not the render's `project`: this runs after several awaits, and the
+    // log has to describe the part as it is NOW.
+    const historyLog = buildLogText(projectRef.current);
 
     const system =
       (kind === "replicad" ? REPLICAD_SYSTEM_PROMPT : FALLBACK_JSON_PROMPT) +
@@ -6059,7 +6128,13 @@ export default function App() {
       // conversation (a real report). The transcript digest is rebuilt every turn,
       // costs a few hundred tokens, and rides the SYSTEM prompt so it is never
       // recorded into history (no digest-of-digest compounding).
-      (convo ? `\n\nRecent conversation (the request may refer back to details here — honour them):\n${convo}` : "");
+      (convo ? `\n\nRecent conversation (the request may refer back to details here — honour them):\n${convo}` : "") +
+      // …and to what has already been DONE. The code above says what the part is now;
+      // this says how it got there. Without it every turn read as the first one: the
+      // model re-derived features it had already added, and "the hole I asked for
+      // earlier" pointed at nothing. Rides the SYSTEM prompt (never recorded into
+      // apiHistory) and costs a couple of hundred tokens.
+      (historyLog ? `\n\nBuild log — every change already made to this part, oldest first; the step marked ON SCREEN NOW is the code above. Do not redo work that is already in this list:\n${historyLog}` : "");
     // Extra angles the user attached (left / back / right). One photo leaves depth and
     // the far side to guesswork — the model invents them. Handing the vision model
     // every view it has makes proportions and hidden features observed rather than
@@ -6197,7 +6272,7 @@ export default function App() {
           }
           const editParams = Object.keys(kept).length ? kept : undefined;
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
-          const summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
+          const summary = askSummary(`Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, p);
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
           setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
@@ -6254,6 +6329,7 @@ export default function App() {
           const res = await sel.engine.build(bi);
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
+          summary = askSummary(summary, p);
           const how = await deliverResult(res, name, summary, p, !!visionImage);
           setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           ok = true;
@@ -6449,20 +6525,26 @@ export default function App() {
   /** Which version the restore is currently rebuilding — the row shows it, and it
    *  blocks a second click from queueing another worker rebuild behind the first. */
   const [restoringId, setRestoringId] = useState<string | null>(null);
+  /** Why the last quiet restore failed, for a caller that suppressed the bubble. */
+  const restoreErr = useRef("");
   // The History panel is memoised; a fresh restoreTo closure on every render would defeat it,
   // so the panel gets this stable wrapper and the ref carries the live function.
   const restoreRef = useRef<(id: string) => void>(() => {});
   const onRestoreStable = useCallback((id: string) => restoreRef.current(id), []);
-  async function restoreTo(versionId: string) {
+  /** Put a recorded version back on the canvas. Returns what happened, so a caller that
+   *  wants to word its own outcome can — `quiet` suppresses the bubbles this posts for
+   *  the History panel's clicks. The chat revert uses both: it must not announce
+   *  "Restored …" for a restore that turned out to be refused or to fail rebuilding. */
+  async function restoreTo(versionId: string, opts?: { quiet?: boolean }): Promise<"ok" | "busy" | "same" | "failed"> {
     const cur = projectRef.current;
-    if (!cur || restoringId) return;
+    if (!cur || restoringId) return "busy";
     // A restore that lands mid-build gets silently overwritten when that build's
     // result arrives — the same race undo/redo already refuse to enter.
     if (statusRef.current === "generating") {
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Still building the last change — give it a moment, then pick that version again.", error: true }]);
-      return;
+      if (!opts?.quiet) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Still building the last change — give it a moment, then pick that version again.", error: true }]);
+      return "busy";
     }
-    if (cur.headId === versionId) return; // already sitting on it; rebuilding changes nothing
+    if (cur.headId === versionId) return "same"; // already sitting on it; rebuilding changes nothing
     setRestoringId(versionId);
     dissolveSeparation(); // restoring rebuilds the model — drop the sandbox's floating parts
     const next = restoreVersion(cur, versionId);
@@ -6474,8 +6556,11 @@ export default function App() {
       // shows it as a step; posting one bubble per restore turned the transcript into
       // sixteen identical lines that buried the actual conversation (a real report).
       // Failures still speak up — those are news.
+      return "ok";
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
+      if (!opts?.quiet) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Restore failed to rebuild: " + String(err?.message ?? err), error: true }]);
+      restoreErr.current = String(err?.message ?? err);
+      return "failed";
     } finally {
       setRestoringId(null);
     }

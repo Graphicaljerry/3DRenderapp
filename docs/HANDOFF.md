@@ -917,6 +917,59 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 415 — text stops sinking into the model on reload
+
+Reported: every refresh embedded placed text into the body, and the only cure was
+selecting the layer and nudging it forward, which snapped it back.
+
+**Root cause — a race, not a placement bug.** A text layer on a curved wall is stored
+flat plus a `bend`, and `restoreTexts` re-fits it to the surface via
+`viewer.conformAt()`. That needs the model's MESH, which on a reload does not exist yet:
+the body is rebuilt from code in the OCCT worker, taking anywhere from ~250 ms to the
+25 s watchdog. `conformAt` correctly returns false when `st.current.mesh` is absent
+(Viewer.tsx) — and the old code answered that with exactly one retry at 400 ms, then
+disposed the flat copy so no further attempt was possible. On any part bigger than
+trivial the build outlasts 400 ms, both attempts fail, and the word stays
+cylinder-bent at its stored pose — which intersects the real surface and reads as text
+sunk into it. Nudging re-ran the conform against a mesh that existed by then, hence the
+"move it forward and it snaps back" workaround.
+
+Fixed with `conformWhenReady()`: poll every 250 ms until the mesh answers, bounded at
+30 s (past the build watchdog, so a part that never builds cannot leak the flat copy).
+Waiting on the kernel's own timescale rather than a guessed constant is the point — the
+duration is the part's business.
+
+**A second defect the fix exposed:** rendering is on-demand, and `conformAt` rewrote
+vertices of geometry already on screen without requesting a frame. The single 400 ms
+retry had masked it by essentially never succeeding. `conformAt` now calls
+`invalidateRef.current(2)` on success.
+
+**Also — Inspector icons were spread edge-to-edge.** `.dock-list.icons` used
+`flex: 1 1 0` with `justify-content: space-between`, giving each of the seven an equal
+share of *whatever* width the dock had — which is why it barely showed in a narrow
+window and was glaring on the reported iPad screenshot. Now content-sized (32 px each,
+2 px gaps = 236 px total) and left-aligned, so the row measures the same at any dock
+width. Phone rule gained horizontal padding to keep 44 px targets now that width follows
+content.
+
+Verified with Playwright at two viewport widths — the point of the second is that the
+old rule's output *changed* with width and the new one does not.
+
+Two things the probes caught that reading alone would not have:
+- A first pass at the icon CSS left a comment fragment outside its `/* */`, which
+  silently ate the rules that followed. The measurement (items 236 px wide, stacked in
+  seven rows) is what exposed it.
+- Sizing to `padding: 8px` overflowed 236 px and wrapped a lone seventh icon onto its
+  own row. `6px` fits all seven with room; `flex-wrap` stays only as a guard for a dock
+  narrower than that.
+
+**Probe note for whoever runs these next.** Two attempts failed for setup reasons, not
+product ones, and both are worth knowing: Google Fonts is unreachable from the dev
+sandbox (families sit on "loading…" forever), so `textrestore.mjs` serves a local TTF
+under a Google family name via `page.route`; and an UPLOADED font is session-only by
+design (`getFont` rejects a custom family after reload, fonts.ts), so a probe that
+uploads one sees the layer legitimately vanish and learns nothing about conforming.
+
 ## Build 413 — the credits experience goes consumer-grade
 
 **Direction decided by Jerry this session:** Moldable is being commercialized as

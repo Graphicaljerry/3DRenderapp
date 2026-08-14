@@ -4975,6 +4975,29 @@ export default function App() {
   }
   /** Rebuild the text layers a restored version carried. Geometry comes back from the
    *  spec, so a reload or an undo reproduces the exact solid rather than a stored mesh. */
+  /** Fit a restored text layer to the model's surface as soon as there IS a surface.
+   *
+   *  Polls rather than fires once, because the thing being waited on is a CAD kernel
+   *  build whose duration is the part's business, not a fixed number of milliseconds.
+   *  Bounded by the same watchdog the build itself answers to: past that there is no
+   *  model coming, and holding the flat copy alive any longer just leaks it. */
+  function conformWhenReady(
+    g: THREE.BufferGeometry,
+    flat: THREE.BufferGeometry,
+    at: [number, number, number],
+    quat: [number, number, number, number],
+  ) {
+    if (viewer.current?.conformAt?.(g, flat, at, quat)) { flat.dispose(); return; }
+    const deadline = Date.now() + 30_000; // the build watchdog gives up at 25 s
+    const timer = window.setInterval(() => {
+      const done = viewer.current?.conformAt?.(g, flat, at, quat);
+      if (done || Date.now() > deadline) {
+        window.clearInterval(timer);
+        flat.dispose();
+      }
+    }, 250);
+  }
+
   async function restoreTexts(snaps: TextLayerSnap[] | undefined) {
     const live = attachmentsRef.current;
     if (!snaps?.length) {
@@ -4989,11 +5012,16 @@ export default function App() {
         const g = bendAroundY(flat.clone(), bend);
         // Conform to the wall, same as placing does — otherwise a reload brings the word
         // back cylinder-bent while the one you placed was surface-fitted, and the shape
-        // quietly changes under you. Retried once: the model's own mesh may still be
-        // going up when the layers are restored, and there is nothing to fit to until it is.
-        if (t.at && t.quat && Number.isFinite(bend) && !viewer.current?.conformAt?.(g, flat, t.at, t.quat)) {
-          setTimeout(() => { viewer.current?.conformAt?.(g, flat, t.at!, t.quat!); flat.dispose(); }, 400);
-        } else flat.dispose();
+        // quietly changes under you.
+        //
+        // It has to WAIT for the mesh. On a reload the body is rebuilt from code in the
+        // CAD worker, which takes hundreds of ms to seconds on a real part, so at restore
+        // time there is usually nothing to fit to yet (conformAt reports false). A single
+        // 400 ms retry raced that build and lost on anything non-trivial: the word stayed
+        // cylinder-bent at its stored pose, which reads as text sunk INTO the body — the
+        // reported defect — and only nudging the layer (which re-conforms) recovered it.
+        if (t.at && t.quat && Number.isFinite(bend)) conformWhenReady(g, flat, t.at, t.quat);
+        else flat.dispose();
         const name = spec.text.length > 18 ? `“${spec.text.slice(0, 17)}…”` : `“${spec.text}”`;
         return { id: t.id, geometry: g, name, text: spec, place: { at: t.at, quat: t.quat, scale: t.scale, bend } };
       } catch { return null; } // a font that won't load must not take the whole restore down

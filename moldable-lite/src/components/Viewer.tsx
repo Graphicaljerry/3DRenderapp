@@ -3909,7 +3909,12 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!s?.mesh) return false;
       ensureBoundsTree(s.mesh.geometry);
       s.mesh.updateWorldMatrix(true, false);
-      return conformToSurface(geom, flat, s.mesh, new THREE.Vector3(...at), new THREE.Quaternion(...quat));
+      const ok = conformToSurface(geom, flat, s.mesh, new THREE.Vector3(...at), new THREE.Quaternion(...quat));
+      // Repaint on success. Rendering here is on-demand, and this rewrites vertices of
+      // geometry that is ALREADY on screen — without a frame request the corrected shape
+      // sits in the buffer unseen until something else happens to trigger a draw.
+      if (ok) invalidateRef.current(2);
+      return ok;
     },
     rollAttachment(id, deltaDeg) {
       const s = st.current;

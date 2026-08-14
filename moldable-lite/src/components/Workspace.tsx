@@ -2969,7 +2969,13 @@ export function Workspace(p: Props) {
   // list and the parameter rows were designed into 262px; on a big screen there is no
   // reason the Inspector cannot have the room the chat gets.
   const DOCK_W_DEFAULT = 262;
-  const clampDockW = (w: number) => Math.min(520, Math.max(230, Math.round(w)));
+  // Ceiling was 520px, and at that width the panel stopped reading as a sidebar: the
+  // icon nav's gaps stretched with it, and the labelled rows sat in a field of empty
+  // space. 390 is a quarter narrower — still roomy for the layers list and parameter
+  // rows, still draggable down to 230 for anyone who wants the canvas back. A stored
+  // width above the new ceiling is clamped on read, so a dock left wide comes back
+  // inside it rather than persisting a size the layout no longer supports.
+  const clampDockW = (w: number) => Math.min(390, Math.max(230, Math.round(w)));
   const [dockW, setDockW] = useState(() => {
     try { const v = Number(localStorage.getItem("moldable_dock_w")); return Number.isFinite(v) && v > 0 ? clampDockW(v) : DOCK_W_DEFAULT; } catch { return DOCK_W_DEFAULT; }
   });

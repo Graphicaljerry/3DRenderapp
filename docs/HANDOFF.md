@@ -917,6 +917,30 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 417 — the Inspector gets a narrower ceiling; icon spacing reverted
+
+Follow-up to 415's icon change, and a correction to it. Clustering the icons left DID
+close the gaps, but in a panel dragged out to the old 520px maximum it just moved the
+imbalance: seven icons huddled in one corner of a wide empty header. Jerry called it,
+and was right about where the fix belonged.
+
+The cause was never the icons — it was the dock being allowed to grow to 520px, at which
+width the panel stops reading as a sidebar: the nav's gaps stretch with it and the
+labelled rows sit in a field of empty space. So:
+
+- `clampDockW` ceiling **520 → 390** (a quarter narrower). Floor stays 230, so it still
+  drags narrower for anyone who wants the canvas back, and the double-click reset to 262
+  is unchanged.
+- `.dock-list.icons` reverted to `flex: 1 1 0` + `space-between` — the icons share the
+  row again, which is right once the row itself is bounded.
+
+A stored width above the new ceiling is clamped **on read** (`clampDockW` runs inside the
+`useState` initialiser), so a dock left at 520 comes back at 390 rather than persisting a
+size the layout no longer supports. That case is asserted directly.
+
+Measured at the cap: 7 icons × 50px across a 364px row, 32px of slack around each glyph —
+against 72px each at the old 520. Default 262px dock: 32px each, 14px slack.
+
 ## Build 416 — Auto goes first, and says what it costs
 
 Reported: Auto sat fourth in the model picker, inside "Other providers", below three

@@ -1911,16 +1911,14 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* Packed: seven named rows cost ~300px of a ~750px dock and clipped Printability's
    own numbers off the bottom. One icon row keeps every section a single tap away
    and hands the height back to the panel you actually opened. */
-/* Collapsed to icons: a CLUSTER, not a spread. `flex: 1 1 0` + space-between gave each
-   of the seven an equal share of the dock's full width, pushing them to the far edges
-   with dead air between — they read as seven unrelated buttons rather than one nav.
-   Content-sized and left-aligned instead, so they group together and line up with the
-   panel content beneath them.
-   Sized so all seven fit ONE row at the dock's real width (~236px): 7 x 30px + 6 x 2px
-   = 222px. Overshooting that wraps a lone orphan onto a second row, which looks broken
-   rather than tidy — wrap stays only as a guard for a dock narrower than this. */
-.dock-list.icons { flex-direction: row; flex-wrap: wrap; gap: 2px; justify-content: flex-start; }
-.dock-list.icons .dock-item { width: auto; flex: 0 0 auto; justify-content: center; padding: 6px; gap: 0; }
+/* Collapsed to icons: the seven share the row evenly, so the nav spans the panel it
+   belongs to instead of huddling in one corner of it. This was briefly content-sized
+   and left-aligned to answer "too far apart" — but the real cause was the dock being
+   allowed to grow to 520px, which stretched the gaps; clustering them at that width
+   just moved the imbalance to the right-hand side. The fix belongs in the dock's max
+   width (clampDockW, now 390px), and the icons go back to sharing the space. */
+.dock-list.icons { flex-direction: row; gap: 2px; justify-content: space-between; }
+.dock-list.icons .dock-item { width: auto; flex: 1 1 0; justify-content: center; padding: 8px 0; gap: 0; }
 .dock-item {
   flex: 0 0 auto; width: 100%; text-align: left; padding: 9px 12px; border-radius: var(--r-md);
   border: 1px solid transparent; background: none; font-size: var(--fs-md); color: var(--ink2);
@@ -3094,9 +3092,7 @@ details.guide { margin-top: 10px; }
   .zoom-ctl button { width: 40px; height: 40px; }
   .view-snaps button { min-height: 40px; }
   .dock-item { min-height: 44px; }
-  /* Horizontal padding too, now the buttons size to content — 0 here would leave an
-     18px icon as an 18px-wide tap target on the touch screens this block exists for. */
-  .dock-list.icons .dock-item { padding: 11px; }
+  .dock-list.icons .dock-item { padding: 11px 0; }
 }
 
 /* Objects panel: the keep-a-version action sits under the model row. */

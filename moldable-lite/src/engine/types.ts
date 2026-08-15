@@ -92,7 +92,12 @@ export type CadOp = PointOp | HoleOp | ScrewOp | SolidOp | TranslateOp | RotateO
 // What we hand the engine to build. `code`/`spec` come from the LLM; `gen` is a
 // generative-mesh request (photo and/or text) routed to a 3D provider.
 export type BuildInput =
-  | { kind: "code"; code: string; params?: Record<string, number>; ops?: CadOp[]; preview?: boolean } // preview: live-drag rebuild — skip limit probing
+  // preview: live-drag rebuild — skip limit probing AND mesh coarse.
+  // probe: a hidden measuring build (the parameter peek) — skip limit probing, but mesh
+  // at FULL quality: its whole job is to be diffed against the displayed mesh, and a
+  // coarse probe differs from a fine base by more than the diff tolerance on every
+  // curved face, which reads as "the entire model moved" and shows no highlight at all.
+  | { kind: "code"; code: string; params?: Record<string, number>; ops?: CadOp[]; preview?: boolean; probe?: boolean }
   | { kind: "spec"; spec: ModelSpec }
   | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string; texture?: boolean };
 

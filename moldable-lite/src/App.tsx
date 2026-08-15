@@ -2834,6 +2834,14 @@ export default function App() {
         // mid-drag value otherwise costs up to eight extra bisection rebuilds per tick
         // to produce an error this loop then throws away.
         const res = await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops, preview: true });
+        // Mark the mesh as a drag frame. `preview: true` above only ever reached the
+        // WORKER (it picks coarse meshing); nothing stamped the BufferGeometry, so the
+        // two consumers that already know how to skip work on a drag frame never fired:
+        // the Viewer's per-swap EdgesGeometry crease pass (Viewer.tsx) and the surface
+        // pattern/texture displacement (which re-subdivided up to 700k triangles PER
+        // TICK). The push/pull drag path has stamped this for a while — the slider path
+        // simply never did, so it paid full freight on every frame of every drag.
+        if (res.geometry) res.geometry.userData.preview = true;
         if (paramGen.current === gen) applyResultNoCommit(res);
       } catch { /* transient drag value — the release commit surfaces real errors */ }
       v = liveParamRun.current.next;
@@ -2902,7 +2910,14 @@ export default function App() {
     // Big enough to be visible at a glance, small enough that the shape stays itself.
     const bump = Math.max(Math.abs(v) * 0.18, 1.5);
     try {
-      const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, ops: src.ops, preview: true });
+      // `probe`, not `preview`: still no limit-probing (a hover must never cost eight
+      // bisection rebuilds), but meshed at the SAME quality as the displayed model.
+      // As a coarse preview this compared a 0.2 mm tessellation against the base's
+      // 0.05 mm one, and on a fillet-rich part that disagreement alone exceeds the
+      // 0.25 mm diff tolerance across most of the surface — so affectedFaces saw
+      // "everything moved", bailed to null, and the row went dark. That is why it hit
+      // clean, rounded, heavily-edited models hardest.
+      const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, ops: src.ops, probe: true });
       if (seq !== peekSeq.current) return;   // pointer moved on — drop the stale result
       const { affectedFaces } = await import("./print/affected");
       // display = engine - recenter, so probe -> base frame is +rcProbe - rcBase.
@@ -2912,7 +2927,12 @@ export default function App() {
         probeOffset: [rcP[0] - rcB[0], rcP[1] - rcB[1], rcP[2] - rcB[2]],
       });
       if (peekCache.current.size > 40) peekCache.current.clear();   // bounded; keys are per-model anyway
-      peekCache.current.set(ck, faces);
+      // Cache ONLY a real answer. A null means the probe couldn't decide (everything
+      // read as moved, too many triangles); caching it made one bad reading permanent —
+      // every later hover on that row was served the stored null instantly and the
+      // parameter stayed dark until the code, params or ops changed. Failures are worth
+      // retrying; successes are worth keeping.
+      if (faces) peekCache.current.set(ck, faces);
       if (seq !== peekSeq.current) return;
       setParamPeek(faces);
     } catch { /* a value that doesn't build just shows no peek */ }
@@ -5055,6 +5075,13 @@ export default function App() {
       }
       return;
     }
+    // A drag frame: show the plain solid and re-apply the treatment once, on release.
+    // Displacement welds, adaptively subdivides to as much as 700k triangles (1.2M for
+    // ribbed patterns) and pushes every vertex along its normal — per tick, on a mesh
+    // whose uuid is new every build so the cache below could never hit. It is a
+    // display-time function of (mesh, fx spec), and export already gates on the
+    // committed geometry, so skipping it mid-drag changes nothing but the wait.
+    if (base.userData.preview) return;
     const key = `${base.uuid}|${JSON.stringify(surfFx)}`;
     if (fxCache.current?.key === key) {
       // Someone restored the plain base (a preview ending, an op failing) — put the

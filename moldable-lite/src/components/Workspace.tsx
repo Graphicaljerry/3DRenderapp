@@ -6244,6 +6244,20 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
   const draggingRef = useRef(false);
   // Set by Escape, read by the onBlur it triggers synchronously in the same turn.
   const cancelRef = useRef<string | null>(null);
+  // EVERY commit is sent — App queues one while a build runs and applies it after.
+  // The old `if (!busy)` guard silently swallowed a number typed during a build: the
+  // input showed it, the model never got it, and the next sync snapped the panel back.
+  // The outstanding list remembers what we sent, so the effect below can tell "echo of
+  // our own commit" from "the app moved the values itself".
+  //
+  // Declared HERE, above the effect that reads it and above the `!isCad || !defaults`
+  // early return below. It used to sit after that return — a hook that only ran on some
+  // renders, which is a Rules-of-Hooks violation with teeth: on a model with nothing
+  // adjustable (or on the render before the params are extracted) the component returned
+  // early, this useRef never initialised, and the effect above still ran and touched it —
+  // "Cannot access 'outstanding' before initialization", which white-screened the entire
+  // app the moment you opened Adjust.
+  const outstanding = useRef<CadParams[]>([]);
   useEffect(() => {
     if (draggingRef.current) return; // a drag is the authority on its own row
     const q = outstanding.current;
@@ -6337,12 +6351,6 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
       </div>
     );
   }
-  // EVERY commit is sent — App queues one while a build runs and applies it after.
-  // The old `if (!busy)` guard silently swallowed a number typed during a build: the
-  // input showed it, the model never got it, and the next sync snapped the panel back.
-  // The outstanding list remembers what we sent, so the effect below can tell "echo of
-  // our own commit" from "the app moved the values itself".
-  const outstanding = useRef<CadParams[]>([]);
   const commit = (next: CadParams, editedKey?: string) => {
     outstanding.current.push({ ...next });
     if (outstanding.current.length > 8) outstanding.current.shift(); // runaway guard

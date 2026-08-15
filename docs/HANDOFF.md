@@ -917,6 +917,76 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 422 — Adjust stops white-screening the app; the peek probes at the right resolution
+
+Chasing Jerry's "the parameters stopped highlighting the faces" report turned up a
+crash sitting underneath it.
+
+**The crash (found, reproduced, fixed).** `ParamsPanel` declared
+`const outstanding = useRef<CadParams[]>([])` **after** the
+`if (!isCad || !defaults) return …` early return, while a `useEffect` above it read
+`outstanding.current`. A hook that only runs on some renders is a Rules-of-Hooks
+violation with teeth: on a model with nothing adjustable — or simply on the render
+before the parameters are extracted — the component returned early, the `useRef` never
+initialised, the effect ran anyway, and React tore the whole tree down into
+*"Something went wrong loading Moldable — ReferenceError: Cannot access 'outstanding'
+before initialization"*. Opening **Adjust** could white-screen the entire app.
+Moving the hook above the early return fixes it. Probe: `adjustcrash.mjs` drives both
+cases (a model with parameters → 4 rows listed; a model whose build never landed →
+"Nothing adjustable in this design yet"), asserting no error screen and no pageerror.
+
+**Param peek — the probe was measuring against the wrong resolution.** `runParamPeek`
+built its nudged probe with `preview: true`, which in `replicadEngine` means
+`{ probeLimit: false, coarse: true }` — the two were welded together. So the probe was
+tessellated at `MESH_OPTS_COARSE` (0.2 mm / 0.6 rad) and then diffed against a display
+mesh built at 0.02–0.08 mm (or 0.05 once the shape passes 300 faces). That disagreement
+alone is ~0.25 mm on curved surfaces, against a diff tolerance of exactly
+`max(0.25, diag × 0.004)` — so on a rounded, fillet-rich part `affectedFaces` saw most
+of the surface "move", hit its `> 90% moved` bail, and returned null. Which is
+precisely "a model that was made very cleanly stopped highlighting".
+
+Two changes: a third build mode (`probe: true` — still no limit-probing, so a hover
+never costs eight bisection rebuilds, but meshed at the **same** quality as the base),
+and `peekCache` now stores only real answers. It used to cache the null too, so one bad
+reading made that row permanently dark until the code, params or ops changed.
+
+**Drag frames are now marked as drag frames.** `applyParamsLive` passed `preview: true`
+to the *worker* (pick a coarse mesh) but nothing ever stamped the BufferGeometry, so the
+two consumers that already know how to skip work on a drag frame never fired — the
+Viewer's per-swap `EdgesGeometry` crease pass, and the surface pattern/texture
+displacement, which re-welds and re-subdivides to as much as 700k triangles (1.2M for
+ribbed patterns) **per tick**. The push/pull drag path has stamped `userData.preview`
+for a long time; the slider path simply never did. It does now, and the fx effect
+returns early on a preview frame.
+
+**Honest limits on this one.** Only the crash fix is verified end-to-end. I could not
+demonstrate the drag speedup: the only model I can synthesise here is a 4-parameter box
+with no ops and no surface treatment — none of the diagnosed costs apply to it — and
+run-to-run noise on that model is larger than any effect (identical code measured
+471 ms and 937 ms release→settled). A third change (a trailing `onLive` on release, so
+the commit build would hit the worker's shape cache) was **written and then removed**:
+it adds a build on release, and I had no measurement showing it pays for itself.
+The place these should show is Jerry's actual model — 39 history steps, 11k triangles,
+patterns in use.
+
+**Not shipped, but now known** (see the four-way diagnosis in this session):
+- *Real spirals are feasible.* `threads.ts` says a true helical sweep "hangs the build
+  past the watchdog… even on a 4-turn stud". Measured in the real browser kernel: the
+  helix is 9 ms and the swept ridge 63 ms — it is the **OCCT boolean** that hangs, not
+  the sweep. Unioning through **Manifold** (already shipped, used by the preview engine)
+  instead: Ø8×1.25 4-turn = **361 ms**, Ø12.8×1.5 10-turn = **516 ms**, both watertight
+  (genus 0). 20+ turns degrades (Ø20×2.5 20-turn took 13.4 s and came out genus −6), so
+  a turns control wants a bound and a genus check. The open design question is that a
+  Manifold result is a mesh, not an OCCT solid — so it cannot take further CAD ops or
+  export STEP.
+- *Textures/patterns.* Refinement is 95–98% of the wall time (knurl s=1.5: refine
+  5555 ms vs displace 163 ms), and the Relief slider only affects refinement through one
+  number — so a refined mesh is reusable across the whole Relief range, which is what
+  makes live preview possible. Two quality bugs found: the refinement loop **discards
+  the whole pass** when it would exceed its triangle budget (so a *finer* Size setting
+  resolves *coarser* — the opposite of the control's promise), and the triplanar
+  projection halves relief contrast at 30°/60° azimuth on any curved wall.
+
 ## Build 421 — the network verdict stops crying wolf (and says it once)
 
 An iPad screenshot on v419: the sign-in dialog with **two red boxes stacked**, both

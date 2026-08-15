@@ -917,6 +917,58 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 423 — patterns preview live and render clean; replies say who wrote them
+
+Three Jerry requests with reference photos (the fluted-vase 3D prints): pattern/texture
+quality "very low quality and badly rendered", "I can't tell what model the chat is
+using", and a Perplexity-inspired chat pass (researched via Mobbin + teardowns — see
+the design brief in this session; items 6-8 of it are still open).
+
+**Why patterns looked lumpy, and the fixes** (`preview.worker.ts`):
+- **Phong tessellation midpoints.** Subdivision midpoints sat on the CHORD of the
+  original coarse tessellation, so the "smooth" base the displacement rode was still
+  the old faceted surface — crest heights varied with where each vertex fell on a
+  chord, which is exactly the wavy-streak look in Jerry's screenshot. Midpoints now
+  project toward the surface the endpoint normals describe (Boubekeur–Alexa, α=0.75),
+  guarded by normal agreement so model edges stay sharp.
+- **The refinement budget degrades instead of abandoning.** `if (out > MAX) break`
+  threw away a whole pass at the budget line, so a FINER Size setting could resolve
+  COARSER than a bigger one. Over budget now loosens the tolerance ×2 and re-marks —
+  the shortfall spreads evenly instead of leaving a seam.
+- **Refinement is depth-independent (proven, not hoped):** the split test compares
+  relative deviation, so the same refined mesh serves every Relief value. That's what
+  makes the cache correct.
+- Ribs refine to 8 facets per crest (was 6); clay/Grayscale view no longer runs
+  `toCreasedNormals` over a treated surface (it flat-shaded every crest).
+
+**Live preview** (the second half of the ask): tapping a tile or moving a slider now
+shows the pattern on the canvas immediately, uncommitted — no history entry; closing
+the panel snaps the committed surface back; Apply commits exactly one step and
+re-renders at full quality. Two mechanisms: `fxPreview` state in App (an overriding
+spec the fx effect renders without committing) and a **refine cache** in the preview
+worker keyed by base+pattern+scale+quality, so Relief drags only re-run the cheap
+displacement. Try-ons run at a **quarter triangle budget** (draft), Apply at full —
+quality is part of both cache keys so neither can be served the other's mesh.
+Measured on the worst-case shape (a shelled 87 mm box = 109 ribs, slow VM): tile tap
+9.2 s, Relief re-drag 4.7 s, Apply full 819k tris. Jerry-sized cylinders are ~20-30×
+smaller. Probe: `fxpreview.mjs` (all 12 checks green).
+
+**"Which model wrote this"** — the tags existed and were being destroyed: both chat
+serialisers dropped `model`/`usage`/`thinking`/`steps`/`sources`/`ts`, and the loader
+rebuilt messages without them, so every reload wiped the metadata. One `toChatTurn()`
+now (thinking capped at 4 KB for the sync row), the loader restores everything, and
+the generative-mesh path stamps its engine label too. Verified across a reload.
+
+**Perplexity items shipped** (from the research brief): finished replies collapse
+their work into "Completed N steps" that expands into the real timeline rows (not a
+text blob — `thinkTrail()` is reasoning-only now, steps live on `m.steps`); source
+chips gained favicons; the research flow narrates its missing "Read N sources —
+domains" beat; markdown headings got a real hierarchy (weight/spacing + hairline
+section dividers — every level used to render smaller than body text); a successful
+web-search block collapses to its head line instead of duplicating the chip list.
+**Still open from the brief:** inline numbered citations wired to sources (item 7),
+reveal cascade (item 6), elapsed-time footer (item 8).
+
 ## Build 422 — Adjust stops white-screening the app; the peek probes at the right resolution
 
 Chasing Jerry's "the parameters stopped highlighting the faces" report turned up a

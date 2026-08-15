@@ -1680,6 +1680,19 @@ export default function App() {
     }
   }
 
+  /** ChatMessage → the stored ChatTurn. ONE function on purpose: there were two
+   *  hand-rolled `.map(...)` copies of this, and neither saved the reply metadata —
+   *  which is why every model tag, cost line, thought process and source list
+   *  vanished on reload. Thinking is capped: it is the one field that can run to
+   *  many KB, and the sync row it ends up in has a statement timeout behind it. */
+  function toChatTurn(m: ChatMessage) {
+    return {
+      role: m.role, text: m.text, error: m.error, image: m.image, images: m.images,
+      ts: m.ts, model: m.model, usage: m.usage, steps: m.steps, sources: m.sources,
+      thinking: m.thinking && m.thinking.length > 4000 ? m.thinking.slice(0, 4000) + "…" : m.thinking,
+    };
+  }
+
   function persist(next: Project) {
     // The ref catches up in the render body, which is too late: the debounced
     // savers below and applyResult all read projectRef.current, and two commits
@@ -1709,9 +1722,7 @@ export default function App() {
   useEffect(() => {
     if (messages.length === 0 && pins.length === 0) return;
     const t = setTimeout(() => {
-      const chat = messages
-        .filter((m) => !m.streaming)
-        .map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image, images: m.images }));
+      const chat = messages.filter((m) => !m.streaming).map(toChatTurn);
       const pr = projectRef.current;
       if (pr) {
         const next = { ...pr, chat, pins, updatedAt: Date.now() };
@@ -1981,7 +1992,7 @@ export default function App() {
       // out the debounce (felt like it hadn't saved).
       void runSync();
     } else {
-      const chat = messages.filter((m) => !m.streaming).map((m) => ({ role: m.role, text: m.text, error: m.error, image: m.image, images: m.images }));
+      const chat = messages.filter((m) => !m.streaming).map(toChatTurn);
       const shell = { ...newProject(clean, "replicad"), chat, pins };
       projectRef.current = shell;
       persist(shell);
@@ -4845,6 +4856,12 @@ export default function App() {
   /** The live fx for a version snapshot — undefined when plain, so old records stay small. */
   const fxForSnap = () => (surfFxRef.current.pattern || surfFxRef.current.texture ? { ...surfFxRef.current } : undefined);
   const [fxBusy, setFxBusy] = useState(false);
+  /** An UNCOMMITTED surface spec the Pattern/Texture panel is trying on: the canvas
+   *  shows it, History does not record it. Selecting a tile or dragging a slider sets
+   *  it; Apply commits (and clears it); closing the panel clears it and the committed
+   *  surface snaps back. This is what "preview before Apply" means — before it, every
+   *  experiment was a history entry and a multi-second rebuild you had to Undo. */
+  const [fxPreview, setFxPreview] = useState<{ slot: "pattern" | "texture"; spec: SurfFxSlot | null } | null>(null);
   const fxCache = useRef<{ key: string; geom: THREE.BufferGeometry } | null>(null);
   const fxGen = useRef(0);
   // ---- Text layers as real state -------------------------------------------------
@@ -5061,7 +5078,8 @@ export default function App() {
   }
   useEffect(() => {
     const base = result?.geometry ?? null;
-    const active = !!(surfFx.pattern || surfFx.texture);
+    const eff = fxPreview ? { ...surfFx, [fxPreview.slot]: fxPreview.spec } : surfFx;
+    const active = !!(eff.pattern || eff.texture);
     if (!base) return;
     if (!active) {
       fxGen.current++;
@@ -5082,7 +5100,9 @@ export default function App() {
     // display-time function of (mesh, fx spec), and export already gates on the
     // committed geometry, so skipping it mid-drag changes nothing but the wait.
     if (base.userData.preview) return;
-    const key = `${base.uuid}|${JSON.stringify(surfFx)}`;
+    // Quality is part of the key: a try-on renders at draft quality, and Apply must
+    // rebuild at full quality rather than adopt the coarser preview mesh.
+    const key = `${base.uuid}|${fxPreview ? "draft" : "full"}|${JSON.stringify(eff)}`;
     if (fxCache.current?.key === key) {
       // Someone restored the plain base (a preview ending, an op failing) — put the
       // treated surface back. A geometry that is NEITHER base nor fx is a live preview
@@ -5099,9 +5119,14 @@ export default function App() {
         if (src !== base) src.dispose();
         // Texture first, pattern on top — the decorative shape rides over the grip.
         let nrm: Float32Array | null = null;
-        for (const slot of [surfFx.texture, surfFx.pattern]) {
+        for (const [name, slot] of [["texture", eff.texture], ["pattern", eff.pattern]] as const) {
           if (!slot) continue;
-          const r = await displaceMesh(pos, { pattern: slot.kind, scale: slot.scale, depth: slot.depth });
+          // The refine key ties the worker's cached refinement to this base AND to
+          // whatever the earlier slot did to it — a pattern stacked on a texture is
+          // refined against the textured surface, so the texture spec is part of the
+          // pattern's identity.
+          const rk = `${base.uuid}|${name}${name === "pattern" ? `|${JSON.stringify(eff.texture)}` : ""}`;
+          const r = await displaceMesh(pos, { pattern: slot.kind, scale: slot.scale, depth: slot.depth, draft: !!fxPreview }, rk);
           if (gen !== fxGen.current) return;
           if (!r) throw new Error("this mesh couldn't be welded into a closed solid");
           pos = new Float32Array(r.positions);
@@ -5126,18 +5151,20 @@ export default function App() {
         restat(g);
       } catch (err: any) {
         if (gen !== fxGen.current) return;
+        if (fxPreview) { setFxPreview(null); setFxBusy(false); return; } // a failed try-on just ends the try-on
         setSurfFx({ pattern: null, texture: null }); // a spec that can't build must not stick
         setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't put that on the surface: ${String(err?.message ?? err)}`, error: true }]);
       } finally {
         if (gen === fxGen.current) setFxBusy(false);
       }
     })();
-  }, [result, surfFx, geometry]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [result, surfFx, fxPreview, geometry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** Apply/remove a surface treatment AS A HISTORY STEP. The model fields are copied
    *  from the head version unchanged — only the surface spec moves — so Undo takes off
    *  exactly the pattern you just applied and nothing else, and Redo puts it back. */
   function commitSurfFx(slot: "pattern" | "texture", v: SurfFxSlot | null) {
+    setFxPreview(null); // committed == previewed → the effect's key matches → no rebuild
     const next = { ...surfFxRef.current, [slot]: v };
     setSurfFx(next);
     const proj = projectRef.current;
@@ -5981,7 +6008,7 @@ export default function App() {
         const spent = usd > 0 ? ` · ${costLabel(provId, modelId)}` : "";
         const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label}${spent})${fitNote}`;
         const how = await deliverResult(res, name, summary, p || "(image upload)", true);
-        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false } : x)));
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false, model: label } : x)));
       };
       try {
         await runGen(ge.provider, genModel, prov?.label ?? ge.provider);
@@ -6089,13 +6116,13 @@ export default function App() {
     // panel — what the AI is looking at and doing — with the model's own reasoning
     // streaming underneath when the model exposes it. The trail is kept on the
     // finished message too, so "what did it just do?" always has an answer.
-    const steps: string[] = [];
     let lastThink = ""; // model reasoning (kept on the reply for later reading)
-    const thinkTrail = () => steps.join("\n") + (lastThink ? `\n\n${lastThink}` : "");
-    const pushStep = (s: string) => {
-      steps.push(`▸ ${s}`); // kept for the saved "Thought process" transcript
-      setStage(s); // …and advances the live step timeline in the bubble
-    };
+    // Reasoning ONLY: the worked steps already live on the message itself (setStage
+    // archives each finished stage into m.steps, which now survives save/reload), and
+    // the finished bubble renders them as timeline rows — so gluing "▸ step" lines to
+    // the front of the reasoning here would print the same trail twice.
+    const thinkTrail = () => lastThink;
+    const pushStep = setStage; // a named step and a stage update are the same act now
     // Live panel shows ONLY the model's own reasoning — the harness steps already
     // read as the timeline above it, so mirroring them here would double them up.
     // Tokens arrive far faster than a frame, and each setState re-rendered the whole
@@ -6171,6 +6198,15 @@ export default function App() {
       researchSources = rr?.sources ?? [];
       researchImages = rr?.images ?? [];
       setWebState(placeholderId, { query: p.slice(0, 90), done: true, found: !!researched, sources: researchSources });
+      // The Reading beat. Searching…→writing skipped the step that earns trust: which
+      // pages the numbers actually came from (Perplexity's Searching/Reading/Writing).
+      const domOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u.slice(0, 30); } };
+      if (researchSources.length) {
+        const doms = [...new Set(researchSources.map((sc) => domOf(sc.url)))].slice(0, 3).join(", ");
+        pushStep(`Read ${researchSources.length} source${researchSources.length === 1 ? "" : "s"} — ${doms}`);
+      } else {
+        pushStep("Nothing solid found online — working from the request alone");
+      }
       if (researched) {
         // Show the found measurements as their own note, above the working placeholder —
         // with the pages the lookup actually used, so the numbers can be checked, and
@@ -6945,7 +6981,11 @@ export default function App() {
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
-    setMessages((p.chat ?? []).map((c) => ({ id: mid(), ts: Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images, replayed: true })));
+    setMessages((p.chat ?? []).map((c) => ({
+      id: mid(), ts: c.ts ?? Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images,
+      model: c.model, usage: c.usage, steps: c.steps, thinking: c.thinking, sources: c.sources,
+      replayed: true,
+    })));
     setPins(p.pins ?? []);
     setPlateOf(p.plates?.of ?? {});
     setPlateCount(p.plates?.count ?? 1);
@@ -7494,6 +7534,8 @@ export default function App() {
         surfaceCtl={{
           fx: surfFx,
           set: commitSurfFx,
+          preview: (slot, spec) => setFxPreview({ slot, spec }),
+          previewEnd: () => setFxPreview(null),
           busy: fxBusy,
         }}
         printer={printer}

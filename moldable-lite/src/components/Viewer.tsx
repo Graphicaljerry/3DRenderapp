@@ -3075,7 +3075,7 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
   useEffect(() => {
     const s = st.current;
     if (!s?.mesh || !geometry) return;
-    if (clay && !geometry.index && !geometry.getAttribute("color")) {
+    if (clay && !geometry.index && !geometry.getAttribute("color") && !geometry.userData.textured) {
       let g = clayCache.get(geometry);
       if (!g) {
         try {

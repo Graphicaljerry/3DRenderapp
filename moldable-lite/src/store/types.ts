@@ -11,6 +11,17 @@ export interface ChatTurn {
    *  message sent with ten pictures came back from a reload — or from another machine —
    *  showing one, with no sign the rest had ever been there. */
   images?: string[];
+  /** Reply metadata. All of it used to be dropped by the save→load round trip, so the
+   *  moment a project was reopened every reply lost its "which model wrote this" tag,
+   *  its cost line, its thought process and its sources — the exact things that let a
+   *  user audit what the AI did ("I can't tell what model the chat is using", a real
+   *  report — the tags existed, they just never survived a refresh). */
+  ts?: number;
+  model?: string;
+  usage?: { inTok: number; outTok: number; usd: number | null; est: boolean };
+  steps?: string[];
+  thinking?: string; // capped at save time — reasoning can run long and the sync row has a budget
+  sources?: { url: string; title?: string }[];
 }
 
 export interface Pin {

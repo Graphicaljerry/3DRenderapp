@@ -909,11 +909,24 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           { label: "All over", note: "covers every face", kinds: PATTERN_KINDS },
         ]
       : [{ label: "", note: "", kinds: TEXTURE_KINDS }];
-  // Everything in the panel edits a DRAFT; nothing touches the model until Apply.
-  // Browsing tiles used to recompute the whole surface on every click — a multi-second
-  // job on a big part, fired while the user was still window-shopping — and each one
-  // landed in history. Now trying things is free and Apply is one deliberate step.
+  // Everything in the panel edits a DRAFT. The canvas previews it live (see showDraft
+  // below) but nothing is COMMITTED until Apply: no history entry, and closing the
+  // panel puts the applied surface back. Browsing used to be the opposite trap — every
+  // tile click was a recorded, multi-second rebuild you then had to Undo.
   const [draft, setDraft] = useState<SurfFxSlot | null>(applied);
+  /** Push a draft to the canvas as an uncommitted try-on. Tile taps go immediately —
+   *  seeing the pattern IS the point of tapping it. Slider moves debounce a beat, so a
+   *  drag costs one rebuild, not thirty; the worker's refine cache then makes every
+   *  further Relief change near-instant. */
+  const previewT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showDraft = (d: SurfFxSlot | null, immediate = false) => {
+    if (previewT.current) clearTimeout(previewT.current);
+    if (immediate) { ctl.preview(tab, d); return; }
+    previewT.current = setTimeout(() => ctl.preview(tab, d), 220);
+  };
+  /* Leaving the panel ends the try-on: the committed surface snaps back, and an
+     experiment can never outlive the UI that explains why the model looks different. */
+  useEffect(() => () => { if (previewT.current) clearTimeout(previewT.current); ctl.previewEnd(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Each tab owns its own draft; flipping tabs (or an outside change like Undo)
   // reseats the draft on what that tab actually has applied.
   const seed = `${tab}|${JSON.stringify(applied)}`;
@@ -950,13 +963,15 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
                 className={`${draft?.kind === k ? "on" : ""}${applied?.kind === k ? " applied" : ""}`}
                 title={FX_TIP[k]}
                 onClick={() => {
-                  if (draft?.kind === k) { setDraft(null); return; }
+                  if (draft?.kind === k) { setDraft(null); showDraft(null, true); return; }
                   // A rib wants a finer pitch and more relief than a stamped pattern, so
                   // switching family carries its own starting proportions rather than
                   // inheriting numbers that were right for the other one.
                   const keep = draft && isRib(draft.kind) === isRib(k);
                   const st = keep ? { scale, depth } : FX_START(k);
-                  setDraft({ kind: k, scale: st.scale, depth: raised ? st.depth : -st.depth });
+                  const next = { kind: k, scale: st.scale, depth: raised ? st.depth : -st.depth };
+                  setDraft(next);
+                  showDraft(next, true);
                 }}>
                 <PatternSwatch kind={k} />
                 <span>{FX_LABEL[k]}</span>
@@ -970,18 +985,18 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           <label className="fx-slider">
             <span>{isRib(draft.kind) ? "Rib pitch" : "Size"} <b>{scale} mm</b></span>
             <input type="range" min={1.5} max={20} step={0.5} value={scale} aria-label="Pattern size"
-              onChange={(e) => setDraft({ ...draft, scale: parseFloat(e.target.value) })} />
+              onChange={(e) => { const next = { ...draft, scale: parseFloat(e.target.value) }; setDraft(next); showDraft(next); }} />
           </label>
           <label className="fx-slider">
             <span>Relief <b>{depth} mm</b></span>
             <input type="range" min={0.1} max={3} step={0.1} value={depth} aria-label="Pattern relief"
-              onChange={(e) => { const d = parseFloat(e.target.value); setDraft({ ...draft, depth: raised ? d : -d }); }} />
+              onChange={(e) => { const d = parseFloat(e.target.value); const next = { ...draft, depth: raised ? d : -d }; setDraft(next); showDraft(next); }} />
           </label>
           <div className="seg sm mode-seg" role="radiogroup" aria-label="Direction">
             <button className={raised ? "on" : ""} role="radio" aria-checked={raised} title="The pattern stands out from the surface"
-              onClick={() => setDraft({ ...draft, depth: Math.abs(draft.depth) })}>Raised</button>
+              onClick={() => { const next = { ...draft, depth: Math.abs(draft.depth) }; setDraft(next); showDraft(next, true); }}>Raised</button>
             <button className={!raised ? "on" : ""} role="radio" aria-checked={!raised} title="The pattern is carved into the surface"
-              onClick={() => setDraft({ ...draft, depth: -Math.abs(draft.depth) })}>Carved</button>
+              onClick={() => { const next = { ...draft, depth: -Math.abs(draft.depth) }; setDraft(next); showDraft(next, true); }}>Carved</button>
           </div>
         </>
       )}
@@ -2635,6 +2650,10 @@ interface Props {
     /** The live spec: at most one decorative pattern and one micro texture. */
     fx: { pattern: SurfFxSlot | null; texture: SurfFxSlot | null };
     set: (slot: "pattern" | "texture", v: SurfFxSlot | null) => void;
+    /** Try a spec on the canvas WITHOUT committing it — no history entry, and closing
+     *  the panel (previewEnd) puts the committed surface back. `null` previews removal. */
+    preview: (slot: "pattern" | "texture", spec: SurfFxSlot | null) => void;
+    previewEnd: () => void;
     busy: boolean;
   };
   printer: PrinterDefaults;
@@ -5619,11 +5638,14 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                           : "Searched the web · nothing solid found"
                         : "Searching the web…"}
                     </span>
-                    <span className="web-live-q">{m.web.query}</span>
-                    {!!m.web.sources?.length && (
+                    {!(m.web.done && m.web.found) && <span className="web-live-q">{m.web.query}</span>}
+                    {!(m.web.done && m.web.found) && !!m.web.sources?.length && (
                       <span className="web-live-src">
                         {m.web.sources.map((sc, i) => (
-                          <a key={i} className="src-chip" href={sc.url} target="_blank" rel="noopener noreferrer" title={sc.title ?? sc.url}>{hostOf(sc.url)}</a>
+                          <a key={i} className="src-chip" href={sc.url} target="_blank" rel="noopener noreferrer" title={sc.title ?? sc.url}>
+                            <img className="src-fav" src={`https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(hostOf(sc.url))}`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            {hostOf(sc.url)}
+                          </a>
                         ))}
                       </span>
                     )}
@@ -5638,16 +5660,40 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                 )}
               </div>
               {/* Finished reply: reasoning kept, collapsed; sources; which model wrote it. */}
-              {!m.streaming && m.thinking && (
+              {!m.streaming && (m.thinking || !!m.steps?.length) && (
                 <details className="think-done">
-                  <summary>Thought process</summary>
-                  <div className="think-body">{m.thinking}</div>
+                  <summary>{m.steps?.length ? `Completed ${m.steps.length} step${m.steps.length === 1 ? "" : "s"}` : "Thought process"}</summary>
+                  {/* The same rows the live timeline drew, settled — reopening the
+                      trail shows the work as it happened, not a flattened blob. Old
+                      saved chats predate per-message steps and keep the blob path. */}
+                  {!!m.steps?.length && (
+                    <div className="think-steps settled">
+                      {m.steps.map((st, i) => (
+                        <div key={i} className="tstep done">
+                          <span className="tstep-rail">
+                            <span className="tstep-dot">
+                              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                                <path d="M20 6 9 17l-5-5" />
+                              </svg>
+                            </span>
+                            {i < (m.steps?.length ?? 0) - 1 && <span className="tstep-line" />}
+                          </span>
+                          <span className="tstep-label">{st.replace(/^▸\s*/, "")}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {m.thinking && <div className="think-body">{m.thinking}</div>}
                 </details>
               )}
               {!!m.sources?.length && (
                 <div className="src-row">
                   {m.sources.map((sc, i) => (
                     <a key={i} className="src-chip" href={sc.url} target="_blank" rel="noopener noreferrer" title={sc.title ?? sc.url}>
+                      {/* The site's own mark makes a source recognisable at a glance
+                          (harvard.edu reads differently from a random blog). Self-hides
+                          on failure — same contract as the ref-strip photos. */}
+                      <img className="src-fav" src={`https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(hostOf(sc.url))}`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
                       {hostOf(sc.url)}
                     </a>
                   ))}

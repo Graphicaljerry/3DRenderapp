@@ -45,7 +45,7 @@ export function Markdown({ text }: { text: string }) {
     if (h) {
       const lvl = Math.min(4, h[1].length);
       const El = (`h${lvl + 2 > 6 ? 6 : lvl + 2}`) as "h3"; // h1→h3 … keep bubble headings small
-      blocks.push(<El key={k++} className="md-h">{inline(h[2], `h${k}`)}</El>);
+      blocks.push(<El key={k++} className={`md-h md-h${lvl}`}>{inline(h[2], `h${k}`)}</El>);
       i++;
       continue;
     }

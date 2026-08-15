@@ -119,8 +119,12 @@ export const FX_TIP: Record<SurfacePattern, string> = {
  *  a triangle soup can't tell you that on its own. */
 export async function displaceMesh(
   positions: Float32Array,
-  opts: { pattern: SurfacePattern; scale: number; depth: number },
+  opts: { pattern: SurfacePattern; scale: number; depth: number; draft?: boolean },
+  /** Base-mesh identity. With it, the worker caches the refined (pre-displacement)
+   *  mesh so a Relief change re-displaces in ~50-150 ms instead of re-refining for
+   *  seconds — the difference between a live slider and a spinner. */
+  refineKey?: string,
 ): Promise<{ positions: Float32Array; normals: Float32Array } | null> {
-  const r = await ensure().displace(positions, opts);
+  const r = await ensure().displace(positions, { ...opts, refineKey });
   return r.ok ? { positions: r.positions, normals: r.normals } : null;
 }

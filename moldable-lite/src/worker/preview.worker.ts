@@ -256,12 +256,19 @@ export interface PreviewApi {
    *  displace along vertex normals. Returns a closed triangle soup. */
   /** Normals come back WITH the positions: the displaced surface is smooth, and letting
    *  the main thread derive normals from the triangle soup would shade every facet flat. */
-  displace(positions: Float32Array, opts: { pattern: string; scale: number; depth: number }): Promise<{ ok: true; positions: Float32Array; normals: Float32Array } | { ok: false; error: string }>;
+  displace(positions: Float32Array, opts: { pattern: string; scale: number; depth: number; refineKey?: string; draft?: boolean }): Promise<{ ok: true; positions: Float32Array; normals: Float32Array } | { ok: false; error: string }>;
   /** Uniform outward surface offset (~delta mm): weld, then displace every vertex along
    *  its area-weighted normal. Correct on non-convex shapes (interior steps move OUT,
    *  where bbox scaling would pull them in) — powers "Make it fit" clearance. */
   grow(positions: Float32Array, delta: number): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
 }
+
+/** Refined-but-not-yet-displaced meshes, keyed by base identity + pattern + scale.
+ *  Refinement is 95-98% of a displacement's wall time and — because the split test
+ *  below compares RELATIVE deviation — is independent of the Relief depth. So while
+ *  the Relief slider drags, only the cheap displacement re-runs (~50-150 ms) and the
+ *  preview is live. Two slots, because Pattern and Texture can be active together. */
+const refineCache = new Map<string, { verts: Float32Array; tris: Uint32Array; hard: Uint8Array; rib: RibFrame | null }>();
 
 const MAX_TRIS = 700_000; // displacement subdivision budget
 // Ribs get a bigger one. They are fine, regular and read against a curved silhouette,
@@ -291,9 +298,67 @@ function vertexNormals(verts: Float32Array, tris: Uint32Array): Float32Array {
   return n;
 }
 
+/** The depth-dependent tail of a displacement: push every vertex along its normal by
+ *  depth × pattern, then build the smooth-shaded triangle soup. Split out so a cached
+ *  refined mesh (see refineCache) can re-run ONLY this while the Relief slider drags. */
+function finishDisplace(
+  verts: Float32Array,
+  tris: Uint32Array,
+  hard: Uint8Array,
+  rib: RibFrame | null,
+  opts: { pattern: string; scale: number; depth: number },
+): { ok: true; positions: Float32Array; normals: Float32Array } {
+  const nrm = vertexNormals(verts, tris);
+  for (let i = 0; i < verts.length; i += 3) {
+    const nx = nrm[i], ny = nrm[i + 1], nz = nrm[i + 2];
+    const d = opts.depth * patternAt(opts.pattern, verts[i], verts[i + 1], verts[i + 2], nx, ny, nz, opts.scale, rib);
+    verts[i] += nx * d; verts[i + 1] += ny * d; verts[i + 2] += nz * d;
+  }
+  // SHADING NORMALS for the displaced surface, computed here rather than left to the
+  // main thread. The mesh below travels as a triangle soup (every downstream stage —
+  // export, split, orientation, thin-wall check — expects one), and deriving normals
+  // from a soup gives every triangle its own flat facet. On a fluted vase that is a
+  // million hard little planes where there should be a smooth curve: the "gritty
+  // ribs" this pattern family kept coming out with.
+  //
+  // The surface is smooth everywhere the model was smooth, however deep the relief,
+  // so it is shaded smooth there — and kept flat only at the corners marked hard on
+  // the model itself, before displacement.
+  const fan = vertexNormals(verts, tris); // on the DISPLACED surface
+  const soup = new Float32Array(tris.length * 3);
+  const nsoup = new Float32Array(tris.length * 3);
+  for (let t = 0; t < tris.length; t += 3) {
+    const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
+    const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
+    const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
+    let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+    const fl = Math.hypot(fx, fy, fz) || 1;
+    fx /= fl; fy /= fl; fz /= fl;
+    for (let k = 0; k < 3; k++) {
+      const v = tris[t + k] * 3, o = (t + k) * 3;
+      soup[o] = verts[v]; soup[o + 1] = verts[v + 1]; soup[o + 2] = verts[v + 2];
+      const smooth = !hard[t + k];
+      nsoup[o] = smooth ? fan[v] : fx;
+      nsoup[o + 1] = smooth ? fan[v + 1] : fy;
+      nsoup[o + 2] = smooth ? fan[v + 2] : fz;
+    }
+  }
+  return transfer({ ok: true as const, positions: soup, normals: nsoup }, [soup.buffer, nsoup.buffer]);
+}
+
 const api: PreviewApi = {
   async displace(positions, opts) {
     try {
+      // Draft quality is part of the mesh's identity: a try-on must never be served
+      // the full-quality mesh (slow) and Apply must never be served the draft (coarse).
+      const ck = opts.refineKey ? `${opts.refineKey}|${opts.pattern}|${opts.scale}|${opts.draft ? "d" : "f"}` : null;
+      const cached = ck ? refineCache.get(ck) : undefined;
+      if (cached) {
+        // The base was already welded, refined and crease-marked for this pattern and
+        // scale — only the depth changed (the Relief slider mid-drag). Displace a copy.
+        const verts = cached.verts.slice();
+        return finishDisplace(verts, cached.tris, cached.hard, cached.rib, opts);
+      }
       const wasm = await ensureManifold();
       // Weld through Manifold so the displaced surface stays a closed solid.
       const man = toManifold(wasm, positions);
@@ -365,14 +430,19 @@ const api: PreviewApi = {
       // does not). Bounding it here rather than letting the tolerance below decide keeps
       // the triangle count predictable on any part, instead of depending on how sharply
       // that particular body curves.
-      const minEdge = Math.max(0.07, feat / (rib ? 6 : 12));
+      const minEdge = Math.max(0.07, feat / (rib ? 8 : 12));
       // Tolerated departure from a straight line, in millimetres of relief. An eighth of
       // the relief lands around five facets across a rib — well under a 0.4 mm nozzle,
       // and smooth to the eye because the surface is SHADED smooth (below) rather than
       // relying on facet size to hide itself. A twentieth looked no better and cost four
       // times the triangles, which on a real vase meant hitting the ceiling and stopping
       // refinement mid-wall — a visible seam, from asking for more than could be paid.
-      const tol = Math.max(0.004, opts.depth * 0.125);
+      // RELATIVE, not absolute: deviation and relief both scale linearly with depth,
+      // so testing deviation/depth against a constant makes the refinement identical
+      // across the whole Relief range — which is what lets the refined mesh be CACHED
+      // and the Relief slider re-displace it live instead of re-refining per tick.
+      // 0.125 of the relief ≈ five facets across a rib, same quality as before.
+      let relTol = 0.125;
       // ADAPTIVE refinement: split only the edges that are still too long.
       //
       // This used to split every triangle into four, every pass. On a CAD part that is
@@ -390,8 +460,10 @@ const api: PreviewApi = {
         // The field is evaluated along the surface normal, so the pass needs normals
         // for the mesh as it stands — the same ones the displacement will use.
         const vn = vertexNormals(verts, tris);
+        // Unit amplitude — see relTol above. The sign of depth (carved vs raised)
+        // changes only the displacement direction, never where detail is needed.
         const fieldAt = (px: number, py: number, pz: number, nx: number, ny: number, nz: number) =>
-          opts.depth * patternAt(opts.pattern, px, py, pz, nx, ny, nz, opts.scale, rib);
+          patternAt(opts.pattern, px, py, pz, nx, ny, nz, opts.scale, rib);
         const need = new Set<string>();
         for (let t = 0; t < tris.length; t += 3) {
           for (let e = 0; e < 3; e++) {
@@ -410,7 +482,7 @@ const api: PreviewApi = {
               (verts[a] + verts[b]) / 2, (verts[a + 1] + verts[b + 1]) / 2, (verts[a + 2] + verts[b + 2]) / 2,
               mx / ml, my / ml, mz / ml,
             );
-            if (Math.abs(dm - (da + db) / 2) > tol) need.add(k);
+            if (Math.abs(dm - (da + db) / 2) > relTol) need.add(k);
           }
         }
         if (!need.size) break;
@@ -422,7 +494,19 @@ const api: PreviewApi = {
           const m = (need.has(ekey(a, b)) ? 1 : 0) + (need.has(ekey(b, c)) ? 1 : 0) + (need.has(ekey(c, a)) ? 1 : 0);
           out += m + 1;
         }
-        if (out > (rib ? MAX_TRIS_RIB : MAX_TRIS)) break;
+        // A try-on runs at a quarter of the budget: it exists to be judged on screen,
+        // not printed, and a preview that takes ten seconds per slider tick is not a
+        // preview. Apply re-runs at full quality (the draft flag is in the cache key).
+        if (out > (rib ? MAX_TRIS_RIB : MAX_TRIS) / (opts.draft ? 4 : 1)) {
+          // Do NOT abandon the pass: that left the mesh refined everywhere except
+          // where the budget ran out — a visible seam — and it meant a FINER Size
+          // setting could come out COARSER than a bigger one, the opposite of what
+          // the slider promises. Loosen the tolerance and re-mark instead, so the
+          // shortfall is spread evenly across the whole surface.
+          relTol *= 2;
+          if (relTol > 1) break;
+          continue;
+        }
         const mid = new Map<string, number>();
         const nv: number[] = [];
         const midOf = (i: number, j: number): number => {
@@ -430,7 +514,26 @@ const api: PreviewApi = {
           let m2 = mid.get(k);
           if (m2 === undefined) {
             m2 = verts.length / 3 + nv.length / 3;
-            nv.push((verts[i * 3] + verts[j * 3]) / 2, (verts[i * 3 + 1] + verts[j * 3 + 1]) / 2, (verts[i * 3 + 2] + verts[j * 3 + 2]) / 2);
+            const a = i * 3, b = j * 3;
+            let mx = (verts[a] + verts[b]) / 2, my = (verts[a + 1] + verts[b + 1]) / 2, mz = (verts[a + 2] + verts[b + 2]) / 2;
+            // Phong tessellation (Boubekeur & Alexa): lift the midpoint off the CHORD
+            // toward the smooth surface the two endpoint normals describe. A midpoint
+            // left on the chord inherits the base tessellation's flat facets, and the
+            // displacement then rides those facets — crests came out at visibly uneven
+            // heights, the wavy streaks in the fluted-model report. Projecting the
+            // chord midpoint onto each endpoint's tangent plane and blending recovers
+            // the curvature the tessellation chopped off. Guarded by normal agreement:
+            // across a real model edge (a box corner, a rim) the normals disagree and
+            // the midpoint stays on the chord, so hard edges stay hard.
+            const nax = vn[a], nay = vn[a + 1], naz = vn[a + 2], nbx = vn[b], nby = vn[b + 1], nbz = vn[b + 2];
+            if (nax * nbx + nay * nby + naz * nbz > 0.77) { // cos 40° — same smooth stretch as the crease rule
+              const da = (mx - verts[a]) * nax + (my - verts[a + 1]) * nay + (mz - verts[a + 2]) * naz;
+              const db = (mx - verts[b]) * nbx + (my - verts[b + 1]) * nby + (mz - verts[b + 2]) * nbz;
+              const px = mx - (da * nax + db * nbx) / 2, py = my - (da * nay + db * nby) / 2, pz = mz - (da * naz + db * nbz) / 2;
+              const ALPHA = 0.75; // the paper's default; 1.0 over-inflates near creases
+              mx += (px - mx) * ALPHA; my += (py - my) * ALPHA; mz += (pz - mz) * ALPHA;
+            }
+            nv.push(mx, my, mz);
             mid.set(k, m2);
           }
           return m2;
@@ -493,48 +596,17 @@ const api: PreviewApi = {
           }
         }
       }
-      // Displace along the vertex normal by depth × pattern.
-      const nrm = vertexNormals(verts, tris);
-      for (let i = 0; i < verts.length; i += 3) {
-        const nx = nrm[i], ny = nrm[i + 1], nz = nrm[i + 2];
-        const d = opts.depth * patternAt(opts.pattern, verts[i], verts[i + 1], verts[i + 2], nx, ny, nz, opts.scale, rib);
-        verts[i] += nx * d; verts[i + 1] += ny * d; verts[i + 2] += nz * d;
+      if (ck) {
+        // Cache the PRE-displacement mesh: finishDisplace mutates verts in place, and
+        // the whole point of the entry is to re-displace it at other Relief depths.
+        refineCache.set(ck, { verts: verts.slice(), tris, hard, rib });
+        while (refineCache.size > 2) refineCache.delete(refineCache.keys().next().value as string);
       }
-      // SHADING NORMALS for the displaced surface, computed here rather than left to the
-      // main thread. The mesh below travels as a triangle soup (every downstream stage —
-      // export, split, orientation, thin-wall check — expects one), and deriving normals
-      // from a soup gives every triangle its own flat facet. On a fluted vase that is a
-      // million hard little planes where there should be a smooth curve: the "gritty
-      // ribs" this pattern family kept coming out with.
-      //
-      // The surface is smooth everywhere the model was smooth, however deep the relief,
-      // so it is shaded smooth there — and kept flat only at the corners marked hard on
-      // the model itself, above.
-      const fan = vertexNormals(verts, tris); // on the DISPLACED surface
-      const soup = new Float32Array(tris.length * 3);
-      const nsoup = new Float32Array(tris.length * 3);
-      for (let t = 0; t < tris.length; t += 3) {
-        const a = tris[t] * 3, b = tris[t + 1] * 3, c = tris[t + 2] * 3;
-        const ux = verts[b] - verts[a], uy = verts[b + 1] - verts[a + 1], uz = verts[b + 2] - verts[a + 2];
-        const vx = verts[c] - verts[a], vy = verts[c + 1] - verts[a + 1], vz = verts[c + 2] - verts[a + 2];
-        let fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
-        const fl = Math.hypot(fx, fy, fz) || 1;
-        fx /= fl; fy /= fl; fz /= fl;
-        for (let k = 0; k < 3; k++) {
-          const v = tris[t + k] * 3, o = (t + k) * 3;
-          soup[o] = verts[v]; soup[o + 1] = verts[v + 1]; soup[o + 2] = verts[v + 2];
-          const smooth = !hard[t + k];
-          nsoup[o] = smooth ? fan[v] : fx;
-          nsoup[o + 1] = smooth ? fan[v + 1] : fy;
-          nsoup[o + 2] = smooth ? fan[v + 2] : fz;
-        }
-      }
-      return transfer({ ok: true, positions: soup, normals: nsoup }, [soup.buffer, nsoup.buffer]);
+      return finishDisplace(verts, tris, hard, rib, opts);
     } catch (e: any) {
       return { ok: false, error: String(e?.message ?? e) };
     }
   },
-
   async grow(positions, delta) {
     try {
       const wasm = await ensureManifold();

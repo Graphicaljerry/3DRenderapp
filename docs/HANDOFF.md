@@ -917,6 +917,18 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 424 — the Settings offline banner gets the health-check link
+
+Jerry hit the signed-in-but-offline banner on his iPad and asked how to fix it. The
+banner was still the pre-421 wording: it asserted "supabase.co looks blocked" off a
+plain boolean (cloudOffline is not a probe verdict) and offered no way to check —
+the sign-in dialog got the honest wording + health link in build 421 and this banner
+was missed. It now states the fact, links the health endpoint (loads → false alarm,
+press Retry; fails → something on the device filters supabase.co), and names the
+culprits that actually occur on an iPad: a VPN, iCloud Private Relay, a content
+blocker (supabase.co appears on ad-block lists), a DNS profile. Verified with
+Playwright (`offlinebanner.mjs`).
+
 ## Build 423 — patterns preview live and render clean; replies say who wrote them
 
 Three Jerry requests with reference photos (the fluted-vase 3D prints): pattern/texture

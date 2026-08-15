@@ -9773,7 +9773,13 @@ function SettingsModal({
               <>
                 {cloudOffline && (
                   <div className="sync-status err" role="status">
-                    You're still signed in as <b>{cloudEmail}</b>, but this network can't reach the sync service right now (supabase.co looks blocked — a DNS filter, VPN or browser shields are the usual culprits). Everything keeps saving on this device and syncs itself the moment the connection returns.
+                    {/* No confident "looks blocked" here: this banner is driven by a boolean
+                        (cloudOffline), not a probe verdict, and build 421's lesson was that
+                        claiming censorship on a maybe is how the app cries wolf. State the
+                        fact, hand over the one test that settles it, and name the usual
+                        culprits as suspects rather than a diagnosis. */}
+                    You're still signed in as <b>{cloudEmail}</b>, but this device can't reach the sync service right now. Everything keeps saving here and syncs itself the moment the connection returns.{" "}
+                    <a className="link" href={HEALTH_URL} target="_blank" rel="noreferrer">Open the health check</a> in a new tab: if it loads, the network is fine — press Retry connection. If it doesn't, something on this device is filtering supabase.co — a VPN, iCloud Private Relay, a content blocker (supabase.co is on some ad-block lists), or a DNS profile.
                   </div>
                 )}
                 <p className="fine">Signed in as <b>{cloudEmail}</b> — {cloudOffline ? "changes wait on this device until the sync service is reachable." : "everything syncs automatically."}</p>

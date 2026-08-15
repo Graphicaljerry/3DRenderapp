@@ -917,6 +917,40 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 421 — the network verdict stops crying wolf (and says it once)
+
+An iPad screenshot on v419: the sign-in dialog with **two red boxes stacked**, both
+saying the network couldn't reach supabase.co, in two different wordings. Two defects
+behind it.
+
+**It said the same thing twice.** The dialog rendered its own up-front `blocked`
+banner *and* whatever a failed attempt reported. Now one box, ever: the reachability
+verdict wins while it stands (it is the more specific of the two), and anything else
+appears only when the network isn't the story.
+
+**And the verdict itself wasn't trustworthy.** `probeReachable()` had two flaws that
+both push toward a false "your network is blocking this":
+
+- It sent an `apikey` header. That makes the request non-simple, so every probe first
+  had to survive a **CORS preflight it never needed** — a whole extra failure surface
+  for an endpoint that is public, and one the code already didn't depend on (a `401`
+  counted as reachable, because the server answering *is* the question).
+- **One try, 5 s.** A first request doing DNS + TLS on a sleeping mobile radio can
+  miss that honestly, and the failure was then reported as censorship.
+
+It is now a bare `GET` (no preflight), two tries at 8 s, and it returns *which* kind of
+failure: `"slow"` — didn't answer in time, usually a weak connection, try again — or
+`"blocked"` — something refused outright, so a DNS filter, VPN or content blocker, and
+note that supabase.co does appear on some ad-blocking lists. `reachMessage()` holds one
+wording per verdict so the two call sites can't drift apart again. Both cases now offer
+the health URL as a link: **opening it in a tab is the test that settles it** — if it
+answers there, the app was wrong.
+
+Verified with Playwright against a health endpoint that answers / hangs / refuses
+(`reach.mjs`): exactly one box in every state, none at all when reachable, no `apikey`
+header and no `OPTIONS` on any probe, two attempts before judging, and the hanging case
+reading as "slow" rather than "blocked".
+
 ## Build 420 — the work-computer build: blank-page boot, blocked logins, a library that outlived the account
 
 Three reports from a work machine, and two of them turned out to be the same root

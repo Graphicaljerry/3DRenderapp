@@ -94,25 +94,55 @@ export async function completeAuthReturn(): Promise<{ email: string } | null> {
   return u;
 }
 
-/** One cheap probe against the auth health endpoint (5 s cap): can THIS machine
-    reach the sync service right now? */
-async function probeReachable(): Promise<boolean> {
-  try {
+/** The public health URL, exposed so the UI can offer it as a link. Opening it in a
+    tab is the one test that settles the argument: if it answers there, the network is
+    fine and this app's verdict was wrong. */
+export const HEALTH_URL = `${SUPA_URL}/auth/v1/health`;
+
+/** Can this device reach the sync service, and if not — WHICH kind of not?
+ *
+ *  "slow" and "blocked" are indistinguishable to fetch(), but they are opposite
+ *  advice: one is a radio waking up or a busy connection, the other is a DNS filter
+ *  or a content blocker. Telling a user on a weak signal that their network is
+ *  censored is both wrong and alarming, and it was doing that.
+ *
+ *  Two changes from the version that cried wolf:
+ *  - NO `apikey` header. That header made this a non-simple cross-origin request, so
+ *    every probe first had to survive a CORS preflight it never needed — one more way
+ *    to "fail" while the service was perfectly up. The endpoint is public, and a 401
+ *    already counted as reachable (the server answered, which is the whole question).
+ *  - Two tries at 8 s, not one at 5. A first request that has to do DNS + TLS on a
+ *    sleeping mobile radio can genuinely miss 5 s. */
+export type Reach = "ok" | "slow" | "blocked";
+
+async function probeReach(): Promise<Reach> {
+  let lastTimedOut = false;
+  for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 5000);
-    const r = await fetch(`${SUPA_URL}/auth/v1/health`, { signal: ctl.signal, headers: { apikey: SUPA_KEY } });
-    clearTimeout(t);
-    return r.ok || r.status === 401;
-  } catch {
-    return false;
+    const t = setTimeout(() => ctl.abort(), 8000);
+    try {
+      const r = await fetch(HEALTH_URL, { signal: ctl.signal, cache: "no-store" });
+      if (r.ok || r.status === 401) return "ok"; // it answered — that is the question
+      lastTimedOut = false;
+    } catch {
+      lastTimedOut = ctl.signal.aborted;
+    } finally {
+      clearTimeout(t);
+    }
   }
+  return lastTimedOut ? "slow" : "blocked";
+}
+
+async function probeReachable(): Promise<boolean> {
+  return (await probeReach()) === "ok";
 }
 
 /** Public probe for UI that wants to warn BEFORE a sign-in attempt fails — the
-    sign-in dialog shows the blocked-network explanation up front instead of as
-    the aftermath of a dead OAuth hop. */
-export function cloudReachable(): Promise<boolean> {
-  return probeReachable();
+    sign-in dialog shows the explanation up front instead of as the aftermath of a
+    dead OAuth hop. Returns the REASON, so the dialog can word "we couldn't get an
+    answer in time" differently from "something is refusing this outright". */
+export function cloudReachable(): Promise<Reach> {
+  return probeReach();
 }
 
 /** OAuth navigates the whole tab to the service's URL — when supabase.co is blocked
@@ -120,10 +150,18 @@ export function cloudReachable(): Promise<boolean> {
     dead browser error page (ERR_ADDRESS_UNREACHABLE — a real report). Check first
     and fail with words. */
 async function ensureReachable(): Promise<void> {
-  if (await probeReachable()) return;
-  throw new Error(
-    "Your network can't reach the sync service (supabase.co looks blocked or unreachable from here — the service itself is up). Common culprits: DNS filtering, a VPN, or browser shields. Try another network or DNS (e.g. 1.1.1.1), or allow supabase.co, then try again.",
-  );
+  const r = await probeReach();
+  if (r === "ok") return;
+  throw new Error(reachMessage(r));
+}
+
+/** One wording for each verdict, in one place, so the dialog's up-front warning and a
+ *  failed attempt can never describe the same fact in two different ways — which is
+ *  what stacked two near-identical red boxes on top of each other. */
+export function reachMessage(r: Reach): string {
+  return r === "slow"
+    ? "The sync service didn't answer in time — twice. That is usually a weak or busy connection rather than anything blocking it, so it is worth simply trying again in a moment."
+    : "Something on this network is refusing to reach the sync service. A DNS filter, a VPN, or a Safari/Chrome content blocker are the usual causes — supabase.co appears on some ad-blocking lists. Open the health link below in a new tab: if it answers there, this was a false alarm and signing in will work.";
 }
 
 /** A failure that means "the wire", not "the account" — callers should keep treating

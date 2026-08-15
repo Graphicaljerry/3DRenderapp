@@ -69,7 +69,7 @@ import type { BuildProgress } from "./components/BuildStage";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { IS_DESKTOP } from "./lib/desktopUpdate";
-import { DEFAULT_RELAY, cloudSessionState, cloudReachable, isNetworkError, cloudSignUp, cloudSignIn, runSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { DEFAULT_RELAY, cloudSessionState, cloudReachable, reachMessage, HEALTH_URL, type Reach, isNetworkError, cloudSignUp, cloudSignIn, runSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 // On-demand UI (code-split): the SVG modal's svg/extrude graph carries
 // three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
@@ -8790,13 +8790,13 @@ function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState(false);
-  const [reach, setReach] = useState<boolean | null>(null); // null = still probing
+  const [reach, setReach] = useState<Reach | null>(null); // null = still probing
   const probe = () => {
     setReach(null);
-    void cloudReachable().then(setReach).catch(() => setReach(false));
+    void cloudReachable().then(setReach).catch(() => setReach("blocked"));
   };
   useEffect(probe, []);
-  const blocked = reach === false || cloudOffline;
+  const blocked = (reach !== null && reach !== "ok") || cloudOffline;
 
   async function auth(op: "github" | "google" | "magic" | "signup" | "signin" | "reset") {
     setBusy(true);
@@ -8840,13 +8840,21 @@ function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose
           <button className="x" aria-label="Close" onClick={onClose}><IconX size={16} /></button>
         </div>
         <p className="fine">One free account keeps your projects, chats and keys on every device — encrypted in your browser before anything uploads. Skip it and everything still saves on this device.</p>
-        {blocked && (
+        {/* ONE box. This used to render its own blocked warning AND whatever a failed
+            attempt reported, which stacked two red panels saying the same thing in two
+            wordings — the screenshot that started this. The reachability verdict wins
+            while it stands, because it is the more specific of the two; anything else
+            the dialog has to say appears only when the network isn't the story. */}
+        {blocked ? (
           <div className="sync-status err" role="status">
-            Before you pick a provider: this network can't reach the sync service (supabase.co looks blocked — a DNS filter, VPN, or browser shields are the usual culprits), so sign-in can't complete from here. Try another network, or set this device's DNS to 1.1.1.1, then{" "}
-            <button className="link" onClick={probe}>check again</button>.
+            {cloudOffline && !reach ? "You're signed in, but this device can't reach the sync service right now." : reachMessage(reach && reach !== "ok" ? reach : "blocked")}{" "}
+            <button className="link" onClick={probe} disabled={reach === null}>{reach === null ? "checking…" : "Check again"}</button>
+            {" · "}
+            <a className="link" href={HEALTH_URL} target="_blank" rel="noreferrer">Open the health check</a>
           </div>
+        ) : (
+          msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>
         )}
-        {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
         {/* Email + password leads. It used to be folded away under "Or use a password"
             with GitHub and Google on top — which is fine until you are on a network that
             blocks one of them, and then the only path that still works is the hidden one.

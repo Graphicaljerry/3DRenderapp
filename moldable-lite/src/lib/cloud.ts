@@ -63,15 +63,18 @@ function supa(): Promise<any> {
   return clientP;
 }
 
-/** Give this account a password, so the desktop app can sign in. OAuth and magic-link
-    sign-in both hand control to a browser and expect a redirect back to a web address —
-    the desktop app has no such address, so neither can ever complete there. A password
-    needs no redirect. Requires being signed in (i.e. do this on the web, once). */
+/** Give this account a password. OAuth and magic-link sign-in both hand control to
+    another website and expect a redirect back to a web address; a password needs no
+    redirect at all, which makes it the only method that survives two situations:
+    the desktop app (no web address to return to) and a locked-down network that
+    blocks the provider (a work laptop, a VPN, a school). Requires being signed in
+    already — the recovery-link flow (cloudResetPassword) is how you get there when
+    you have no password yet. */
 export async function cloudSetPassword(password: string): Promise<string> {
   const c = await supa();
   const { error } = await c.auth.updateUser({ password });
   if (error) throw new Error(error.message);
-  return "Password set — sign in with your email and this password in the Mac or Windows app.";
+  return "Password set — you can now sign in with your email and this password on any device or network, including the Mac and Windows apps.";
 }
 
 /** The exact page URL OAuth/magic links must return to (works on Pages + localhost). */
@@ -178,8 +181,35 @@ export async function cloudSessionState(): Promise<CloudSessionState> {
   return { email: null, offline: false };
 }
 
+/** The provider's OWN host, which the tab is about to be navigated to. `no-cors` gives
+ *  an opaque response we can't read — but reachable-vs-dead is the whole question, and
+ *  a network failure still throws. 4 s cap so the check never becomes the delay. */
+async function providerReachable(host: string): Promise<boolean> {
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 4000);
+    await fetch(host, { mode: "no-cors", signal: ctl.signal, cache: "no-store" });
+    clearTimeout(t);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function cloudOAuth(provider: "github" | "google"): Promise<void> {
   await ensureReachable(); // fail HERE with an explanation, not on a dead browser page
+  // ensureReachable only proves SUPABASE is reachable. OAuth then navigates the whole
+  // tab to github.com / accounts.google.com, and a work network commonly blocks one
+  // without the other — which stranded the user on a dead browser page with no way back
+  // and no idea why ("github isn't letting me", reported on a work machine). Check the
+  // host we are actually about to hand the tab to.
+  const host = provider === "github" ? "https://github.com/favicon.ico" : "https://accounts.google.com/favicon.ico";
+  if (!(await providerReachable(host))) {
+    const name = provider === "github" ? "GitHub" : "Google";
+    throw new Error(
+      `This network can't reach ${name}, so that sign-in would leave you on a dead page. Use your email and password below instead — if you've never set one, "Email me a link to set a password" works on any network.`,
+    );
+  }
   const c = await supa();
   const { error } = await c.auth.signInWithOAuth({ provider, options: { redirectTo: appUrl() } });
   if (error) throw new Error(error.message);
@@ -245,6 +275,96 @@ export async function cloudSignOut(): Promise<void> {
   const c = await supa();
   await c.auth.signOut();
   try { localStorage.removeItem(LAST_EMAIL); } catch { /* private mode */ }
+}
+
+/** How many projects this device is holding — the number the sign-out confirmation
+ *  has to be able to say out loud before it erases them. */
+export async function deviceProjectCount(): Promise<number> {
+  return (await listProjects()).length;
+}
+
+/** Erase this device's copy of the library: every project, plus the local bookkeeping
+ *  that only means anything next to those projects (which mesh bytes are held, which
+ *  sync stamps were seen, which project was last open, pending tombstones).
+ *
+ *  Jerry's rule, and the reason this exists: an account whose models stay browsable
+ *  after you sign out is not an account, it is a shared folder — on a work machine the
+ *  next person sees the library. Signing out therefore takes the copy with it.
+ *
+ *  Settings and API keys are deliberately NOT touched: they are this browser's setup,
+ *  not the account's work, and wiping them would mean re-entering keys after every
+ *  sign-out. Callers must push to the account BEFORE calling this — see signOutAndWipe,
+ *  which is the only path a person can reach. */
+export async function wipeDevice(): Promise<number> {
+  const all = await listProjects();
+  for (const p of all) {
+    await deleteProject(p.id);
+    try { localStorage.removeItem(meshMark(p.id)); } catch { /* private mode */ }
+  }
+  for (const k of [SEEN_KEY, TOMB_KEY, "moldable_last_project"]) {
+    try { localStorage.removeItem(k); } catch { /* private mode */ }
+  }
+  // Second pass. The open project is still live in the UI while this runs, and a save
+  // that was already in flight (the chat autosave restamps every few seconds) lands
+  // AFTER the delete and puts the row back — a wipe that leaves the one model you had
+  // open is worse than no wipe, because it looks like it worked. Callers reload
+  // immediately on top of this; between them nothing survives.
+  for (const p of await listProjects()) await deleteProject(p.id);
+  return all.length;
+}
+
+export type SignOutResult = { wiped: number; synced: boolean; reason?: string };
+
+/** Sign out, taking this device's library with it — the whole point — but never
+ *  before the account has a copy. The upload is attempted first and its failure is
+ *  reported rather than swallowed: erasing work that only existed here, because the
+ *  network happened to be down, is the one outcome this must not produce.
+ *  `force` is the caller's answer once the user has been told and chosen anyway. */
+/** The entire sign-out decision, in ONE place, because the app has two buttons for it —
+ *  Settings → Sync, and the account menu — and a second copy that forgets to clear the
+ *  device is precisely the bug this was written to fix. The UI passes in how to ask and
+ *  how to report; the rules live here. Returns true when the device was cleared, which
+ *  is the caller's cue to reload rather than unpick the open project by hand. */
+export async function runSignOut(
+  ask: (question: string) => boolean,
+  say: (message: string, isError?: boolean) => void,
+): Promise<boolean> {
+  const n = await deviceProjectCount();
+  const models = `${n} model${n === 1 ? "" : "s"}`;
+  if (!ask(n === 0
+    ? "Sign out of this computer?"
+    : `Sign out and remove ${models} from this computer?\n\nThey stay in your account — signing back in brings them all back. Anything not yet uploaded is uploaded first.`)) {
+    say("");
+    return false;
+  }
+  say("Uploading anything new, then clearing this computer…");
+  let r = await signOutAndWipe();
+  if (!r.synced) {
+    if (!ask(`${r.reason}\n\nSign out and remove ${models} anyway? Anything that never reached your account is gone for good.`)) {
+      say(`Still signed in — nothing was removed. ${r.reason}`, true);
+      return false;
+    }
+    r = await signOutAndWipe(true);
+  }
+  say(n === 0 ? "Signed out." : `Signed out — ${r.wiped} model${r.wiped === 1 ? "" : "s"} removed from this computer.`);
+  return true;
+}
+
+export async function signOutAndWipe(force = false): Promise<SignOutResult> {
+  let synced = false;
+  let reason: string | undefined;
+  try {
+    synced = (await cloudSyncPush()) != null;
+    if (!synced) reason = "You're already signed out, so this device's copy was never uploaded.";
+  } catch (e) {
+    reason = isNetworkError(e)
+      ? "This device couldn't reach your account, so anything changed since the last sync isn't uploaded yet."
+      : `The upload failed: ${String((e as any)?.message ?? e)}`;
+  }
+  if (!synced && !force) return { wiped: 0, synced, reason };
+  const wiped = await wipeDevice();
+  await cloudSignOut();
+  return { wiped, synced, reason };
 }
 
 type BlobKind = "settings" | "projects" | "tombstones";

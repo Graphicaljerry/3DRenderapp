@@ -917,6 +917,89 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 420 — the work-computer build: blank-page boot, blocked logins, a library that outlived the account
+
+Three reports from a work machine, and two of them turned out to be the same root
+cause: **that network blocks third-party hosts, and Moldable was leaning on them.**
+
+**1. "Some models take 20+ seconds to load."** Not the CAD kernel — OCCT boots in
+~0.4 s and the 10.9 MB wasm fetches in ~0.2 s. It was `index.html`:
+
+```html
+<link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk…" rel="stylesheet">
+```
+
+A stylesheet link **blocks first paint**. When `fonts.googleapis.com` can't be
+reached — corporate networks filter it as a standard GDPR/tracking rule — the browser
+waits for the socket to give up before running a single byte of the app. Traced on the
+production build with that host black-holed: `DOMContentLoaded` at **12,751 ms**, and
+every other request in the app queued behind it.
+
+Fixed by self-hosting: 95 KB of woff2 in `src/assets/fonts/`, `@font-face` at the top
+of `src/styles.css`, bundled and fingerprinted by Vite, zero off-origin requests during
+boot. Schibsted Grotesk is a *variable* font — 400/500/700 were byte-identical
+downloads — so it ships once per subset with the weight range declared, not three times.
+
+Measured after, with all third-party hosts hanging (not rejecting — a filter that
+swallows packets is the slow case):
+
+| | before | after |
+| --- | --- | --- |
+| first paint | 12,751 ms | **67 ms** |
+| app usable | 13,485 ms | **1,094 ms** |
+| off-origin requests during boot | 1 | **0** |
+
+**2. "GitHub isn't letting me log in."** Same class of problem, and the pre-flight
+check was looking at the wrong host: `ensureReachable()` only proved *supabase.co* was
+up, then handed the whole tab to github.com — which on that network is a dead page with
+no way back. Now `cloudOAuth` also probes the provider's own host and refuses with words
+that name it and point at what still works.
+
+The dialog itself was the deeper problem: **email + password was folded away inside a
+`<details>` under the two provider buttons**, so the only method that works on a
+locked-down network was the one you had to go looking for. It leads now, with the
+providers below an "or" rule, and one line covers the case Jerry was actually in —
+*"Forgot it, or signed up with GitHub and never set one? Email me a link to set a
+password."* (That is `resetPasswordForEmail`: the link signs the browser in, and the
+password field is then reachable.) In Settings, "Set a password" came out of its
+`<details>` and lost the "(for the Mac / Windows app)" label that made it look
+irrelevant on the web.
+
+**3. "My library still shows up on the work computer after it asks me to log in."**
+Jerry's call, asked and answered: *"it doesn't make sense to have an account and have
+the models synced if you can access them as a guest. Also it doesn't help with privacy."*
+So **signing out now erases this device's copy** — but never blindly:
+
+- it uploads to the account **first**, and a failed upload stops with the reason;
+- it says what it is about to remove, by count, and that the account keeps them;
+- backing out of either confirmation changes nothing at all.
+
+`runSignOut` in `src/lib/cloud.ts` holds the whole rule, because the app has **two**
+sign-out buttons — Settings → Sync and the account menu — and the account-menu one was
+calling `cloudSignOut()` straight, leaving the library sitting on the machine you had
+just signed out of. Both go through the one function now.
+
+Two things the probe caught that reading would not have:
+- the completion message was being posted **into the chat**, which triggers the project
+  autosave, which wrote the open project straight back into the store the wipe had just
+  cleared — the receipt undid the deletion. The message is held until after the reload
+  decision now, and both callers reload immediately instead of after a beat.
+- `wipeDevice` does a second delete pass for anything a save in flight put back.
+
+Settings and API keys are deliberately **not** wiped — they are this browser's setup,
+not the account's work, and clearing them would mean re-entering keys after every
+sign-out.
+
+Verified with Playwright against a mocked Supabase: the sign-in dialog's shape, a
+blocked GitHub failing without navigating away, and the wipe driven from **both**
+sign-out buttons including the cancel-changes-nothing case (`authwipe.mjs`), plus the
+blocked-network boot measurement (`blockednet.mjs`). Phone and desktop suites re-run
+green.
+
+**Still open:** the session-expiry case (the server ends the session on its own) can't
+upload first, because by then there is nothing to authenticate with. Today it leaves the
+data in place; making that path lock or clear the library needs its own decision.
+
 ## Build 419 — the phone toolbar folds away
 
 Jerry, after 418: *"Design it properly. Maybe make the toolbar collapsible that

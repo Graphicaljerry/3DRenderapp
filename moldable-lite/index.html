@@ -4,9 +4,11 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23498a6f' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 2 21 7 21 17 12 22 3 17 3 7Z'/%3E%3Cpath d='M3 7 12 12 21 7'/%3E%3Cpath d='M12 12V22'/%3E%3C/svg%3E" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet" />
+    <!-- No font <link> here on purpose. A stylesheet link blocks first paint, so pointing
+         one at fonts.googleapis.com let any network that cannot reach Google hold the app
+         on a blank page until the socket timed out — 12.7 s, measured, on a work network
+         that filters it. The faces are bundled into the app's own CSS now (see the
+         @font-face block at the top of src/styles.css). Nothing here reaches off-origin. -->
     <!-- Installable app (PWA): home-screen icon + standalone chrome on iOS. -->
     <meta name="theme-color" content="#498a6f" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#121213" media="(prefers-color-scheme: dark)" />

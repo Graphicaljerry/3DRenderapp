@@ -69,7 +69,7 @@ import type { BuildProgress } from "./components/BuildStage";
 import { downloadBlob, safeFileName } from "./lib/download";
 import { exportSettings, importSettings } from "./lib/backup";
 import { IS_DESKTOP } from "./lib/desktopUpdate";
-import { DEFAULT_RELAY, cloudSessionState, cloudReachable, isNetworkError, cloudSignUp, cloudSignIn, cloudSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
+import { DEFAULT_RELAY, cloudSessionState, cloudReachable, isNetworkError, cloudSignUp, cloudSignIn, runSignOut, cloudSyncPush, cloudSyncPull, cloudOAuth, cloudMagicLink, cloudResetPassword, cloudSetPassword, onAuthChange, hasAuthReturn, completeAuthReturn } from "./lib/cloud";
 
 // On-demand UI (code-split): the SVG modal's svg/extrude graph carries
 // three-bvh-csg + SVGLoader — it only loads when an SVG is actually dropped.
@@ -7116,11 +7116,21 @@ export default function App() {
         }}
         onComposerFocus={maybePromptSignIn}
         onSignOut={() => {
-          void cloudSignOut().finally(() => {
-            setAccountEmail(null);
-            setCloudOffline(false);
-            pulledRef.current = false;
-            setMessages((mm) => [...mm, { id: mid(), ts: Date.now(), role: "assistant", text: "Signed out. This device keeps its own copy; sign in anywhere to sync again." }]);
+          // Same rule as Settings → Sync, from the same function: this button used to
+          // call cloudSignOut() straight, which left the whole library sitting on the
+          // machine you had just signed out of.
+          //
+          // The message is HELD rather than posted as it arrives. Posting it appends a
+          // chat line, a chat line triggers the project autosave, and the autosave wrote
+          // the open project straight back into the store the wipe had just cleared — so
+          // the receipt for the deletion undid the deletion. The probe caught it.
+          let held = { text: "", err: false };
+          void runSignOut(confirm, (m, e) => { held = { text: m, err: !!e }; }).then((cleared) => {
+            if (cleared) { window.location.reload(); return; }
+            // Not cleared means the user backed out of one of the confirmations, so the
+            // session is untouched — clearing accountEmail here would show them as
+            // signed out while they are still signed in.
+            if (held.text) setMessages((mm) => [...mm, { id: mid(), ts: Date.now(), role: "assistant", text: held.text, error: held.err }]);
           });
         }}
         mode={mode}
@@ -8837,6 +8847,25 @@ function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose
           </div>
         )}
         {msg && <div className={`sync-status${err ? " err" : ""}`} role="status">{msg}</div>}
+        {/* Email + password leads. It used to be folded away under "Or use a password"
+            with GitHub and Google on top — which is fine until you are on a network that
+            blocks one of them, and then the only path that still works is the hidden one.
+            A password needs nothing but this page. */}
+        <label htmlFor="si-email">Email</label>
+        <input id="si-email" type="email" autoComplete="username" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
+        <label htmlFor="si-pw">Password</label>
+        <input id="si-pw" type="password" autoComplete="current-password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
+        <div className="param-actions">
+          <button className="primary sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signin")}>Sign in</button>
+          <button className="ghost sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signup")}>Create account</button>
+        </div>
+        {/* One button for two situations that feel different but are the same thing:
+            a forgotten password, and an account made with GitHub/Google that never had
+            one. Both get a link that signs this browser in and lets a password be set. */}
+        <button className="link signin-nopw" disabled={busy || !email.includes("@")} onClick={() => auth("reset")}>
+          Forgot it, or signed up with GitHub and never set one? Email me a link to set a password
+        </button>
+        <div className="signin-or"><span>or</span></div>
         <div className="social-col">
           <button className="ghost block social" disabled={busy} onClick={() => auth("github")}>
             <IconGitHub /> Continue with GitHub
@@ -8844,20 +8873,14 @@ function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose
           <button className="ghost block social" disabled={busy} onClick={() => auth("google")}>
             <IconGoogle /> Continue with Google
           </button>
+          {/* No mark on this one: the two above are provider buttons and their logos are
+              what identifies them. A decorative glyph here would only imply a third
+              provider that doesn't exist. */}
+          <button className="ghost block" disabled={busy || !email.includes("@")} onClick={() => auth("magic")}>
+            Email me a one-time login link
+          </button>
         </div>
-        <div className="magicrow">
-          <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-          <button className="ghost" disabled={busy || !email.includes("@")} onClick={() => auth("magic")}>Email me a login link</button>
-        </div>
-        <details className="adv">
-          <summary>Or use a password</summary>
-          <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
-          <div className="param-actions">
-            <button className="primary sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signup")}>Create account</button>
-            <button className="ghost sm" disabled={busy || !email.includes("@") || pw.length < 6} onClick={() => auth("signin")}>Sign in</button>
-            <button className="link" disabled={busy || !email.includes("@")} onClick={() => auth("reset")}>Forgot password?</button>
-          </div>
-        </details>
+        <p className="fine">GitHub, Google and login links all finish by bouncing through another website. On a locked-down network (a work laptop, a VPN, a school) that bounce can be blocked — the password above never leaves this page.</p>
         <div className="modal-actions">
           <button className="ghost" onClick={onClose}>Not now — keep it on this device</button>
         </div>
@@ -9100,8 +9123,14 @@ function SettingsModal({
         setSyncMsg("Signed in — your projects, chats and settings now sync automatically.");
       }
       if (op === "signout") {
-        await cloudSignOut();
-        setSyncMsg("Signed out. This device keeps its own copy.");
+        // Reload rather than unpick the open project, the recents and the viewer by
+        // hand: a half-cleared screen after a wipe is the confusion this exists to fix.
+        const cleared = await runSignOut(confirm, (m, e) => { setSyncErr(!!e); setSyncMsg(m); });
+        // Reload at once, not after a beat: the workspace behind this modal still holds
+        // the open project, and any save it has in flight would land after the wipe.
+        if (cleared) { window.location.reload(); return; }
+        setCloudBusy(false);
+        return;
       }
       if (op === "sync") {
         const pushed = await cloudSyncPush();
@@ -9680,18 +9709,23 @@ function SettingsModal({
                   <button className="primary sm" disabled={cloudBusy} onClick={() => doCloud("sync")}>{cloudOffline ? "Retry connection" : "Sync now"}</button>
                   <button className="ghost sm" disabled={cloudBusy} onClick={() => doCloud("signout")}>Sign out</button>
                 </div>
-                <details className="adv">
-                  <summary>Set a password (for the Mac / Windows app)</summary>
-                  <p className="fine">Google, GitHub and login links all sign you in by returning to a web address. The desktop app isn't one, so it can't use them — give the account a password here and sign in with it there. You'll stay signed in.</p>
-                  <label>New password</label>
-                  <input type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
+                {/* Not hidden in a <details>, and not labelled "for the Mac app" any more.
+                    A password is the ONLY sign-in that works without bouncing through
+                    another website, which makes it the answer on every locked-down
+                    network too — the case that sent someone home from a work machine
+                    unable to get in at all. Somewhere you have to already be signed in
+                    to reach, so it belongs here rather than in the sign-in dialog. */}
+                <div className="pw-set">
+                  <label>Set or change your password</label>
+                  <p className="fine">Signed up with GitHub or a login link? Those need a bounce through another website, which work laptops, VPNs and school networks often block. Give the account a password here and it will sign you in anywhere — including the Mac and Windows apps, which have no web address to bounce back to.</p>
+                  <input type="password" autoComplete="new-password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="at least 6 characters" />
                   <div className="param-actions">
                     <button className="primary sm" disabled={cloudBusy || pw.length < 6} onClick={() => doCloud("setpw")}>Set password</button>
                   </div>
-                </details>
+                </div>
                 <details className="adv">
                   <summary>What syncs, exactly?</summary>
-                  <p className="fine">Projects (their code, versions, chats, thumbnails), plus your settings and keys — encrypted in your browser before upload, private to your account. 3D meshes and imported STEP files stay on each device (they're big; CAD models rebuild from their code). On another device, just sign in the same way.</p>
+                  <p className="fine">Projects (their code, versions, chats, thumbnails), plus your settings and keys — encrypted in your browser before upload, private to your account. Older version snapshots and imported STEP files stay on each device (they're big; CAD models rebuild from their code). Signing out uploads everything and then removes the models from that computer, so a shared machine keeps nothing; sign in again anywhere to get them back.</p>
                 </details>
               </>
             ) : (
@@ -9776,7 +9810,7 @@ function SettingsModal({
           <button className="ghost" onClick={onClose}>Cancel</button>
           <button className="primary" onClick={saveAll}>Save all</button>
         </div>
-        <p className="fine center">Signed out, everything stays in this browser. Signed in, it syncs privately to your account (row-level security).</p>
+        <p className="fine center">Signed in, your work syncs privately to your account (row-level security) and signing out clears it off that computer. Never signed in, it just stays in this browser.</p>
       </div>
     </div>
   );

@@ -1,3 +1,50 @@
+/* ---------- UI type, self-hosted ----------
+   These used to arrive from fonts.googleapis.com through a render-blocking <link> in
+   index.html. A stylesheet link blocks first paint, so on any network that cannot reach
+   Google the WHOLE app sat on a blank page until the connection gave up — and corporate
+   networks block Google Fonts routinely (it is a standard GDPR/tracking rule). Measured
+   on the production build with that host unreachable: 12.7 s of nothing before a single
+   byte of Moldable ran. That was the "some models take 20+ seconds to load" report; the
+   CAD kernel was never the problem (OCCT boots in ~0.4 s).
+
+   Bundled instead: 95 KB of woff2, fingerprinted and cached forever, that no filter can
+   block and no third party can watch. Schibsted Grotesk is a VARIABLE font — 400/500/700
+   are the same bytes — so it ships once per subset with the axis range declared rather
+   than three times. Latin + Latin-Extended only; anything else falls to the stacks in
+   --font-display / --font-mono below. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/jetbrains-mono-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('./assets/fonts/jetbrains-mono-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./assets/fonts/schibsted-grotesk-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: 'Schibsted Grotesk';
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url('./assets/fonts/schibsted-grotesk-latin-ext.woff2') format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
 :root {
   /* Native form controls (textarea/select/scrollbars) follow the app theme, not the OS. */
   color-scheme: light;
@@ -1710,6 +1757,26 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .signin-card .magicrow { margin-bottom: 4px; }
 .signin-card .sync-status { margin: 10px 0 2px; }
 .signin-card .modal-actions { margin-top: 14px; }
+.signin-card .param-actions { margin-top: 12px; }
+/* The one line that has to survive being read in a hurry on a network where the
+   provider buttons below it are dead. Left-aligned and full width so it reads as the
+   next step under the form rather than a footnote hanging off the last button. */
+.signin-nopw { display: block; margin-top: 10px; text-align: left; line-height: 1.4; }
+/* Rule with the word sitting in it — the divider between "the way that always works"
+   and "the ways that need another website to co-operate". */
+.signin-or {
+  display: flex; align-items: center; gap: 10px;
+  margin: 18px 0 4px;
+  font-size: var(--fs-sm); color: var(--mut);
+}
+.signin-or::before, .signin-or::after {
+  content: ""; flex: 1 1 0; height: 1px; background: var(--bord);
+}
+/* Set-a-password, out in the open in Settings rather than folded into a <details>:
+   on a network that blocks the providers it is the only way back in, so it cannot be
+   something you have to already know is there. */
+.pw-set { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--bord-subtle); }
+.pw-set input { width: 100%; }
 .launch-foot { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--bord); display: flex; align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap; font-size: var(--fs-sm); color: var(--mut); }
 .launch-foot .launch-actions { display: flex; align-items: baseline; gap: 14px; margin-left: auto; }
 /* Returning user: one link, no rule above it — the section has nothing to separate. */

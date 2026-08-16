@@ -952,8 +952,19 @@ relative-time helper (the version list had a near-identical private copy) and ga
 "Yesterday" plus a year on older dates.
 
 Verified with `landing.mjs` (build → reload → Launchpad → click → part opens with its
-geometry → reload → Launchpad again) and `shelfgrid.mjs` (12 cards at 1500/1024/390 px,
-both themes).
+geometry → reload → Launchpad again).
+
+**Corrected in build 431.** Twelve cards was wrong. Jerry, on a real library of 93: "too
+many project files are being shown, heading is too high. keep the old design where it
+shows 3-4 projects and then clicking on 'All projects' shows me all of them." Both
+complaints were one bug — the shelf pushed the column past the viewport, so the Launchpad
+scrolled and the heading rode up under the top bar. Now four cards in ONE row (explicit
+column count: four items on an auto-fill grid land on three-plus-an-orphan at a range of
+widths; two columns under 700 px), label "Your projects · 4 of 93", and the column's
+decorative foot trimmed 6vh → 2vh with body padding 32 → 24 px. A signed-out 1512x900
+laptop measured 42 px over and is now exactly 0. `shelf4.mjs` seeds 93 projects straight
+into IndexedDB and checks four widths plus the Library hand-off. **The lesson: the shelf
+is not the point of this screen — the composer is. It gets a glance, not a screenful.**
 
 **Two probe-hygiene notes worth keeping.** (1) The old probe corpus seeds
 `moldable_entered: "1"` to skip the Launchpad. That key is inert now, so those scripts

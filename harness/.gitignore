@@ -1,4 +1,6 @@
 node_modules/
+node_modules
+triage-state.json
 *.png
 *.webp
 package-lock.json

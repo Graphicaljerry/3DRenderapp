@@ -46,7 +46,6 @@ const canvas = page.locator(".viewerCanvas canvas");
 const box = await canvas.boundingBox();
 
 // 1) Shift-click two different faces → both selected, both highlighted, extrude-all offered.
-await page.getByRole("button", { name: "Select", exact: true }).click();
 await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 }, modifiers: ["Shift"] });
 await page.waitForTimeout(400);
 await canvas.click({ position: { x: box.width * 0.42, y: box.height * 0.75 }, modifiers: ["Shift"] });

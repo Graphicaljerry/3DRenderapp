@@ -42,7 +42,6 @@ const box = await canvas.boundingBox();
 const cx = box.width * 0.5, cy = box.height * 0.5;
 await page.getByRole("button", { name: "Top", exact: true }).click();
 await page.waitForTimeout(600);
-await page.getByRole("button", { name: "Select", exact: true }).click();
 await canvas.click({ position: { x: cx, y: cy } });
 await page.waitForTimeout(400);
 if ((await page.getByRole("button", { name: "Hole…" }).count()) === 0) {

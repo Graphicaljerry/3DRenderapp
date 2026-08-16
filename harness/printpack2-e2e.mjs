@@ -132,7 +132,6 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   // T5: face → Hole… → pick "M3 heat-set insert" → ⌀4, 5.5 deep + boss hint.
   const canvas = page.locator(".viewerCanvas canvas");
   const box = await canvas.boundingBox();
-  await page.getByRole("button", { name: "Select", exact: true }).click();
   let holeBtn = false;
   for (const pos of [[0.42, 0.75], [0.5, 0.72], [0.38, 0.68], [0.5, 0.62]]) {
     await canvas.click({ position: { x: box.width * pos[0], y: box.height * pos[1] } });

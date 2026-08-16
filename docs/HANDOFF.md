@@ -917,6 +917,91 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Builds 433–439 — reload keeps your part, and the harness gets repaired
+
+**Build 436 — the resume window.** Build 429's "always land on the Launchpad" was too
+blunt. Jerry: "if I refresh it, it'll still stay within the project. But if I won't touch
+it for hours, then it'll refresh into the launch pad." `lib/session.ts` stamps the last
+time the app was TOUCHED; a stamp under `RESUME_WINDOW_MS` (2 h) reopens the part, older
+lands on the Launchpad with it offered on the shelf. Leaving via the wordmark clears the
+stamp; so does wiping the device. The stamp never syncs.
+
+**Trap worth keeping:** stamping on `pagehide`/`visibilitychange` was tried and is WRONG.
+Those fire on the way out of every load, so a tab idle five hours stamps itself fresh the
+instant you press refresh and carries you back in — defeating the window entirely. Only
+real interaction may stamp it. The probe caught this, not review.
+
+**Build 433 — nothing moves on hover in the template and library galleries.** Reported as
+the gallery shrinking a few per cent while hovering a tile. Measured every frame at DPR
+1/2/3: no box moves by a pixel, so it is compositing, not layout — a transform on a child
+promotes a layer and forces the panel to re-rasterise. Removed the remaining hover
+transforms (thumbnail scale, library card lift). The template card had already lost its
+lift for a near-identical report ("the gallery shaking"); this finishes that.
+
+**Build 435 — Library toolbar heights.** The modal-wide `.card input/select` 44 px rule
+still won on HEIGHT over the library's own overrides, so search + selects sat at 44 px
+between ~28 px buttons. Everything in `.lib-toolbar`/`.lib-bulk` is 33 px now.
+
+**Four subagents** in `.claude/agents/`: `probe-auditor` (adversarial probe review — every
+rule in it is a mistake made here), `moldable-verifier` (owns the harness ritual),
+`kernel-bencher` (one OCCT case per process under timeout), `diff-reviewer` (runs
+/code-review then the no-ai-slop pass).
+
+**The harness was systematically stale — seven repairs, all script rot, no app bugs.**
+`harness/triage.mjs` runs the suite in resumable batches and refuses to score a script
+that exits 0 having asserted nothing as a pass. What it found:
+
+1. 56/61 scripts seeded `moldable_entered` then waited for `.topbar`; that flag went inert
+   in build 429 so they sat on the Launchpad for 60 s. `harness/enter.mjs` clicks the
+   Launchpad's "Open an empty workspace" door and waits for the topbar to be POPULATED —
+   `.topbar` renders one commit before its buttons, and callers click Templates on the
+   very next line.
+2. 33 scripts matched `"Build the X template"`; the modal grid says `"Build the X —
+   instant, free"` now. They match the stable prefix.
+3. 13 scripts named templates removed in the rebuild-to-12 (coaster, cable clip, wall
+   hook, washer/spacer), remapped to the nearest survivor by function.
+4. 15 scripts found the composer by placeholder copy (reworded twice) → `.composer
+   textarea`.
+5. `"Or start from a template"` lost its "Or".
+6. `geometriesTo3MF` → `write3MF`. One word; the script then passed every check.
+7. **`gen-thumbs.mjs` rewrites tracked artwork.** It re-renders template thumbnails into
+   `src/assets/templates/`, so a sweep left a modified `box-with-lid.webp` in the working
+   tree. The triage now skips generators that mutate tracked files.
+
+**Genuine app findings, deliberately NOT patched away** (fixing a test to hide these would
+be the worst possible outcome):
+- `boot-e2e` **B3: the kernel does not finish warming with no interaction.** Landing on the
+  Launchpad instead of the workspace plausibly changed this — first build after landing may
+  now be slower.
+- `damping-e2e` **A5: camera damping does not scale with frame time** (0.265 at 20 Hz vs
+  0.150 at 63 Hz). May be headless frame-rate noise; needs a judgement call.
+- `dims-e2e`: selection bounding box measures 0 px.
+- `engine-audit`: the mesh templates fail with "must define function main" — likely the
+  stub returning CAD-shaped code for mesh fixtures.
+- `double-send-e2e`: double-tapping Send fires 3 requests, hammering Enter fires 2.
+
+Triage state lives in `harness/triage-state.json` (gitignored, resumable). At handoff:
+15/60 verdicts on the post-repair run — 2 pass, 5 shots, 10 fail. Re-run with
+`node triage.mjs 20`.
+
+## Mixed CAD + mesh scenes — researched, not yet built
+
+For the speaker project. Two agents (codebase + industry) reported; conclusion:
+**objects stay native-kind, the scene is heterogeneous, export per-kind** — literally what
+Onshape ships as "Mixed Modeling". Mesh→BRep is a trap (FreeCAD's own docs call it "not an
+easy operation"; no credible WASM implementation exists), BRep→mesh is free and safe below
+printer resolution. Slicers prove the scene model: a flat list of independent objects +
+plate assignment + per-object overrides.
+
+Moldable already does most of it IN SESSION: importing a mesh beside a CAD model,
+per-object plate assignment, and combined multi-object multi-plate 3MF export all work
+today. **The missing piece is persistence** — only text and logo layers survive a reload;
+a plain imported mesh lives in session memory. The recommended next cut is a
+`MeshLayerSnap` mirroring the logo pattern (`Version.meshes?`, `meshesForSnap()`,
+`restoreMeshes()`, plus every `appendVersion` call site — the schema silently ERASES any
+field a writer forgets). Honest constraint: blob-backed second objects cannot sync —
+`pushMeshes` writes exactly one `<uid>/<projectId>.bin` per project.
+
 ## Build 429 — the app stops reopening your last part, and the shelf becomes a shelf
 
 Jerry: "When I load the app, I want it to always load me to the library or launchpad. I

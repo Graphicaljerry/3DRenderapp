@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } fro
 import * as THREE from "three";
 import { Workspace, FILAMENT_SWATCHES } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
+import { whenAgo } from "./lib/when";
 import { MeasureModal } from "./components/MeasureModal";
 import type { SvgMode, SvgParams } from "./components/ExtrudeModal";
 import { geometryToSTL } from "./print/stl";
@@ -279,23 +280,18 @@ function sourceText(source: BuildInput): string {
 export default function App() {
   const [key, setKey] = useState(() => localStorage.getItem(KEY_LS) ?? "");
   const [model, setModel] = useState(() => localStorage.getItem(MODEL_LS) ?? MODELS[0].id);
-  // "entered" survives reloads for free-mode users too (not only key holders). The flag
-  // was being WRITTEN and never read, so every refresh dumped you back on the launchpad
-  // mid-session. Now a reload puts you back in the workspace you were in; the launchpad
-  // is reached deliberately — New chat, or the wordmark.
-  const [entered, setEnteredState] = useState(() => {
-    try { return localStorage.getItem("moldable_entered") === "1"; } catch { return false; }
-  });
+  // Are we past the Launchpad? In-session only — NOT persisted, deliberately. It used to
+  // survive reloads, which meant that after your first visit the app never showed you the
+  // Launchpad again: every load reopened the part you were last in, and the only way out
+  // was to notice that the wordmark was a link. A fresh load now always lands on the
+  // Launchpad and the last part is OFFERED there as the first card.
+  const [entered, setEnteredState] = useState(false);
   // The Launchpad's staggered entrance is a first-impression, worth 770 ms when the page
   // loads. Now that the wordmark navigates back to it mid-session it would replay on every
   // trip — and the resume chip and recents animate in LAST, so the one thing a returning
   // user came for is the slowest to arrive. Play it on arrival, not on the way back.
   const [beenHome, setBeenHome] = useState(false);
-  const setEntered = (v: boolean) => {
-    if (v) localStorage.setItem("moldable_entered", "1");
-    else localStorage.removeItem("moldable_entered"); // going home un-enters — the flag has to follow
-    setEnteredState(v);
-  };
+  const setEntered = setEnteredState;
   const [printer, setPrinter] = useState<PrinterDefaults>(loadPrinter);
   const [providerKeys, setProviderKeys] = useState<Record<string, string>>(loadProviderKeys);
   const [proxyBase, setProxyBase] = useState(() => localStorage.getItem(PROXY_LS) ?? "");
@@ -1905,35 +1901,35 @@ export default function App() {
   // Land on a FRESH start screen; offer the last session as a one-tap resume
   // chip instead of auto-opening it (auto-open replayed stale errors on load).
   const [resume, setResume] = useState<{ id: string; name: string } | null>(null);
-  // The four most recently touched projects, shown on the Launchpad as thumbnails.
-  // Deliberately NOT a second library page: the Library modal already does thumbnails,
-  // search, rename and delete, so the entry screen shows the few you actually want and
-  // hands off to it for everything else.
-  const [recent, setRecent] = useState<{ id: string; name: string; engine: string; thumb?: string }[]>([]);
-  /** Re-read the four most recent projects. Called at boot and again on every return to
-      the Launchpad — otherwise the row would still show what existed at page load, and
-      the part you had open a second ago would be missing from your own recents. */
+  // The Launchpad's project shelf. It was four cards when the app auto-opened your last
+  // part and this was a shortcut nobody looked at; now that every load lands here, this
+  // IS the way back into your work, so it shows a screenful. The Library modal still owns
+  // the long tail — search, rename, delete — and "All projects" hands off to it.
+  const RECENT_SHOWN = 12;
+  const [recent, setRecent] = useState<{ id: string; name: string; engine: string; thumb?: string; at: number }[]>([]);
+  const [recentTotal, setRecentTotal] = useState(0);
+  /** Re-read the shelf. Called at boot and again on every return to the Launchpad —
+      otherwise it would still show what existed at page load, and the part you had open a
+      second ago would be missing from your own recents. */
   function loadRecent() {
     return listProjects().then((all) => {
+      setRecentTotal(all.length);
       setRecent(
         [...all]
           .sort((a, b) => b.updatedAt - a.updatedAt)
-          .slice(0, 4)
-          .map((p) => ({ id: p.id, name: p.name, engine: p.engine, thumb: p.thumb })),
+          .slice(0, RECENT_SHOWN)
+          .map((p) => ({ id: p.id, name: p.name, engine: p.engine, thumb: p.thumb, at: p.updatedAt })),
       );
-    }).catch(() => { /* no store yet — the row just doesn't render */ });
+    }).catch(() => { /* no store yet — the shelf just doesn't render */ });
   }
   useEffect(() => {
     const id = localStorage.getItem("moldable_last_project");
     if (id) {
-      void getProject(id).then((p) => {
-        if (!p) return;
-        // Reloading INSIDE the workspace reopens what was on the canvas — an empty
-        // workspace after a refresh reads as "my work is gone". From the launchpad it
-        // stays an offer (the resume chip), because that screen is a deliberate choice.
-        if (localStorage.getItem("moldable_entered") === "1") void openProjectById(p);
-        else setResume({ id: p.id, name: p.name });
-      });
+      // An OFFER, never an auto-open. The old code reopened the last part whenever the
+      // "entered" flag was set, which is every load after the first — so the app only
+      // ever showed you the part you were last in, and the way out was to notice the
+      // wordmark. Landing on your own shelf and picking is the whole point of a shelf.
+      void getProject(id).then((p) => { if (p) setResume({ id: p.id, name: p.name }); });
     }
     void loadRecent();
   }, []);
@@ -7103,6 +7099,7 @@ export default function App() {
         resume={resume}
         onResume={() => { setEntered(true); void resumeLast(); }}
         recent={recent}
+        recentTotal={recentTotal}
         onOpenRecent={(id) => { void getProject(id).then((pr) => { if (pr) { setEntered(true); void openProjectById(pr); } }); }}
         onAllProjects={() => { setEntered(true); setShowLibrary(true); }}
         accountEmail={accountEmail}
@@ -8534,7 +8531,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -8559,7 +8556,8 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   photoAdvice: string;
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
-  recent?: { id: string; name: string; engine: string; thumb?: string }[];
+  recent?: { id: string; name: string; engine: string; thumb?: string; at: number }[];
+  recentTotal?: number;
   onOpenRecent?: (id: string) => void;
   onAllProjects?: () => void;
   accountEmail?: string | null;
@@ -8737,10 +8735,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             recent card — the card itself now carries the continue treatment instead. */}
         {!!recent?.length && (
           <section className="launch-sect">
-            <p className="launch-label">Recent projects</p>
+            <p className="launch-label">Your projects{recentTotal > recent.length ? ` · ${recent.length} of ${recentTotal}` : ""}</p>
             <div className="launch-recents">
               {recent.map((r, i) => {
                 const cont = !!resume && (resume.id === r.id || (i === 0 && !recent.some((x) => x.id === resume.id)));
+                const kind = r.engine === "replicad" ? "Precise CAD" : r.engine === "generative" ? "AI mesh" : "Part";
                 return (
                   <button key={r.id} className={`launch-recent${cont ? " continue" : ""}`} onClick={() => (cont ? onResume?.() : onOpenRecent?.(r.id))} title={cont ? `Continue ${r.name}` : `Open ${r.name}`}>
                     <span className="lr-thumb">
@@ -8748,7 +8747,10 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
                     </span>
                     <span className="lr-meta">
                       <b>{r.name}</b>
-                      <em>{cont ? "Continue where you left off" : r.engine === "replicad" ? "Precise CAD" : r.engine === "generative" ? "AI mesh" : "Part"}</em>
+                      {/* Kind AND when. Every shelf worth copying (Figma, Framer, Lovable)
+                          puts an edited-time under the name — it is what tells two similar
+                          thumbnails apart, and what makes "the one from last night" findable. */}
+                      <em>{cont ? `Continue · ${whenAgo(r.at)}` : `${kind} · ${whenAgo(r.at)}`}</em>
                     </span>
                   </button>
                 );

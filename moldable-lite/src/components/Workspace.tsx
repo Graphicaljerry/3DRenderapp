@@ -26,6 +26,7 @@ import type { Version } from "../store/types";
 import { MAX_VERSIONS } from "../store/versions";
 import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
+import { whenAgo } from "../lib/when";
 import { fmtTok, fmtUSD, priceFor, loadLedger } from "../llm/pricing";
 import { fmtCredits, usdToCredits, ageLabel, PRICING, estBuildCredits } from "../llm/credits";
 import { HEAVY_TRIANGLES } from "../print/heavy";
@@ -6002,15 +6003,6 @@ function versionLabel(summary: string): { text: string; restored: boolean } {
   return { text, restored };
 }
 
-/** "just now" / "14m ago" / a clock time once it stops being about recency. */
-function whenLabel(ts: number): string {
-  const mins = Math.floor((Date.now() - ts) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  if (mins < 24 * 60) return `${Math.floor(mins / 60)}h ago`;
-  return new Date(ts).toLocaleDateString([], { month: "short", day: "numeric" });
-}
-
 const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore, onSaveCheckpoint, syncNote }: {
   versions: Version[];
   headId?: string; // where the model actually IS — undo moves this without touching the list
@@ -6061,7 +6053,7 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
           const { text, restored } = versionLabel(v.summary);
           const isHead = v.id === head;
           const busy = restoringId === v.id;
-          const meta = `${step} · ${whenLabel(v.createdAt)}${v.dims ? ` · ${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : ` · ${v.engine}`}`;
+          const meta = `${step} · ${whenAgo(v.createdAt)}${v.dims ? ` · ${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : ` · ${v.engine}`}`;
           // The ROW is the control. A separate Restore button next to a big thumbnail
           // left about seventy pixels for the summary in a 262px dock, which clipped
           // every label to two characters — and "click the version you want" is what

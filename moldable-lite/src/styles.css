@@ -1746,22 +1746,32 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* A GRID, not wrapped inline-flex: every card takes the same column width, so a
    short name ("Wall hook") no longer sits in a visibly narrower box than a long one.
    Equal columns are what makes a set read as a set. */
-.launch-recents { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 7px; align-items: stretch; max-width: 640px; }
+/* A gallery, not a list. When the app auto-opened your last part this was a four-item
+   shortcut and a 40px thumbnail beside a name was enough. Now every load lands here and
+   this is the way back into your work, so the picture does the recognising — the shape of
+   the part is what you remember, not its name. Same card as Figma/Framer/Lovable put on
+   their file shelves: image on top, name and edited-time under it. */
+.launch-recents { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 12px; align-items: stretch; max-width: 1000px; }
 .launch-recent {
-  display: flex; align-items: center; gap: 10px; padding: 5px 13px 5px 5px; min-width: 0;
-  border: 1px solid var(--bord); border-radius: var(--r-sm); background: transparent;
-  color: var(--ink2); font: inherit; font-size: var(--fs-md); text-align: left;
+  display: flex; flex-direction: column; gap: 8px; padding: 0; min-width: 0;
+  border: 1px solid var(--bord); border-radius: var(--r-md); background: transparent;
+  color: var(--ink2); font: inherit; font-size: var(--fs-md); text-align: left; overflow: hidden;
   transition: border-color .15s ease, background-color .15s ease, color .15s ease, transform .15s ease;
 }
-.launch-recent:hover { background: var(--ctl); border-color: var(--bord-strong); color: var(--ink); transform: translateY(-1px); }
+.launch-recent:hover { background: var(--ctl); border-color: var(--bord-strong); color: var(--ink); transform: translateY(-2px); }
 /* The most recent project carries the continue treatment — the accent ring replaces
    the separate "Continue where you left off" pill that used to duplicate it. */
 .launch-recent.continue { border-color: var(--accent); }
 .launch-recent.continue .lr-meta em { color: var(--accent-d); }
-.lr-thumb { width: 40px; height: 40px; flex: 0 0 auto; display: grid; place-items: center; border-radius: var(--r-sm); overflow: hidden; background: var(--ctl); color: var(--subt); }
+.lr-thumb {
+  width: 100%; aspect-ratio: 4 / 3; flex: none; display: grid; place-items: center;
+  overflow: hidden; background: var(--ctl); color: var(--subt);
+  border-bottom: 1px solid var(--bord);
+}
 .lr-thumb img { width: 100%; height: 100%; object-fit: cover; }
-.lr-meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
-.lr-meta b { font-weight: 500; font-size: var(--fs-md); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; }
+.lr-thumb svg { width: 28px; height: 28px; } /* the no-thumbnail cube, sized for the bigger tile */
+.lr-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 10px 10px; }
+.lr-meta b { font-weight: 500; font-size: var(--fs-md); line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lr-meta em { font-style: normal; font-size: var(--fs-tiny); color: var(--subt); line-height: 1.2; }
 /* Secondary extras box: background shift separates it — a border here would be the
    third nested hairline on this screen (page → composer → box). */

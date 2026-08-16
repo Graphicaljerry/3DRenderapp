@@ -1364,13 +1364,16 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* content-visibility: the browser skips layout, style and paint for cards scrolled
    out of the library — with a big library that's most of them. contain-intrinsic-size
    reserves each card's height so the scrollbar and scroll position stay honest. */
-.lib-card { background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-lg); padding: 12px; transition: border-color .15s ease, box-shadow .16s ease, transform .16s cubic-bezier(.23,1,.32,1); content-visibility: auto; contain-intrinsic-size: auto 232px; }
-.lib-card:hover { border-color: var(--bord); box-shadow: var(--shadow-md); transform: translateY(-2px); }
+/* Same rule as the template gallery: nothing here moves on hover. This grid additionally
+   runs content-visibility:auto with a guessed intrinsic size, so a hover transform is
+   asking the browser to re-composite the one surface whose off-screen sizing is an
+   estimate — the worst place to spend a decorative animation. */
+.lib-card { background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-lg); padding: 12px; transition: border-color .15s ease, box-shadow .16s ease; content-visibility: auto; contain-intrinsic-size: auto 232px; }
+.lib-card:hover { border-color: var(--bord); box-shadow: var(--shadow-md); }
 .lib-card.current { border-color: var(--accent); }
 .lib-open { display: block; width: 100%; text-align: left; background: none; border: none; padding: 0 0 8px; }
 .lib-thumb { aspect-ratio: 4 / 3; border-radius: var(--r-md); overflow: hidden; background: var(--bg); margin-bottom: 9px; display: grid; place-items: center; }
-.lib-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s cubic-bezier(.23,1,.32,1); }
-.lib-card:hover .lib-thumb img { transform: scale(1.03); }
+.lib-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .lib-thumb-empty { color: var(--subt); opacity: .6; }
 .lib-open:hover .lib-name { color: var(--accent-d); }
 .lib-name { font-size: var(--fs-lg); font-weight: 600; color: var(--ink); transition: color .15s ease; }
@@ -1379,24 +1382,27 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 
 /* ---------- template gallery (photo cards → one-tap parametric parts) ---------- */
 .tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-top: 16px; }
-.tpl-card { display: block; width: 100%; text-align: left; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-lg); padding: 10px; cursor: pointer; transition: border-color .15s ease, box-shadow .16s ease, transform .16s cubic-bezier(.23,1,.32,1); }
-/* No lift on hover: moving the card out from under the pointer drops the hover, which
-   moves it back — the card oscillates for as long as you rest near its edge (reported
-   as the gallery "shaking"). Border + shadow read the same and never move the target. */
+.tpl-card { display: block; width: 100%; text-align: left; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-lg); padding: 10px; cursor: pointer; transition: border-color .15s ease, box-shadow .16s ease; }
+/* NOTHING in this gallery moves on hover — not the card, not the picture inside it.
+   The card lift went first (resting near an edge made the card oscillate in and out from
+   under the pointer: the gallery "shaking"). The thumbnail's scale-on-hover went next,
+   reported as the whole gallery appearing to shrink a few per cent while hovering one
+   tile. Measured across DPR 1/2/3 that scale moves no box by a single pixel, so what it
+   changes is compositing, not layout: it promotes a layer and forces the panel to
+   re-rasterise, which is exactly what a resampling flicker looks like. It was decoration
+   on top of a hover state that border + shadow + the name's colour already carry. */
 .tpl-card:hover { border-color: var(--bord); box-shadow: var(--shadow-md); }
 .tpl-card:hover .tpl-name { color: var(--accent-d); }
-.tpl-card:disabled { opacity: .55; cursor: default; transform: none; box-shadow: none; }
+.tpl-card:disabled { opacity: .55; cursor: default; box-shadow: none; }
 .tpl-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tpl-thumb { aspect-ratio: 4 / 3; border-radius: var(--r-md); overflow: hidden; background: var(--bg); margin-bottom: 8px; display: grid; place-items: center; }
-.tpl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .2s cubic-bezier(.23,1,.32,1); }
-.tpl-card:hover .tpl-thumb img { transform: scale(1.04); }
+.tpl-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .tpl-thumb-empty { color: var(--subt); opacity: .6; }
 /* Sculpt cards carry line art rather than a render — tinted, and large enough to read
    as the subject rather than as a missing image. */
 .tpl-thumb.sculpt { background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 12%, var(--bg)), var(--bg)); }
 .tpl-thumb.sculpt .tpl-thumb-empty { color: var(--accent-d); opacity: .85; display: grid; place-items: center; width: 100%; height: 100%; padding: 12%; }
-.tpl-thumb.sculpt svg { width: 100%; height: 100%; max-height: 108px; transition: transform .2s cubic-bezier(.23,1,.32,1); }
-.tpl-card:hover .tpl-thumb.sculpt svg { transform: scale(1.06); }
+.tpl-thumb.sculpt svg { width: 100%; height: 100%; max-height: 108px; }
 .tpl-name { display: block; font-size: var(--fs-md); font-weight: 600; color: var(--ink); transition: color .15s ease; }
 .tpl-blurb { display: block; font-size: var(--fs-tiny); color: var(--subt); margin-top: 2px; }
 /* empty-chat teaser strip */

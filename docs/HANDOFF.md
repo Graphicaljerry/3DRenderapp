@@ -917,6 +917,67 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 427 — screw threads take a turn count, and the helix question gets numbers
+
+Jerry: "How do I add sweep to a screw and control the parameters of it?" — the follow-up
+to his earlier "I want to control how many spirals or how many times the spirals go
+around the cylinder".
+
+`makeThread` now takes diameter plus **any two of pitch/length/turns** and derives the
+third (turns = length / pitch). An explicit `turns` is honoured exactly: the rib count is
+that number, the pitch is whatever makes it fit. `turns` and `starts` joined the count
+parameters in `cad/params.ts`, so Adjust steps them by whole numbers and no longer
+labels a count "mm". `llm/prompts.ts` documents the signature and tells the model to
+reach for `turns` when the user phrases it as turns.
+
+**The helix question is now settled with measurements** (`scratchpad/helixcase.mjs`,
+one process per case so a kernel hang kills only that case). The old header comment
+blamed the sweep; that was wrong. The sweep is cheap — the boolean is the wall:
+
+| step | time |
+| --- | --- |
+| `sketchHelix` | 9–13 ms |
+| `sweepSketch` (frenet) | 60–164 ms |
+| FUSE ridge onto core | hangs past 5 min |
+| CUT groove, M3×0.5×3 (6 turns) | 8.2 s |
+| CUT groove, M8×1.25×10 (8 turns) | **fails** at 7.4 s |
+| CUT groove, M6×1×12 (12 turns) | **fails** at 12.1 s |
+| CUT groove, 30×3×60 (20 turns) | 85.7 s |
+
+The watchdog is 25 s, so cut is not a rescue: it fails outright at the two commonest
+screw sizes. A true helix **is** reachable through Manifold (361 ms at dia 8 / 4 turns,
+516 ms at dia 12.8 / 10 turns, genus 0 both; degrades past ~20 turns — dia 20 / 20 turns
+is 13.4 s and genus −6, i.e. broken), but its output is a **mesh**: no STEP, no further
+CAD ops. That is the same trade the surface-pattern path already makes, so the machinery
+exists — but converting a CAD bolt into a mesh is a product call, left open for Jerry.
+
+Verified through the app (`boltturns.mjs`): the AI's code calls `makeThread` with
+`turns`, the worker builds it, Adjust shows Turns, and 8 → 14 raises the crest count
+measured off the displayed mesh.
+
+## Build 426 — a pattern try-on stops surviving a version restore
+
+Jerry: applying a texture records a History step, but restoring an earlier version
+"automatically puts the textures back on it" — and he guessed the cause correctly. The
+committed surface was already per-version (build 407-era fix); what leaked was the
+**uncommitted try-on**. `fxPreview` is view state that outlived a history navigation, so
+the pattern you were only auditioning was re-applied on top of whatever you restored —
+the model on screen was a version that never existed, and an export taken there would
+have carried the texture.
+
+- `rebuildHead` clears the try-on (restore, undo/redo and open all funnel through it).
+- `PatternFly` cancels a preview still sitting in its 220 ms debounce when the applied
+  surface changes underneath it.
+- New **Live preview** checkbox in the pattern panel (Jerry's suggestion). Off, tiles and
+  sliders only move the panel and the model changes on Apply — also the lever for
+  browsing swatches on a heavy model, since a try-on subdivides the whole skin.
+
+Verified with `fxrevert.mjs`. **Measurement note worth keeping:** the first version of
+that probe compared vertex COUNTS and passed without a try-on ever being in flight —
+refinement is depth-independent by design (build 422), so changing Relief keeps the
+vertex count identical and only moves the points. Fingerprint pattern work with a
+position checksum, never a count.
+
 ## Build 424 — the Settings offline banner gets the health-check link
 
 Jerry hit the signed-in-but-offline banner on his iPad and asked how to fix it. The

@@ -2,6 +2,7 @@
 // interactive element (or run off-screen). Finds the "toolbar elements and popups
 // overlap" cases without having to guess which one the user hit.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const SIZES = [[1194, 834], [1024, 768], [834, 1194], [1366, 1024]]; // real iPad landscape / split / PORTRAIT / 12.9"
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
@@ -14,11 +15,11 @@ const PROBE = [".pmenu", ".canvas-rail .rail-fly", ".layers-panel", ".mesh-stats
 for (const [width, height] of SIZES) {
   const page = await browser.newPage({ viewport: { width, height } });
   page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
-  await page.addInitScript(() => { localStorage.setItem("moldable_entered", "1"); localStorage.setItem("moldable_theme", "dark"); });
+  await page.addInitScript(() => { localStorage.setItem("moldable_theme", "dark"); });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
-  await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+  await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
   await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
 
   const scan = (label) => page.evaluate(({ PROBE, label }) => {

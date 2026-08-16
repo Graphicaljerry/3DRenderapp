@@ -1,13 +1,14 @@
 // One-shot: capture the bare 3D canvas (no DOM overlays) at the Figma frame's
 // 1210×831 aspect for use as the viewer mockup fill in the design file.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
 const THEME = process.env.THEME === "light" ? "light" : "dark";
-await page.addInitScript((t) => { localStorage.setItem("moldable_entered", "1"); localStorage.setItem("moldable_theme", t); }, THEME);
+await page.addInitScript((t) => { localStorage.setItem("moldable_theme", t); }, THEME);
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // Empty chat shows the TemplateStrip — tap Phone stand (fall back to the Templates modal)
 try {

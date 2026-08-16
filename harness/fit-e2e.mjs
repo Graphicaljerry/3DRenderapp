@@ -1,5 +1,6 @@
 // Fit-testing e2e: Separate parts (ungroup), Check fit (Manifold intersect), Drop to plate.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -9,14 +10,12 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
   if (!ok) fails.push(name);
 };
-
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // Box with lid = two disconnected solids in one model.
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), { timeout: 120_000 });
 
 // 1) The Objects panel offers "Separate 2 parts" (partCount detection).

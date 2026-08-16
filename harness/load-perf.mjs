@@ -2,6 +2,7 @@
 // account has real history — many projects, long chats with images, deep version
 // stacks, and a heavy mesh. Seeds synthetic-but-realistic data, then times the paths.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const PROJECTS = Number(process.env.PROJECTS ?? 25);
 const VERSIONS = Number(process.env.VERSIONS ?? 30);
@@ -10,9 +11,8 @@ const CHAT = Number(process.env.CHAT ?? 40);
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // ---- Seed a realistic library -------------------------------------------------
 const NOTHUMB = !!process.env.NOTHUMB; // isolate what thumbnail decoding costs

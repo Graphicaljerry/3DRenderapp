@@ -1,16 +1,16 @@
 // Library organization e2e: search, sort, engine filter, live model count, and
 // flat folders (create via prompt, chip filtering, persistence + sync stamp).
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 page.on("dialog", (d) => void d.accept("Prototypes")); // the New folder… prompt
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // Seed three projects (thumbV=2 so the background upgrader leaves them alone).
 await page.evaluate(async () => {

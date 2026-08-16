@@ -4,6 +4,7 @@
 //  2) cache/device keys are excluded from cloud-synced settings;
 //  3) the saved theme applies BEFORE first paint (no light-mode flash on reload).
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -15,13 +16,12 @@ const CAT = JSON.stringify({ t: Date.now(), m: [{ id: "google/gemini-2.5-flash",
 {
   const page = await browser.newPage();
   await page.addInitScript((cat) => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_theme", "dark");
     localStorage.setItem("moldable_openrouter_models_v2", cat);
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "openrouter", model: "auto" }));
   }, CAT);
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(3000); // give the warm-up effect every chance to misbehave
   const now = await page.evaluate(() => localStorage.getItem("moldable_openrouter_models_v2"));
   check("T1 fresh catalogue cache untouched at boot (no churn)", now === CAT, now === CAT ? "" : "value was rewritten");
@@ -44,7 +44,6 @@ const CAT = JSON.stringify({ t: Date.now(), m: [{ id: "google/gemini-2.5-flash",
 {
   const page = await browser.newPage();
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_theme", "dark");
   });
   // Sample as early as possible: at domcontentloaded, BEFORE React mounts.
@@ -60,7 +59,7 @@ const CAT = JSON.stringify({ t: Date.now(), m: [{ id: "google/gemini-2.5-flash",
   check("T3 data-theme=dark at domcontentloaded", early.theme === "dark", JSON.stringify(early));
   check("T3 dark backdrop painted pre-mount", early.bg === "rgb(18, 18, 19)" && early.scheme === "dark", `${early.bg} / ${early.scheme}`);
   // And after mount the app agrees (no flip back).
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   const late = await page.evaluate(() => document.documentElement.dataset.theme);
   check("T3 theme stays dark after mount", late === "dark", late);
   await page.close();

@@ -2,6 +2,7 @@
 // Apply commits a version, Discard restores, and the auto toggle applies immediately.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 const PROGRAM = "```js\nconst defaultParams = { size: 40 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  return replicad.makeBaseBox(p.size, p.size, p.size);\n}\n```";
 const server = createServer((req, res) => {
@@ -34,13 +35,12 @@ const versions = () => page.evaluate(async () => {
 });
 
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
 });
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the wall hook template").click();
+await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
 check("baseline: template committed one version", (await versions()) === 1, String(await versions()));
 

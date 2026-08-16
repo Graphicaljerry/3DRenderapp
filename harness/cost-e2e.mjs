@@ -3,6 +3,7 @@
 // recorded in the local spend ledger, and surfaced in Settings → 3D engine
 // (month-to-date spend + a live Meshy balance check via the stubbed relay).
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -41,7 +42,6 @@ const GLB = makeGlb();
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_geneng", JSON.stringify({ provider: "meshy", model: "meshy" }));
   localStorage.setItem("moldable_provider_keys", JSON.stringify({ meshy: "msy_mock" }));
 });
@@ -61,7 +61,7 @@ await page.route("**/prox/meshy/**", async (route) => {
 await page.route("**/mockglb/**", (route) => route.fulfill({ status: 200, contentType: "model/gltf-binary", body: GLB }));
 
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Generative (AI mesh)" }).click();
 
 // 1) Price is visible before anything is typed — the mode hint carries it.

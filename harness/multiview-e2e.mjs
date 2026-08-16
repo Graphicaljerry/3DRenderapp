@@ -4,6 +4,7 @@
 // side it is looking at.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 let lastBody = null;
 const PROGRAM = "```js\nconst defaultParams = { size: 20 };\nfunction main(replicad, params) {\n  return replicad.makeBaseBox(20, 20, 20);\n}\n```";
@@ -39,11 +40,10 @@ const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8789");
 });
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // Precise (CAD) — the mode Auto lands in for a functional part.
 await page.getByRole("button", { name: "Precise (CAD)", exact: true }).click();

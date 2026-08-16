@@ -3,6 +3,7 @@
 // when no relay is configured (the dormant default).
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 // ---- Mock house relay: OpenAI-compatible SSE, returns a parametric cube program ----
 const PROGRAM = [
@@ -58,9 +59,8 @@ const check = (name, ok, detail = "") => {
 // ---- 1) Dormant by default: no relay configured → no "Built-in" anywhere. ----
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-  await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.locator(".modebar .mp-trigger, .modebar button").filter({ hasText: /Claude|Gemini|OpenAI|Groq|OpenRouter|Ollama|Custom/ }).first().click();
   await page.waitForTimeout(400);
   const txt = await page.evaluate(() => document.body.innerText);
@@ -73,11 +73,10 @@ const check = (name, ok, detail = "") => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForFunction(() => true, null, { timeout: 1000 }).catch(() => {});
   await page.waitForTimeout(800); // health check settles
   check("health check hit the relay", hits.health >= 1, String(hits.health));

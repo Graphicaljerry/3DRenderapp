@@ -6,6 +6,7 @@
 //     WebView storage the system can clear — that's what "stay logged in" needs.
 // The web build must be untouched: social buttons still there, localStorage still used.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -16,7 +17,6 @@ async function boot(url, tauri) {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
   await page.addInitScript((tauri) => {
-    localStorage.setItem("moldable_entered", "1");
     if (!tauri) return;
     window.__store = {}; // stands in for auth.json on disk
     window.__storeCalls = [];
@@ -35,7 +35,7 @@ async function boot(url, tauri) {
     };
   }, tauri);
   await page.goto(url, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   return page;
 }
 

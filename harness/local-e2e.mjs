@@ -7,6 +7,7 @@
 //    with the on-device model instead of failing.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 const BAD_PROGRAM = "```js\nfunction main(replicad) {\n  return replicad.makeBaseBox(10, 10, 10).fillet(50);\n}\n```"; // fillet 50 on a 10mm box → OCCT throws
 const GOOD_PROGRAM = "```js\nconst defaultParams = { size: 30 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  return replicad.makeBaseBox(p.size, p.size, p.size);\n}\n```";
@@ -46,9 +47,8 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // ---- A) Engine level: numeric OCCT exception → human message. ----
 {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   const res = await page.evaluate(async () => {
     const mod = await import("/src/engine/selectEngine.ts");
     const sel = await mod.getEngineSelection();
@@ -69,13 +69,12 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
     localStorage.setItem("moldable_local_mock", "1");
     localStorage.setItem("moldable_ai_apply", "auto"); // no preview gating — keep the flow linear
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(800);
 
   // B1) chat repair loop: bad program (OCCT throw) → readable retry note → fixed build.
@@ -107,7 +106,6 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_local_mock", "1");
     localStorage.setItem("moldable_ai_apply", "auto");
     // A dead endpoint that fails FAST (connection refused) — the dev relay would
@@ -115,7 +113,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "test-model", baseUrl: "http://127.0.0.1:9999/v1" }));
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(600);
   const ta = page.getByPlaceholder(/Describe a part/);
   await ta.fill("a test cube");

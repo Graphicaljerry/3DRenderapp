@@ -3,6 +3,7 @@
 // configured — the app must announce and attempt the keyed fallback automatically,
 // and surface BOTH errors if the fallback also fails.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -11,7 +12,6 @@ const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_geneng", JSON.stringify({ provider: "hf", model: "stabilityai/stable-fast-3d" }));
   localStorage.setItem("moldable_provider_keys", JSON.stringify({ meshy: "msy_mock" }));
   // Record the transient "retrying…" placeholder the moment it renders — the keyed
@@ -45,7 +45,7 @@ await page.route("**/prox/meshy/**", async (route) => {
 });
 
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Generative (AI mesh)" }).click();
 await page.locator('input[type="file"]').first().setInputFiles({ name: "car.png", mimeType: "image/png", buffer: PNG });
 await page.waitForTimeout(500);

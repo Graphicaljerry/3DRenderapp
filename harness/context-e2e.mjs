@@ -3,6 +3,7 @@
 // part?". Mock relay captures the exact request body.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 const PROGRAM = "```js\nconst defaultParams = { size: 20 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  return replicad.makeBaseBox(p.size, p.size, p.size);\n}\n```";
 let captured = null;
@@ -35,14 +36,13 @@ const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
 });
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.waitForTimeout(800);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the coaster template").click();
+await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
 await page.waitForTimeout(500);
 

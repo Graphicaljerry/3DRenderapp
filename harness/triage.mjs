@@ -2,10 +2,11 @@
 // and keep going. Resumable — each script's verdict is appended to triage-state.json, so
 // a run can be stopped and restarted without repeating work.
 //
-// Why this exists: 55 of the 61 scripts here seed `moldable_entered`, a flag the app
-// stopped reading in build 429. Whether that actually broke them depends on whether each
-// script assumed it would start inside the workspace. Nobody knows, and a regression
-// suite whose state is "probably fine" is not a regression suite.
+// Why this exists: a regression suite whose state is "probably fine" is not a regression
+// suite. The first run found three independent kinds of rot, none of them app bugs:
+// scripts seeding a flag the app stopped reading in build 429 (so they never left the
+// Launchpad), scripts matching template tooltips whose wording had changed, and scripts
+// naming templates that no longer exist. Verdicts are per-script and resumable.
 //
 //   node triage.mjs            # run the next batch (default 4)
 //   node triage.mjs 6          # run the next 6
@@ -32,7 +33,11 @@ const WORKSPACE_ONLY = /\.topbar|\.canvas-rail|\.dock-|\.statusbar|\.inspector|f
 
 /** Turn a script's output into one line a person can act on. */
 function describe(out, status) {
-  const waitingFor = out.match(/waiting for locator\('([^']+)'\)/)?.[1];
+  // The WHOLE "waiting for" clause, not just its first locator. Capturing only
+  // `locator('…')` reported a failing `locator('.overlay').getByTitle('Build the box with
+  // lid template')` as "timed out waiting for .overlay" — which sent the reader after a
+  // modal that was in fact opening fine, and hid a renamed template.
+  const waitingFor = out.match(/waiting for (.+)$/m)?.[1]?.trim().replace(/\s+/g, " ").slice(0, 120);
   const failed = [...out.matchAll(/^(?:FAIL|✗ ?(?:FAIL)?)\s*(.+)$/gm)].map((m) => m[1].trim()).filter(Boolean);
   if (waitingFor) {
     const stale = WORKSPACE_ONLY.test(waitingFor) && /moldable_entered/.test(out) === false;
@@ -55,7 +60,7 @@ function table() {
   const done = Object.keys(r);
   const by = (v) => done.filter((k) => r[k].verdict === v);
   console.log(`\n=== harness triage: ${done.length}/${scripts.length} scripts ===`);
-  for (const v of ["pass", "fail", "timeout", "error"]) {
+  for (const v of ["pass", "shots", "fail", "timeout", "error"]) {
     const list = by(v);
     if (!list.length) continue;
     console.log(`\n${v.toUpperCase()} (${list.length})`);
@@ -86,7 +91,16 @@ for (const s of todo) {
     // A script that exits 0 having asserted nothing is NOT a pass — that is the exact
     // failure mode this triage is meant to surface, not reproduce.
     if (/✗|FAILED/.test(out)) { verdict = "fail"; note = "exit 0 but printed a failure"; }
-    else if (!/✓|all good|PASS|ok\b/i.test(out)) { verdict = "error"; note = "exit 0 with no assertion output"; }
+    else if (!/✓|all good|PASS|ok\b/i.test(out)) {
+      // Some files here are screenshot/asset generators, not tests — they assert nothing
+      // BY DESIGN, so silence is success for them. Tell them apart by whether the SOURCE
+      // contains assertion vocabulary at all; a real test that suddenly stops asserting is
+      // still the dangerous case this triage exists to catch.
+      const src = readFileSync(join(HERE, s), "utf8");
+      const asserts = /\bcheck\(|\bPASS\b|\bFAIL\b|✓/.test(src);
+      verdict = asserts ? "error" : "shots";
+      note = asserts ? "exit 0 with no assertion output" : "ran clean (generator, no assertions by design)";
+    }
   } catch (e) {
     const out = `${e.stdout ?? ""}${e.stderr ?? ""}`;
     tail = out.trim().split("\n").slice(-4).join(" | ");
@@ -96,7 +110,7 @@ for (const s of todo) {
   const seconds = Math.round((Date.now() - t0) / 1000);
   state.results[s] = { verdict, seconds, note, tail: tail.slice(0, 400) };
   save(state);
-  console.log(`${verdict === "pass" ? "✓" : "✗"} ${s.padEnd(30)} ${verdict.padEnd(8)} ${seconds}s  ${note}`);
+  console.log(`${verdict === "pass" || verdict === "shots" ? "✓" : "✗"} ${s.padEnd(30)} ${verdict.padEnd(8)} ${seconds}s  ${note}`);
 }
 const st = table();
 console.log(`\n${st.remaining} scripts still to run.`);

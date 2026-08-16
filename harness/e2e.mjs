@@ -22,7 +22,7 @@ const thumbs = await page.locator(".overlay .tpl-thumb img").count();
 check("every card has a real thumbnail", thumbs === cards, `${thumbs}/${cards}`);
 
 // 2) Tap "Wall hook" → parametric model builds, chat + project + sliders present.
-await page.locator(".overlay").getByTitle("Build the wall hook template").click();
+await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
 await page.waitForSelector(".overlay", { state: "detached" });
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), { timeout: 120_000 });
 check("wall hook built + summary in chat", true);
@@ -54,7 +54,7 @@ check("param overrides change dims", dimsChange.b.x === 50 && dimsChange.b.z > d
 await page.getByRole("button", { name: "+ New chat" }).click();
 await page.waitForSelector(".tpl-strip");
 check("empty state shows template strip", true);
-await page.locator(".tpl-strip").getByTitle("Build the cable clip template").click();
+await page.locator(".tpl-strip").getByTitle(/^Build the squeeze bag clip\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("cable clip"), { timeout: 120_000 });
 const names = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");

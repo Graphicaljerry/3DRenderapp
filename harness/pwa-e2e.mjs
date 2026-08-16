@@ -3,6 +3,7 @@
 // boots with the network fully OFF. Plus: numeric-only build stamp.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
+import { enterWorkspace } from "./enter.mjs";
 
 const preview = spawn("npx", ["vite", "preview", "--port", "4173", "--strictPort"], {
   cwd: "/home/user/3DRenderapp/moldable-lite",
@@ -16,10 +17,8 @@ const page = await ctx.newPage();
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
-
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:4173/", { waitUntil: "load" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // 1) Numeric build stamp.
 const tag = await page.locator(".build-tag").innerText();
@@ -60,7 +59,7 @@ check("precache holds the app incl. the CAD kernel wasm", cached.count >= 15 && 
 // 4) Full offline: kill the network, reload, the app AND the OCCT engine boot.
 await ctx.setOffline(true);
 await page.reload({ waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 check("offline: app shell boots from cache", true);
 const engine = await page.evaluate(async () => {
   const mod = await import("/src/engine/selectEngine.ts").catch(() => null);
@@ -70,7 +69,7 @@ await page.waitForFunction(() => document.body.innerText.includes("Engine · rep
 check("offline: OCCT kernel loads from cache (Engine · replicad)", true);
 // Build a template offline — the whole local CAD path works with no network.
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the Washer / spacer template").click();
+await page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("washer"), null, { timeout: 120_000 });
 check("offline: template builds a real model (no network)", true);
 await page.screenshot({ path: "shot-pwa-offline.png" });

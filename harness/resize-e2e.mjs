@@ -3,6 +3,7 @@
 // fit to the plate and resized by typed mm/%, and the baked transform survives
 // undo and a full reload (meshXform replay over the original glb).
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -12,10 +13,8 @@ const check = (name, ok, detail = "") => {
   console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`);
   if (!ok) fails.push(name);
 };
-
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // ---------- A: unit checks through the real modules ----------
 const unit = await page.evaluate(async () => {
@@ -103,7 +102,7 @@ await page.waitForTimeout(1200); // let the debounced project save land
 
 // Reload → resume the project → the baked size must survive (meshXform over original glb)
 await page.reload({ waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByText(/bigmesh/i).first().click({ timeout: 20_000 });
 await page.waitForFunction(({ src, w }) => { const d = eval(src); return d && Math.abs(d[0] - w / 2) < 1.5; }, { src: sbDims, w: wBefore }, { timeout: 60_000 });
 check("B6 resized mesh size survives reload (meshXform replay)", true);

@@ -2,6 +2,7 @@
 // and Mark & ask sending REAL 3D region coordinates (verified through a mock relay).
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 // Mock house relay that CAPTURES the request so we can assert the prompt contents.
 let lastBody = null;
@@ -33,13 +34,12 @@ const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
 });
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the wall hook template").click();
+await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
 
 const canvas = page.locator(".viewerCanvas canvas");

@@ -3,6 +3,7 @@
 // captured project thumbnail (clean 3/4 render, 384×288 webp) as the card image.
 import { chromium } from "playwright";
 import { writeFileSync, mkdirSync } from "node:fs";
+import { enterWorkspace } from "./enter.mjs";
 
 const OUT = "/home/user/3DRenderapp/moldable-lite/src/assets/templates";
 mkdirSync(OUT, { recursive: true });
@@ -10,9 +11,8 @@ mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // CAD only: a "mesh" template is a prompt for the generative engine, so rendering its
 // card this way would spend a real generation per card. Those cards carry drawn glyphs.

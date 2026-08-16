@@ -1,5 +1,6 @@
 // Dry-fit sandbox e2e: undo-duplicate regression, Regroup, Make it fit (carve).
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -10,12 +11,10 @@ const check = (name, ok, detail = "") => {
   if (!ok) fails.push(name);
 };
 const lastMsg = () => page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].pop()?.textContent ?? "");
-
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
 await page.getByRole("button", { name: "Objects", exact: true }).click();
 

@@ -3,6 +3,7 @@
 //    time), not inside the Transform flyout where they floated loose on the canvas.
 //  - Opening any popup closes whatever else was open, so panels never stack.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -10,11 +11,11 @@ page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
-await page.addInitScript(() => { localStorage.setItem("moldable_entered", "1"); localStorage.setItem("moldable_theme", "dark"); });
+await page.addInitScript(() => { localStorage.setItem("moldable_theme", "dark"); });
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
 
 const setSize = page.getByRole("button", { name: "Set size", exact: true });

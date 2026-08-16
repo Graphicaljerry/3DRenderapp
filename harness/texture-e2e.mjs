@@ -5,6 +5,7 @@
 // fal (Hunyuan v3.1 / v2) and Meshy provider wiring is asserted at module level
 // with a patched fetch — same production code, no paid calls anywhere.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -41,7 +42,6 @@ const GLB = makeGlb();
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_geneng", JSON.stringify({ provider: "tripo", model: "v3.0" }));
   localStorage.setItem("moldable_provider_keys", JSON.stringify({ tripo: "tcli_mock" }));
 });
@@ -62,7 +62,7 @@ await page.route("**/prox/tripo/**", async (route) => {
 await page.route("**/mockglb/**", (route) => route.fulfill({ status: 200, contentType: "model/gltf-binary", body: GLB }));
 
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Generative (AI mesh)" }).click();
 
 // 1) Default: the chip says print-first (color off).
@@ -130,7 +130,7 @@ check("C4 Grayscale persists", await page.evaluate(() => localStorage.getItem("m
 
 // CAD leg: build a template -> badge says CAD, Select returns.
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the washer / spacer template").click();
+await page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/).click();
 await page.waitForFunction(() => document.querySelector(".statusbar .dims")?.textContent?.includes("12"), null, { timeout: 120_000 });
 // The Objects panel is still open from C1 — don't toggle it closed.
 const badgeCad = await page.locator(".lp-badge").first().textContent().catch(() => null);

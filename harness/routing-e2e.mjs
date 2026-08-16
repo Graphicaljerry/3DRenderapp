@@ -4,6 +4,7 @@
 // CAD model → auto snapshot → mesh-refine route with the History safety note.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 const requests = [];
 const POLISHED = "A coiled dragon sculpture with flowing scales, curled tail wrapped around its base, wings folded, standing stably on a rocky mound, single connected solid";
@@ -36,7 +37,6 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 const init = (extra = {}) => (ctxVals) => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "mock", baseUrl: "http://127.0.0.1:8788/v1" }));
   for (const [k, v] of Object.entries(ctxVals)) localStorage.setItem(k, v);
 };
@@ -46,7 +46,7 @@ const init = (extra = {}) => (ctxVals) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await page.addInitScript(init(), { moldable_geneng: JSON.stringify({ provider: "meshy", model: "meshy" }) });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(600);
   const ta = page.getByPlaceholder(/Describe a part/);
   await ta.fill("a swirling coral reef centerpiece"); // matches NEITHER regex → brain decides
@@ -70,7 +70,7 @@ const init = (extra = {}) => (ctxVals) => {
     moldable_provider_keys: JSON.stringify({ meshy: "msy_mock" }),
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(600);
   const ta = page.getByPlaceholder(/Describe a part/);
   await ta.fill("a majestic dragon"); // ORGANIC_RE hits → regex-routes to mesh, then polish
@@ -93,9 +93,9 @@ const init = (extra = {}) => (ctxVals) => {
     moldable_provider_keys: JSON.stringify({ meshy: "msy_mock" }),
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
-  await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+  await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
   await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
   await page.waitForTimeout(600);
 

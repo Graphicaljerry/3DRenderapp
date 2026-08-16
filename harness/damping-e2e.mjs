@@ -20,6 +20,7 @@
 //
 //   node damping-e2e.mjs
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const FAST = 60;
 const SLOW = 20;
@@ -34,7 +35,6 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // fix keys off REAL measured dt, so this timer's jitter is handled correctly — the
 // harness reports the rate it actually achieved rather than the one it asked for.
 await page.addInitScript(() => {
-  localStorage.setItem("moldable_entered", "1");
   localStorage.setItem("moldable_theme", "dark");
   const native = window.requestAnimationFrame.bind(window);
   const nativeCancel = window.cancelAnimationFrame.bind(window);
@@ -73,9 +73,9 @@ await page.addInitScript(() => {
 });
 
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
 await page.waitForSelector(".viewerCanvas canvas");
 await page.waitForFunction(() => typeof window.__viewerCam === "function", null, { timeout: 20_000 });

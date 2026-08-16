@@ -42,7 +42,6 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
   // A returning free-mode user boots straight into the workspace (worst case: the
   // old code fired the 11 MB kernel fetch at mount).
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     window.__wasmAt = 0;
     window.__uiAt = 0;
     const po = new PerformanceObserver((list) => {

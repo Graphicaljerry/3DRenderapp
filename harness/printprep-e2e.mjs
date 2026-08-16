@@ -3,6 +3,7 @@
 // on synthetic shapes with known answers. Part B (e2e): the Print tab flow on real
 // templates — heatmap pixels, orientation suggest, wall check, elephant-foot chamfer.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -77,11 +78,10 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // ---------- Part B: the real app flow ----------
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-  await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
-  await page.locator(".overlay").getByTitle("Build the coaster template").click();
+  await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
   await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
   await page.waitForTimeout(600);
 

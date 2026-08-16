@@ -3,6 +3,7 @@
 // hole tool, voronoi texture, fit calibration field, and the coupon template card.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
+import { enterWorkspace } from "./enter.mjs";
 
 const bodies = [];
 const server = createServer((req, res) => {
@@ -39,11 +40,10 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "mock", baseUrl: "http://127.0.0.1:8788/v1" }));
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(500);
   const ta = page.getByPlaceholder(/Describe a part/);
   await ta.fill("a 20 mm cube with a 5 mm hole"); // CADish → precise, no classify call
@@ -63,13 +63,12 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   bodies.length = 0;
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await page.addInitScript(() => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "mock", baseUrl: "http://127.0.0.1:8788/v1" }));
     localStorage.setItem("moldable_geneng", JSON.stringify({ provider: "meshy", model: "meshy" }));
     localStorage.setItem("moldable_provider_keys", JSON.stringify({ meshy: "msy_mock" }));
   });
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(500);
   await page.locator('input[type="file"]').first().setInputFiles({ name: "sketch.png", mimeType: "image/png", buffer: PNG_1x1 });
   await page.waitForTimeout(400);
@@ -95,13 +94,12 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     ],
   });
   await page.addInitScript((cat) => {
-    localStorage.setItem("moldable_entered", "1");
     localStorage.setItem("moldable_openrouter_models_v2", cat);
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "openrouter", model: "auto" }));
     localStorage.setItem("moldable_llm_keys", JSON.stringify({ openrouter: "sk-or-mock" }));
   }, seeded);
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.waitForTimeout(500);
   const ta = page.getByPlaceholder(/Describe a part/);
   await ta.fill("a bracket with two 5 mm holes");
@@ -117,19 +115,18 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 // ---- T4–T7 in one session: coupon card, fastener presets, voronoi, fit calibration ----
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-  await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
 
   // T4: the coupon template card exists with a real thumbnail.
   await page.getByRole("button", { name: "Templates", exact: true }).click();
-  const couponCard = page.locator(".overlay").getByTitle("Build the tolerance test coupon template");
+  const couponCard = page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/);
   check("T4 coupon card in the gallery", (await couponCard.count()) === 1);
   const hasImg = await couponCard.evaluate((el) => !!el.querySelector("img")?.src);
   check("T4 coupon card has a real render", hasImg);
 
   // Build the wall hook for the hole-preset test.
-  await page.locator(".overlay").getByTitle("Build the wall hook template").click();
+  await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
   await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
 
   // T5: face → Hole… → pick "M3 heat-set insert" → ⌀4, 5.5 deep + boss hint.

@@ -2,16 +2,15 @@
 // A: unit-check the writers directly (unzip + inspect model_settings/project_settings/basematerials).
 // B: UI smoke — paint the model via the Objects panel swatch; the colour persists on the project.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
-
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // ---------- A: export writers encode colour ----------
 const A = await page.evaluate(async () => {

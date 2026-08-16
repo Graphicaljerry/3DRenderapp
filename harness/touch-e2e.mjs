@@ -2,6 +2,7 @@
 // content opts back in, and a real drag across the page selects NOTHING. Plus a
 // phone-width (390px) overflow audit of the stacked layout.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -9,11 +10,10 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 
 {
   const page = await browser.newPage({ viewport: { width: 1194, height: 834 } });
-  await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
-  await page.locator(".overlay").getByTitle("Build the box with lid template").click();
+  await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
   await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
   await page.waitForTimeout(500);
 
@@ -53,9 +53,8 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // ---- Phone-width audit (stacked layout): nothing crosses the viewport. ----
 for (const [name, w, h] of [["iphone", 390, 844], ["iphone-max", 430, 932]]) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
-  await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-  await page.waitForSelector(".topbar", { timeout: 60_000 });
+  await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.waitForTimeout(600);
   await page.keyboard.press("Escape");

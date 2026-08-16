@@ -1,16 +1,16 @@
 // Library bulk-select e2e: Select mode, tap-to-select cards, select-all/clear,
 // bulk move to a new folder, bulk delete with confirm, and Done restoring normal mode.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 page.on("dialog", (d) => void d.accept("Archive")); // confirm() for delete, prompt() for new folder
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // Seed four projects (thumbV=2 keeps the background upgrader out of the way).
 await page.evaluate(async () => {

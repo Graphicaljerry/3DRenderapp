@@ -3,16 +3,15 @@
 // Sequence that failed for the user: export STL → export STEP (dead cache).
 // Also: transform ops consumed cached intermediates the same way.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
-
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 const res = await page.evaluate(async () => {
   const mod = await import("/src/engine/selectEngine.ts");

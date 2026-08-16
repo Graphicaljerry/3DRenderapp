@@ -2,6 +2,7 @@
 // thumbV stamp) gets silently rebuilt off-screen and re-shot studio-style when
 // the Library opens; fresh captures are stamped with the current style version.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -10,9 +11,8 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 const OLD_THUMB = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYGD4DwABBAEAX+cX5AAAAABJRU5ErkJggg==";
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-await page.addInitScript(() => localStorage.setItem("moldable_entered", "1"));
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
-await page.waitForSelector(".topbar", { timeout: 60_000 });
+await enterWorkspace(page);
 
 // Seed a stale-thumbnail CAD project through the real store.
 await page.evaluate(async (oldThumb) => {
@@ -63,7 +63,7 @@ await page.screenshot({ path: "shot-library-upgraded.png" });
 await page.keyboard.press("Escape");
 await page.locator(".overlay .x, .overlay button.x").first().click().catch(() => {});
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle("Build the coaster template").click();
+await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
 const fresh = await page.waitForFunction(async () => {
   const { listProjects } = await import("/src/store/projects.ts");

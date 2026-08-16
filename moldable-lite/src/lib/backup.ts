@@ -35,6 +35,9 @@ async function deriveKey(passphrase: string, salt: Uint8Array): Promise<CryptoKe
 export const LOCAL_ONLY_KEYS = new Set([
   "moldable_last_sync", // written after every push — always differs
   "moldable_last_project", // which project THIS device last had open
+  "moldable_last_active", // when THIS device was last touched — decides whether a reload
+                          // resumes the open part; syncing it would let one device's
+                          // activity resume a part on another
   "moldable_entered", // RETIRED (the app no longer writes it), but devices still hold a
                       // stale copy and this list is a deny-list — dropping the entry would
                       // start syncing dead state between them

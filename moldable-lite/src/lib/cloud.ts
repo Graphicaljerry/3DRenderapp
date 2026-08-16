@@ -339,7 +339,9 @@ export async function wipeDevice(): Promise<number> {
     await deleteProject(p.id);
     try { localStorage.removeItem(meshMark(p.id)); } catch { /* private mode */ }
   }
-  for (const k of [SEEN_KEY, TOMB_KEY, "moldable_last_project"]) {
+  // "moldable_last_active" too: it is what makes the next load resume the open part, so
+  // leaving it warm would send a just-wiped device straight back into a deleted project.
+  for (const k of [SEEN_KEY, TOMB_KEY, "moldable_last_project", "moldable_last_active"]) {
     try { localStorage.removeItem(k); } catch { /* private mode */ }
   }
   // Second pass. The open project is still live in the UI while this runs, and a save

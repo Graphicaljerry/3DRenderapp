@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { Workspace, FILAMENT_SWATCHES } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { whenAgo } from "./lib/when";
+import { markActive, clearActive, sessionIsFresh } from "./lib/session";
 import { MeasureModal } from "./components/MeasureModal";
 import type { SvgMode, SvgParams } from "./components/ExtrudeModal";
 import { geometryToSTL } from "./print/stl";
@@ -1926,14 +1927,43 @@ export default function App() {
   useEffect(() => {
     const id = localStorage.getItem("moldable_last_project");
     if (id) {
-      // An OFFER, never an auto-open. The old code reopened the last part whenever the
-      // "entered" flag was set, which is every load after the first — so the app only
-      // ever showed you the part you were last in, and the way out was to notice the
-      // wordmark. Landing on your own shelf and picking is the whole point of a shelf.
-      void getProject(id).then((p) => { if (p) setResume({ id: p.id, name: p.name }); });
+      // Reopen only if the last sitting is still warm. A refresh while you are working
+      // keeps the part on screen, the way every other engineering tool behaves; a load
+      // hours later — after lunch, or the next morning — lands on the Launchpad with the
+      // part offered on the shelf. The old code had no clock at all: it reopened the last
+      // part on EVERY load, so the app only ever showed you where you had just been.
+      const warm = sessionIsFresh();
+      void getProject(id).then((p) => {
+        if (!p) return;
+        if (warm) { setEntered(true); void openProjectById(p); }
+        else setResume({ id: p.id, name: p.name });
+      });
     }
     void loadRecent();
   }, []);
+  /** Keep the freshness stamp current while a part is open.
+   *
+   *  ONLY real interaction counts. Stamping on pagehide/visibilitychange was tried and is
+   *  wrong: those fire on the way out of every load, including the reload itself, so a tab
+   *  left untouched for five hours would stamp itself fresh the moment you pressed refresh
+   *  and carry you straight back into the part — the exact thing the window exists to
+   *  prevent. Last TOUCH is the signal; last unload is not.
+   *
+   *  The 30 s write throttle leaves the stamp up to half a minute stale, which is noise
+   *  against a two-hour window. */
+  useEffect(() => {
+    if (!entered) return;
+    markActive(true);
+    const touch = () => markActive();
+    window.addEventListener("pointerdown", touch, { passive: true });
+    window.addEventListener("keydown", touch, { passive: true });
+    window.addEventListener("wheel", touch, { passive: true });
+    return () => {
+      window.removeEventListener("pointerdown", touch);
+      window.removeEventListener("keydown", touch);
+      window.removeEventListener("wheel", touch);
+    };
+  }, [entered]);
   async function resumeLast() {
     if (!resume) return;
     const p = await getProject(resume.id);
@@ -7077,6 +7107,9 @@ export default function App() {
     void loadRecent();
     setBeenHome(true);
     setEntered(false);
+    // Walking out is a decision. Without this the freshness stamp is still warm, so the
+    // very next reload would carry you back into the part you just left.
+    clearActive();
   }
 
   const activeKind = result?.kind ?? (mode === "generative" ? "generative" : sel?.kind ?? "primitive");

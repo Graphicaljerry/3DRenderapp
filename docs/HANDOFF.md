@@ -917,6 +917,53 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 429 — the app stops reopening your last part, and the shelf becomes a shelf
+
+Jerry: "When I load the app, I want it to always load me to the library or launchpad. I
+don't want it to always load the app UI with the last 3D model I was working on. I would
+say let me choose if I want to open it again or not." He also asked whether the library
+should become a separate gallery page, Figma/Weavy style, and asked for Mobbin research.
+
+**Cause:** `moldable_entered` was persisted. After your first visit it was always "1", so
+the boot effect took the `openProjectById` branch every time. The Launchpad was reachable
+only by noticing that the wordmark is a link. `entered` is now plain in-session state.
+
+**Mobbin research** ([Figma](https://mobbin.com/screens/e9894255-1cab-4430-b03e-9637f1ff3ac2),
+[Framer](https://mobbin.com/screens/fe4dd3de-54d8-433f-b4ce-a8c80dbf2353),
+[Lovable](https://mobbin.com/screens/0dcae4bf-2382-4c4d-b656-fc8ac24fc51c),
+[Riverside](https://mobbin.com/screens/a9f46e08-be7b-4671-8ece-d112a2d4a588),
+[Programa](https://mobbin.com/screens/bd19e1fc-02a6-4a99-b760-b3bd5ce5ceb9),
+[NotebookLM](https://mobbin.com/screens/50009231-f307-4d7d-97ee-bd6ec5f1e001)):
+
+- **None of them auto-open your last file.** Every one lands on a project gallery.
+- The card is invariably picture-on-top, name + edited-time under it. Time, not file type,
+  is the second line — it is what separates two similar thumbnails.
+- **Riverside settles the "separate page?" question**: it puts its create surface
+  ("What will you create today?") ABOVE the Projects grid on one screen. That is what the
+  Launchpad already is, so the answer to Jerry was *don't build a second page* — make the
+  existing recents row a real gallery. A separate route would split "make something" from
+  "open something" across two screens for no gain, and the Library modal already owns
+  search/rename/delete.
+
+**Shipped:** shelf 4 → 12 cards; card rebuilt as a 4:3 picture tile with name and
+`kind · when`; the last part keeps the accent ring and reads "Continue · just now";
+label shows "Your projects · 12 of N" when there are more. `lib/when.ts` now holds the one
+relative-time helper (the version list had a near-identical private copy) and gained
+"Yesterday" plus a year on older dates.
+
+Verified with `landing.mjs` (build → reload → Launchpad → click → part opens with its
+geometry → reload → Launchpad again) and `shelfgrid.mjs` (12 cards at 1500/1024/390 px,
+both themes).
+
+**Two probe-hygiene notes worth keeping.** (1) The old probe corpus seeds
+`moldable_entered: "1"` to skip the Launchpad. That key is inert now, so those scripts
+start on the Launchpad, where the composer is `.launch-composer textarea`, not
+`form.composer textarea` — expect timeouts there and update the selector. (2) `shelfgrid`
+first reported "all good" having run ZERO checks, because a fresh browser context has no
+projects and every case skipped; and its "light" run was a second dark run, because
+`addInitScript` re-runs on reload and kept resetting the theme. Both now assert they
+actually ran. A pass with no checks is not a pass.
+
 ## Build 427 — screw threads take a turn count, and the helix question gets numbers
 
 Jerry: "How do I add sweep to a screw and control the parameters of it?" — the follow-up

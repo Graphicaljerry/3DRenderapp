@@ -1794,11 +1794,56 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* Secondary extras box: background shift separates it — a border here would be the
    third nested hairline on this screen (page → composer → box). */
 .launch-signin { margin-top: 10px; padding: 14px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--surf) 62%, transparent); }
+
+/* ---- Launchpad on a phone ----
+   There were no phone rules here at all: the desktop screen was simply squeezed into
+   390 px, and the headline's clamp FLOOR (2.75rem) is a desktop size, so it rendered at
+   44 px — 90 px tall, a seventh of the viewport — while every single thing below it sat
+   at 16 px. One enormous step, then a flat plateau: no way to tell the composer (the
+   actual job) from "add an Anthropic key" (an advanced aside).
+   So: shrink the headline, step the supporting copy down below body size, and let the
+   composer be the largest thing on the screen. Desktop is untouched. */
+@media (max-width: 760px) {
+  .launch-top { padding: 12px 16px; }
+  .launch-col { gap: 12px; }
+  /* Ramps 30px → 38px across phone widths instead of sticking at the desktop floor. */
+  .launch-h1 { font-size: clamp(1.85rem, 8vw, 2.4rem); letter-spacing: -0.025em; line-height: 1.06; }
+  /* Supporting copy, sized like supporting copy. At 15px over three full-bleed lines this
+     was the second-heaviest block on the screen — more ink than the composer it was
+     introducing — and it is the one thing here that stops being useful after the first
+     visit. The negative margin closes most of the column gap above it, so headline and
+     blurb read as one unit rather than as two separate announcements. */
+  .launch-sub { font-size: var(--fs-md); line-height: 1.45; margin-top: -5px; }
+  /* The composer outranks everything: full body size inside, nothing else competing. */
+  .launch-composer textarea { font-size: 1rem; }
+  /* Section labels and the engine hint are scaffolding — quieter than the things they label. */
+  .launch-label, .lp-eng-hint { font-size: var(--fs-tiny); }
+  .launch-engines { gap: 6px; }
+  /* Grouping does as much work as size here: everything above is one job (describe the
+     part), everything below is another (start from something that exists). A wider gap is
+     the only thing separating them — the flex column's uniform 12px had the template
+     shelf reading as one more line of the composer's own furniture. */
+  .launch-sect { margin-top: 10px; }
+  /* Tertiary: an advanced aside should not carry the same weight as the shelf above it. */
+  .launch-signin { margin-top: 6px; padding: 11px 12px; }
+  .launch-guided { font-size: var(--fs-sm); } /* `.adv summary` is already --fs-sm */
+  /* A whole email address in a pill, on the row that also holds the wordmark and the
+     theme toggle: at 390px it either pushed the toggle off or wrapped the row. The pill
+     takes what is left and ellipsises. */
+  .launch-account { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .launch-top-right { min-width: 0; }
+}
+/* The modal's desktop padding is 56 px of the 390 px a phone has; give the content back. */
+@media (max-width: 760px) { .card { padding: 18px; } }
 /* Inline folder tag in library card metadata (SVG icon, not an emoji). */
 .lib-folder { display: inline-flex; align-items: center; gap: 3px; vertical-align: -2px; }
 .lib-folder svg { width: 11px; height: 11px; }
 /* The sign-in POPUP: one narrow dialog for every "sign in" affordance. */
-.signin-card { max-width: 440px; }
+/* `min()`, not a bare 440px: this rule sits after `.card` and was overriding its
+   `max-width: calc(100vw - 48px)` outright, so on a 390 px phone the card rendered 440 px
+   wide and ran 74 px off the right edge — "Not now" and half of "Create account" were
+   off-screen and untappable. */
+.signin-card { max-width: min(440px, calc(100vw - 28px)); }
 .signin-card .social-col { margin: 12px 0 10px; }
 .signin-card .magicrow { margin-bottom: 4px; }
 .signin-card .sync-status { margin: 10px 0 2px; }
@@ -2295,11 +2340,29 @@ details.guide { margin-top: 10px; }
   .topbar .brand > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* One statusbar row: it scrolls sideways rather than wrapping under itself, Export
      pinned by its own auto margin. Build/update chips are diagnostics — shed. */
-  .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 8px 2px max(6px, env(safe-area-inset-bottom)); }
+  .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 5px 2px max(6px, env(safe-area-inset-bottom)); }
   .statusbar > * { flex: 0 0 auto; }
   .build-tag, .update-chip { display: none; }
   .bedchip-name { display: none; } /* the volume identifies the printer well enough here */
-  .statusbar .primary { padding: 6px 12px; font-size: var(--fs-sm); }
+  .statusbar .primary { padding: 0 14px; font-size: var(--fs-sm); }
+  /* ---- thumb-sized targets in the fixed chrome ----
+     Measured on a 390×664 phone: the wordmark (the way home) was a 22px tap target,
+     the bed chip 23px, Export 27px, "+ New chat" 30px. Every one of them is a thing
+     you reach for with a thumb while holding the phone, and every one was under half
+     Apple's 44pt. They were sized by their text because they inherited desktop rules
+     where the pointer is a pixel.
+     Height only — the type stays where it is, so the bars do not get louder, they get
+     easier to hit. The topbar's 48px already had the room; the statusbar's top padding
+     comes down 3px to pay for most of its own. */
+  .topbar .brandbtn, .topbar .primary.sm { min-height: 40px; }
+  .statusbar .primary, .statusbar .bedchip { min-height: 40px; }
+  .statusbar .bedchip { padding-top: 0; padding-bottom: 0; }
+  /* One filled action per screen, and on a phone it is Export — the thing you came to
+     do. "+ New chat" wearing the same accent fill made *starting over* the loudest
+     element above the canvas, and with only four items left in a 48px bar it became the
+     screen's visual anchor. It keeps its size and its place; it loses the fill. */
+  .topbar .primary.sm { background: var(--ctl); color: var(--ink2); font-weight: 500; }
+  .topbar .primary.sm:hover { background: var(--ctl-h); color: var(--ink); }
   /* The stats card was the worst collider on the short canvas, and every number in it
      is one tap away in Printability. */
   .mesh-stats { display: none; }

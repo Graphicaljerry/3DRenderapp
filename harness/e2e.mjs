@@ -21,15 +21,15 @@ check("gallery shows the template cards", cards >= 10, `${cards}`);
 const thumbs = await page.locator(".overlay .tpl-thumb img").count();
 check("every card has a real thumbnail", thumbs === cards, `${thumbs}/${cards}`);
 
-// 2) Tap "Wall hook" → parametric model builds, chat + project + sliders present.
+// 2) Tap "Headphone desk hook" → parametric model builds, chat + project + sliders present.
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
 await page.waitForSelector(".overlay", { state: "detached" });
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), { timeout: 120_000 });
-check("wall hook built + summary in chat", true);
+await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("headphone desk hook"), { timeout: 120_000 });
+check("headphone desk hook built + summary in chat", true);
 const proj = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");
   const all = await mod.listProjects();
-  const p = all.find((x) => x.name === "Wall hook");
+  const p = all.find((x) => x.name === "Headphone desk hook");
   return p ? { versions: p.versions.length, hasCode: !!p.versions[0]?.code?.includes("defaultParams"), dims: p.versions[0]?.dims } : null;
 });
 check("project persisted with parametric code", !!proj?.hasCode, JSON.stringify(proj));
@@ -55,12 +55,12 @@ await page.getByRole("button", { name: "+ New chat" }).click();
 await page.waitForSelector(".tpl-strip");
 check("empty state shows template strip", true);
 await page.locator(".tpl-strip").getByTitle(/^Build the squeeze bag clip\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("cable clip"), { timeout: 120_000 });
+await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("squeeze bag clip"), { timeout: 120_000 });
 const names = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");
   return (await mod.listProjects()).map((p) => p.name).sort();
 });
-check("template opens as its own project", names.includes("Wall hook") && names.includes("Cable clip"), names.join(", "));
+check("template opens as its own project", names.includes("Headphone desk hook") && names.includes("Squeeze bag clip"), names.join(", "));
 
 // 5) Topbar Templates button reopens the gallery any time.
 await page.getByRole("button", { name: "Templates", exact: true }).click();

@@ -3,7 +3,7 @@
 // hole tool, voronoi texture, fit calibration field, and the coupon template card.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const bodies = [];
 const server = createServer((req, res) => {
@@ -125,9 +125,9 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   const hasImg = await couponCard.evaluate((el) => !!el.querySelector("img")?.src);
   check("T4 coupon card has a real render", hasImg);
 
-  // Build the wall hook for the hole-preset test.
+  // Build the headphone desk hook for the hole-preset test.
   await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
-  await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
+  await awaitBuild(page);
 
   // T5: face → Hole… → pick "M3 heat-set insert" → ⌀4, 5.5 deep + boss hint.
   const canvas = page.locator(".viewerCanvas canvas");

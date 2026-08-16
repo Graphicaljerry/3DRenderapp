@@ -64,10 +64,10 @@ await page.keyboard.press("Escape");
 await page.locator(".overlay .x, .overlay button.x").first().click().catch(() => {});
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
+await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("phone stand"), null, { timeout: 120_000 });
 const fresh = await page.waitForFunction(async () => {
   const { listProjects } = await import("/src/store/projects.ts");
-  const p = (await listProjects()).find((x) => x.name === "Coaster" && x.thumb);
+  const p = (await listProjects()).find((x) => x.name === "Phone stand" && x.thumb);
   return p && p.thumbV === 2 ? true : false;
 }, null, { timeout: 30_000 }).then(() => true).catch(() => false);
 check("fresh captures carry thumbV=2", fresh);

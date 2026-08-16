@@ -88,7 +88,7 @@ const report = await page.evaluate(async () => {
   // Stability: rebuild the same part 10× with alternating ops — caches must not
   // leak dead shapes or corrupt intermediates.
   try {
-    const code = TEMPLATES.find((t) => t.id === "coaster").code;
+    const code = TEMPLATES.find((t) => t.id === "phone-stand").code;
     for (let i = 0; i < 10; i++) {
       const ops = i % 2 ? [{ type: "rotate", axis: [0, 0, 1], angleDeg: 15 * i, center: [0, 0, 0] }] : [];
       const res = await eng.build({ kind: "code", code, ops });

@@ -2,7 +2,7 @@
 // content opts back in, and a real drag across the page selects NOTHING. Plus a
 // phone-width (390px) overflow audit of the stacked layout.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -14,7 +14,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-  await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
+  await awaitBuild(page);
   await page.waitForTimeout(500);
 
   const sel = await page.evaluate(() => ({

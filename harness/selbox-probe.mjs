@@ -1,6 +1,6 @@
 // Probe: when does the gray selection bounding box appear/disappear today?
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -8,7 +8,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
+await awaitBuild(page);
 await page.waitForTimeout(800);
 
 const canvas = page.locator(".viewerCanvas canvas");

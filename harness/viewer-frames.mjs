@@ -7,7 +7,7 @@
 //   node viewer-frames.mjs --heavy         # dense mesh (subdivided sphere ~200k tris)
 //   node viewer-frames.mjs --blur          # force-restore backdrop blur (A/B the fix)
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const HEAVY = process.argv.includes("--heavy");
 const FORCE_BLUR = process.argv.includes("--blur");
@@ -23,7 +23,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
+await awaitBuild(page);
 await page.waitForSelector(".viewerCanvas canvas");
 
 if (HEAVY) {

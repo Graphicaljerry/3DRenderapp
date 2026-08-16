@@ -4,7 +4,7 @@
 // CAD model → auto snapshot → mesh-refine route with the History safety note.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const requests = [];
 const POLISHED = "A coiled dragon sculpture with flowing scales, curled tail wrapped around its base, wings folded, standing stably on a rocky mound, single connected solid";
@@ -96,7 +96,7 @@ const init = (extra = {}) => (ctxVals) => {
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-  await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
+  await awaitBuild(page);
   await page.waitForTimeout(600);
 
   const ta = page.locator(".composer textarea");

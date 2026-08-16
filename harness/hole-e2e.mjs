@@ -1,7 +1,7 @@
 // Hole tool e2e: face → Hole… panel, magnet snapping, reference alignment (Δ / spacing),
 // drill commits a real ops-chain version, ghost renders, params still rebuild with it.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -12,7 +12,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
+await awaitBuild(page);
 
 // 1) Pick a flat face → the quick-edit offers "Hole…".
 const canvas = page.locator(".viewerCanvas canvas");
@@ -110,7 +110,7 @@ await page.getByRole("button", { name: "Drill hole", exact: true }).click();
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Drilled a/.test(b.textContent ?? "")), null, { timeout: 120_000 });
 const proj = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");
-  const p = (await mod.listProjects()).find((x) => x.name === "Wall hook");
+  const p = (await mod.listProjects()).find((x) => x.name === "Headphone desk hook");
   const last = p?.versions[p.versions.length - 1];
   return { versions: p?.versions.length, ops: last?.ops ?? p?.ops ?? [] };
 });

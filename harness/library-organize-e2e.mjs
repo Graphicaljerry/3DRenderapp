@@ -21,7 +21,7 @@ await page.evaluate(async () => {
     thumbV: 2,
     versions: [{ id: id + "-v1", createdAt: at, summary, engine }],
   });
-  await putProject(mk("p-hook", "Wall hook mount", "replicad", Date.now() - 3000, "a wall hook"));
+  await putProject(mk("p-hook", "Headphone desk hook mount", "replicad", Date.now() - 3000, "a headphone desk hook"));
   await putProject(mk("p-box", "Storage box", "replicad", Date.now() - 2000, "a box with lid"));
   await putProject(mk("p-dragon", "Dragon figurine", "generative", Date.now() - 1000, "a dragon mesh"));
 });
@@ -38,7 +38,7 @@ check("default sort newest first", (await cardNames())[0] === "Dragon figurine",
 // Search narrows + count reflects it.
 await page.locator(".lib-search").fill("hook");
 await page.waitForTimeout(200);
-check("search narrows to the hook", (await cardNames()).join() === "Wall hook mount", (await cardNames()).join(", "));
+check("search narrows to the hook", (await cardNames()).join() === "Headphone desk hook mount", (await cardNames()).join(", "));
 check("count shows filtered total", /1 of 3 models/.test(await page.locator(".lib-count").textContent()));
 await page.locator(".lib-search").fill("");
 
@@ -51,7 +51,7 @@ await page.locator(".lib-toolbar select").nth(1).selectOption("all");
 // Sort by name.
 await page.locator(".lib-toolbar select").nth(0).selectOption("name");
 await page.waitForTimeout(200);
-check("sort by name A–Z", (await cardNames())[0] === "Dragon figurine" && (await cardNames())[2] === "Wall hook mount", (await cardNames()).join(", "));
+check("sort by name A–Z", (await cardNames())[0] === "Dragon figurine" && (await cardNames())[2] === "Headphone desk hook mount", (await cardNames()).join(", "));
 
 // Folders: move the box into a new "Prototypes" folder via the card's select.
 const boxCard = page.locator(".lib-card", { hasText: "Storage box" });

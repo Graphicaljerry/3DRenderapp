@@ -1,7 +1,7 @@
 // iPad-width audit: find anything overflowing the viewport or its container at
 // common iPad sizes, with a template loaded and toolbars fully populated.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const SIZES = [
@@ -15,7 +15,7 @@ for (const [name, w, h] of SIZES) {
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-  await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
+  await awaitBuild(page);
   await page.waitForTimeout(700);
   const report = await page.evaluate(() => {
     const vw = document.documentElement.clientWidth;

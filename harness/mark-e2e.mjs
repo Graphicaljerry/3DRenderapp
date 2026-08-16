@@ -1,6 +1,6 @@
 // Mark & ask e2e: draw a circle on the viewport → annotated screenshot in the composer.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -14,7 +14,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("phone stand"), null, { timeout: 120_000 });
+await awaitBuild(page);
 
 // 1) Enter Mark mode: overlay + hint appear.
 await page.getByRole("button", { name: "Mark", exact: true }).click();

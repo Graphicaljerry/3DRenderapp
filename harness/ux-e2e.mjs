@@ -1,7 +1,7 @@
 // UX batch e2e: renames (objects/model/plates), grouped layers, right-click menu,
 // copy/paste/duplicate, zoom cluster, consolidated View menu.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -15,7 +15,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
+await awaitBuild(page);
 
 // 1) Toolbar consolidation: display toggles live in one View menu now.
 check("no top-level Wireframe/Stats/Dimensions buttons",

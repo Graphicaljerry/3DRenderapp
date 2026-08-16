@@ -36,3 +36,18 @@ export async function enterWorkspace(page, timeout = 60_000) {
     { timeout },
   );
 }
+
+/** Wait for a build to actually land: the viewer holds real geometry and nothing is still
+ *  generating.
+ *
+ *  Scripts used to detect this by waiting for a chat bubble to mention the template's
+ *  name. That was brittle twice over — it broke when the template set was rebuilt (the
+ *  name no longer existed) and again when the blurb was reworded (the bubble says "A
+ *  headphone hook that clamps to your desk…", never "headphone desk hook") — and it never
+ *  actually checked that a model appeared. This asks the question the scripts meant. */
+export async function awaitBuild(page, timeout = 180_000) {
+  await page.waitForFunction(() => {
+    const n = window.__viewerS?.()?.mesh?.geometry?.getAttribute?.("position")?.count ?? 0;
+    return n > 0 && !document.querySelector(".gen-pill");
+  }, null, { timeout });
+}

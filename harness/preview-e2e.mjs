@@ -2,7 +2,7 @@
 // Apply commits a version, Discard restores, and the auto toggle applies immediately.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const PROGRAM = "```js\nconst defaultParams = { size: 40 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  return replicad.makeBaseBox(p.size, p.size, p.size);\n}\n```";
 const server = createServer((req, res) => {
@@ -41,7 +41,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
+await awaitBuild(page);
 check("baseline: template committed one version", (await versions()) === 1, String(await versions()));
 
 // 1) Ask mode (default): the AI result is a held preview, nothing committed.

@@ -20,7 +20,7 @@
 //
 //   node damping-e2e.mjs
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const FAST = 60;
 const SLOW = 20;
@@ -76,7 +76,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
+await awaitBuild(page);
 await page.waitForSelector(".viewerCanvas canvas");
 await page.waitForFunction(() => typeof window.__viewerCam === "function", null, { timeout: 20_000 });
 

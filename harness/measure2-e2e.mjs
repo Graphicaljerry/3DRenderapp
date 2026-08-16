@@ -1,4 +1,4 @@
-// Measure v2 + composer e2e, on the coaster template from Top view:
+// Measure v2 + composer e2e, on the phone stand template from Top view:
 // 1. Composer textarea wraps/grows; Shift+Enter = newline.
 // 2. Hole tool drills an EXACT ⌀7 through-hole (deterministic, no AI).
 // 3. Drag-a-line measure with vertex snap reads that hole as 7 mm.
@@ -16,7 +16,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
+await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("phone stand"), null, { timeout: 120_000 });
 await page.waitForTimeout(800);
 
 // ---- 1) Composer wraps: long text grows the box; Shift+Enter adds a line. ----
@@ -36,7 +36,7 @@ await ta.fill("");
 await page.waitForTimeout(120);
 check("composer shrinks back when cleared", (await ta.evaluate((el) => el.clientHeight)) <= h0 + 2);
 
-// ---- 2) Top view, drill an exact ⌀7 hole in the middle of the coaster. ----
+// ---- 2) Top view, drill an exact ⌀7 hole in the middle of the phone stand. ----
 const canvas = page.locator(".viewerCanvas canvas");
 const box = await canvas.boundingBox();
 const cx = box.width * 0.5, cy = box.height * 0.5;

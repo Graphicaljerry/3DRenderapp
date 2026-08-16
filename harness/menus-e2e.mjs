@@ -3,7 +3,7 @@
 //    time), not inside the Transform flyout where they floated loose on the canvas.
 //  - Opening any popup closes whatever else was open, so panels never stack.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -16,7 +16,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("friction-fit"), null, { timeout: 120_000 });
+await awaitBuild(page);
 
 const setSize = page.getByRole("button", { name: "Set size", exact: true });
 const snapping = page.getByRole("button", { name: "Snapping", exact: true });

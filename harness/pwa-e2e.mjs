@@ -70,7 +70,7 @@ check("offline: OCCT kernel loads from cache (Engine · replicad)", true);
 // Build a template offline — the whole local CAD path works with no network.
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("washer"), null, { timeout: 120_000 });
+await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("tolerance test coupon"), null, { timeout: 120_000 });
 check("offline: template builds a real model (no network)", true);
 await page.screenshot({ path: "shot-pwa-offline.png" });
 

@@ -43,7 +43,7 @@ await enterWorkspace(page);
 await page.waitForTimeout(800);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
+await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("phone stand"), null, { timeout: 120_000 });
 await page.waitForTimeout(500);
 
 const ta = page.locator(".composer textarea");
@@ -54,9 +54,9 @@ await page.waitForTimeout(300);
 
 check("request reached the mock brain", !!captured);
 const sys = captured?.messages?.find((m) => m.role === "system")?.content ?? "";
-check("system prompt names the part on canvas", sys.includes('the part "Coaster"'), sys.slice(sys.indexOf("Current canvas"), sys.indexOf("Current canvas") + 90));
+check("system prompt names the part on canvas", sys.includes('the part "Phone stand"'), sys.slice(sys.indexOf("Current canvas"), sys.indexOf("Current canvas") + 90));
 check("system prompt says edits refer to this part", sys.includes("Edit requests refer to this part"));
-check("part description rides along", /coaster/i.test(sys.split("Current canvas")[1] ?? ""), "");
+check("part description rides along", /phone stand/i.test(sys.split("Current canvas")[1] ?? ""), "");
 
 await browser.close();
 server.close();

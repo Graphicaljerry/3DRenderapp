@@ -2,7 +2,7 @@
 // and Mark & ask sending REAL 3D region coordinates (verified through a mock relay).
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 // Mock house relay that CAPTURES the request so we can assert the prompt contents.
 let lastBody = null;
@@ -40,7 +40,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("wall hook"), null, { timeout: 120_000 });
+await awaitBuild(page);
 
 const canvas = page.locator(".viewerCanvas canvas");
 const box = await canvas.boundingBox();

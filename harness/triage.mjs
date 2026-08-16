@@ -21,9 +21,17 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const STATE = join(HERE, "triage-state.json");
 const PER_SCRIPT_TIMEOUT_S = 420; // engine-audit is the long one; most finish far sooner
 
+/** Not scripts to be run by a sweep.
+ *  - triage.mjs is this file; enter.mjs is a helper module that executes nothing.
+ *  - gen-thumbs.mjs re-renders template thumbnails straight into
+ *    `moldable-lite/src/assets/templates/`, which is TRACKED. Running it as part of a
+ *    sweep silently rewrites shipped artwork — the first full run left a modified
+ *    box-with-lid.webp in the working tree (3238 → 3250 bytes of pure encoder noise).
+ *    It stays a maintenance tool you invoke deliberately when a template changes. */
+const NOT_A_TEST = new Set(["triage.mjs", "enter.mjs", "gen-thumbs.mjs"]);
+
 const scripts = readdirSync(HERE)
-  // enter.mjs is a helper module, not a script — it exports a function and runs nothing.
-  .filter((f) => f.endsWith(".mjs") && f !== "triage.mjs" && f !== "enter.mjs")
+  .filter((f) => f.endsWith(".mjs") && !NOT_A_TEST.has(f))
   .sort();
 
 /** Selectors that only exist once you are INSIDE the workspace. A script that dies waiting

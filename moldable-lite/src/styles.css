@@ -1240,6 +1240,8 @@ button:disabled { cursor: default; }
    .applied is the one actually on the model — marked with the same dot the tab wears. */
 .fx-grid button { position: relative; }
 .fx-grid button.applied::after { content: ""; position: absolute; top: 5px; right: 5px; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.fx-live-tog { display: flex; align-items: center; gap: 7px; font-size: var(--fs-sm); color: var(--ink2); cursor: pointer; padding-top: 2px; }
+.fx-live-tog input { width: 14px; height: 14px; accent-color: var(--accent); cursor: pointer; flex: none; }
 .fx-actions { display: flex; gap: 6px; }
 .fx-actions .primary { flex: 1; }
 .pattern-fly .fine { margin: 0; line-height: 1.45; }

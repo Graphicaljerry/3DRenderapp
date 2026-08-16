@@ -919,8 +919,10 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
    *  drag costs one rebuild, not thirty; the worker's refine cache then makes every
    *  further Relief change near-instant. */
   const previewT = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [live, setLive] = useState(true);
   const showDraft = (d: SurfFxSlot | null, immediate = false) => {
     if (previewT.current) clearTimeout(previewT.current);
+    if (!live) return; // browsing only — the model doesn't move until Apply
     if (immediate) { ctl.preview(tab, d); return; }
     previewT.current = setTimeout(() => ctl.preview(tab, d), 220);
   };
@@ -934,6 +936,9 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
   if (seeded.current !== seed) {
     seeded.current = seed;
     setDraft(applied);
+    // The surface changed under us. A try-on still sitting in the debounce was aimed at
+    // the old one, so firing it would repaint the pattern onto whatever just arrived.
+    if (previewT.current) clearTimeout(previewT.current);
   }
   const scale = draft?.scale ?? 4;
   const depth = Math.abs(draft?.depth ?? 0.6);
@@ -980,6 +985,19 @@ function PatternFly({ ctl }: { ctl: Props["surfaceCtl"] }) {
           </div>
         </div>
       ))}
+      {/* A try-on subdivides the whole skin, so on a heavy model it costs seconds per tile
+          tap and per slider release — worth being able to switch off and browse by swatch. */}
+      <label className="fx-live-tog" title="Show each choice on the model as you pick it. Switch it off on a heavy model to browse by swatch — nothing on screen changes until you press Apply.">
+        <input type="checkbox" checked={live}
+          onChange={(e) => {
+            const on = e.target.checked;
+            setLive(on);
+            if (previewT.current) clearTimeout(previewT.current);
+            if (!on) ctl.previewEnd();
+            else if (dirty) ctl.preview(tab, draft);
+          }} />
+        <span>Live preview</span>
+      </label>
       {draft && (
         <>
           <label className="fx-slider">

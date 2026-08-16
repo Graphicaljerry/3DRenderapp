@@ -6588,6 +6588,9 @@ export default function App() {
     // like — patterned if it was patterned, plain if it was plain. Before this, the fx
     // was free-floating state that chased every rebuild, so restoring an old version
     // silently re-wrapped it in whatever pattern happened to be on.
+    // An uncommitted try-on belongs to the version it was tried on: walking to another
+    // version ends it, or the pattern you were only auditioning lands on what you restored.
+    setFxPreview(null);
     const hvFx = next.versions[headIndex(next)]?.surfFx;
     setSurfFx({
       pattern: (hvFx?.pattern as SurfFxSlot | null) ?? null,

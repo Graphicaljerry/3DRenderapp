@@ -1828,8 +1828,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   .launch-signin { margin-top: 6px; padding: 11px 12px; }
   .launch-guided { font-size: var(--fs-sm); } /* `.adv summary` is already --fs-sm */
   /* A whole email address in a pill, on the row that also holds the wordmark and the
-     theme toggle: at 390px it either pushed the toggle off or wrapped the row. The pill
-     takes what is left and ellipsises. */
+     theme toggle: at 390px it wrapped onto a second line and squeezed the other two
+     together. The address goes (the workspace's avatar menu has it, and the tooltip
+     keeps it here); "Signed in" — or "Signed in · offline", the part you actually need
+     at a glance — stays. The truncation rules are the backstop for the offline case. */
+  .la-who { display: none; }
   .launch-account { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .launch-top-right { min-width: 0; }
 }

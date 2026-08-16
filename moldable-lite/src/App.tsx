@@ -8640,7 +8640,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         <div className="launch-top-right">
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? <IconSun /> : <IconMoon />}</button>
           {accountEmail
-            ? <span className="launch-account" title={cloudOffline ? `Signed in as ${accountEmail} — the sync service isn't reachable from this network right now; changes stay on this device until it is` : `Signed in as ${accountEmail}`}>Signed in · {accountEmail}{cloudOffline ? " · offline" : ""}</span>
+            ? <span className="launch-account" title={cloudOffline ? `Signed in as ${accountEmail} — the sync service isn't reachable from this network right now; changes stay on this device until it is` : `Signed in as ${accountEmail}`}>Signed in{/* The address is wrapped so a phone can drop it: at 390px "Signed in · jrodsuniverse@aol.com" was the widest thing in the bar and wrapped onto a second line, squashing the wordmark and the theme toggle together. Which account is a question you ask occasionally; that it synced is the one you ask at a glance. */}<span className="la-who"> · {accountEmail}</span>{cloudOffline ? " · offline" : ""}</span>
             : <button className="ghost sm" onClick={onSignIn}>Sign in</button>}
         </div>
       </header>
@@ -8652,7 +8652,11 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
            the screen is simply there. */}
        <div className={`launch-col${animateIn ? " play" : ""}`}>
         <h1 className="launch-h1">What do you want to make?</h1>
-        <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
+        {/* First-run framing, and it was the only piece of it still shown to everyone —
+            the footer beneath already goes for veterans on exactly this condition. Three
+            lines explaining what the app is, above the box you came to type in, every
+            single time you open it with 37 projects in the shelf below. */}
+        {!veteran && <p className="launch-sub">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>}
 
         <form
           className={`launch-composer${dragOver ? " drop" : ""}`}
@@ -8755,10 +8759,15 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           ] as const).map(([v, label, hint]) => (
             <button key={v} type="button" role="radio" aria-checked={engine === v} className={`lp-eng${engine === v ? " on" : ""}`} title={hint} onClick={() => setEngine(v)}>{label}</button>
           ))}
+          {/* Self-contained sentences. These used to read as continuations of whichever
+              chip was selected — "picks per request · asks before anything paid runs" —
+              which parses on a desktop, where the hint sits on the same line as the word
+              "Auto". On a phone the chips take the whole row and the hint wraps beneath
+              them, leaving a fragment with no subject. */}
           <span className="lp-eng-hint">
-            {engine === "auto" ? "picks per request · asks before anything paid runs"
-              : engine === "precise" ? "exact mm · free with your AI key"
-              : "organic detail · paid engine, ~$0.10–0.40 per run"}
+            {engine === "auto" ? "Auto picks per request · asks before anything paid runs"
+              : engine === "precise" ? "Exact mm · free with your AI key"
+              : "Organic detail · paid engine, ~$0.10–0.40 per run"}
           </span>
         </div>
 

@@ -1901,11 +1901,12 @@ export default function App() {
   // Land on a FRESH start screen; offer the last session as a one-tap resume
   // chip instead of auto-opening it (auto-open replayed stale errors on load).
   const [resume, setResume] = useState<{ id: string; name: string } | null>(null);
-  // The Launchpad's project shelf. It was four cards when the app auto-opened your last
-  // part and this was a shortcut nobody looked at; now that every load lands here, this
-  // IS the way back into your work, so it shows a screenful. The Library modal still owns
-  // the long tail — search, rename, delete — and "All projects" hands off to it.
-  const RECENT_SHOWN = 12;
+  // The Launchpad's project shelf: the few you are most likely to want, and nothing more.
+  // A screenful was tried and is wrong — at 93 projects it pushed the page into scrolling,
+  // which shoves the heading up under the top bar and buries the composer this screen is
+  // built around. Four is a glance; the full set lives one tap away in "All projects",
+  // which has the search, folders and renaming that a real list needs.
+  const RECENT_SHOWN = 4;
   const [recent, setRecent] = useState<{ id: string; name: string; engine: string; thumb?: string; at: number }[]>([]);
   const [recentTotal, setRecentTotal] = useState(0);
   /** Re-read the shelf. Called at boot and again on every return to the Launchpad —

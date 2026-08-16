@@ -1667,7 +1667,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .launch-top { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; }
 .launch-top-right { display: flex; align-items: center; gap: 8px; }
 .launch-main {
-  flex: 1; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 32px;
+  flex: 1; width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 24px;
   display: grid; grid-template-columns: minmax(0, 620px) 1fr; align-content: center;
 }
 /* One column below ~1120px. Two columns need ~700px for the text plus ~420px for a bed
@@ -1680,7 +1680,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      layout rather than a deliberate one-column one. */
   .launch-main { grid-template-columns: minmax(0, 620px); justify-content: center; }
 }
-.launch-col { display: flex; flex-direction: column; gap: 14px; padding-bottom: 6vh; }
+/* Breathing room at the foot, but not enough to be the thing that tips the column past
+   the viewport — a Launchpad that scrolls puts the heading under the top bar the moment
+   you touch the wheel, which is what "the heading is too high" looks like. */
+.launch-col { display: flex; flex-direction: column; gap: 14px; padding-bottom: 2vh; }
 /* One orchestrated entrance, replacing the perpetual sweep that was deleted. 70ms
    stagger — the tight end of the range, because this surface is seen every session. */
 @keyframes launch-in { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
@@ -1746,12 +1749,14 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 /* A GRID, not wrapped inline-flex: every card takes the same column width, so a
    short name ("Wall hook") no longer sits in a visibly narrower box than a long one.
    Equal columns are what makes a set read as a set. */
-/* A gallery, not a list. When the app auto-opened your last part this was a four-item
-   shortcut and a 40px thumbnail beside a name was enough. Now every load lands here and
-   this is the way back into your work, so the picture does the recognising — the shape of
-   the part is what you remember, not its name. Same card as Figma/Framer/Lovable put on
-   their file shelves: image on top, name and edited-time under it. */
-.launch-recents { display: grid; grid-template-columns: repeat(auto-fill, minmax(172px, 1fr)); gap: 12px; align-items: stretch; max-width: 1000px; }
+/* The picture does the recognising — the shape of the part is what you remember, not its
+   name — so this is the card Figma/Framer/Lovable put on their file shelves: image on
+   top, name and edited-time under it.
+   FOUR, in ONE row. An explicit column count, not auto-fill: with four items auto-fill
+   lands on three-plus-an-orphan at a range of widths, and the whole block has to stay
+   short enough that the composer above it never scrolls off. */
+.launch-recents { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: stretch; max-width: 560px; }
+@media (max-width: 700px) { .launch-recents { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 340px; } }
 .launch-recent {
   display: flex; flex-direction: column; gap: 8px; padding: 0; min-width: 0;
   border: 1px solid var(--bord); border-radius: var(--r-md); background: transparent;

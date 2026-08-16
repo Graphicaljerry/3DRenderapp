@@ -1345,6 +1345,13 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .lib-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 14px; }
 /* width/margins beat the modal's generic full-width input styling */
 .lib-toolbar select { width: auto; flex: 0 0 auto; margin: 0; padding: 7px 9px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--ink); font: inherit; font-size: var(--fs-md); }
+/* ONE height for every control in both toolbar rows. The modal's 44px form-field rule
+   (.card input/select, meant for the key-entry card) was still winning on HEIGHT — the
+   overrides above beat it on width/margin/padding but never said height — so the search
+   and selects sat at 44px while the .sm buttons beside them sat at ~28px: three sizing
+   systems in the same row, reported as "these buttons are inconsistent in height". */
+.lib-toolbar input, .lib-toolbar select, .lib-toolbar .ghost,
+.lib-bulk .ghost, .lib-bulk select { height: 33px; box-sizing: border-box; padding-top: 0; padding-bottom: 0; }
 .lib-search { width: auto; flex: 1 1 160px; min-width: 160px; margin: 0; padding: 7px 11px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--ink); font: inherit; font-size: var(--fs-md); }
 .lib-search:focus { outline: none; border-color: var(--accent); }
 .lib-count { font-size: var(--fs-sm); color: var(--mut); white-space: nowrap; margin-left: auto; }

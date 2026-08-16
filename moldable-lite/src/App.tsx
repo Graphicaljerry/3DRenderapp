@@ -7237,6 +7237,16 @@ export default function App() {
         mode={mode}
         modePref={modePref}
         pickMode={pickMode}
+        onSculptAsMesh={
+          // The one deliberate crossing from CAD to mesh, offered only when there is a
+          // CAD part to cross. `forceMode` skips Auto entirely; plan and clarify are
+          // skipped because the chip already asked the only question they would have.
+          // The prompt names the model on screen, so send() snapshots the canvas and
+          // refines from it rather than starting a new shape from words alone.
+          result && activeKind !== "generative"
+            ? (prompt: string) => { pickMode("generative"); void send(prompt, "generative", { skipPlan: true, skipClarify: true }); }
+            : undefined
+        }
         webMode={webMode}
         onCycleWeb={cycleWeb}
         guided={guided}

@@ -2199,6 +2199,24 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .pm-who { display: flex; flex-direction: column; min-width: 0; }
 .pm-label { font-size: var(--fs-sm); font-weight: 500; color: var(--mut); }
 .pm-email { font-size: var(--fs-md); color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* ---- the engine readout, in the statusbar beside the dimensions ----
+   Same hairline-chip language as the bed chip next to it: both are facts about the
+   thing on the plate, not actions on it. It opens UPWARD — the statusbar is the last
+   row on the screen, so a menu hanging below it would be off the bottom. */
+.engine-wrap { position: relative; }
+.engine-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; font-size: var(--fs-sm); color: var(--ink2); background: transparent; border: 1px solid var(--bord); border-radius: var(--r-full); white-space: nowrap; cursor: pointer; }
+.engine-chip:hover { color: var(--ink); border-color: var(--bord-strong); }
+.engine-chip svg { color: var(--mut); flex: 0 0 auto; }
+/* Mesh reads warmer than CAD deliberately: which engine built a part changes what you
+   can do to it, and telling them apart at a glance is the whole point of the chip. */
+.engine-chip.mesh svg { color: var(--accent-d); }
+.engine-menu { position: absolute; left: 0; bottom: calc(100% + 6px); width: 270px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); box-shadow: var(--shadow-md); padding: 10px; z-index: var(--z-popover); display: flex; flex-direction: column; gap: 6px; }
+.engine-menu .em-what { margin: 0; font-size: var(--fs-md); line-height: 1.45; color: var(--ink2); }
+.engine-menu .fine { margin: 0; }
+.engine-menu .pm-item { padding-left: 0; padding-right: 0; color: var(--accent-d); }
+.engine-menu .pm-item:hover { background: none; text-decoration: underline; }
+.engine-menu .pm-item:disabled { color: var(--subt); text-decoration: none; }
+.ec-short { display: none; } /* the phone spelling — see the statusbar rules below */
 .pm-item { text-align: left; background: none; border: none; border-radius: var(--r-md); padding: 8px 10px; font-size: var(--fs-md); color: var(--ink2); }
 .pm-item:hover { background: var(--surf); }
 .pm-item.danger { color: var(--danger); }
@@ -2358,8 +2376,27 @@ details.guide { margin-top: 10px; }
      easier to hit. The topbar's 48px already had the room; the statusbar's top padding
      comes down 3px to pay for most of its own. */
   .topbar .brandbtn, .topbar .primary.sm { min-height: 40px; }
-  .statusbar .primary, .statusbar .bedchip { min-height: 40px; }
-  .statusbar .bedchip { padding-top: 0; padding-bottom: 0; }
+  .statusbar .primary, .statusbar .bedchip, .statusbar .engine-chip { min-height: 40px; }
+  .statusbar .bedchip, .statusbar .engine-chip { padding-top: 0; padding-bottom: 0; }
+  /* ---- the statusbar has more facts than a phone has width ----
+     Measured at 390px: dimensions 127 + engine 111 + printer 149 + Export 87 + gaps
+     = 517 in a 390 box. It scrolls, which is fine for the facts — but Export was
+     scrolling with them and ended up 117px past the right edge, unreachable without
+     a sideways swipe nobody knows is there. Two changes, and it is the pinning that
+     matters: the row can grow (a long dimension string, a renamed printer) without
+     the one ACTION on it ever going out of reach again. */
+  .ec-full { display: none; }
+  .ec-short { display: inline; }
+  .export-wrap { position: sticky; right: 0; z-index: 1; padding-left: 10px; background: var(--page); }
+  /* The statusbar is `overflow-x: auto`, which clips on BOTH axes — an absolutely
+     positioned menu above it is cut off at the bar's own top edge, not floated over
+     the canvas. `fixed` leaves the scroll container entirely (nothing in this subtree
+     is transformed, so there is no containing block to trap it), and full width is the
+     right shape for a phone anyway. */
+  .engine-menu {
+    position: fixed; left: 10px; right: 10px; width: auto;
+    bottom: calc(56px + env(safe-area-inset-bottom, 0px));
+  }
   /* One filled action per screen, and on a phone it is Export — the thing you came to
      do. "+ New chat" wearing the same accent fill made *starting over* the loudest
      element above the canvas, and with only four items left in a 48px bar it became the

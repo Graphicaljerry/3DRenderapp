@@ -2416,8 +2416,11 @@ interface Props {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   mode: Mode; // resolved engine (for badges / active-kind display)
-  modePref: ModePref; // the composer switch: "auto" | "precise" | "generative"
+  modePref: ModePref; // the composer switch, shown only while the canvas is empty
   pickMode: (p: ModePref) => void;
+  /** Cross this CAD part to the mesh engine, deliberately and once. Undefined while
+   *  there is nothing to convert. */
+  onSculptAsMesh?: (prompt: string) => void;
   webMode: "auto" | "on" | "off";
   onCycleWeb: () => void;
   guided: boolean;
@@ -3468,6 +3471,13 @@ export function Workspace(p: Props) {
                 <BuildOptions p={p} />
                 <BalanceChip b={p.balance} brain={p.brain} genProvider={p.genProvider} genModel={p.genModel} />
               </div>
+              {/* Only while the canvas is empty. This picks the engine for the part you
+                  are about to make; once one exists the question is answered, and the
+                  answer is stated by the engine chip in the statusbar. Leaving it here
+                  after the first build meant an inert "Auto" (routing only runs when
+                  there is no model) and two buttons that looked like a reversible mode
+                  switch while actually being a one-way conversion. */}
+              {!p.geometry && (
               <div className="modebar-row">
                 <div className="seg">
                   <button className={p.modePref === "auto" ? "on auto-live" : ""} title="Auto — just describe what you want to print and the app picks the right engine for you: exact CAD for functional parts, AI mesh for organic shapes" onClick={() => p.pickMode("auto")}>Auto</button>
@@ -3476,6 +3486,7 @@ export function Workspace(p: Props) {
                 </div>
                 <Hint text="How the shape gets made. Precise builds exact, editable millimetre parts you can export as STEP — brackets, cases, adapters. Generative builds an organic AI mesh — figurines, sculpted shapes — which cannot be dimensioned. Auto reads your description and picks for you." />
               </div>
+              )}
               {/* This line renders ONLY when it says something you could not already
                   read off the controls. It used to restate the mode on every idle
                   frame ("Describe what you want to print — Auto picks…"), which is
@@ -4777,6 +4788,7 @@ export function Workspace(p: Props) {
 
           <div className="statusbar">
             <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
+            {p.geometry && <EngineChip kind={p.activeKind} busy={p.status === "generating"} onSculpt={p.onSculptAsMesh} />}
             <button
               className="bedchip"
               title={`3D printer plate: ${p.printer.name ?? "generic"} — ${p.printer.bed.x} × ${p.printer.bed.y} × ${p.printer.bed.z} mm build volume. Tap to change printers.`}
@@ -4800,6 +4812,95 @@ export function Workspace(p: Props) {
           </div>
         </section>
       </main>
+    </div>
+  );
+}
+
+/** Which engine built the thing on screen, stated rather than inferred — and the only
+ *  door between the two.
+ *
+ *  The composer used to carry an Auto / Precise / Generative segmented control at all
+ *  times, which was wrong in three ways once a model existed. "Auto" was inert (routing
+ *  is gated on there being no model yet), so one of the three buttons did nothing.
+ *  Nothing anywhere said what the project actually was — you inferred it from which
+ *  segment happened to be lit, and that segment means "what the NEXT build will use".
+ *  And a segmented control promises you can flip back: you cannot. Crossing to mesh
+ *  costs the dimensions, the parameters, STEP export and every CAD tool, and pressing
+ *  "Precise" afterwards does not return them — it just means your next build starts a
+ *  different part.
+ *
+ *  So the switch is gone from the composer once a model exists, and this is the readout
+ *  in its place. It is also the crossing, because a conversion should live where the
+ *  fact it changes is displayed. Two steps, in one small surface: what you have, then
+ *  what it would cost to change it. */
+function EngineChip({ kind, busy, onSculpt }: { kind: EngineKind; busy: boolean; onSculpt?: (prompt: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const mesh = kind === "generative";
+  // "primitive" is the fallback path when the OCCT kernel will not load. It is still the
+  // precise side of the app, but STEP is off — say so rather than claiming full CAD.
+  const label = mesh ? "AI mesh" : kind === "primitive" ? "Precise (basic)" : "Precise CAD";
+  // A phone's statusbar has 390px for the dimensions, the printer, this, and Export.
+  // The full wording costs 111px of it; the distinction it carries survives one word.
+  const short = mesh ? "Mesh" : kind === "primitive" ? "Basic" : "CAD";
+  const close = () => { setOpen(false); setConfirming(false); };
+  return (
+    <div className="engine-wrap">
+      <button
+        className={`engine-chip${mesh ? " mesh" : ""}`}
+        onClick={() => (open ? close() : setOpen(true))}
+        aria-expanded={open}
+        title={mesh
+          ? "This part is an AI mesh — organic geometry, no editable dimensions"
+          : "This part is exact CAD — editable dimensions and STEP export. Tap for how it was built."}
+      >
+        {mesh ? <IconShapes size={13} /> : <IconCube size={13} />}
+        <span className="ec-full">{label}</span>
+        <span className="ec-short">{short}</span>
+      </button>
+      {open && (
+        <div className="engine-menu" onMouseLeave={close}>
+          {!confirming ? (
+            <>
+              <p className="em-what">
+                {mesh
+                  ? "Built by an AI mesh engine. Organic geometry — no editable dimensions, no STEP export, and the CAD tools (Adjust, Fasteners, Cut) don't apply."
+                  : kind === "primitive"
+                    ? "Built by the built-in primitive engine — the CAD kernel didn't load, so shapes are exact but STEP export is off."
+                    : "Built as exact CAD. Editable dimensions, parameters you can drag, and STEP export."}
+              </p>
+              {mesh
+                // No reverse crossing: nothing can turn a mesh back into a parametric
+                // solid, and offering a button that quietly produced an unrelated new
+                // part would be worse than saying so.
+                ? <p className="fine">A mesh can't be turned back into CAD. Earlier CAD steps, if this part had any, are still in History.</p>
+                : onSculpt && <button className="pm-item" disabled={busy} onClick={() => setConfirming(true)}>Sculpt as mesh…</button>}
+            </>
+          ) : (
+            <>
+              <p className="em-what">
+                This takes a snapshot of the part on screen and rebuilds it on the AI mesh
+                engine as sculpted geometry.
+              </p>
+              <p className="fine">
+                You lose editable dimensions, STEP export, and Adjust / Fasteners / Cut. The
+                CAD version stays in History and Undo brings it straight back. Mesh engines
+                are paid — roughly $0.10–0.40 a run.
+              </p>
+              <div className="param-actions">
+                <button
+                  className="primary sm"
+                  disabled={busy}
+                  onClick={() => { close(); onSculpt?.("Sculpt this model as an organic mesh, keeping its overall shape and proportions."); }}
+                >
+                  Sculpt as mesh
+                </button>
+                <button className="ghost sm" onClick={() => setConfirming(false)}>Back</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -46,7 +46,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // A) Two clicks on Send, back to back, before any re-render can disable the button.
-const box = page.getByPlaceholder(/Describe a part|Describe something/);
+const box = page.locator(".composer textarea");
 await box.fill("a 20 mm cube");
 const send = page.getByRole("button", { name: "Send", exact: true });
 await Promise.all([send.click(), send.click({ force: true })]);

@@ -48,7 +48,7 @@ const init = (extra = {}) => (ctxVals) => {
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(600);
-  const ta = page.getByPlaceholder(/Describe a part/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("a swirling coral reef centerpiece"); // matches NEITHER regex → brain decides
   await ta.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("routed it to")), null, { timeout: 30_000 });
@@ -72,7 +72,7 @@ const init = (extra = {}) => (ctxVals) => {
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(600);
-  const ta = page.getByPlaceholder(/Describe a part/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("a majestic dragon"); // ORGANIC_RE hits → regex-routes to mesh, then polish
   await ta.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("expanded your ask")), null, { timeout: 30_000 });
@@ -99,7 +99,7 @@ const init = (extra = {}) => (ctxVals) => {
   await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("box"), null, { timeout: 120_000 });
   await page.waitForTimeout(600);
 
-  const ta = page.getByPlaceholder(/Describe a part|Ask for a change/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("sculpt it into an organic statue");
   await ta.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("Refining your current model")), null, { timeout: 30_000 });

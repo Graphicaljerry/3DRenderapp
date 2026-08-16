@@ -45,7 +45,7 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(500);
-  const ta = page.getByPlaceholder(/Describe a part/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("a 20 mm cube with a 5 mm hole"); // CADish → precise, no classify call
   await ta.press("Enter");
   await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /20 × 20 × 20|Updated the model|preview on the canvas/.test(b.textContent)), null, { timeout: 60_000 });
@@ -101,7 +101,7 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(500);
-  const ta = page.getByPlaceholder(/Describe a part/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("a bracket with two 5 mm holes");
   await ta.press("Enter");
   const label = await page.waitForFunction(() => {

@@ -78,7 +78,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
   await page.waitForTimeout(800);
 
   // B1) chat repair loop: bad program (OCCT throw) → readable retry note → fixed build.
-  const ta = page.getByPlaceholder(/Describe a part/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("a test cube");
   await ta.press("Enter");
   await page.waitForFunction(() => document.body.innerText.includes("30 × 30 × 30"), null, { timeout: 180_000 });
@@ -115,7 +115,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
   await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(600);
-  const ta = page.getByPlaceholder(/Describe a part/);
+  const ta = page.locator(".composer textarea");
   await ta.fill("a test cube");
   await ta.press("Enter");
   await page.waitForFunction(() => document.body.innerText.includes("25 × 25 × 25"), null, { timeout: 180_000 });

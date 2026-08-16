@@ -94,7 +94,7 @@ check("D2 falling through to model history leaves a valid model", dimsAfter.incl
 check("D3 the model is still on the canvas", (await page.locator(".mesh-stats").innerText().catch(() => "")) === triBefore, "stats unchanged");
 
 // ---- E) Typing is never hijacked ----------------------------------------------
-const composer = page.getByPlaceholder(/Describe a part|Describe something/);
+const composer = page.locator(".composer textarea");
 await composer.fill("hello");
 await composer.press("ControlOrMeta+z");
 await page.waitForTimeout(300);

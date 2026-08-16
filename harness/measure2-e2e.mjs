@@ -20,7 +20,7 @@ await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble"
 await page.waitForTimeout(800);
 
 // ---- 1) Composer wraps: long text grows the box; Shift+Enter adds a line. ----
-const ta = page.getByPlaceholder(/Describe a part/);
+const ta = page.locator(".composer textarea");
 const h0 = await ta.evaluate((el) => el.clientHeight);
 await ta.fill("make the rim a little taller and rounder, add a drainage channel around the inside edge, and emboss my initials JR on the bottom face so they show when it is flipped over");
 await page.waitForTimeout(150);

@@ -45,7 +45,7 @@ await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble"
 check("baseline: template committed one version", (await versions()) === 1, String(await versions()));
 
 // 1) Ask mode (default): the AI result is a held preview, nothing committed.
-const inp = page.getByPlaceholder(/Describe a part/);
+const inp = page.locator(".composer textarea");
 await inp.fill("turn it into a 40 mm cube");
 await inp.press("Enter");
 await page.waitForSelector(".ai-preview-bar", { timeout: 120_000 });

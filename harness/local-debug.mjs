@@ -11,7 +11,7 @@ await page.addInitScript(() => {
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.waitForTimeout(600);
-const ta = page.getByPlaceholder(/Describe a part/);
+const ta = page.locator(".composer textarea");
 await ta.fill("a test cube");
 await ta.press("Enter");
 await page.waitForTimeout(25_000);

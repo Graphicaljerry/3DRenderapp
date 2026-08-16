@@ -16,7 +16,7 @@ await enterWorkspace(page);
 const A = await page.evaluate(async () => {
   const THREE = await import("/node_modules/three/build/three.module.js");
   const { unzipSync, strFromU8 } = await import("/node_modules/fflate/esm/browser.js");
-  const { platesToProject3MF, geometriesTo3MF } = await import("/src/print/exportClient.ts");
+  const { platesToProject3MF, write3MF } = await import("/src/print/exportClient.ts");
   const box = (s) => new THREE.BoxGeometry(s, s, s).toNonIndexed();
   // model painted red, one attachment painted blue, one left unpainted
   const parts = [
@@ -30,7 +30,7 @@ const A = await page.evaluate(async () => {
   const modelSettings = strFromU8(projZip["Metadata/model_settings.config"]);
   const projSettings = projZip["Metadata/project_settings.config"] ? strFromU8(projZip["Metadata/project_settings.config"]) : null;
 
-  const coreBlob = geometriesTo3MF(parts);
+  const coreBlob = write3MF(parts);
   const coreZip = unzipSync(new Uint8Array(await coreBlob.arrayBuffer()));
   const coreModel = strFromU8(coreZip["3D/3dmodel.model"]);
 

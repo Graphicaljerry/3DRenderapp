@@ -46,7 +46,7 @@ await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
 await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("coaster"), null, { timeout: 120_000 });
 await page.waitForTimeout(500);
 
-const ta = page.getByPlaceholder(/Describe a part/);
+const ta = page.locator(".composer textarea");
 await ta.fill("can you add a 7mm screw hole in the center?");
 await ta.press("Enter");
 await page.waitForFunction(() => !!window.__ctx_done || document.querySelector(".ai-preview-bar"), null, { timeout: 120_000 }).catch(() => {});

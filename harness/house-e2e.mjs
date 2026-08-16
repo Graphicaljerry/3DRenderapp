@@ -89,7 +89,7 @@ const check = (name, ok, detail = "") => {
   await page.keyboard.press("Escape");
 
   // Full round trip: type a prompt, send — ask-mode holds a preview — Apply commits.
-  const inp = page.getByPlaceholder(/Describe a part/);
+  const inp = page.locator(".composer textarea");
   await inp.fill("a simple test cube");
   await inp.press("Enter");
   await page.waitForSelector(".ai-preview-bar", { timeout: 120_000 });

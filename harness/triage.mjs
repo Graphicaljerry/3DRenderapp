@@ -22,7 +22,8 @@ const STATE = join(HERE, "triage-state.json");
 const PER_SCRIPT_TIMEOUT_S = 420; // engine-audit is the long one; most finish far sooner
 
 const scripts = readdirSync(HERE)
-  .filter((f) => f.endsWith(".mjs") && f !== "triage.mjs")
+  // enter.mjs is a helper module, not a script — it exports a function and runs nothing.
+  .filter((f) => f.endsWith(".mjs") && f !== "triage.mjs" && f !== "enter.mjs")
   .sort();
 
 /** Selectors that only exist once you are INSIDE the workspace. A script that dies waiting

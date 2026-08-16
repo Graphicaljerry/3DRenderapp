@@ -6500,7 +6500,7 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
                    field, which fired onBlur → another commit and stole focus after every
                    single arrow press. Commits are queued in App instead, so nothing is
                    lost by leaving the field live. */
-                aria-label={`${humanizeParam(k)} in millimetres`}
+                aria-label={isInt ? humanizeParam(k) : `${humanizeParam(k)} in millimetres`}
                 onChange={(e) => setEditing({ ...editing, [k]: e.target.value })}
                 onFocus={() => setEditing({ ...editing, [k]: String(v) })}
                 onKeyDown={(e) => {

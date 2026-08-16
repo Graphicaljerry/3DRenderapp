@@ -43,7 +43,7 @@ export function isCountParam(name: string): boolean {
   // The boundary is a word break, NOT any non-letter: `[^a-z]` let `slots_depth` and
   // `holes_dia` through, and force-rounding a snake_case DEPTH to an integer is exactly
   // the silent-wrong-dimension case this narrowness exists to avoid.
-  return /(^|[^a-z])(count|num|qty|segments|sides|teeth|rows|cols|columns|holes|slots|ribs|layers)($|[^a-z_])/i.test(name);
+  return /(^|[^a-z])(count|num|qty|segments|sides|teeth|rows|cols|columns|holes|slots|ribs|layers|turns|starts)($|[^a-z_])/i.test(name);
 }
 
 /** Decimals actually present in the default, so the step matches how the value was

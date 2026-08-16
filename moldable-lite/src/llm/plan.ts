@@ -82,26 +82,37 @@ export async function draftPlan(
   llm: LlmSettings,
   keys: Record<string, string>,
   proxyBase: string,
-  opts?: { image?: { dataBase64: string; mediaType: string }; canvas?: string; engine?: "cad" | "mesh" },
+  opts?: { images?: { dataBase64: string; mediaType: string }[]; canvas?: string; engine?: "cad" | "mesh" },
 ): Promise<BuildPlan | null> {
   const brain = utilityBrain(llm, keys);
   if (!brain) return null;
   const text = request.trim();
-  if (!text && !opts?.image) return null;
+  // Every reference the user attached, not only the first. Someone photographing a part
+  // to reproduce shoots it from several angles precisely because no single view carries
+  // all the dimensions — planning from one of them throws away the rest of the evidence.
+  const imgs = opts?.images ?? [];
+  if (!text && !imgs.length) return null;
   const engineLine = opts?.engine === "mesh"
     ? "\nThis will be SCULPTED by a mesh engine, which cannot hold exact dimensions: plan the form, proportions, pose and surface detail, and give size only as an overall envelope."
     : "";
   const canvasLine = opts?.canvas ? `\nThe user is editing ${opts.canvas} — plan the CHANGE, not a new part.` : "";
-  const content: ApiMsg["content"] = opts?.image
+  // Told how many there are and that they show ONE object: without it the planner has
+  // been seen to read a second angle of the same part as a second part to build.
+  const refLine = imgs.length > 1
+    ? `\nThe user attached ${imgs.length} reference pictures. They are different views or sketches of the SAME object unless the text says otherwise — read dimensions and features across all of them, and say in assumptions which view a number came from.`
+    : "";
+  const content: ApiMsg["content"] = imgs.length
     ? [
-        { type: "image", mediaType: opts.image.mediaType, dataBase64: opts.image.dataBase64 },
-        { type: "text", text: text.slice(0, 900) || "The user attached this reference with no description." },
+        ...imgs.map((im) => ({ type: "image" as const, mediaType: im.mediaType, dataBase64: im.dataBase64 })),
+        { type: "text" as const, text: text.slice(0, 900) || (imgs.length > 1 ? "The user attached these references with no description." : "The user attached this reference with no description.") },
       ]
     : text.slice(0, 900);
   try {
     const out = await withTimeout(
-      generateLlm(brain, keys, SYS + engineLine + canvasLine, [{ role: "user", content }], {}, proxyBase),
-      opts?.image ? 30_000 : 22_000,
+      generateLlm(brain, keys, SYS + engineLine + canvasLine + refLine, [{ role: "user", content }], {}, proxyBase),
+      // More pictures is more upload and more to look at; the old flat 30s was tuned
+      // for exactly one.
+      imgs.length ? Math.min(30_000 + (imgs.length - 1) * 8_000, 60_000) : 22_000,
     );
     if (!out) return null;
     return coerce(JSON.parse(extractJsonObject(out)));

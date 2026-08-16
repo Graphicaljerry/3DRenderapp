@@ -1508,6 +1508,25 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .web-toggle .web-state { font-weight: 600; }
 .web-toggle.web-on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
 .web-toggle.web-off { opacity: 0.65; }
+/* Plan-first, on the Launchpad's composer row. Same chip as Research beside it — they
+   are both "what happens before the build" — but this one is ON by default, so it
+   carries the accent as its resting state rather than as an exception. Off is the
+   quiet state here, which is the reverse of Research and deliberate: the row has to
+   read "a plan is coming" at a glance, not "there is a plan setting". */
+.plan-toggle.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
+.plan-toggle:not(.on) { opacity: 0.65; }
+.fw-short { display: none; } /* the phone spelling; the rules below swap the pair */
+/* Three chips on one row, and on a phone the row has 298px before it reaches the send
+   button floating in the composer's bottom-right corner. Measured at 390px: the full
+   wording came to 338px and the plan chip rendered UNDERNEATH the send button.
+   Each label keeps the word that identifies it and sheds the rest — "Photos",
+   "Web · auto", "Plan · on" — and the tooltips still carry the full sentence. */
+@media (max-width: 760px) {
+  .launch-composer-foot .fw-more { display: none; }
+  .launch-composer-foot .fw-short { display: inline; }
+  .launch-composer-foot { gap: 6px; }
+  .launch-composer-foot .web-toggle { padding: 0 8px; }
+}
 .link-inline { color: var(--accent-d); text-decoration: underline; }
 .link-inline:hover { color: var(--accent); }
 /* OpenRouter "recommended for CAD" chips in Settings. */

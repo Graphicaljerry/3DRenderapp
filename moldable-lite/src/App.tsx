@@ -49,7 +49,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe, IconSun, IconMoon } from "./components/icons";
+import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe, IconSun, IconMoon, IconChecklist } from "./components/icons";
 import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
@@ -1586,6 +1586,15 @@ export default function App() {
     setPlanOn(v);
     try { localStorage.setItem("moldable_plan", v ? "on" : "off"); } catch { /* private mode */ }
   };
+  /** Every NEW part starts by planning, whatever was chosen on the last one.
+   *
+   *  "Off" used to be a permanent global setting: switch it off once, mid-project,
+   *  because you knew exactly what that one edit should be, and every part you ever
+   *  started afterwards silently skipped its spec — with nothing on the Launchpad
+   *  saying so. The setting outlived the reason for it. Turning it off is now a
+   *  decision about the part in front of you, and the Launchpad's chip both states the
+   *  default and lets you drop it for the build you are about to make. */
+  const startPlanned = () => { setPlanOn(true); try { localStorage.removeItem("moldable_plan"); } catch { /* private mode */ } };
   const setClarify = (v: boolean) => {
     setClarifyOn(v);
     try { localStorage.setItem("moldable_clarify", v ? "on" : "off"); } catch { /* private mode */ }
@@ -5825,15 +5834,21 @@ export default function App() {
     // would have run anyway.
     if (!override?.skipPlan && planOn && !guided && !result && !image?.markup && (p || image)) {
       setStage("Writing a build plan…");
-      let planImg: { dataBase64: string; mediaType: string } | undefined;
-      if (image) {
+      // EVERY reference, not just the first. The builder has always received the whole
+      // set (`visionRefs`, below), while the plan — the one artefact you actually read
+      // and correct — was drafted from a single photo. So the spec you checked for
+      // accuracy had seen less of your part than the thing building it, and a dimension
+      // only visible in the third photo could not appear in the plan at all.
+      const planImgs: { dataBase64: string; mediaType: string }[] = [];
+      for (const b of [image?.blob, ...refs.map((r) => r.blob)]) {
+        if (!b) continue;
         try {
-          const du = await blobToDataURL(image.blob);
-          planImg = { dataBase64: du.split(",")[1], mediaType: image.blob.type || "image/png" };
-        } catch { /* plan from the text alone */ }
+          const du = await blobToDataURL(b);
+          planImgs.push({ dataBase64: du.split(",")[1], mediaType: b.type || "image/png" });
+        } catch { /* skip this one — the plan is still better with the rest */ }
       }
       const draft = await draftPlan(p, brainLlm, brainKeys, effectiveProxy, {
-        image: planImg,
+        images: planImgs,
         engine: useGen ? "mesh" : "cad",
       });
       if (draft) {
@@ -7062,6 +7077,7 @@ export default function App() {
 
   function startNew() {
     localStorage.removeItem("moldable_last_project");
+    startPlanned();
     projectRef.current = null;
     setPins([]);
     setPlateOf({});
@@ -7107,6 +7123,9 @@ export default function App() {
     void loadRecent();
     setBeenHome(true);
     setEntered(false);
+    // Back at the front door, the next thing you start is a new part — so the chip you
+    // are about to look at has to already be telling the truth about it.
+    startPlanned();
     // Walking out is a decision. Without this the freshness stamp is still warm, so the
     // very next reload would carry you back into the part you just left.
     clearActive();
@@ -7151,6 +7170,8 @@ export default function App() {
           // confirm still guards anything that bills).
           void send(text, engine === "auto" ? undefined : engine, engine === "auto" ? { routeAuto: true } : undefined);
         }}
+        planOn={planOn}
+        onTogglePlan={setPlan}
         imageUrl={image && !image.markup ? image.url : null}
         refUrls={refs.map((r) => r.url)}
         maxPhotos={MAX_PHOTOS}
@@ -8575,7 +8596,7 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, photoAdvice, animateIn = true }: {
+function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
   onToggleTheme: () => void;
@@ -8597,6 +8618,8 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   onClearImage: () => void;
   webMode: "auto" | "on" | "off";
   onCycleWeb: () => void;
+  planOn: boolean;
+  onTogglePlan: (v: boolean) => void;
   photoAdvice: string;
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
@@ -8732,7 +8755,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             {/* Attaches, like every chat app's clip — drop and paste land in the same
                 place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}
             <button type="button" className="launch-attach" title={`Up to ${maxPhotos} pictures in one request. ${photoAdvice}`} onClick={() => fileRef.current?.click()}>
-              <IconPaperclip /> Photos &amp; sketches
+              <IconPaperclip /> Photos<span className="fw-more"> &amp; sketches</span>
             </button>
             <input
               ref={fileRef}
@@ -8754,7 +8777,25 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
               title="Web search for real dimensions (and product photos) before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
             >
               <IconGlobe size={13} />
-              <span className="web-state">{webMode === "auto" ? "Research · auto" : webMode === "on" ? "Research · on" : "Research · off"}</span>
+              <span className="web-state"><span className="fw-more">Research</span><span className="fw-short">Web</span> · {webMode}</span>
+            </button>
+            {/* Planning was already on by default and there was nothing anywhere saying
+                so — you typed a sentence, pressed send, and a spec card you never asked
+                for appeared. A step that runs before your build spends anything should
+                announce itself on the same row as the send button, not in a menu two
+                screens away. */}
+            <button
+              type="button"
+              className={`web-toggle plan-toggle${planOn ? " on" : ""}`}
+              onClick={() => onTogglePlan(!planOn)}
+              aria-pressed={planOn}
+              aria-label={`Plan first: ${planOn ? "on" : "off"}`}
+              title={planOn
+                ? "Plan first — you get a short spec (size, steps, and the assumptions being made for you) to check and correct BEFORE anything is generated. One cheap call; it saves rebuilds. Click to build straight away instead."
+                : "Building straight away — no spec to check first. Click to plan first."}
+            >
+              <IconChecklist size={13} />
+              <span className="web-state">Plan<span className="fw-more"> first</span> · {planOn ? "on" : "off"}</span>
             </button>
           </div>
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>

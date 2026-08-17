@@ -1880,11 +1880,16 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   /* 2vh of tail padding is desktop breathing room; on a phone it is the last 17px
      between "everything fits" and a page that scrolls for no reason. */
   .launch-col { gap: 12px; padding-bottom: 0; }
-  /* Ramps 34px → 44px across phone widths instead of sticking at the desktop floor.
-     The question IS the screen — it earns the extra size, and the room comes out of the
-     project tiles below, which were showing a 4:3 crop of a centred object on a plain
-     backdrop: the tallest thing on the screen carrying the least information per pixel. */
-  .launch-h1 { font-size: clamp(2.15rem, 9.4vw, 2.75rem); letter-spacing: -0.028em; line-height: 1.04; }
+  /* The question IS the screen, so it takes the space nothing else is using: there is a
+     deliberate margin above it, and under the old ramp the headline sat in the middle of
+     it looking stranded.
+     The CAP never applied on a phone — 9.4vw only reached the 44px ceiling at 468px, wider
+     than any handset — so the vw term is what actually sized this, and raising the cap
+     alone would have changed nothing. 11.5vw is the real edit: 37px at 320, 45px at 390,
+     50px at 430. The ceiling is now only a guard for a very wide phone.
+     Held to two lines at every width measured by harness/launchpad-widths-e2e.mjs — a
+     third line would eat the breathing room this is meant to use, not fill. */
+  .launch-h1 { font-size: clamp(2.3rem, 11.5vw, 3.4rem); letter-spacing: -0.03em; line-height: 1.03; }
   /* Supporting copy, sized like supporting copy. At 15px over three full-bleed lines this
      was the second-heaviest block on the screen — more ink than the composer it was
      introducing — and it is the one thing here that stops being useful after the first

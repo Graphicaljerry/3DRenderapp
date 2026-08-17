@@ -38,7 +38,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin, IconTools} from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin, IconTools, IconStop} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, getReasoningEffort, type LlmProviderId, type ReasoningEffort } from "../llm/llm";
@@ -815,20 +815,50 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine, mode }: {
   );
 }
 
-/** The unlabelled extra photos, as thumbnails you can drop one at a time. A count on its
- *  own ("6 reference pictures") is unusable at this size — with ten attached, throwing out
- *  the blurry one meant clearing the lot and re-picking the other nine. */
-function RefStrip({ refs, max, onRemove }: { refs: string[]; max: number; onRemove: (i: number) => void }) {
-  if (!refs.length) return null;
+/** Every attached photo, one shape, both composers.
+ *
+ *  The two boxes used to disagree about what a set of photos looks like: the first one
+ *  got a wide chip with a sentence next to it and the rest got small squares underneath,
+ *  in the Launchpad and again — differently worded, separately written — in the project.
+ *  So attaching five pictures produced two layouts depending on where you were standing,
+ *  and photo 1 read as a different KIND of thing from photos 2-5 when it is the same
+ *  kind, just first.
+ *
+ *  Now: equal thumbnails in order, the first tagged Front because it genuinely leads
+ *  (the mesh engines treat it as the front view), one count, one advice line. Individual
+ *  removal matters at this size — with ten attached, dropping the blurry one used to
+ *  mean clearing the lot and re-picking the other nine. */
+export function PhotoStrip({ urls, max, advice, onRemove, onClear, onZoom }: {
+  /** Front first, then the extras — the same order they are sent in. */
+  urls: string[];
+  max: number;
+  advice?: string;
+  onRemove: (i: number) => void;
+  onClear: () => void;
+  onZoom?: (u: string) => void;
+}) {
+  if (!urls.length) return null;
   return (
-    <div className="refstrip" aria-label="Extra reference pictures">
-      {refs.map((u, i) => (
-        <div className="refthumb" key={u}>
-          <img src={u} alt={`Reference ${i + 2}`} />
-          <button type="button" className="mv-x" aria-label={`Remove reference ${i + 2}`} onClick={() => onRemove(i)}><IconX /></button>
-        </div>
-      ))}
-      <span className="refstrip-count">{refs.length + 1} of {max}</span>
+    <div className="photostrip" aria-label="Attached reference pictures">
+      <div className="ps-thumbs">
+        {urls.map((u, i) => (
+          <div className={`refthumb${i === 0 ? " ps-front" : ""}`} key={`${i}-${u}`}>
+            <img src={u} alt={i === 0 ? "Front reference" : `Reference ${i + 1}`}
+              onClick={onZoom ? () => onZoom(u) : undefined}
+              style={onZoom ? { cursor: "zoom-in" } : undefined} />
+            {i === 0 && <span className="ps-tag">Front</span>}
+            <button type="button" className="mv-x" aria-label={i === 0 ? "Remove the front picture" : `Remove reference ${i + 1}`} onClick={() => onRemove(i)}><IconX /></button>
+          </div>
+        ))}
+      </div>
+      {/* The shooting advice is a paragraph, and a paragraph under the thumbnails buries
+          the two things this row is for — how many are attached, and how to drop them.
+          It keeps the same Hint affordance the project composer already used. */}
+      <div className="ps-foot">
+        <span className="refstrip-count">{urls.length} of {max}</span>
+        {advice && <Hint text={advice} />}
+        <button type="button" className="link sm ps-clear" onClick={onClear}>Remove all</button>
+      </div>
     </div>
   );
 }
@@ -2416,7 +2446,11 @@ function CanvasToast({ messages }: { messages: ChatMessage[] }) {
   // Only failures from this session. A saved error is a record, not an event: replaying
   // one meant every reload of the project opened with an alarm about something that had
   // already been dealt with, and no way to make it stop.
-  const newest = [...messages].reverse().find((m) => m.error && !m.replayed) ?? null;
+  //
+  // And only failures that AREN'T a reply. A failed build now stays in the transcript
+  // (see `reply`), so raising it here too would say the same thing twice — once where
+  // it belongs and once on a banner that takes itself away again.
+  const newest = [...messages].reverse().find((m) => m.error && !m.replayed && !m.reply) ?? null;
   const [dismissed, setDismissed] = useState<string | null>(null);
   useEffect(() => {
     if (!newest || newest.id === dismissed) return;
@@ -2673,6 +2707,8 @@ interface Props {
    *  exactly one tool is ever lit — see armRail(). */
   standDown: () => void;
   onRemoveAttachment: (id: string) => void;
+  /** Stop the running request — see App's abortRef. */
+  onStop: () => void;
   /** Right-click → Delete on the part itself: off the plate, project and history intact. */
   onDeleteModel: () => void;
   /** Copy a layer — same colour, same words, offset just below it. */
@@ -3154,6 +3190,9 @@ export function Workspace(p: Props) {
   const [ctx, setCtx] = useState<ContextHit | null>(null); // right-click quick-action menu
   const [renaming, setRenaming] = useState<string | null>(null); // "model" | attachment id being renamed
   const [markMode, setMarkMode] = useState(false); // "circle it and ask" draw overlay
+  // Named view slots are opt-in — see the toggle below the photo strip.
+  const [showViews, setShowViews] = useState(false);
+  const hasViews = !!(p.views.left || p.views.back || p.views.right);
   // Exactly one rail tool is ever lit. That needs two mechanisms, because tool state
   // lives in two places: Mark, Pattern and Add Logo are this component's, everything
   // else is App's. armRail() below covers the rail's own clicks; this effect covers
@@ -3605,30 +3644,49 @@ export function Workspace(p: Props) {
               </div>
             </div>
 
-            {p.imageUrl && (
+            {/* A marked screenshot is not a reference photo — it is one picture with one
+                job ("change what I circled"), so it keeps its own chip and its Measure
+                button rather than joining the strip. */}
+            {p.imageUrl && p.imageMarkup && (
               <div className="imgchip">
-                <img src={p.imageUrl} alt={p.imageMarkup ? "marked screenshot" : "reference"} />
-                <span>
-                  {p.imageMarkup ? `marked screenshot${p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change` : p.refUrls.length > 0 ? `${p.refUrls.length + 1} reference pictures` : "reference picture"}
-                  {!p.imageMarkup && <Hint text={p.photoAdvice} />}
-                </span>
-                {p.mode === "precise" && !p.imageMarkup && (
-                  <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
-                )}
+                <img src={p.imageUrl} alt="marked screenshot" />
+                <span>marked screenshot{p.imageNote ? ` · ${p.imageNote}` : ""} — describe the change</span>
                 <button aria-label="Remove reference image" onClick={p.onClearImage}><IconX /></button>
               </div>
             )}
-
-            {p.imageUrl && !p.imageMarkup && <RefStrip refs={p.refUrls} max={p.maxPhotos} onRemove={p.onRemoveRef} />}
+            {p.imageUrl && !p.imageMarkup && (
+              <>
+                <PhotoStrip
+                  urls={[p.imageUrl, ...p.refUrls]}
+                  max={p.maxPhotos}
+                  advice={p.photoAdvice}
+                  onRemove={(i) => (i === 0 ? p.onClearImage() : p.onRemoveRef(i - 1))}
+                  onClear={p.onClearImage}
+                />
+                {p.mode === "precise" && (
+                  <div className="ps-actions">
+                    <button className="imgchip-measure" title="Measure real dimensions from this photo" onClick={p.onMeasure}>Measure</button>
+                  </div>
+                )}
+              </>
+            )}
             {p.fetchingImages > 0 && (
               <div className="refstrip"><span className="refstrip-count">Fetching {p.fetchingImages === 1 ? "a picture" : `${p.fetchingImages} pictures`}…</span></div>
             )}
 
-            {/* Shown for ANY engine now: extra angles help the CAD path just as much
-                as the mesh engines (one photo leaves the far side to guesswork), and
-                hiding this in Generative meant nobody in Auto ever found it. */}
+            {/* Behind a toggle. Three empty black squares appeared the moment ANY photo
+                was attached, which reads as three things you are now expected to fill —
+                and most attachments are a sketch plus dimensions, where left/back/right
+                mean nothing. Opened by choice, or automatically once a slot is filled so
+                a restored draft never hides its own photos. */}
             {p.imageUrl && !p.imageMarkup && (
-              <MultiViewRow views={p.views} onPick={p.onPickView} onClear={p.onClearView} multiViewEngine={p.multiViewEngine} mode={p.mode} />
+              hasViews || showViews ? (
+                <MultiViewRow views={p.views} onPick={p.onPickView} onClear={p.onClearView} multiViewEngine={p.multiViewEngine} mode={p.mode} />
+              ) : (
+                <button type="button" className="link sm mv-open" onClick={() => setShowViews(true)}>
+                  Add left, back &amp; right views
+                </button>
+              )
             )}
 
             <form
@@ -3707,7 +3765,17 @@ export function Workspace(p: Props) {
                   {p.improveCtl.busy ? <span className="spinner sm" /> : <IconSparkle size={15} />}
                 </button>
                 <MicButton value={p.input} onChange={p.setInput} />
-                <button type="submit" className="send" aria-label="Send" disabled={p.status === "generating"}><IconArrowUp /></button>
+                {/* Send becomes Stop, in place. A disabled send button while a build runs
+                    was the app saying "wait" with no way to say "don't" — and every
+                    second of waiting is tokens being generated and billed. Same spot,
+                    because that is where the hand already is after pressing send. */}
+                {p.status === "generating" ? (
+                  <button type="button" className="send stop" aria-label="Stop generating" title="Stop — ends the request now, so nothing more is generated or billed" onClick={p.onStop}>
+                    <IconStop />
+                  </button>
+                ) : (
+                  <button type="submit" className="send" aria-label="Send"><IconArrowUp /></button>
+                )}
               </div>
             </form>
 
@@ -5320,6 +5388,9 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   const baseCountRef = useRef<number | null>(null);
   if (baseCountRef.current === null) baseCountRef.current = messages.length;
   const baseCount = baseCountRef.current;
+  // One list, computed once: the day separator compares against the PREVIOUS VISIBLE
+  // message, and building that with a second inline filter meant the two could disagree.
+  const visible = messages.filter((m) => !m.error || m.reply);
 
   return (
     <div className={`messages${selecting ? " selecting" : ""}`}>
@@ -5345,14 +5416,22 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
           </div>
         </div>
       )}
-      {/* Errors are STATUS, not conversation. They surface as a banner on the canvas
-          (see .canvas-toast) where the thing that failed actually is, instead of pushing
-          the conversation up the screen — sixty-one of them in a session buried it. */}
-      {messages.filter((m) => !m.error).map((m, i) => (
+      {/* An INCIDENTAL failure is status: a tool op that didn't apply, a check that
+          couldn't run. Those surface as a banner on the canvas (see .canvas-toast) where
+          the thing that failed actually is, instead of pushing the conversation up the
+          screen — sixty-one of them in a session buried it.
+
+          A failed REPLY is not status. It is the entire outcome of a request the user
+          typed and paid for, and it was going through the same filter: a build that
+          didn't compile left the transcript holding the question and nothing else — no
+          error, no reasoning, no retry — while the only explanation auto-dismissed off
+          the canvas nine seconds later. `reply` marks the messages that answer a user
+          turn; those stay, whatever they have to say. */}
+      {visible.map((m, i) => (
         <Fragment key={m.id}>
           {/* Day separator wherever the calendar date changes between stamped
               messages — the transcript spans weeks of a project's life. */}
-          {m.ts != null && new Date(m.ts).toDateString() !== new Date(messages.filter((x) => !x.error)[i - 1]?.ts ?? 0).toDateString() && (
+          {m.ts != null && new Date(m.ts).toDateString() !== new Date(visible[i - 1]?.ts ?? 0).toDateString() && (
             <div className="day-sep" role="separator">
               {new Date(m.ts).toLocaleDateString([], {
                 month: "long", day: "numeric",

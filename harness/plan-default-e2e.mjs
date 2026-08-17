@@ -73,9 +73,12 @@ await page.keyboard.press("Escape");
 
 // --- 3. every attached reference reaches the PLANNER ---
 await page.setInputFiles(".launch-composer input[type=file]", files);
-await page.waitForSelector(".launch-imgchip", { timeout: 20_000 });
-const shown = await page.locator(".launch-imgchip span").first().innerText();
-check("all three references attached", /3 reference pictures/i.test(shown), shown);
+// One PhotoStrip serves both composers now — equal thumbnails and a single count,
+// where the Launchpad used to give photo one a wide chip of its own.
+await page.waitForSelector(".launch-composer .photostrip", { timeout: 20_000 });
+const thumbs = await page.locator(".launch-composer .ps-thumbs .refthumb").count();
+const shown = await page.locator(".launch-composer .refstrip-count").first().innerText();
+check("all three references attached", thumbs === 3 && /3 of/i.test(shown), `${thumbs} thumbs, "${shown}"`);
 
 const before = (await (await fetch(`${STUB}/_stats`)).json()).length;
 await page.locator(".launch-composer textarea").fill("A wall bracket for a 32 mm pipe");

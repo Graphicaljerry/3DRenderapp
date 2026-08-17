@@ -14,6 +14,10 @@ export class GenerativeEngine implements Engine {
   // set by App before each build:
   config: { keyFor: (providerId: string) => string | undefined; proxyBase?: string } = { keyFor: () => undefined };
   onProgress: (p: GenProgress) => void = () => {};
+  /** Stop. Providers already take a signal (they poll a remote job, and pollUntil checks
+   *  it between ticks) — it just was never handed one, so a mesh run could not be called
+   *  off once started. Set by App per build, alongside onProgress. */
+  signal: AbortSignal | undefined = undefined;
 
   async build(input: BuildInput): Promise<EngineResult> {
     if (input.kind !== "gen") throw new Error("The generative engine expects an image or text request.");
@@ -40,6 +44,7 @@ export class GenerativeEngine implements Engine {
         texture: input.texture,
       },
       this.onProgress,
+      this.signal,
     );
     const { geometry, dims, texture } = await glbToGeometry(glb);
     return {

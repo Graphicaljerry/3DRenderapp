@@ -4,9 +4,12 @@ name: Deploy Moldable to GitHub Pages
 on:
   push:
     branches: [main]
-    paths:
-      - "moldable-lite/**"
-      - ".github/workflows/deploy-pages.yml"
+    # Deliberately NOT path-filtered. The in-app version is the commit COUNT, so a
+    # docs-only commit advances the number everywhere except the deployed site — and
+    # then "shipped build 457" and a site reading v456 are both true, which is worse
+    # than either being wrong. Every push to main deploys, so the number in the status
+    # bar is always the number of the commit that built it. A docs-only rebuild costs
+    # about two minutes of CI; a version number nobody can trust costs more.
   workflow_dispatch:
 
 permissions:

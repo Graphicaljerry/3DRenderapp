@@ -700,6 +700,11 @@ button:disabled { cursor: default; }
 @keyframes mic-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 45%, transparent); } 50% { box-shadow: 0 0 0 7px transparent; } }
 @media (prefers-reduced-motion: reduce) { .mic.on { animation: none; } }
 .send:disabled { opacity: 0.5; cursor: default; }
+/* Stop wears the same circle as Send — same size, same place, so the button doesn't jump
+   under the cursor at the exact moment it changes job. The colour is what changes: this
+   is the one control that ends something rather than starting it. */
+.send.stop { background: var(--danger); }
+.send.stop:hover { background: color-mix(in srgb, var(--danger) 84%, #000); }
 
 /* ---------- viewer ---------- */
 .viewer-head {
@@ -1584,6 +1589,24 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .refthumb { position: relative; width: 40px; height: 40px; border-radius: var(--r-sm); overflow: hidden; border: 1px solid var(--bord); }
 .refthumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .refstrip-count { font-size: var(--fs-tiny); color: var(--subt); margin-left: 2px; }
+/* One attachment layout for both composers (see PhotoStrip). Equal squares in a wrapping
+   row, then a single foot line carrying the count, the shooting advice and Remove all —
+   so the set reads as a set, and the first photo is marked rather than shaped
+   differently. */
+.photostrip { margin: 8px 12px 0; }
+.ps-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+.ps-thumbs .refthumb { width: 44px; height: 44px; }
+.refthumb.ps-front { border-color: var(--accent); }
+.ps-tag {
+  position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
+  font-size: 9px; line-height: 13px; letter-spacing: .02em;
+  background: var(--accent); color: var(--on-accent);
+}
+.ps-foot { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 5px; }
+.ps-foot .ps-clear { margin-left: auto; padding: 0; font-size: var(--fs-sm); }
+.ps-actions { margin: 6px 12px 0; }
+/* The opt-in door to the named view slots. */
+.mv-open { display: inline-block; margin: 6px 12px 0; padding: 0; font-size: var(--fs-sm); }
 /* Multi-view reference angles (generative). */
 .mv { margin: 6px 12px 0; }
 .mv-slots { display: flex; gap: 6px; }
@@ -1756,7 +1779,16 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   .launch-composer-foot .fw-short { display: inline; }
   .launch-composer-foot .launch-attach { padding: 5px 7px; }
   .launch-composer-foot .web-toggle { padding: 0 7px; }
+  /* The 44px touch size the in-project composer gives this button would cost the
+     options chip its state readout on a 320px row, and that chip is the only thing
+     saying what the next build will do. 34px still clears the 32px this row's other
+     controls run at, and the chip keeps its words. */
+  .launch-composer-foot .improve { width: 34px; height: 34px; }
 }
+/* Sits with the paperclip and the options chip, not with the send button — it acts on
+   what is IN the box, like the clip does. */
+.launch-composer-foot .improve { width: 30px; height: 30px; }
+.launch-improve-note { margin: 8px 4px 0; }
 /* One options chip replaced three controls, so the row has room again — but the label
    grows with what is off-default ("Sculpted model · No research · No plan"), which is
    exactly when it must not reach the send button. Truncate rather than overrun: the

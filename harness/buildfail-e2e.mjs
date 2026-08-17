@@ -11,14 +11,20 @@
 //   3. the reasoning the user paid for is kept, not discarded
 //   4. the app returns to idle so the next request can be sent
 //
-// STATUS: checks 1 and 3 FAIL today. This is the reproduction, committed before the fix.
-// Established so far — the app does NOT hang (it returns to idle, the composer re-enables,
-// no uncaught exception), and the user's own message survives. What is lost is the
-// assistant's side of the exchange: the transcript ends up with the request and no reply
-// at all. The outer catch in sendInner rewrites the placeholder by id with the error text,
-// and friendlyNet passes a non-network message through unchanged, so on paper it should
-// render — it does not, and why is still open. Do not "fix" this by writing a second
-// error bubble without finding out where the first one goes.
+// FIXED. The reply was never lost — it was written correctly and then filtered out of
+// the render. The chat list mapped `messages.filter((m) => !m.error)`, on the reasoning
+// that "errors are STATUS, not conversation" and belong on a canvas banner instead. True
+// of a tool op that didn't apply; false of a build that failed, which IS the outcome of
+// a request the user paid for. The banner also auto-dismisses after nine seconds and
+// takes the reasoning with it, so the whole exchange was gone within a minute.
+//
+// `ChatMessage.reply` now marks the messages that answer a user turn: those stay in the
+// transcript whatever they have to say, incidental errors still go to the banner, and
+// nothing appears in both places. The flag rides through save/load too — without that it
+// vanished again on the next reopen.
+//
+// The lesson for the next reader: the bug was in the RENDER, not the send path. Chasing
+// it in sendInner (where the catch demonstrably does the right thing) is a dead end.
 import { chromium } from "playwright";
 
 const STUB = "http://localhost:8899";

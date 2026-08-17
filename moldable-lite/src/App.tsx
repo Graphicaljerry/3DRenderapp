@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Workspace, FILAMENT_SWATCHES, AnchoredMenu } from "./components/Workspace";
+import { Workspace, FILAMENT_SWATCHES, AnchoredMenu, PhotoStrip } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { whenAgo } from "./lib/when";
 import { markActive, clearActive, sessionIsFresh } from "./lib/session";
@@ -17,6 +17,7 @@ import type { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp, SolidOp } from "./engine/types";
 import { MODELS, type ApiMsg, type MsgPart } from "./llm/anthropic";
 import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type LlmSettings, type LlmProviderId, type ReasoningEffort } from "./llm/llm";
+import { isAbort } from "./llm/openaiCompat";
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
 import { localSupported, localDownloaded } from "./llm/local";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
@@ -50,7 +51,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconSun, IconMoon, IconSliders } from "./components/icons";
+import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconSun, IconMoon, IconSliders, IconSparkle } from "./components/icons";
 import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
@@ -142,6 +143,15 @@ export type ChatMessage = {
   /** Read back from the saved project rather than said just now. Alerts are about what
    *  is happening, so replaying one on load announces an old failure as a new one. */
   replayed?: boolean;
+  /** This message IS the answer to something the user asked — the reply that a send
+   *  posted, not a receipt or an alert the app raised on its own.
+   *
+   *  It exists to separate two things that were both called "error": a tool op that
+   *  didn't apply (status — belongs on the canvas, next to the thing that failed) and a
+   *  request that came back empty-handed (the outcome — belongs in the transcript, with
+   *  the reasoning that was paid for and a Retry to act on). The chat used to drop every
+   *  `error` message, so a build that wouldn't compile left the question standing alone. */
+  reply?: boolean;
   model?: string; // which AI produced this reply (shown small under the bubble)
   // While streaming, the bubble is a step timeline: `steps` are the COMPLETED stages
   // (checked off, connector line drawn) and `text` is the ACTIVE one — so in-place
@@ -1772,6 +1782,20 @@ export default function App() {
   // Improve-this-prompt, run from the composer. `improveBefore` holds what the user
   // actually typed so the rewrite is one tap from being undone — a rewrite you cannot
   // take back is a rewrite you have to proofread before every send.
+  /** Stop. Every AI call for the current request hangs off this one controller, so one
+   *  press ends the whole request — including the attempt-2 and attempt-3 retries, which
+   *  is where a stuck build spends most of its money.
+   *
+   *  Aborting is the ONLY way to stop paying: a provider bills for what it generates, so
+   *  letting a stream run to completion and ignoring the result costs exactly as much as
+   *  using it. The signal reaches fetch itself (see openaiCompat/anthropic). */
+  const abortRef = useRef<AbortController | null>(null);
+  const stoppedRef = useRef(false);
+  function stopGenerating() {
+    if (!abortRef.current) return;
+    stoppedRef.current = true;
+    abortRef.current.abort();
+  }
   const [improving, setImproving] = useState(false);
   const [improveBefore, setImproveBefore] = useState<string | null>(null);
   const [improveNote, setImproveNote] = useState<string | null>(null);
@@ -1864,6 +1888,10 @@ export default function App() {
   function toChatTurn(m: ChatMessage) {
     return {
       role: m.role, text: m.text, error: m.error, image: m.image, images: m.images,
+      // `reply` rides along or a failed build disappears again the moment the project is
+      // reopened: the transcript filter would drop it, and the canvas banner skips
+      // anything replayed, so the record would exist in the store and nowhere on screen.
+      reply: m.reply,
       ts: m.ts, model: m.model, usage: m.usage, steps: m.steps, sources: m.sources,
       thinking: m.thinking && m.thinking.length > 4000 ? m.thinking.slice(0, 4000) + "…" : m.thinking,
     };
@@ -5711,10 +5739,15 @@ export default function App() {
     sendingRef.current = true;
     setImproveBefore(null); // the composer is being emptied; there is nothing left to revert
     setImproveNote(null);
+    // One controller for the whole request, retries included. Fresh per send, so a Stop
+    // pressed on the last request can't kill this one.
+    abortRef.current = new AbortController();
+    stoppedRef.current = false;
     try {
       await sendInner(promptText, forceMode, override);
     } finally {
       sendingRef.current = false;
+      abortRef.current = null;
       setGenProgress(null); // the canvas goes back to showing the model, not the build
     }
   }
@@ -5864,6 +5897,39 @@ export default function App() {
     void send(withAnswers ? applyAnswers(c.prompt, c.questions, c.answers) : c.prompt, undefined, { skipClarify: true });
   }
 
+  /** The rewrite itself, with no opinion about which box it came from.
+   *
+   *  Both composers improve prompts and only one of them ever had the button: the
+   *  Launchpad — where the FIRST description of a part gets written, and the one most
+   *  likely to be two vague words — had none at all, which is what "the improve button
+   *  hasn't been working" turned out to mean. Returns a note instead of throwing, since
+   *  every failure here is a thing to say rather than a thing to handle. */
+  async function refineText(before: string): Promise<{ improved?: string; note?: string }> {
+    let img: { dataBase64: string; mediaType: string } | undefined;
+    if (image) {
+      try {
+        const du = await blobToDataURL(image.blob);
+        img = { dataBase64: du.split(",")[1], mediaType: image.blob.type || "image/png" };
+      } catch { /* the photo wouldn't decode here — improve from the text alone */ }
+    }
+    const ref = await refineRequest(
+      before,
+      llm.provider === "anthropic" ? { ...llm, model } : llm,
+      { anthropic: key, ...llmKeys },
+      effectiveProxy,
+      {
+        image: img,
+        canvas: result && project ? `the part "${project.name}"` : undefined,
+        convo: chatDigest() || undefined,
+        engine: mode === "generative" ? "mesh" : "cad",
+      },
+    );
+    const next = ref?.improved.trim();
+    if (!ref) return { note: "Couldn't reach the AI to rewrite that — send it as it is, or try again." };
+    if (!next || next.toLowerCase() === before.toLowerCase()) return { note: "Already specific enough to build." };
+    return { improved: next };
+  }
+
   /** Composer's Improve button. Rewrites what is typed into something specific enough to
    *  build and keeps the original one tap away — this is a button rather than a silent
    *  always-on pass precisely so the words that get built are words the user saw. */
@@ -5873,29 +5939,20 @@ export default function App() {
     setImproving(true);
     setImproveNote(null);
     try {
-      let img: { dataBase64: string; mediaType: string } | undefined;
-      if (image) {
-        try {
-          const du = await blobToDataURL(image.blob);
-          img = { dataBase64: du.split(",")[1], mediaType: image.blob.type || "image/png" };
-        } catch { /* improve from the text alone */ }
-      }
-      const ref = await refineRequest(
-        before,
-        llm.provider === "anthropic" ? { ...llm, model } : llm,
-        { anthropic: key, ...llmKeys },
-        effectiveProxy,
-        {
-          image: img,
-          canvas: result && project ? `the part "${project.name}"` : undefined,
-          convo: chatDigest() || undefined,
-          engine: mode === "generative" ? "mesh" : "cad",
-        },
-      );
-      const next = ref?.improved.trim();
-      if (!ref) setImproveNote("Couldn't reach the AI to rewrite that — send it as it is, or try again.");
-      else if (!next || next.toLowerCase() === before.toLowerCase()) setImproveNote("Already specific enough to build.");
-      else { setImproveBefore(before); setInput(next); }
+      const { improved, note } = await refineText(before);
+      if (improved) { setImproveBefore(before); setInput(improved); }
+      else setImproveNote(note ?? null);
+    } finally {
+      setImproving(false);
+    }
+  }
+  /** Same rewrite, from the front door. The Launchpad owns its own draft, so it gets the
+   *  text back rather than having its box written to from here. */
+  async function improveDraft(before: string): Promise<{ improved?: string; note?: string }> {
+    if (improving) return {};
+    setImproving(true);
+    try {
+      return await refineText(before);
     } finally {
       setImproving(false);
     }
@@ -5949,7 +6006,7 @@ export default function App() {
     setInput("");
     setMessages((m) => [...m,
       { id: userMsgId, ts: Date.now(), role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
-      { id: placeholderId, ts: Date.now(), role: "assistant", text: "Reading your request…", streaming: true },
+      { id: placeholderId, ts: Date.now(), role: "assistant", text: "Reading your request…", streaming: true, reply: true },
     ]);
     // Advancing to a new stage checks the current one off into `steps` (the timeline
     // draws its connector line); writing `text` directly instead updates the active
@@ -6291,6 +6348,7 @@ export default function App() {
 
       const genEngine = await getGenEngine();
       genEngine.config = { keyFor: (id) => providerKeys[id] || undefined, proxyBase: effectiveProxy };
+      genEngine.signal = abortRef.current?.signal; // Stop reaches the polling loop too
       genEngine.onProgress = (pr) =>
         // First tick checks "Preparing…" off the step timeline; the rest rewrite the
         // active row in place so queue/percent updates don't grow the list.
@@ -6330,6 +6388,14 @@ export default function App() {
         // end when a KEYED engine can take the same request — retry there automatically,
         // once, and say so. Never falls back for real config errors or non-HF failures.
         const msg = String(err?.message ?? err);
+        // Stopped on purpose: say so and stop, rather than reporting the abort as a
+        // provider failure — and never fall through to the "retry on a paid engine"
+        // branch below, which would spend money answering a request the user cancelled.
+        if (stoppedRef.current || isAbort(err)) {
+          setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: "Stopped. The generation was cancelled — if the engine had already started, the provider may still bill for that run.", streaming: false } : x)));
+          setStatus("idle");
+          return;
+        }
         const hfRejected = ge.provider === "hf" && /free GPU rejected|GPU minutes|anonymous quota is tiny|free GPU queue/i.test(msg);
         const alt = hfRejected && !override?.genEng
           ? pickAutoGenEngine({ hasImage: !!genImage, prompt: p, hasKey: (id) => !!providerKeys[id] })
@@ -6690,7 +6756,7 @@ export default function App() {
         // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
         const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
         pushStep(`Writing the change with ${shortModelName(effLlm.model)} (edit mode — only the lines that change)…`);
-        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken, onThinking: onThink, onUsage }, effectiveProxy);
+        const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
         finalRaw = raw;
         const newCode = hasEditBlocks(raw) ? applyEditBlocks(currentCode, parseEditBlocks(raw)) : extractJsBlock(raw);
         if (newCode && newCode.trim() && newCode !== currentCode) {
@@ -6738,7 +6804,7 @@ export default function App() {
           ? `Writing the ${kind === "replicad" ? "CAD program" : "model spec"} with ${shortModelName(effLlm.model)}…`
           : `Attempt ${attempt} — feeding the build error back so the model can fix its code…`);
         try {
-          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage }, effectiveProxy);
+          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
         } catch (err: any) {
           // Cloud brain unreachable + the on-device model is already on this machine →
           // answer locally instead of failing (works fully offline).
@@ -6750,7 +6816,7 @@ export default function App() {
             const note = { id: mid(), ts: Date.now(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
             return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
           });
-          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage }, effectiveProxy);
+          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
         }
         finalRaw = raw;
         try {
@@ -6790,7 +6856,18 @@ export default function App() {
         }
       }
     } catch (err: any) {
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: friendlyNet(String(err?.message ?? err)), error: true, streaming: false, thinking: thinkTrail() || undefined } : x)));
+      // Stopped on purpose is not a failure. It gets a plain bubble rather than an error
+      // one, and keeps the reasoning that was already paid for — the whole point of
+      // stopping is that you keep what you bought and buy no more.
+      const stopped = stoppedRef.current || isAbort(err);
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? {
+        ...x,
+        text: stopped ? "Stopped. Nothing was built — edit your request and send it again." : friendlyNet(String(err?.message ?? err)),
+        error: !stopped,
+        streaming: false,
+        thinking: thinkTrail() || undefined,
+        usage: msgUsage(),
+      } : x)));
     } finally {
       if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }]; // already normalised above
       setStatus("idle");
@@ -6812,12 +6889,6 @@ export default function App() {
     } finally {
       setStatus("idle");
     }
-  }
-
-  /** Enter without any key: straight to the free generative engine. */
-  function enterFree() {
-    setEntered(true);
-    setMode("generative");
   }
 
   /** One tap on a gallery card: build the canned parametric program — no AI, no key.
@@ -7314,7 +7385,7 @@ export default function App() {
     setProject(p);
     setMessages((p.chat ?? []).map((c) => ({
       id: mid(), ts: c.ts ?? Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images,
-      model: c.model, usage: c.usage, steps: c.steps, thinking: c.thinking, sources: c.sources,
+      model: c.model, usage: c.usage, steps: c.steps, thinking: c.thinking, sources: c.sources, reply: c.reply,
       replayed: true,
     })));
     setPins(p.pins ?? []);
@@ -7433,10 +7504,9 @@ export default function App() {
     return (
       <>
       <Launchpad
-        model={model}
+        improve={{ busy: improving, run: improveDraft }}
         theme={theme}
         onToggleTheme={() => setThemePrefState(theme === "dark" ? "light" : "dark")}
-        onContinue={saveKey}
         onExample={loadExample}
         onAllTemplates={() => { setEntered(true); setShowTemplates(true); }}
         onTemplate={(t) => void loadTemplate(t)}
@@ -7452,7 +7522,6 @@ export default function App() {
         cloudOffline={cloudOffline}
         onSignIn={() => setShowSignInModal(true)}
         onFirstInput={maybePromptSignIn}
-        onFree={enterFree}
         // A launchpad ask always routes: the front door has no engine switch, so a pref
         // pinned in some earlier session must not silently steer this build. Auto is
         // re-assertable in one tap from the workspace seg once inside.
@@ -7736,6 +7805,7 @@ export default function App() {
         onDuplicateAttachment={(id: string) => void duplicateLayer(id)}
         standDown={standDownTools}
         onRemoveAttachment={removeAttachment}
+        onStop={stopGenerating}
         onDeleteModel={deleteModel}
         partCount={partCount}
         separated={separated}
@@ -8965,17 +9035,14 @@ function LaunchOptions({ engine, onEngine, webMode, onCycleWeb, planOn, onToggle
   );
 }
 
-function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, animateIn = true }: {
-  model: string;
+function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
-  onContinue: (k: string, m: string) => void;
   onExample: () => void;
   onAllTemplates: () => void;
   onTemplate: (t: Template) => void;
   onGuided: () => void;
   onSkip: () => void;
-  onFree: () => void;
   onSubmit: (text: string, engine: ModePref) => void;
   imageUrl: string | null;
   refUrls: string[];
@@ -8990,6 +9057,9 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   planOn: boolean;
   onTogglePlan: (v: boolean) => void;
   photoAdvice: string;
+  /** Rewrite the draft into something buildable. Returns the new text, or a note saying
+   *  why it didn't — the box is written by the Launchpad, never from outside it. */
+  improve: { busy: boolean; run: (text: string) => Promise<{ improved?: string; note?: string }> };
   resume?: { id: string; name: string } | null;
   onResume?: () => void;
   recent?: { id: string; name: string; engine: string; thumb?: string; at: number }[];
@@ -9003,8 +9073,18 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
   animateIn?: boolean;
 }) {
   const [draft, setDraft] = useState("");
-  const [k, setK] = useState("");
-  const [m, setM] = useState(model);
+  // The rewrite's own state is local because the box is: `improveBefore` is what was
+  // typed, kept so the rewrite is one tap from being undone.
+  const [improveBefore, setImproveBefore] = useState<string | null>(null);
+  const [improveNote, setImproveNote] = useState<string | null>(null);
+  async function runImprove() {
+    const before = draft.trim();
+    if ((!before && !imageUrl) || improve.busy) return;
+    setImproveNote(null);
+    const { improved, note } = await improve.run(before);
+    if (improved) { setImproveBefore(before); setDraft(improved); }
+    else setImproveNote(note ?? null);
+  }
   /** Past the first-run tour: signed in, or enough projects behind them that the
       teaching scaffolding is just furniture between them and the composer. */
   const veteran = !!accountEmail || (recent?.length ?? 0) >= 2;
@@ -9073,31 +9153,21 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
             else onDropUrls(e.dataTransfer); // an image dragged straight off a web page
           }}
         >
+          {/* The SAME strip the project composer uses. This was a hand-written near-copy
+              of it: a wide chip for photo one and small squares for the rest, so the
+              same five pictures looked like two different things depending on which
+              side of the front door you were standing on. */}
           {imageUrl && (
-            <div className="launch-imgchip">
-              <img src={imageUrl} alt="reference" />
-              <span>
-                {refUrls.length > 0 ? `${refUrls.length + 1} reference pictures` : "reference picture"}
-                {/* The advice is most actionable right here — while re-shooting is
-                    still one tap away. */}
-                <em className="imgchip-advice">{photoAdvice}</em>
-              </span>
-              <button type="button" aria-label="Remove reference pictures" onClick={onClearImage}><IconX /></button>
-            </div>
+            <PhotoStrip
+              urls={[imageUrl, ...refUrls]}
+              max={maxPhotos}
+              advice={photoAdvice}
+              onRemove={(i) => (i === 0 ? onClearImage() : onRemoveRef(i - 1))}
+              onClear={onClearImage}
+            />
           )}
           {fetchingImages > 0 && (
             <div className="refstrip"><span className="refstrip-count">Fetching {fetchingImages === 1 ? "a picture" : `${fetchingImages} pictures`}…</span></div>
-          )}
-          {imageUrl && refUrls.length > 0 && (
-            <div className="refstrip" aria-label="Extra reference pictures">
-              {refUrls.map((u, i) => (
-                <div className="refthumb" key={u}>
-                  <img src={u} alt={`Reference ${i + 2}`} />
-                  <button type="button" className="mv-x" aria-label={`Remove reference ${i + 2}`} onClick={() => onRemoveRef(i)}><IconX /></button>
-                </div>
-              ))}
-              <span className="refstrip-count">{refUrls.length + 1} of {maxPhotos}</span>
-            </div>
           )}
           <textarea
             autoFocus
@@ -9109,6 +9179,10 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
               // whether it fires; autoFocus makes a focus trigger fire at page load).
               if (!draft && e.target.value) onFirstInput?.();
               setDraft(e.target.value);
+              // Typing again means the rewrite is no longer what's in the box, so the
+              // offer to put back "the original" would be a lie.
+              if (improveBefore !== null) setImproveBefore(null);
+              if (improveNote !== null) setImproveNote(null);
               // Grow with the text up to the CSS max-height; the scrollbar exists only
               // beyond that. Without this the box was fixed-height with overflow:auto,
               // so a gutter appeared while the box still looked mostly empty.
@@ -9155,9 +9229,39 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
               webMode={webMode} onCycleWeb={onCycleWeb}
               planOn={planOn} onTogglePlan={onTogglePlan}
             />
+            {/* The same rewrite the in-project composer has had all along. It belongs
+                HERE most of all: this is where a part gets described for the first time,
+                with nothing on the canvas to correct it against. A button rather than an
+                always-on pass, for the same reason as in there — words that become a
+                physical object should be words the user saw. */}
+            <button
+              type="button"
+              className={`improve${improve.busy ? " busy" : ""}`}
+              title="Improve this description — fills in the measurements and details a buildable request needs. Uses your reference photos too."
+              aria-label="Improve this description"
+              disabled={(!draft.trim() && !imageUrl) || improve.busy}
+              onClick={() => void runImprove()}
+            >
+              {improve.busy ? <span className="spinner sm" /> : <IconSparkle size={15} />}
+            </button>
           </div>
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>
         </form>
+        {(improveBefore !== null || improveNote) && (
+          <div className="improve-note launch-improve-note" role="status">
+            {improveBefore !== null ? (
+              <>
+                <span>Rewritten to be buildable.</span>
+                <button className="link sm" onClick={() => { setDraft(improveBefore); setImproveBefore(null); }}>Use what I wrote</button>
+              </>
+            ) : (
+              <>
+                <span>{improveNote}</span>
+                <button className="x" aria-label="Dismiss" onClick={() => setImproveNote(null)}><IconX /></button>
+              </>
+            )}
+          </div>
+        )}
         {/* Your own work outranks the samples, so it sits above them. Shown whenever
             projects EXIST rather than only when signed in — they are stored locally
             either way, and hiding a signed-out user's own parts would be a lie.
@@ -9222,27 +9326,17 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
         </section>
         )}
 
-        {/* Sign-in itself lives in the SignInModal popup now (one dialog serves every
-            entry point). What stays inline are the non-account extras that used to
-            hide behind the Sign in toggle — collapsed, so the page stays calm. */}
-        {!accountEmail && (
-        <div className="launch-signin">
-        <details className="adv">
-          <summary>Advanced — add an Anthropic key now (best CAD quality)</summary>
-          <label>Anthropic API key — exact parts, editable STEP export</label>
-          <input type="password" value={k} onChange={(e) => setK(e.target.value)} placeholder="sk-ant-…" />
-          <label>Model</label>
-          <select value={m} onChange={(e) => setM(e.target.value)}>
-            {MODELS.map((x) => (
-              <option key={x.id} value={x.id}>{x.label}{x.recommended ? " · recommended" : ""}</option>
-            ))}
-          </select>
-          <button className="ghost block" disabled={!k.trim()} onClick={() => onContinue(k, m)}>Continue with my key</button>
-          <p className="fine">No Anthropic key? Precise mode also works with a <b>free Google Gemini key</b>, OpenAI, Groq, or local Ollama — set it up later in Settings.</p>
-        </details>
-        <button className="link" onClick={onExample}>Or view the built-in example model</button>
-        </div>
-        )}
+        {/* The signed-out page used to end in five stacked links: an Anthropic key form,
+            an example link, "Sign in to sync", "Start free in generative mode" and
+            "Skip". Every one of them was a second route to somewhere the page already
+            went, and together they turned the bottom half into a settings screen you
+            had to read past.
+
+            The key form is gone because there are two better doors to the same place:
+            send a request without a key and the app asks for one, in context — or open
+            Settings, which explains every provider and its price. Pasting sk-ant-… under
+            a "What do you want to make?" headline asked for a credential before the app
+            had shown a single thing. */}
 
         {/* The footer is first-run framing: the AI-sizes caveat, the local-storage
             pitch and the free-mode offer all answer "should I trust this?", which a
@@ -9261,10 +9355,12 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
               )}
             </span>
           )}
+          {/* The two doors that aren't the composer, named for what is behind them.
+              "Skip" never said skip to WHERE, and "Start free in generative mode" was
+              the engine choice that already sits in the composer's own options chip. */}
           <span className="launch-actions">
-            <button className="launch-free" onClick={onFree}>Start free in generative mode</button>
-            {/* A visible link only — deliberately not bound to Escape, so there is one Escape contract. */}
-            <button className="link" onClick={onSkip}>Skip</button>
+            <button className="link" onClick={onExample}>See a finished example</button>
+            <button className="link" onClick={onSkip}>Open an empty workspace</button>
           </span>
         </footer>
         )}

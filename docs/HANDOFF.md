@@ -917,6 +917,72 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 458 — Stop, the reply that survives a failed build, a calmer front door
+
+Jerry: "Please fix it" — the whole open list, plus "it's still on v456".
+
+- **The v456 confusion was mine, and it is now impossible.** The in-app version is
+  `git rev-list --count HEAD` baked in at build time, and `deploy-pages.yml` was
+  path-filtered to `moldable-lite/**` — so a docs-only commit advanced the count
+  without deploying, and "shipped 457" and a site reading v456 were both true.
+  **The path filter is gone**: every push to main deploys, so the number in the
+  status bar is always the number of the commit that built it.
+
+- **Stop button.** Send becomes Stop in place (`.send.stop`, red, same circle).
+  `abortRef` in App holds ONE controller per request — retries included, which is
+  where a stuck build spends most of its money. The plumbing was nearly all
+  present: `StreamHandlers.signal` existed and `anthropic.ts` honoured it;
+  `openaiCompat.ts` passed `signal: undefined`, and `GenerativeEngine` never handed
+  providers the signal `GenFn` already accepts. **An abort must not read as a
+  network failure** — `attempt()` treats any throw from the direct fetch as CORS and
+  retries via the relay, which would re-send the request the user just cancelled;
+  `isAbort()` guards it. A stopped reply is a plain bubble, not an error one, and
+  keeps its reasoning. The mesh path says the provider may still bill a run that had
+  already started, because aborting the poll doesn't cancel a remote job.
+
+- **The vanishing reply, solved — and it was in the RENDER, not the send path.**
+  `Messages` mapped `messages.filter((m) => !m.error)`, on a reasonable-sounding
+  rule ("errors are STATUS, not conversation — 61 of them buried a session"). True
+  of a tool op that didn't apply; false of a build that failed, which IS the outcome
+  of a paid request. The canvas banner also auto-dismisses after 9 s, taking 8,000
+  tokens of reasoning with it. **`ChatMessage.reply`** marks messages that answer a
+  user turn: those stay in the transcript whatever they say, incidental errors still
+  go to the banner (`CanvasToast` now skips `reply`), nothing appears in both. The
+  flag rides through `toChatTurn`/`openProjectById` + `ChatTurn` — without that the
+  error vanished again on the next reopen. `harness/buildfail-e2e.mjs` flipped from
+  failing-on-purpose to passing.
+
+- **Improve prompt: it works, and it was never on the Launchpad.** The in-project
+  button rewrites correctly (verified end to end). The Launchpad — where a part is
+  described for the first time, with nothing on the canvas to correct it against —
+  had no button at all. `refineText()` is now the shared core; `improveInput()`
+  drives the project box, `improveDraft()` returns text for the Launchpad (which
+  owns its own draft, so its box is never written from outside).
+
+- **Composer, one shape.** New exported **`PhotoStrip`** used by BOTH composers:
+  equal thumbnails in send order, the first tagged Front, one count, one Hint, one
+  Remove all. The Launchpad had a hand-written near-copy — wide chip for photo one,
+  small squares for the rest — so the same five pictures rendered two ways depending
+  on which side of the front door you stood. **View slots are opt-in**: three empty
+  black boxes used to appear the moment any photo was attached; now a link opens
+  them, and they auto-open if a slot is already filled.
+
+- **Signed-out Launchpad.** It ended in five stacked links (Anthropic key form,
+  example link, "Sign in to sync", "Start free in generative mode", "Skip"), every
+  one a second route somewhere the page already went. The **key form is gone** — two
+  better doors exist (send without a key and the app asks in context; Settings
+  explains every provider and price), and asking for `sk-ant-…` under "What do you
+  want to make?" wants a credential before showing anything. The action row is now
+  two honestly-named doors. `onContinue`/`onFree`/`enterFree` and the draft key
+  state went with it.
+
+Probe note worth keeping: `stop-e2e.mjs` asserts the **server** saw the socket close
+(`abortedByClient`), because a stop that merely hides the result costs exactly as
+much as letting it finish. Two fixture bugs found while writing it — `req.on("close")`
+fires when the request BODY finishes uploading (use `res`), and a keyword fixture
+lives on in the conversation history and hung every later build in the session (so
+the hang is armed over HTTP via `GET /_hang` and consumed once).
+
 ## Build 456 — Opus 5 is on the list, Retry keeps your photos, the part can be deleted
 
 Jerry, three questions in one message: "Where is Opus 5? / When I click retry on the

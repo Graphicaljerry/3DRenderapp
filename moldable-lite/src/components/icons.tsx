@@ -21,6 +21,13 @@ export const IconArrowUp = () => (
     <path d="M12 19V5M5 12l7-7 7 7" />
   </svg>
 );
+/* Stop: a filled square. The universal "this is running, end it" mark — a solid shape
+   rather than an outline so it reads as an action, not another status glyph. */
+export const IconStop = ({ size = 15 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true">
+    <rect x="6.5" y="6.5" width="11" height="11" rx="1.6" fill="currentColor" />
+  </svg>
+);
 /* Export: an arrow leaving an open tray. */
 export const IconExport = ({ size = 15 }: { size?: number }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" {...base} strokeWidth={1.8}>

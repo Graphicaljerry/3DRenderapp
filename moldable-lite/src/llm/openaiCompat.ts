@@ -61,10 +61,16 @@ function endpoint(r: CompatRequest, viaRelay: boolean): string {
   return `${r.proxyBase || ""}/prox/${r.relayPrefix}${u.pathname.replace(/\/$/, "")}/chat/completions`;
 }
 
-async function post(r: CompatRequest, stream: boolean, viaRelay: boolean): Promise<Response> {
+async function post(r: CompatRequest, stream: boolean, viaRelay: boolean, signal?: AbortSignal): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (r.apiKey) headers.authorization = `Bearer ${r.apiKey}`;
-  return fetch(endpoint(r, viaRelay), { method: "POST", headers, body: body(r, stream), signal: undefined });
+  return fetch(endpoint(r, viaRelay), { method: "POST", headers, body: body(r, stream), signal });
+}
+
+/** Did this throw because the user pressed Stop? Cross-realm-safe: a DOMException from
+ *  fetch and one from a stream reader don't share a constructor. */
+export function isAbort(e: unknown): boolean {
+  return !!e && typeof e === "object" && (e as { name?: string }).name === "AbortError";
 }
 
 async function errorDetail(res: Response): Promise<string> {
@@ -138,8 +144,12 @@ async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
   let viaRelay = false;
 
   try {
-    res = await post(r, true, false);
-  } catch {
+    res = await post(r, true, false, h.signal);
+  } catch (e) {
+    // Stop is not a network failure. Without this, pressing Stop looked exactly like a
+    // CORS block and the relay fallback below cheerfully re-sent the whole request —
+    // the one outcome a stop button exists to prevent.
+    if (isAbort(e)) throw e;
     if (!canRelay) {
       throw new Error(
         `Couldn't reach ${new URL(r.baseUrl).host} from the browser (network or CORS). ` +
@@ -147,7 +157,7 @@ async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
       );
     }
     viaRelay = true;
-    res = await post(r, true, true);
+    res = await post(r, true, true, h.signal);
   }
 
   if (!res.ok) throw new Error(`${new URL(r.baseUrl).host} ${res.status}: ${await errorDetail(res)}`);
@@ -156,7 +166,7 @@ async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
     if (text) return text;
   }
   // Some gateways ignore stream:true — retry non-streaming on the same route.
-  const res2 = await post(r, false, viaRelay);
+  const res2 = await post(r, false, viaRelay, h.signal);
   if (!res2.ok) throw new Error(`${new URL(r.baseUrl).host} ${res2.status}: ${await errorDetail(res2)}`);
   const data: any = await res2.json();
   const text = data.choices?.[0]?.message?.content ?? "";

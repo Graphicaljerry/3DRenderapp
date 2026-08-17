@@ -34,10 +34,14 @@ npm run build      # typecheck + production build → dist/
 
 - **Deploy = push to `main`.** `.github/workflows/deploy-pages.yml` publishes
   `moldable-lite/` to GitHub Pages (https://graphicaljerry.github.io/3DRenderapp/)
-  on any push to main that touches it.
+  on EVERY push to main — deliberately not path-filtered, see below.
 - **The in-app version number** (v320, v321…) is just the commit count:
   `git rev-list --count HEAD`. It's baked in at build time — needs a full clone,
-  not a shallow one.
+  not a shallow one. This is why the deploy has no path filter: with one, a
+  docs-only commit advanced the number everywhere except the deployed site, so the
+  build you announced and the build the app showed disagreed by one. **The number
+  to report is the count of the commit that deployed** — check it after pushing,
+  not before.
 - Node 20+ is fine. No env vars, no secrets in the repo — the app is
   bring-your-own-key by design.
 

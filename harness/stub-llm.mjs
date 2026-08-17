@@ -30,6 +30,8 @@ const REFINE = {
 };
 
 let hits = 0;
+/** Armed by GET /_hang, consumed by the next BUILD request. See the fixture below. */
+let hangNext = false;
 // What the last few requests actually carried, so a probe can assert on the PAYLOAD
 // rather than on the UI's own count. GET /_stats returns it.
 const seen = [];
@@ -37,8 +39,14 @@ const server = createServer((req, res) => {
   // Probes cursor into `seen` by index, so a run that starts against a part-full buffer
   // slices past its own requests and reports "nothing was sent" — a failure that looks
   // like the app's and moves with how many probes ran before it. Reset first, always.
+  if (req.method === "GET" && req.url.startsWith("/_hang")) {
+    hangNext = true;
+    res.writeHead(200, { "access-control-allow-origin": "*", "content-type": "application/json" });
+    return res.end("{}");
+  }
   if (req.method === "GET" && req.url.startsWith("/_reset")) {
     seen.length = 0;
+    hangNext = false;
     res.writeHead(200, { "access-control-allow-origin": "*", "content-type": "application/json" });
     return res.end("{}");
   }
@@ -132,6 +140,32 @@ const server = createServer((req, res) => {
       const wider = /WIDER/.test(body);
       const dims = thin ? { w: wider ? 50 : 30, d: 20, t: 5 } : { w: wider ? 80 : 60, d: 40, t: 24 };
       const code = `Here is the part.\n\n\`\`\`js\nconst defaultParams = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t} };\nfunction main(replicad, params) {\n  const p = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t}, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane("XY").extrude(p.thickness);\n}\n\`\`\``;
+      // Hang the stream open and never finish it, so a probe can press Stop against a
+      // request that is genuinely in flight. The point of the fixture is the LAST line:
+      // when the browser aborts, the socket closes and we record it — the only way to
+      // tell a real abort from a client that merely ignored the answer. A stop button
+      // that doesn't close the connection still pays for every token.
+      //
+      // Armed over HTTP (GET /_hang) and consumed once, NOT keyed off a word in the
+      // prompt: the app sends the conversation with every request, so a keyword lives on
+      // in the history and silently hung every LATER build in the same session too.
+      if (hangNext) {
+        hangNext = false;
+        res.write(frame({ choices: [{ delta: { content: "Here is the part.\n\n```js\n" } }] }));
+        const slowly = setInterval(() => res.write(frame({ choices: [{ delta: { content: "// still writing\n" } }] })), 400);
+        // RES, not REQ. `req`'s close fires as soon as the request BODY has been read —
+        // which for a POST is immediately — so listening there reported every request as
+        // aborted the instant it arrived, and the probe read a stop that hadn't happened
+        // yet. `res` closes when the client actually goes away.
+        res.on("close", () => {
+          clearInterval(slowly);
+          if (!res.writableEnded) {
+            seen.push({ bytes: 0, images: 0, each: [], abortedByClient: true });
+            console.log(`[stub] ${hits} hung build aborted by client`);
+          }
+        });
+        return;
+      }
       // "SLOWBUILD" holds the reply for a beat so a probe can look at the WORKING
       // state — with the instant reply, mid-stream UI (the model tag on a running
       // request, the step timeline) is gone before Playwright can see it.

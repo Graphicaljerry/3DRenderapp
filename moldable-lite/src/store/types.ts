@@ -6,6 +6,11 @@ export interface ChatTurn {
   role: "user" | "assistant";
   text: string;
   error?: boolean;
+  /** This turn answered a request, rather than being an alert the app raised on its own.
+   *  The transcript keeps failed REPLIES and hides incidental failures (which belong on
+   *  the canvas, next to what failed) — so without this, a build that didn't compile
+   *  vanished from the chat again on the next reopen. */
+  reply?: boolean;
   image?: string; // reference-photo thumbnail (data URL)
   /** The OTHER reference photos attached to this turn. Saving only `image` meant a
    *  message sent with ten pictures came back from a reload — or from another machine —

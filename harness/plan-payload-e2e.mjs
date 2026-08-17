@@ -81,7 +81,7 @@ await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
 await page.setInputFiles(".launch-composer input[type=file]", files);
-await page.waitForSelector(".launch-imgchip", { timeout: 30_000 });
+await page.waitForSelector(".launch-composer .photostrip", { timeout: 30_000 });
 
 const before = (await (await fetch(`${STUB}/_stats`)).json()).length;
 await page.locator(".launch-composer textarea").fill("A wall bracket for a 32 mm pipe");

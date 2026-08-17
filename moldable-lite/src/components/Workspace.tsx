@@ -40,7 +40,7 @@ import type { Template } from "../cad/templates";
 import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin, IconTools} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
-import { LLM_PRESETS, type LlmProviderId } from "../llm/llm";
+import { LLM_PRESETS, getReasoningEffort, type LlmProviderId, type ReasoningEffort } from "../llm/llm";
 import { localSupported } from "../llm/local";
 import { shortModelName, AUTO_MODEL } from "../llm/openrouterModels";
 import { fitClearance, fitCalibration, type FitId } from "../llm/prompts";
@@ -430,16 +430,33 @@ function BuildOptions({ p }: { p: Props }) {
   const btn = useRef<HTMLButtonElement>(null);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const precise = p.mode === "precise";
+  // The thinking dial, out of Settings' third pane and into the menu where the other
+  // per-build levers already live. OpenRouter only, because that is the one provider
+  // whose request carries the reasoning param (llm.ts guards per model, so a model that
+  // cannot think is never sent it — the dial can't 400 anything).
+  const [think, setThinkState] = useState<ReasoningEffort>(() => getReasoningEffort());
+  const setThink = (v: ReasoningEffort) => {
+    setThinkState(v);
+    try { localStorage.setItem("moldable_or_reasoning", v); } catch { /* private mode */ }
+  };
+  const showThink = p.brain?.provider === "openrouter";
   const notes: string[] = [];
   if (p.modePref !== "generative" && p.webMode !== "auto") notes.push(p.webMode === "on" ? "Research On" : "No Research");
   if (!p.planCtl.on) notes.push("No Plan");
+  if (showThink && think !== "medium") notes.push(`Thinking · ${think === "off" ? "Off" : think[0].toUpperCase() + think.slice(1)}`);
   if (precise && p.fit !== "snug") notes.push(`Fit · ${p.fit === "loose" ? "Loose" : "Press"}`);
   return (
     <span>
       <button ref={btn} type="button" className={`web-toggle opt-trigger${notes.length ? " on" : ""}`}
         aria-haspopup="menu" aria-expanded={!!anchor}
-        title="How the next build runs — web research, plan-first, and how tightly parts fit together"
-        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
+        title="How the next build runs — web research, plan-first, thinking effort, and how tightly parts fit together"
+        /* Re-read the effort on open, not just on mount: Settings still sets the same
+           key, so a change made there would otherwise show a stale radio here until the
+           workspace remounted — two controls disagreeing about one setting. */
+        onClick={() => {
+          if (!anchor) setThinkState(getReasoningEffort());
+          setAnchor(anchor ? null : btn.current!.getBoundingClientRect());
+        }}>
         <IconSliders size={13} />
         <span className="web-state">{notes.length ? notes.join(" · ") : "Build options"}</span>
       </button>
@@ -457,6 +474,21 @@ function BuildOptions({ p }: { p: Props }) {
             <b>{p.planCtl.on ? "Plan first" : "Build straight away"}</b>
             <span>{p.planCtl.on ? "You get a short spec to check and correct before anything is generated" : "Skips the spec. One cheap call saved, a rebuild often spent"}</span>
           </button>
+          {showThink && (
+            <div className="pmenu-item pmenu-choice" role="none">
+              <b>Thinking</b>
+              <span>{think === "off" ? "The model answers directly — fastest, cheapest" : `The model reasons before writing code — ${think === "low" ? "briefly" : think === "high" ? "at length: most careful, slowest, costs the most" : "the balanced default"}`}</span>
+              <div className="pmenu-opts" role="radiogroup" aria-label="Thinking effort">
+                {(["off", "low", "medium", "high"] as const).map((v) => (
+                  <button key={v} role="radio" aria-checked={think === v} className={`pm-opt${think === v ? " on" : ""}`}
+                    title={v === "off" ? "Never send reasoning effort" : `Reasoning effort: ${v} (models that can't think are never sent it)`}
+                    onClick={() => setThink(v)}>
+                    {v[0].toUpperCase() + v.slice(1)}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {precise && (
             <>
               <div className="pmenu-sep" />
@@ -5819,7 +5851,10 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                   ))}
                 </div>
               )}
-              {m.role === "assistant" && !m.streaming && m.model && (
+              {/* Not gated on the stream finishing: the model is decided before the
+                  request goes out, and the minute you most want to know which model is
+                  writing your part is while it still is. Usage joins when it arrives. */}
+              {m.role === "assistant" && m.model && (
                 <span
                   className="msg-model"
                   /* The money stays one hover away. Credits are the readable scale;

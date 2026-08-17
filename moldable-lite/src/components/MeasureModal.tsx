@@ -1,5 +1,6 @@
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { IconX } from "./icons";
+import { useEscape } from "../lib/useEscape";
 
 // Turn a coin/card in the photo into real millimetres. All geometry is done in
 // the overlay's own pixel space: because the reference line and every measured
@@ -34,6 +35,7 @@ function nextLabel(used: Set<string>): string {
 }
 
 export function MeasureModal({ imageUrl, onApply, onClose }: { imageUrl: string; onApply: (text: string) => void; onClose: () => void }) {
+  useEscape(onClose);
   const [step, setStep] = useState<"scale" | "measure">("scale");
   const [refId, setRefId] = useState("card-long");
   const [customMm, setCustomMm] = useState(20);

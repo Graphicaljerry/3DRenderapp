@@ -917,6 +917,52 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 448 — Escape works, the model says its name while it works, thinking gets a dial
+
+Jerry: "Fix the Escape key on both modals… I still can't see what models are being used
+when auto is on… not sure if there should be an option to turn off or on Thinking as
+well. what do you think?"
+
+**Escape.** Not two modals — **six**, and none of them bound the key (Templates, Sign-in,
+Settings, Library, Measure, Extrude). `lib/useEscape.ts` is a shared subscriber STACK, not
+a listener per modal: the naive version has every open overlay's listener fire on the same
+keystroke, so a lightbox over the library takes the library down with it. Only the
+last-mounted subscriber is called. Six callers, so the abstraction is earned.
+
+**"Auto on by default" was already true.** Engine `useState<ModePref>("auto")`, webMode
+`"auto"`, plan on since 446 — all three of Jerry's asks were already the defaults, so the
+real gap was visibility, not defaults. Research now also resets per new part (`startPlanned`
+became `startFresh`, and clears `moldable_web_mode` alongside `moldable_plan`).
+
+**The model, while it works.** Careful correction to the obvious story: the model was NOT
+invisible during a response — App.tsx:6500 narrates "Writing the CAD program with <model>…"
+as a step. But that step is transient; it folds into the collapsed "Completed N steps"
+details when the reply lands, and the durable `.msg-model` tag was gated on
+`!m.streaming`. The model is resolved BEFORE the request goes out (`effLlm` after
+`pickAutoModel`), so it is now stamped on the placeholder there, and the tag renders
+during the stream — one stable place, from decision to transcript. Same on the mesh path
+in `runGen`, where it matters more: minutes and real money per run, and a mid-flight
+fallback rewrites the label so the transcript shows what actually ran.
+
+**Thinking.** A display-only on/off would have been a lie about cost — you pay for
+reasoning tokens whether or not the text is shown. A REAL control already existed and was
+buried in Settings' third pane: `moldable_or_reasoning` → OpenRouter's `reasoning: {effort}`.
+So it was surfaced, not reinvented: an Off/Low/Medium/High row in Build options beside
+Research and Plan, OpenRouter-only because that is the one provider whose request carries
+the param (`llm.ts` also guards per model, so a model that cannot think is never sent it).
+Re-read on menu OPEN, not on mount — Settings still writes the same key, and two controls
+disagreeing about one setting is worse than one buried control.
+
+Mobbin was checked for the model-attribution question: Claude puts the model in the header
+as a tappable control, WhatsApp/Meta AI as a header subtitle ("Llama 4"), Brave Leo with an
+ⓘ, Mimo as a composer chip. All keep it in persistent chrome rather than only on the
+finished message — which is the pattern adopted here, scaled to a composer row that has
+8.7px of slack at 320px and cannot take a fourth chip.
+
+Probe: `assist-visibility-e2e.mjs`, 14 checks. The stub gained a `SLOWBUILD` fixture that
+holds a reply open ~2.5s, because with an instant stub the mid-stream state is gone before
+Playwright can look at it.
+
 ## Builds 443–447 — the phone gets its hierarchy, the engine gets stated, planning gets honest
 
 **443–444 — phone hierarchy and a decluttered nav.** Jerry, from an iPad/phone: "mainly

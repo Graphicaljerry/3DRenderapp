@@ -1,4 +1,5 @@
 import { IconX } from "./icons";
+import { useEscape } from "../lib/useEscape";
 import { TEMPLATES, templateThumb, type Template } from "../cad/templates";
 import { SCULPT_GLYPHS } from "../assets/templates/sculptGlyphs";
 
@@ -27,6 +28,7 @@ function Thumb({ t }: { t: Template }) {
 
 /** Full gallery: every template as a photo card. One tap → parametric model, no AI, no key. */
 export function TemplatesModal({ onPick, onClose, busy }: { onPick: (t: Template) => void; onClose: () => void; busy: boolean }) {
+  useEscape(onClose);
   return (
     <div className="overlay" onClick={onClose}>
       <div className="card wide" onClick={(e) => e.stopPropagation()}>

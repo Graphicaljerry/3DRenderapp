@@ -118,11 +118,17 @@ const server = createServer((req, res) => {
       }
       const dims = thin ? { w: 30, d: 20, t: 5 } : { w: 60, d: 40, t: 24 };
       const code = `Here is the part.\n\n\`\`\`js\nconst defaultParams = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t} };\nfunction main(replicad, params) {\n  const p = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t}, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane("XY").extrude(p.thickness);\n}\n\`\`\``;
-      res.write(frame({ choices: [{ delta: { content: code } }] }));
-      res.write(frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 1234, completion_tokens: 321, cost: 0.00421 } }));
-      res.write("data: [DONE]\n\n");
-      res.end();
-      console.log(`[stub] ${hits} BUILD (${body.length}b)`);
+      // "SLOWBUILD" holds the reply for a beat so a probe can look at the WORKING
+      // state — with the instant reply, mid-stream UI (the model tag on a running
+      // request, the step timeline) is gone before Playwright can see it.
+      const wait = /SLOWBUILD/.test(body) ? 2500 : 0;
+      setTimeout(() => {
+        res.write(frame({ choices: [{ delta: { content: code } }] }));
+        res.write(frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 1234, completion_tokens: 321, cost: 0.00421 } }));
+        res.write("data: [DONE]\n\n");
+        res.end();
+        console.log(`[stub] ${hits} BUILD${wait ? " slow" : ""} (${body.length}b)`);
+      }, wait);
       return;
     }
     // A HISTORY-MOVE request (the revert resolver's system prompt). Emulates what a real

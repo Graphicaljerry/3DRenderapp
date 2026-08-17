@@ -44,6 +44,7 @@ Screenshots (`shot-*.png`) land beside the scripts and are gitignored.
 | `printprep-e2e.mjs`, `printpack2-e2e.mjs` | Overhang heatmap, auto-orientation, thin walls, elephant-foot chamfer, tolerance coupon, fastener presets |
 | `library-thumbs-e2e.mjs`, `library-organize-e2e.mjs`, `library-bulk-e2e.mjs` | Studio thumbnails + background upgrade; search/sort/filter/folders; multi-select delete/move |
 | `plan-default-e2e.mjs` | Plan-first: chip states the default, every new part resets to on, a browse does not, the off half really skips, all references reach the planner |
+| `assist-visibility-e2e.mjs` | Escape closes every overlay; the model is named WHILE the reply streams (stub `SLOWBUILD` fixture holds it open); the Thinking dial writes the key `llm.ts` reads; research resets to auto per part |
 | `plan-payload-e2e.mjs` | The plan request stays inside the photo byte budget on a heavy PNG sketch set (multi-MB fixtures — 1×1 pixels prove nothing here) |
 | `launchpad-widths-e2e.mjs` | The composer's chip row clears the send button at 320–414px (it slides UNDER it, so the covered part taps as Send) |
 | `flashfix-e2e.mjs`, `theme-toggle-e2e.mjs` | Reload-loop guard (sync churn) and light/dark pre-paint parity |
@@ -60,5 +61,10 @@ Screenshots (`shot-*.png`) land beside the scripts and are gitignored.
 - One-shot chat announcements get overwritten by the engine's first progress event
   within milliseconds — either keep context in every progress line (app-side rule)
   or `waitForFunction` on the persistent line, not a flash.
-- Modal overlays intercept clicks — close via the `.overlay .x` button first.
+- Modal overlays intercept clicks — Escape now closes them (build 448); before that
+  only the `.overlay .x` button or the backdrop worked.
+- "All templates" / "All projects" ENTER the workspace to float their modal, so after
+  opening one the Launchpad's own chrome is gone and its selectors time out.
+- `addInitScript(fn, arg)` passes `arg` to `fn` — a curried `seed(extra)` helper silently
+  drops the extras, and the checks then pass because the state under test was never set.
 - Keep `addInitScript` bodies plain JS (no TS syntax) — they run raw in the page.

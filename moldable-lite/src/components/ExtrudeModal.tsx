@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { IconX } from "./icons";
+import { useEscape } from "../lib/useEscape";
 import { svgInfo } from "../svg/extrude";
 
 export type SvgMode = "extrude" | "revolve" | "emboss" | "attach";
@@ -16,6 +17,7 @@ export function ExtrudeModal({
   onCreate: (mode: SvgMode, params: SvgParams) => void;
   onClose: () => void;
 }) {
+  useEscape(onClose);
   const info = svgInfo(svgText);
   const [mode, setMode] = useState<SvgMode>(initialMode ?? "extrude");
   const [sizeMm, setSizeMm] = useState(50);

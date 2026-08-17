@@ -2,6 +2,7 @@ import { IconX, IconFolder } from "./icons";
 import { useEffect, useMemo, useState } from "react";
 import { listProjects, deleteProject, duplicateProject, putProject } from "../store/projects";
 import { recordTombstone } from "../lib/cloud";
+import { useEscape } from "../lib/useEscape";
 import type { Project } from "../store/types";
 
 type SortId = "recent" | "oldest" | "name" | "versions";
@@ -12,6 +13,7 @@ function haystack(p: Project): string {
 }
 
 export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutated }: { onOpen: (p: Project) => void; onClose: () => void; currentId?: string; refreshTick?: number; onMutated?: () => void }) {
+  useEscape(onClose);
   const [items, setItems] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
   const [q, setQ] = useState("");

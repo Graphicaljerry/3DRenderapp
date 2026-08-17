@@ -4,6 +4,7 @@ import { Workspace, FILAMENT_SWATCHES } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { whenAgo } from "./lib/when";
 import { markActive, clearActive, sessionIsFresh } from "./lib/session";
+import { useEscape } from "./lib/useEscape";
 import { MeasureModal } from "./components/MeasureModal";
 import type { SvgMode, SvgParams } from "./components/ExtrudeModal";
 import { geometryToSTL } from "./print/stl";
@@ -1586,14 +1587,15 @@ export default function App() {
     setPlanOn(v);
     try { localStorage.setItem("moldable_plan", v ? "on" : "off"); } catch { /* private mode */ }
   };
-  /** Every NEW part starts by planning, whatever was chosen on the last one.
+  /** Every NEW part starts with full help — plan on, research back on auto — whatever
+   *  was chosen on the last one.
    *
-   *  "Off" used to be a permanent global setting: switch it off once, mid-project,
+   *  Both used to be permanent global settings: switch one off once, mid-project,
    *  because you knew exactly what that one edit should be, and every part you ever
-   *  started afterwards silently skipped its spec — with nothing on the Launchpad
-   *  saying so. The setting outlived the reason for it. Turning it off is now a
-   *  decision about the part in front of you, and the Launchpad's chip both states the
-   *  default and lets you drop it for the build you are about to make. */
+   *  started afterwards silently skipped its spec, or stopped looking up the real
+   *  product's dimensions — with nothing on the Launchpad saying so. The setting
+   *  outlived the reason for it. Turning either off is now a decision about the part
+   *  in front of you, and the Launchpad's chips state what will happen. */
   /** Was this trip into the workspace about a PART?
    *
    *  "All templates" and "All projects" also enter the workspace — only to float a modal
@@ -1604,10 +1606,14 @@ export default function App() {
    *  direction: walk home while the first build is still running and there is no project
    *  yet, though a part is plainly under way. */
   const partStarted = useRef(false);
-  const startPlanned = () => {
+  const startFresh = () => {
     setPlanOn(true);
+    setWebMode("auto");
     partStarted.current = false;
-    try { localStorage.removeItem("moldable_plan"); } catch { /* private mode */ }
+    try {
+      localStorage.removeItem("moldable_plan");
+      localStorage.removeItem("moldable_web_mode");
+    } catch { /* private mode */ }
   };
   const setClarify = (v: boolean) => {
     setClarifyOn(v);
@@ -1955,7 +1961,7 @@ export default function App() {
     // startNew/goHome cannot reach — neither ever runs — and without it an "off" pinned
     // mid-part in a tab you closed yesterday is still in force this morning. Coming back
     // into a WARM part keeps the pin: that is the same part, not a new one.
-    if (!warm) startPlanned();
+    if (!warm) startFresh();
     if (id) {
       // Reopen only if the last sitting is still warm. A refresh while you are working
       // keeps the part on screen, the way every other engineering tool behaves; a load
@@ -6063,6 +6069,11 @@ export default function App() {
           ? { ...x, text: `Generating mesh${costTag}… ${pr.status}`, steps: x.text.startsWith("Generating mesh") ? x.steps : [...(x.steps ?? []), x.text], streaming: true }
           : x)));
       const runGen = async (provId: string, modelId: string, label: string) => {
+        // Same rule as the CAD path: name the engine the moment it is settled, not when
+        // the mesh lands. This one matters more — a sculpt takes minutes and costs real
+        // money per run, and a fallback to a different engine mid-flight rewrites this
+        // label, so the transcript shows what actually ran rather than what was asked for.
+        setMessages((m) => m.map((x) => (x.id === ph ? { ...x, model: label } : x)));
         let res = await genEngine.build({ kind: "gen", image: genImage?.blob, views: { left: views.left?.blob, back: views.back?.blob, right: views.right?.blob }, prompt: genPrompt || undefined, provider: provId, model: modelId, texture: genTexture === "on" });
         // AI meshes carry no real-world units — engines routinely hand back a "car-sized
         // car" (a real one arrived at 1161 mm on a 320 mm bed). Print-friendly default:
@@ -6151,6 +6162,13 @@ export default function App() {
       setProviderWall(promptText);
       return;
     }
+    // The model is DECIDED here — before one token streams — so say it here. It used
+    // to appear only when the reply finished, which on Auto meant reading a minute of
+    // "Writing CAD code…" with no answer to "writing it with WHAT?", and the answer to
+    // a bad pick arriving only after the spend. The end-of-stream stamps still run:
+    // they correct this label when the request lands somewhere else (on-device
+    // fallback, retry with another model).
+    setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, model: shortModelName(effLlm.model) } : x)));
     // The kernel warm-up is deferred to post-paint idle — if a fast first message
     // beats it, boot now (same shared, memoized boot; the status pill narrates it)
     // instead of bouncing the user to "try again in a few seconds". Shadows the
@@ -7109,7 +7127,7 @@ export default function App() {
 
   function startNew() {
     localStorage.removeItem("moldable_last_project");
-    startPlanned();
+    startFresh();
     projectRef.current = null;
     setPins([]);
     setPlateOf({});
@@ -7158,7 +7176,7 @@ export default function App() {
     // Back at the front door, the next thing you start is a new part — so the chip you
     // are about to look at has to already be telling the truth about it. Only if a part
     // is what you walked away from, though; see partStarted.
-    if (partStarted.current) startPlanned();
+    if (partStarted.current) startFresh();
     // Walking out is a decision. Without this the freshness stamp is still warm, so the
     // very next reload would carry you back into the part you just left.
     clearActive();
@@ -8990,6 +9008,7 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
     reachable the moment it opens — so "your network blocks supabase.co" is the
     first thing on screen, not the aftermath of a dead OAuth hop. */
 function SignInModal({ cloudOffline, onClose }: { cloudOffline: boolean; onClose: () => void }) {
+  useEscape(onClose);
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
   const [busy, setBusy] = useState(false);
@@ -9289,6 +9308,7 @@ function SettingsModal({
   onSetClarify: (v: boolean) => void;
   onClose: () => void;
 }) {
+  useEscape(onClose);
   const [pane, setPane] = useState<SettingsPane>(initialPane ?? "ai");
   const [passphrase, setPassphrase] = useState("");
   const [syncMsg, setSyncMsg] = useState("");

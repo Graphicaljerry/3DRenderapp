@@ -118,6 +118,17 @@ const server = createServer((req, res) => {
       }
       // "WIDER" = the same part with one number moved, so a probe can see the change
       // strip compute a real before/after rather than a fresh build's size-only case.
+      // "BADCODE" = a reply the kernel will refuse: a js block with no main(). Exercises
+      // the retry-then-give-up path, which is where a real session lost its whole reply.
+      if (/BADCODE/.test(body)) {
+        const bad = "Here is the part.\n\n```js\nconst defaultParams = { width: 10 };\nconst shape = 42; // no main() at all\n```";
+        res.write(frame({ choices: [{ delta: { content: bad } }] }));
+        res.write(frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 900, completion_tokens: 120, cost: 0.002 } }));
+        res.write("data: [DONE]\n\n");
+        res.end();
+        console.log(`[stub] ${hits} BUILD bad-code (${body.length}b)`);
+        return;
+      }
       const wider = /WIDER/.test(body);
       const dims = thin ? { w: wider ? 50 : 30, d: 20, t: 5 } : { w: wider ? 80 : 60, d: 40, t: 24 };
       const code = `Here is the part.\n\n\`\`\`js\nconst defaultParams = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t} };\nfunction main(replicad, params) {\n  const p = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t}, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane("XY").extrude(p.thickness);\n}\n\`\`\``;

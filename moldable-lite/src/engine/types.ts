@@ -99,7 +99,10 @@ export type BuildInput =
   // curved face, which reads as "the entire model moved" and shows no highlight at all.
   | { kind: "code"; code: string; params?: Record<string, number>; ops?: CadOp[]; preview?: boolean; probe?: boolean }
   | { kind: "spec"; spec: ModelSpec }
-  | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string; texture?: boolean };
+  /** taskId is output-only: the engine writes the provider's job id onto the RESULT's
+   *  source so a later call (Meshy's print-repair) can name the mesh instead of
+   *  uploading it. Nothing sets it on the way in. */
+  | { kind: "gen"; image?: Blob; views?: MultiViews; prompt?: string; provider: string; model: string; texture?: boolean; taskId?: string };
 
 /** Extra reference angles (the primary photo is the "front") — used by multi-view engines. */
 export interface MultiViews {

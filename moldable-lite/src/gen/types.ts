@@ -18,6 +18,14 @@ export interface GenInput {
 
 export interface GenResult {
   glb: Blob;
+  /** The provider's own id for the job that made this mesh.
+   *
+   *  Kept so a follow-up call can name the RESULT instead of re-uploading it: Meshy's
+   *  print-repair takes an `input_task_id`, which means a mesh it just generated can be
+   *  repaired without the model ever leaving the user's machine. Sending a `model_url`
+   *  instead would mean hosting the GLB somewhere public first, which is the one thing a
+   *  local-first app should not quietly start doing. */
+  taskId?: string;
 }
 
 export type GenFn = (

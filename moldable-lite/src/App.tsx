@@ -60,6 +60,8 @@ import type { ThinWallReport } from "./print/thinwalls";
 import { PRINTERS, PRINTER_BRANDS, printerKey } from "./print/printers";
 import { PROVIDERS, getProvider, usesMultiView, pickAutoGenEngine, costLabel, costUsd } from "./gen/registry";
 import { recordSpend, spendSummary } from "./gen/ledger";
+import { meshyRepair } from "./gen/providers/meshy";
+import type { GenProgress } from "./gen/types";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { mergeProjects, mergeChanged } from "./store/merge";
@@ -2600,7 +2602,7 @@ export default function App() {
       dims: res.dims,
       glb: res.glb,
       meshXform: res.meshXform,
-      genSource: res.source.kind === "gen" ? { provider: res.source.provider, model: res.source.model, prompt: res.source.prompt } : undefined,
+      genSource: res.source.kind === "gen" ? { provider: res.source.provider, model: res.source.model, prompt: res.source.prompt, taskId: res.source.taskId } : undefined,
       splitPieces: extras?.splitPieces,
     });
     // Chat is synced separately (continuous effect) — keep whatever is there.
@@ -3074,6 +3076,56 @@ export default function App() {
   }
 
   /** One-click mesh repair: weld seams, drop bad triangles, fill holes, fix winding. */
+  /** Meshy's print-repair, for a mesh Meshy generated.
+   *
+   *  repairMesh() above welds seams and fills boundary holes and says in its own header
+   *  that it cannot do self-intersections — which is the failure sculpted meshes actually
+   *  have and the one that makes a slicer refuse the file. This hands the job to the
+   *  engine that made the mesh, by task id, so nothing is uploaded anywhere.
+   *
+   *  Only offered when there IS a task id from Meshy: repairing an imported STL or a
+   *  mesh from another engine would mean hosting the file at a public URL first, and a
+   *  local-first app should not start doing that behind a button labelled "repair". */
+  const meshyTaskId =
+    result?.source.kind === "gen" && result.source.provider === "meshy" ? result.source.taskId : undefined;
+  async function deepRepairMesh() {
+    if (!result || !meshyTaskId || status === "generating") return;
+    const key = providerKeys.meshy;
+    if (!key) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Deep repair needs your Meshy key — add it in Settings › AI engines.", error: true }]);
+      return;
+    }
+    setStatus("generating");
+    // Its own streaming row, the way a generation gets one: this is a paid call that can
+    // take a minute, so it has to look like work in progress rather than a dead button.
+    const ph = mid();
+    setMessages((m) => [...m, { id: ph, ts: Date.now(), role: "assistant", text: "Sending for print repair…", streaming: true }]);
+    const say = (t: string) => setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: t } : x)));
+    try {
+      const glb = await meshyRepair(meshyTaskId, key, effectiveProxy, (pr: GenProgress) => say(pr.status));
+      const { geometry: g, dims: d, texture } = await loadAnyMesh(glb);
+      // A real version, like the local repair: the repaired BYTES are what gets stored,
+      // so undo restores this mesh and not the broken one it replaced. The task id is
+      // carried forward — a repaired mesh is still a Meshy mesh, and re-repairing it
+      // should address the repair, not the original.
+      applyResult(
+        { kind: "generative", geometry: g, dims: d, glb, texture, meshXform: undefined, supportsStep: false,
+          source: { kind: "gen", provider: "meshy", model: "repair-printability", prompt: result.source.kind === "gen" ? result.source.prompt : undefined, taskId: meshyTaskId } },
+        project?.name ?? "Model",
+        `Repaired for printing — ${d.x} × ${d.y} × ${d.z} mm`,
+        "deep repair",
+      );
+      setMessages((m) => m.map((x) => (x.id === ph
+        ? { ...x, streaming: false, text: "Repaired for printing — watertight topology, and the self-intersections the local fix can't reach. Undo reverts it." }
+        : x)));
+    } catch (err: any) {
+      setMessages((m) => m.map((x) => (x.id === ph
+        ? { ...x, streaming: false, error: true, text: "Deep repair failed: " + String(err?.message ?? err) + " — Meshy refunds the credits on a failed task." }
+        : x)));
+    } finally {
+      setStatus("idle");
+    }
+  }
   function repairMesh() {
     if (!result || result.kind === "replicad" || status === "generating") return;
     try {
@@ -7724,6 +7776,7 @@ export default function App() {
         onSaveParams={saveParamsVersion}
         onOpenSlicer={busyExport(openSlicer)}
         onRepair={repairMesh}
+        onDeepRepair={meshyTaskId ? deepRepairMesh : undefined}
         onSimplify={simplifyMesh}
         onSplit={splitMesh}
         onFitToPlate={() => void fitModelToPlate()}

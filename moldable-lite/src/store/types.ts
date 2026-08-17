@@ -39,6 +39,10 @@ export interface GenSource {
   provider: string;
   model: string;
   prompt?: string;
+  /** The engine's own id for the job that produced this mesh. Meshy's print-repair takes
+   *  one, so keeping it is what lets a sculpted model be repaired by NAME rather than by
+   *  uploading the GLB to a public URL first. Absent on older saved projects. */
+  taskId?: string;
 }
 
 export interface Version {

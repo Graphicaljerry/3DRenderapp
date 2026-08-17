@@ -29,7 +29,7 @@ export class GenerativeEngine implements Engine {
         `${prov.label} needs a small relay server, which this hosted site doesn't have yet. The 10-minute, free fix: deploy the included Cloudflare Worker — step-by-step guide in proxy/DEPLOY.md on GitHub — then paste its URL in Settings → 3D engine → Advanced. (Running locally with npm run dev needs no setup.)`,
       );
     }
-    const { glb } = await prov.generate(
+    const { glb, taskId } = await prov.generate(
       {
         image: input.image,
         views: input.views,
@@ -47,7 +47,7 @@ export class GenerativeEngine implements Engine {
       geometry,
       dims,
       // keep the persisted source lean + key-free (drop the image blob)
-      source: { kind: "gen", prompt: input.prompt, provider: input.provider, model: input.model },
+      source: { kind: "gen", prompt: input.prompt, provider: input.provider, model: input.model, taskId },
       supportsStep: false,
       glb,
       texture,

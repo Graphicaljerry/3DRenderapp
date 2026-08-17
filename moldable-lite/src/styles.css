@@ -3511,3 +3511,13 @@ details.guide { margin-top: 10px; }
 .chg-size .chg-v { color: var(--accent-d); }
 /* The locally drawn source mark that replaced the Google favicon fetch. */
 .src-mark { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 9px; font-weight: 700; border-radius: var(--r-xs); }
+/* Grams and money in the mesh-stats overlay. The material is a picker rather than a
+   label because the answer is wrong for anyone printing PETG, and re-deriving it from
+   a settings pane two screens away is not a thing people do mid-design. */
+.ms-filament b em { font-style: normal; color: var(--subt); font-weight: 400; }
+.ms-mat { appearance: none; border: none; background: none; padding: 0; margin: 0; font: inherit; font-size: inherit; color: inherit; cursor: pointer; }
+.ms-mat:hover { color: var(--ink); text-decoration: underline; }
+.ms-mat option { background: var(--bg); color: var(--ink); }
+/* The credit cost rides inside the button rather than in a separate line of fine print —
+   a paid action should carry its price where the finger lands. */
+.dock button.ghost.sm em { font-style: normal; color: var(--subt); font-weight: 400; }

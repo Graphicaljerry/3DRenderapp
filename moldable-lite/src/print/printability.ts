@@ -26,7 +26,7 @@ export interface PrintabilityReport {
     overhangArea: number;
     ratio: number;
   };
-  volume: { approxVolume: number; signedVolume: number; note: string };
+  volume: { approxVolume: number; signedVolume: number; surfaceArea: number; note: string };
   warnings: string[];
 }
 
@@ -102,6 +102,7 @@ export function analyzePrintability(
   const ab = new THREE.Vector3(), ac = new THREE.Vector3(), faceN = new THREE.Vector3();
   let overhangTriangleCount = 0;
   let overhangArea = 0;
+  let surfaceArea = 0;
   let signedVolume = 0;
 
   for (let i = 0; i < pos.count; i += 3) {
@@ -119,6 +120,7 @@ export function analyzePrintability(
     faceN.crossVectors(ab, ac);
     const area = faceN.length() * 0.5;
     if (area > 0) faceN.normalize();
+    surfaceArea += area;
 
     const angleToUp = faceN.angleTo(up);
     if (angleToUp > Math.PI / 2) {
@@ -167,6 +169,7 @@ export function analyzePrintability(
     volume: {
       approxVolume,
       signedVolume,
+      surfaceArea,
       note: "Signed-tetrahedra sum; assumes a closed surface.",
     },
     warnings,

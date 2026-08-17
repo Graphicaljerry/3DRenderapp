@@ -7,6 +7,7 @@ import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
 import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { BuildPlan } from "../llm/plan";
+import { MATERIALS, DEFAULT_MATERIAL, DEFAULT_PRINT, DEFAULT_SPOOL, estimateFilament, materialById, fmtGrams, fmtMoney } from "../print/filament";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
@@ -1521,6 +1522,17 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
       {r && !tight && isMesh && (
         <button className="ghost sm" disabled={busy} onClick={p.onRepair}>Fix model — make it watertight</button>
       )}
+      {/* Only for a mesh the engine itself made, and only when the local pass has
+          something left to fix. The local repair welds seams and fills holes; this one
+          reaches self-intersections, which is what a sculpted mesh actually fails on and
+          what print/repair.ts says in its own header it cannot do. It costs credits, so
+          the button says so rather than surprising anyone. */}
+      {r && !tight && isMesh && p.onDeepRepair && (
+        <button className="ghost sm" disabled={busy} onClick={p.onDeepRepair}
+          title="Sends this mesh back to Meshy for a print-repair pass — watertight topology plus the self-intersections the local fix can't reach. Costs about 10 Meshy credits, refunded if the task fails. The model is named by its job id, not uploaded.">
+          Deep repair — self-intersections too <em>· ~10 credits</em>
+        </button>
+      )}
       {r && heavy && isMesh && (
         <button className="ghost sm" disabled={busy} onClick={p.onSimplify}>Simplify — halve triangles</button>
       )}
@@ -1890,16 +1902,36 @@ function BuildTag() {
   );
 }
 
-function MeshStats({ report }: { report: PrintabilityReport }) {
+function MeshStats({ report, material, onMaterial, nozzleMM }: {
+  report: PrintabilityReport; material: string; onMaterial: (id: string) => void; nozzleMM: number;
+}) {
   const heavy = report.triangleCount > HEAVY_TRIANGLES;
   const wt = report.manifold.isWatertight;
   const fit = report.bedFit;
+  const mat = materialById(material);
+  // Watertight is the precondition for the volume being real at all — a mesh with open
+  // edges has no inside, so quoting grams off it would be inventing a number.
+  const est = wt ? estimateFilament(report.volume.approxVolume, report.volume.surfaceArea, mat, { ...DEFAULT_PRINT, nozzleMM }) : null;
   return (
     <div className="mesh-stats" role="status" aria-label="Mesh and print stats">
       <div className="ms-row"><span>Triangles</span><b className={heavy ? "warn" : ""}>{report.triangleCount.toLocaleString()}{heavy ? " · heavy" : ""}</b></div>
       <div className="ms-row"><span>Watertight</span><b className={wt ? "ok" : "bad"}>{wt ? "Yes" : `${report.manifold.boundaryEdges} open`}</b></div>
       <div className="ms-row"><span>Volume</span><b>{(report.volume.approxVolume / 1000).toFixed(1)} cm³</b></div>
       <div className="ms-row"><span>Fits bed</span><b className={fit.fitsRotated ? "ok" : "bad"}>{fit.fitsAsIs ? "Yes" : fit.fitsWithRotation ? "Rotated" : "No"}</b></div>
+      {/* The two questions people actually ask before spending three hours on a print.
+          Estimated from walls + infill, not from a real toolpath, so the tooltip says
+          exactly what it leaves out rather than letting a confident number imply a
+          precision it does not have. */}
+      {est && (
+        <div className="ms-row ms-filament" title={`Estimate: ${DEFAULT_PRINT.perimeters} perimeters at ${nozzleMM} mm and ${Math.round(DEFAULT_PRINT.infill * 100)}% infill, ${mat.label} at ${mat.density} g/cm³, ${DEFAULT_SPOOL.currency}${DEFAULT_SPOOL.price} per ${DEFAULT_SPOOL.grams} g spool. Good to roughly ±20%: it excludes supports, brim and raft (so a support-heavy print uses more), and it bills both faces of a thin wall (so a hollow part reads high). Your slicer has the exact figure.`}>
+          <span>
+            <select className="ms-mat" value={material} onChange={(e) => onMaterial(e.target.value)} aria-label="Filament material">
+              {MATERIALS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </span>
+          <b>{fmtGrams(est.grams)} · {est.cost != null ? fmtMoney(est.cost, DEFAULT_SPOOL.currency) : "—"} <em>≈{Math.round(est.metres)} m</em></b>
+        </div>
+      )}
     </div>
   );
 }
@@ -2741,6 +2773,8 @@ interface Props {
   onSaveParams: () => void;
   onOpenSlicer: (t: SlicerTarget) => void;
   onRepair: () => void;
+  /** Present only when the mesh came from Meshy and can be repaired by task id. */
+  onDeepRepair?: () => void;
   onSimplify: () => void;
   onSplit: () => void;
   onFitToPlate: () => void;
@@ -3011,6 +3045,14 @@ export function Workspace(p: Props) {
   const chatResize = useRef<{ startX: number; startW: number } | null>(null);
   const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
   const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
+  /** Which filament the grams-and-cost line is quoting. Remembered, because almost
+   *  everybody prints one material for months at a time and re-picking it on every part
+   *  would make the number feel like a toy rather than an answer. */
+  const [material, setMaterialState] = useState(() => localStorage.getItem("moldable_material") ?? DEFAULT_MATERIAL);
+  const setMaterial = (id: string) => {
+    setMaterialState(id);
+    try { localStorage.setItem("moldable_material", id); } catch { /* private mode */ }
+  };
   const [showHelp, setShowHelp] = useState(false); // tools & gestures cheat-sheet overlay
   // Focus mode: every panel steps off and the model has the screen. Spline hides its UI
   // on a keystroke, Shapr3D ships an Immersive View — both exist because at some point
@@ -4587,7 +4629,7 @@ export function Workspace(p: Props) {
                   top of each other (Objects over the selection inspector, most
                   visibly). A flex column can't overlap itself. */}
               <div className="right-dock">
-                {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} />}
+                {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} material={material} onMaterial={setMaterial} nozzleMM={p.printer.nozzleMM} />}
                 {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
                 {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
                   <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} onAdjust={() => { setDockPanel("params"); setDockOpen(true); }} />

@@ -124,11 +124,13 @@ async function call(
   onProgress: (p: GenProgress) => void,
   ms: number,
   textOnly = false,
+  signal?: AbortSignal,
 ): Promise<any[]> {
   const post = await fetch(signed(`${loc.apiBase}/call/${api}`, loc.sign), {
     method: "POST",
     headers: { ...headers, "content-type": "application/json" },
     body: JSON.stringify({ data }),
+    signal,
   });
   if (!post.ok) {
     const detail = (await post.text().catch(() => "")).slice(0, 200);
@@ -137,9 +139,18 @@ async function call(
   const { event_id } = (await post.json()) as { event_id?: string };
   if (!event_id) throw new Error("The Space didn't return a job id — its API may have changed.");
 
-  const stream = await fetch(signed(`${loc.apiBase}/call/${api}/${event_id}`, loc.sign), { headers });
+  const stream = await fetch(signed(`${loc.apiBase}/call/${api}/${event_id}`, loc.sign), { headers, signal });
   if (!stream.ok || !stream.body) throw new Error(`Couldn't read the job stream (HTTP ${stream.status}).`);
   const reader = stream.body.getReader();
+
+  // Stop, on the engine most people are actually using. This is the free default every
+  // user without a paid mesh key falls back to, and it was the ONE provider that dropped
+  // the abort signal: declared with two parameters, so TypeScript accepted it as a GenFn
+  // and quietly discarded the third. Pressing Stop did nothing here for up to the full
+  // five-minute timeout, and if the job finished, the mesh the user had cancelled was
+  // delivered to the canvas anyway.
+  const onAbort = () => { try { reader.cancel(); } catch { /* already closed */ } };
+  signal?.addEventListener("abort", onAbort, { once: true });
 
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<never>((_, rej) => {
@@ -237,7 +248,7 @@ function findGlb(data: any, base: string, filePrefix: string): string | undefine
   return hits[0];
 }
 
-export const hfGenerate: GenFn = async (input, onProgress) => {
+export const hfGenerate: GenFn = async (input, onProgress, signal) => {
   if (!input.image && !input.prompt) throw new Error("Provide an image or a prompt.");
   const def = resolveSpace(input.model);
   if (!input.image && !def.supportsText) {
@@ -272,7 +283,7 @@ export const hfGenerate: GenFn = async (input, onProgress) => {
   }
 
   onProgress({ status: "queued on a free GPU (can take 30–120s)…" });
-  const result = await call(loc, def.endpoint, def.data(imagePath, input.prompt), headers, onProgress, 300_000, !input.image);
+  const result = await call(loc, def.endpoint, def.data(imagePath, input.prompt), headers, onProgress, 300_000, !input.image, signal);
 
   let glbUrl = findGlb(result, base, loc.filePrefix);
   if (!glbUrl) throw new Error(`${def.space} finished but returned no .glb — its interface may have changed. Try another free model in Settings.`);

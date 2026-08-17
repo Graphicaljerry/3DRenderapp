@@ -1619,6 +1619,25 @@ export default function App() {
     views: Partial<Record<ViewSlot, Blob>>;
   };
   const sentPhotos = useRef(new Map<string, SentPhotos>());
+  /** Drop the front photo and let the next one lead.
+   *
+   *  Its ✕ was wired straight to clearImage(), which also revokes every OTHER attached
+   *  photo and all three named view slots. So on a strip of five, removing the first one
+   *  silently took the other four with it — the exact "clear the lot and re-pick" cost
+   *  the strip was built to end, still being paid by whoever's first photo was the blurry
+   *  one. Only when nothing is left to lead does this fall through to clearImage(), where
+   *  dropping the view slots is right: extra angles of a front photo that no longer
+   *  exists are meaningless. */
+  function removeFrontPhoto() {
+    const cur = imageRef.current;
+    const rs = refsRef.current;
+    if (!cur) return;
+    if (!rs.length) { clearImage(); return; }
+    URL.revokeObjectURL(cur.url);
+    setImage({ blob: rs[0].blob, url: rs[0].url });
+    setRefs(rs.slice(1));
+  }
+
   /** Make attached photo `i` the front one, swapping it with whatever holds that slot.
    *
    *  Index 0 is load-bearing — the mesh engines read it as the front view — and until now
@@ -6839,6 +6858,13 @@ export default function App() {
           raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
         }
         finalRaw = raw;
+        // The stream is only the first half of a build. Aborting the fetch does nothing
+        // once the text has arrived, and the kernel pass that follows — an OCCT fillet or
+        // boolean on a real part — is the SLOW half, during which Stop sat on screen live
+        // and did nothing at all: no message, no state change, and the finished part
+        // delivered anyway. The worker is a Comlink call with no signal, so the honest
+        // place to check is here, between the two phases.
+        if (stoppedRef.current) throw new DOMException("Aborted", "AbortError");
         try {
           let bi: BuildInput;
           let name = "";
@@ -6853,6 +6879,12 @@ export default function App() {
           }
           pushStep("Building the solid in the CAD kernel…");
           const res = await sel.engine.build(bi);
+          // And again on the way out. The kernel runs in a Comlink worker with no signal,
+          // so a Stop pressed WHILE it is working cannot interrupt it — but it can still
+          // decide the outcome. Delivering a part the user cancelled, and stamping it as a
+          // version, is the one thing the button exists to prevent. The check above this
+          // covers a Stop during the stream; this one covers the slower half.
+          if (stoppedRef.current) throw new DOMException("Aborted", "AbortError");
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           summary = askSummary(summary, p);
@@ -7000,6 +7032,15 @@ export default function App() {
   // Rebuild the viewer from a project's HEAD (live) fields — shared by restore, undo/redo,
   // and opening a project. Does not append or persist; the caller owns that.
   async function rebuildHead(next: Project) {
+    // A project whose FIRST build failed is saved as a shell: it has a chat but no code
+    // and no versions (see the chat autosave). Rebuilding it handed the worker an empty
+    // program, which threw "must define function main(...)" — and the catch appended a
+    // fresh error turn every single time the project was opened. Those turns are hidden
+    // from the transcript (they carry no `reply`) but not from the canvas banner, so the
+    // project grew by one invisible message per reopen, forever, and greeted the user
+    // with a kernel error about code they never wrote. The generative branch below
+    // already guards its missing-mesh case the same way.
+    if (next.engine !== "generative" && !next.code?.trim() && !next.spec) return;
     seedHistory(next.engine, next.code, next.spec);
     clearImage();
     // Every version knows its own surface: restoring one shows EXACTLY what it looked
@@ -7562,6 +7603,7 @@ export default function App() {
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
         onPromote={promotePhoto}
+        onRemoveFront={removeFrontPhoto}
         onDropUrls={dropImageUrls}
         fetchingImages={fetchingImages}
         onPickFiles={pickImages}
@@ -7691,6 +7733,7 @@ export default function App() {
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
         onPromote={promotePhoto}
+        onRemoveFront={removeFrontPhoto}
         onDropUrls={dropImageUrls}
         fetchingImages={fetchingImages}
         photoAdvice={imageAdvice({ provider: llm.provider, mesh: mode === "generative" })}
@@ -9057,7 +9100,7 @@ function LaunchOptions({ engine, onEngine, webMode, onCycleWeb, planOn, onToggle
   );
 }
 
-function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPromote, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
+function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPromote, onRemoveFront, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onExample: () => void;
@@ -9072,6 +9115,8 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
   onRemoveRef: (i: number) => void;
   /** Make attached photo i the front view. */
   onPromote: (i: number) => void;
+  /** Drop the front photo; the next one takes its place. */
+  onRemoveFront: () => void;
   onDropUrls: (dt: DataTransfer) => void;
   fetchingImages: number;
   onPickFiles: (fs: File[]) => void;
@@ -9101,6 +9146,18 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
   // typed, kept so the rewrite is one tap from being undone.
   const [improveBefore, setImproveBefore] = useState<string | null>(null);
   const [improveNote, setImproveNote] = useState<string | null>(null);
+  // The box auto-grows in its onChange handler, so a rewrite written straight into state
+  // never resized it — and the CSS is overflow-y:hidden, so the tail of an improved prompt
+  // was not just clipped but unreachable. About a third of it, on a phone. The in-project
+  // composer already does exactly this for the same reason.
+  const taRef = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = taRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 260)}px`;
+    el.style.overflowY = el.scrollHeight > 260 ? "auto" : "hidden";
+  }, [draft]);
   async function runImprove() {
     const before = draft.trim();
     if ((!before && !imageUrl) || improve.busy) return;
@@ -9186,7 +9243,7 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
               urls={[imageUrl, ...refUrls]}
               max={maxPhotos}
               advice={photoAdvice}
-              onRemove={(i) => (i === 0 ? onClearImage() : onRemoveRef(i - 1))}
+              onRemove={(i) => (i === 0 ? onRemoveFront() : onRemoveRef(i - 1))}
               onClear={onClearImage}
               onPromote={onPromote}
             />
@@ -9195,6 +9252,7 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
             <div className="refstrip"><span className="refstrip-count">Fetching {fetchingImages === 1 ? "a picture" : `${fetchingImages} pictures`}…</span></div>
           )}
           <textarea
+            ref={taRef}
             autoFocus
             rows={1}
             value={draft}

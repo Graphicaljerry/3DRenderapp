@@ -1778,6 +1778,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    MUST stay after the base .launch-composer-foot rule: same specificity, so the later
    one wins, and while this block sat further up the file its gap was silently dead.
    Measured at 320/344/360/375/390/414 by harness/launchpad-widths-e2e.mjs. */
+/* Sits with the paperclip and the options chip, not with the send button — it acts on
+   what is IN the box, like the clip does. */
+.launch-composer-foot .improve { width: 30px; height: 30px; }
+.launch-improve-note { margin: 8px 4px 0; }
 @media (max-width: 760px) {
   .launch-composer-foot { gap: 6px; }
   .launch-composer-foot .fw-more { display: none; }
@@ -1790,10 +1794,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      controls run at, and the chip keeps its words. */
   .launch-composer-foot .improve { width: 34px; height: 34px; }
 }
-/* Sits with the paperclip and the options chip, not with the send button — it acts on
-   what is IN the box, like the clip does. */
-.launch-composer-foot .improve { width: 30px; height: 30px; }
-.launch-improve-note { margin: 8px 4px 0; }
 /* One options chip replaced three controls, so the row has room again — but the label
    grows with what is off-default ("Sculpted model · No research · No plan"), which is
    exactly when it must not reach the send button. Truncate rather than overrun: the
@@ -1870,7 +1870,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .lr-meta em { font-style: normal; font-size: var(--fs-tiny); color: var(--subt); line-height: 1.2; }
 /* Secondary extras box: background shift separates it — a border here would be the
    third nested hairline on this screen (page → composer → box). */
-.launch-signin { margin-top: 10px; padding: 14px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--surf) 62%, transparent); }
 
 /* ---- Launchpad on a phone ----
    There were no phone rules here at all: the desktop screen was simply squeezed into
@@ -1922,7 +1921,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   .launch-recent { gap: 6px; }
   .lr-meta { padding: 0 9px 8px; }
   /* Tertiary: an advanced aside should not carry the same weight as the shelf above it. */
-  .launch-signin { margin-top: 6px; padding: 11px 12px; }
   .launch-guided { font-size: var(--fs-sm); } /* `.adv summary` is already --fs-sm */
   /* A whole email address in a pill, on the row that also holds the wordmark and the
      theme toggle: at 390px it wrapped onto a second line and squeezed the other two
@@ -1972,8 +1970,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .launch-foot .launch-actions { display: flex; align-items: baseline; gap: 14px; margin-left: auto; }
 /* Returning user: one link, no rule above it — the section has nothing to separate. */
 .launch-foot.lean { border-top: none; padding-top: 4px; }
-.launch-free { border: none; background: none; color: var(--mut); font-size: var(--fs-sm); text-decoration: underline; padding: 0; }
-.launch-free:hover { color: var(--ink2); }
 @media (max-width: 560px) {
   .launch-main { padding: 3vh 16px 24px; }
   .launch-foot { flex-direction: column; align-items: flex-start; gap: 6px; }
@@ -3447,14 +3443,6 @@ details.guide { margin-top: 10px; }
 
 /* ---------- launchpad attachments + research photo strip ---------- */
 .launch-composer.drop textarea { border-style: dashed; border-color: var(--accent); }
-.launch-imgchip {
-  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 6px;
-  border: 1px solid var(--bord); border-radius: var(--r-md); background: var(--chrome);
-}
-.launch-imgchip img { width: 40px; height: 40px; object-fit: cover; border-radius: var(--r-sm); }
-.launch-imgchip span { flex: 1; font-size: var(--fs-md); color: var(--ink2); }
-.launch-imgchip button { border: none; background: none; color: var(--subt); cursor: pointer; padding: 2px 6px; }
-.launch-imgchip button:hover { color: var(--ink); }
 /* Photo thumbnails riding inside a chat bubble: extra uploads on a user message,
    product photos a research lookup found on its note. Small on purpose — the bubble
    stays a message, not a gallery. */
@@ -3464,10 +3452,6 @@ details.guide { margin-top: 10px; }
 
 /* Format/resolution advice inside the attachment chips — small, secondary, present
    exactly while re-shooting is still one tap away. */
-.imgchip-advice, .launch-imgchip .imgchip-advice {
-  display: block; margin-top: 2px; font-style: normal;
-  font-size: var(--fs-tiny); line-height: 1.45; color: var(--mut);
-}
 
 /* ---- Plan mode: the spec you agree before anything is generated ---------------- */
 /* Wider than a chat bubble and quietly framed — it is a document to read, not a

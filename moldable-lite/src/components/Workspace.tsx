@@ -2685,6 +2685,8 @@ interface Props {
   onRemoveRef: (i: number) => void;
   /** Make attached photo i the front view — see PhotoStrip's onPromote. */
   onPromote: (i: number) => void;
+  /** Drop the front photo; the next attached one takes its place. */
+  onRemoveFront: () => void;
   onDropUrls: (dt: DataTransfer) => void;
   fetchingImages: number;
   photoAdvice: string; // model-aware format/resolution guidance for attachments
@@ -3702,7 +3704,7 @@ export function Workspace(p: Props) {
                   urls={[p.imageUrl, ...p.refUrls]}
                   max={p.maxPhotos}
                   advice={p.photoAdvice}
-                  onRemove={(i) => (i === 0 ? p.onClearImage() : p.onRemoveRef(i - 1))}
+                  onRemove={(i) => (i === 0 ? p.onRemoveFront() : p.onRemoveRef(i - 1))}
                   onClear={p.onClearImage}
                   onPromote={p.onPromote}
                 />

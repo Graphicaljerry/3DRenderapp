@@ -171,7 +171,18 @@ export async function generateLlm(
       h.onUsage?.(u);
     },
   };
-  const out = await generateLlmRaw(s, keys, system, messages, h2, proxyBase);
+  // A STOP still costs money. The provider bills for what it generated before the socket
+  // closed, so throwing straight out of here skipped recordSpend entirely and a cancelled
+  // build landed in the ledger as nothing at all — while the reply told the user the whole
+  // point of stopping was to control spend. Whatever the stream reported (or, failing
+  // that, the estimate below) is booked either way; the error still propagates.
+  let out = "";
+  let aborted: unknown = null;
+  try {
+    out = await generateLlmRaw(s, keys, system, messages, h2, proxyBase);
+  } catch (e) {
+    aborted = e;
+  }
   // Estimate whatever the provider didn't report. Text only — base64 image payloads
   // must not be counted as characters; images cost a flat IMAGE_TOKENS each.
   let inChars = system.length;
@@ -190,6 +201,7 @@ export async function generateLlm(
   const usage: Usage = { inTok, outTok, usd, est: est && seen.usd == null };
   recordSpend(usage, h.onToken ? "build" : "utility");
   h.onUsage?.({ ...usage, final: true });
+  if (aborted) throw aborted;
   return out;
 }
 

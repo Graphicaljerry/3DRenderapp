@@ -14,9 +14,14 @@ export class GenerativeEngine implements Engine {
   // set by App before each build:
   config: { keyFor: (providerId: string) => string | undefined; proxyBase?: string } = { keyFor: () => undefined };
   onProgress: (p: GenProgress) => void = () => {};
-  /** Stop. Providers already take a signal (they poll a remote job, and pollUntil checks
-   *  it between ticks) — it just was never handed one, so a mesh run could not be called
-   *  off once started. Set by App per build, alongside onProgress. */
+  /** Stop. Set by App per build, alongside onProgress.
+   *
+   *  The keyed providers (tripo, meshy, replicate, fal) poll a remote job and pollUntil
+   *  checks the signal between ticks — they only ever needed handing one. Hugging Face
+   *  did NOT: it was declared with two parameters, which TypeScript accepts as a GenFn,
+   *  so the third argument was silently discarded. That is the free default every user
+   *  without a paid key lands on, so "Stop works on mesh runs" was false for most people
+   *  until hf.ts started honouring it too. */
   signal: AbortSignal | undefined = undefined;
 
   async build(input: BuildInput): Promise<EngineResult> {

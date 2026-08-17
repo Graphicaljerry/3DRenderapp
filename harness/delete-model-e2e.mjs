@@ -35,7 +35,7 @@ await page.addInitScript(() => {
   // "ask" is the default and the interesting one: the build lands as a proposal.
   localStorage.setItem("moldable_ai_apply", "ask");
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
 const chip = page.locator(".lo-trigger");

@@ -23,7 +23,7 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
     await new Promise((r) => setTimeout(r, 1200));
     route.continue();
   });
-  await page.goto("http://localhost:5173/");
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`);
   let sawSplash = false;
   try {
     await page.waitForSelector(".boot-splash", { timeout: 3000, state: "attached" });
@@ -61,7 +61,7 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
     });
     addEventListener("DOMContentLoaded", () => mo.observe(document.getElementById("root"), { childList: true }));
   });
-  await page.goto("http://localhost:5173/");
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`);
   await page.waitForFunction(() => window.__wasmAt > 0, { timeout: 30000 });
   const { wasmAt, uiAt, loadEnd } = await page.evaluate(() => ({
     wasmAt: window.__wasmAt,
@@ -82,7 +82,7 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
 // ---------- C: instant action preempts the deferred warm-up ----------
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  await page.goto("http://localhost:5173/");
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`);
   // Click the example link the moment it exists — before idle warm-up.
   await page.click("text=built-in example", { timeout: 15000 });
   const built = await page

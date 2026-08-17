@@ -38,7 +38,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 await page.addInitScript(() => {
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.waitForTimeout(800);
 await page.getByRole("button", { name: "Templates", exact: true }).click();

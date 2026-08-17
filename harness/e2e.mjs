@@ -11,7 +11,7 @@ const check = (name, ok, detail = "") => {
 };
 
 // 1) Entry gate → "start from a template" link opens the gallery with no key.
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.getByText(/start from a template/i).click();
 await page.waitForSelector(".overlay .tpl-grid", { timeout: 30_000 });
 check("keycard link opens gallery", true);

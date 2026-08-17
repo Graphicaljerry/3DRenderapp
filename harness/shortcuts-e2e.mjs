@@ -9,7 +9,7 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();

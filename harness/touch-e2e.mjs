@@ -10,7 +10,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 
 {
   const page = await browser.newPage({ viewport: { width: 1194, height: 834 } });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
@@ -53,7 +53,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // ---- Phone-width audit (stacked layout): nothing crosses the viewport. ----
 for (const [name, w, h] of [["iphone", 390, 844], ["iphone-max", 430, 932]]) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.waitForTimeout(600);

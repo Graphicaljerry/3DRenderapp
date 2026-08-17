@@ -23,7 +23,7 @@ for (const [tag, w, h] of [["phone 390", 390, 844], ["phone 320", 320, 812], ["i
     localStorage.setItem("moldable_theme", "dark");
     localStorage.setItem("moldable_signin_prompted", "1");
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60000 });
   await page.waitForTimeout(700);
   const m = await page.evaluate(() => {

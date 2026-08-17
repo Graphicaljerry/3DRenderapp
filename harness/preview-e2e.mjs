@@ -37,7 +37,7 @@ const versions = () => page.evaluate(async () => {
 await page.addInitScript(() => {
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();

@@ -13,7 +13,7 @@ for (const theme of ["light", "dark"]) {
   {
     const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
     await page.addInitScript((t) => localStorage.setItem("moldable_theme", t), theme);
-    await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+    await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(2500); // entry card + template thumbs settle
     await page.screenshot({ path: `${OUT}/entry-${theme}.png` });
     await page.close();
@@ -24,7 +24,7 @@ for (const theme of ["light", "dark"]) {
     await page.addInitScript((t) => {
       localStorage.setItem("moldable_theme", t);
     }, theme);
-    await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+    await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
     await enterWorkspace(page);
     await page.getByRole("button", { name: "Templates", exact: true }).click();
     await page.waitForSelector(".overlay");

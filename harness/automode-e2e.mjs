@@ -10,7 +10,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 
 // fresh context → localStorage is empty, so no stored preference → Auto is the default
 // (don't clear the pref in initScript — it runs on every reload and would break persistence)
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".modebar .seg", { timeout: 60_000 });
 
 const seg = page.locator(".modebar .seg button");

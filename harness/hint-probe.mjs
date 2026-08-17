@@ -5,7 +5,7 @@ import { enterWorkspace } from "./enter.mjs";
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 await page.addInitScript(() => { localStorage.setItem("moldable_theme", "dark"); });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();

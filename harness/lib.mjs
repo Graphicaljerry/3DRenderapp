@@ -4,7 +4,7 @@ export async function bootPage() {
   const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
-  await page.goto("http://localhost:5173/");
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`);
   // Boot the engine once (OCCT WASM fetch + init) and keep it on window.
   await page.evaluate(async () => {
     const mod = await import("/src/engine/selectEngine.ts");

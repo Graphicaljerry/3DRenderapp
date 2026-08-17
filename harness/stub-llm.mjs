@@ -245,4 +245,5 @@ const server = createServer((req, res) => {
     console.log(`[stub] ${hits} ${req.method} ${req.url} (${body.length}b)`);
   });
 });
-server.listen(8899, () => console.log("[stub] listening on 8899"));
+const STUB_PORT = Number(process.env.STUB_PORT ?? 8899);
+server.listen(STUB_PORT, () => console.log(`[stub] listening on ${STUB_PORT}`));

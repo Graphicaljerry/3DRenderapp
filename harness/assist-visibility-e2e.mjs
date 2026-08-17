@@ -41,7 +41,7 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await seedInto(page);
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
   // Sign-in FIRST, templates last: "All templates" enters the workspace to float its
@@ -75,7 +75,7 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
   await seedInto(page, { moldable_plan: "off" });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
   // The cold-load reset puts plan back ON (447's contract) — turn it off for this
@@ -122,7 +122,7 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
     moldable_llm: JSON.stringify({ provider: "openrouter", model: "openrouter/auto" }),
     moldable_llm_keys: JSON.stringify({ openrouter: "sk-or-probe" }),
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   await page.locator("button.link", { hasText: /built-in example/i }).first().click();
   await page.waitForSelector(".opt-trigger", { timeout: 120_000 });
@@ -157,7 +157,7 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await seedInto(page, { moldable_web_mode: "off" });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   const web = page.locator(".launch-composer-foot .web-toggle").first();
   check("a cold load puts research back on auto, like plan",

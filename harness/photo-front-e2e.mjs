@@ -34,7 +34,7 @@ await page.addInitScript(() => {
   localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "stub", baseUrl: "http://localhost:8899/v1" }));
   localStorage.setItem("moldable_signin_prompted", "1");
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60000 });
 await page.locator(".launch-composer input[type=file]").first().setInputFiles(P.map((buf, i) => ({ name: `p${i}.png`, mimeType: "image/png", buffer: buf })));
 await page.waitForSelector(".photostrip", { timeout: 20000 });

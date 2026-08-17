@@ -20,7 +20,7 @@ const CAT = JSON.stringify({ t: Date.now(), m: [{ id: "google/gemini-2.5-flash",
     localStorage.setItem("moldable_openrouter_models_v2", cat);
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "openrouter", model: "auto" }));
   }, CAT);
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(3000); // give the warm-up effect every chance to misbehave
   const now = await page.evaluate(() => localStorage.getItem("moldable_openrouter_models_v2"));
@@ -47,7 +47,7 @@ const CAT = JSON.stringify({ t: Date.now(), m: [{ id: "google/gemini-2.5-flash",
     localStorage.setItem("moldable_theme", "dark");
   });
   // Sample as early as possible: at domcontentloaded, BEFORE React mounts.
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   const early = await page.evaluate(() => ({
     theme: document.documentElement.dataset.theme,
     bg: document.documentElement.style.backgroundColor,

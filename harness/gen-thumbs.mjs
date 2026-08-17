@@ -11,7 +11,7 @@ mkdirSync(OUT, { recursive: true });
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // CAD only: a "mesh" template is a prompt for the generative engine, so rendering its

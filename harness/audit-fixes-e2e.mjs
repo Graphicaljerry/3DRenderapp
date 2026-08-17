@@ -48,7 +48,7 @@ const planOff = async (page) => {
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 950 } });
   await seed(page);
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   const P = [];
   for (const c of ["#0000ff", "#ff0000", "#00ff00", "#ffff00", "#ff00ff"]) {
@@ -84,7 +84,7 @@ const planOff = async (page) => {
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 950 } });
   await seed(page);
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   await planOff(page);
   await page.locator(".launch-composer textarea").fill("A SPECIFIC bracket, BADCODE please");
@@ -124,7 +124,7 @@ const planOff = async (page) => {
 {
   const page = await browser.newPage({ viewport: { width: 1280, height: 950 } });
   await seed(page);
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   await planOff(page);
   // "rounded holder" is a real OCCT fillet — the kernel pass is long enough to click in.

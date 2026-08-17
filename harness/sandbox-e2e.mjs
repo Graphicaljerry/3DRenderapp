@@ -11,7 +11,7 @@ const check = (name, ok, detail = "") => {
   if (!ok) fails.push(name);
 };
 const lastMsg = () => page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].pop()?.textContent ?? "");
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();

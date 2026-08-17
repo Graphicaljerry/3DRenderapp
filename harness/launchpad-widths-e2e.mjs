@@ -51,7 +51,7 @@ for (const width of WIDTHS) {
       }));
     };
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   await page.waitForSelector(".launch-recent", { timeout: 20_000 }).catch(() => {});
 

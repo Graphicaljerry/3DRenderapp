@@ -8,7 +8,7 @@ import { chromium } from "playwright";
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
 page.on("console", (m) => { if (m.type() === "error" && !/ERR_CONNECTION|favicon/.test(m.text())) console.error("[page]", m.text().slice(0, 200)); });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 
 const report = await page.evaluate(async () => {
   const { getEngineSelection } = await import("/src/engine/selectEngine.ts");

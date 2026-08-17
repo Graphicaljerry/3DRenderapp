@@ -18,7 +18,7 @@ await page.addInitScript(() => {
   localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "stub", baseUrl: "http://localhost:8899/v1" }));
   localStorage.setItem("moldable_signin_prompted", "1");
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60000 });
 // plan is on by default
 await page.locator(".launch-composer textarea").fill("A wall bracket for a 32 mm pipe");

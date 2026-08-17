@@ -9,7 +9,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("dialog", (d) => void d.accept("Prototypes")); // the New folder… prompt
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // Seed three projects (thumbV=2 so the background upgrader leaves them alone).

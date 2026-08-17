@@ -42,7 +42,7 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await page.addInitScript(() => {
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "mock", baseUrl: "http://127.0.0.1:8788/v1" }));
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(500);
   const ta = page.locator(".composer textarea");
@@ -67,7 +67,7 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     localStorage.setItem("moldable_geneng", JSON.stringify({ provider: "meshy", model: "meshy" }));
     localStorage.setItem("moldable_provider_keys", JSON.stringify({ meshy: "msy_mock" }));
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(500);
   await page.locator('input[type="file"]').first().setInputFiles({ name: "sketch.png", mimeType: "image/png", buffer: PNG_1x1 });
@@ -98,7 +98,7 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "openrouter", model: "auto" }));
     localStorage.setItem("moldable_llm_keys", JSON.stringify({ openrouter: "sk-or-mock" }));
   }, seeded);
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(500);
   const ta = page.locator(".composer textarea");
@@ -115,7 +115,7 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
 // ---- T4–T7 in one session: coupon card, fastener presets, voronoi, fit calibration ----
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
 
   // T4: the coupon template card exists with a real thumbnail.

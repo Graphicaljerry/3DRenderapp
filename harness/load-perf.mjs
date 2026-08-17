@@ -11,7 +11,7 @@ const CHAT = Number(process.env.CHAT ?? 40);
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
 page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // ---- Seed a realistic library -------------------------------------------------

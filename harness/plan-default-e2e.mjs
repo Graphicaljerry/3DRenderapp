@@ -45,7 +45,7 @@ await page.addInitScript(() => {
   localStorage.setItem("moldable_signin_prompted", "1");
   // Deliberately NOT seeding moldable_plan: the default is the thing under test.
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
 // --- 1. the options chip states the default, on the row with the send button ---
@@ -140,7 +140,7 @@ check("localStorage no longer pins plan off", await page.evaluate(() => localSto
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "stub", baseUrl: "http://localhost:8899/v1" }));
     localStorage.setItem("moldable_signin_prompted", "1");
   });
-  await off.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await off.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await off.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   const oc = off.locator(".lo-trigger");
   if (!/no plan/i.test(await oc.innerText())) {
@@ -175,7 +175,7 @@ check("localStorage no longer pins plan off", await page.evaluate(() => localSto
     localStorage.setItem("moldable_signin_prompted", "1");
     localStorage.setItem("moldable_plan", "off"); // pinned in a tab closed long ago
   });
-  await cold.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await cold.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await cold.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
   const cc = cold.locator(".lo-trigger");
   check("a cold load starts planned, whatever a closed tab pinned",

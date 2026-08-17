@@ -68,7 +68,7 @@ async function openSync(page) {
 
 // ---- B) Web build unchanged ----------------------------------------------------
 {
-  const page = await boot("http://localhost:5173/", false);
+  const page = await boot(`http://localhost:${process.env.PORT ?? 5173}/`, false);
   const body = await openSync(page);
   check("B1 web still offers Google / GitHub", /Continue with Google/.test(body) && /Continue with GitHub/.test(body));
   check("B2 web still offers a login link", /login link/i.test(body));

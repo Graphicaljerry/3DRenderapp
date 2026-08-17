@@ -56,12 +56,12 @@ await page.route("**/prox/tripo/**", async (route) => {
     return route.fulfill({ status: 200, contentType: "application/json", body: '{"code":0,"data":{"task_id":"t1"}}' });
   }
   if (url.includes("/task/t1"))
-    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: 0, data: { status: "success", progress: 100, output: { model: "http://localhost:5173/mockglb/model.glb" } } }) });
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ code: 0, data: { status: "success", progress: 100, output: { model: `http://localhost:${process.env.PORT ?? 5173}/mockglb/model.glb` } } }) });
   return route.fulfill({ status: 404, body: "" });
 });
 await page.route("**/mockglb/**", (route) => route.fulfill({ status: 200, contentType: "model/gltf-binary", body: GLB }));
 
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Generative (AI mesh)" }).click();
 

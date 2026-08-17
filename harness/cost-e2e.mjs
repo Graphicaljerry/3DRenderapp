@@ -53,14 +53,14 @@ await page.route("**/prox/meshy/**", async (route) => {
   if (url.includes("/openapi/v1/balance"))
     return route.fulfill({ status: 200, contentType: "application/json", body: '{"balance":1234}' });
   if (url.includes("/openapi/v2/text-to-3d/t1"))
-    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "SUCCEEDED", progress: 100, model_urls: { glb: "http://localhost:5173/mockglb/model.glb" } }) });
+    return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ status: "SUCCEEDED", progress: 100, model_urls: { glb: `http://localhost:${process.env.PORT ?? 5173}/mockglb/model.glb` } }) });
   if (url.includes("/openapi/v2/text-to-3d"))
     return route.fulfill({ status: 200, contentType: "application/json", body: '{"result":"t1"}' });
   return route.fulfill({ status: 404, body: "" });
 });
 await page.route("**/mockglb/**", (route) => route.fulfill({ status: 200, contentType: "model/gltf-binary", body: GLB }));
 
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Generative (AI mesh)" }).click();
 

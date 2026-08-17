@@ -2,7 +2,7 @@ import { chromium } from "playwright";
 import { enterWorkspace } from "./enter.mjs";
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 const tag = await page.locator(".build-tag").innerText();
 console.log("build tag:", JSON.stringify(tag));

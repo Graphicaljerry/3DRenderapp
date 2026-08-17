@@ -44,7 +44,7 @@ await page.route("**/prox/meshy/**", async (route) => {
   return route.fulfill({ status: 401, contentType: "application/json", body: '{"message":"invalid key"}' });
 });
 
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Generative (AI mesh)" }).click();
 await page.locator('input[type="file"]').first().setInputFiles({ name: "car.png", mimeType: "image/png", buffer: PNG });

@@ -11,7 +11,7 @@ const SIZES = [
 ];
 for (const [name, w, h] of SIZES) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();

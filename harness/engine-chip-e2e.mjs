@@ -19,7 +19,7 @@ const check = (name, ok, detail = "") => {
   if (!ok) fails.push(name);
 };
 
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // --- empty canvas: the picker is the thing that shows, the readout is not ---

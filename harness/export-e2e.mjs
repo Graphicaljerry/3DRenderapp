@@ -10,7 +10,7 @@ const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 const res = await page.evaluate(async () => {

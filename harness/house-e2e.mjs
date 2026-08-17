@@ -59,7 +59,7 @@ const check = (name, ok, detail = "") => {
 // ---- 1) Dormant by default: no relay configured → no "Built-in" anywhere. ----
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.locator(".modebar .mp-trigger, .modebar button").filter({ hasText: /Claude|Gemini|OpenAI|Groq|OpenRouter|Ollama|Custom/ }).first().click();
   await page.waitForTimeout(400);
@@ -75,7 +75,7 @@ const check = (name, ok, detail = "") => {
   await page.addInitScript(() => {
     localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForFunction(() => true, null, { timeout: 1000 }).catch(() => {});
   await page.waitForTimeout(800); // health check settles

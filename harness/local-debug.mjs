@@ -8,7 +8,7 @@ await page.addInitScript(() => {
   localStorage.setItem("moldable_ai_apply", "auto");
   localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "test-model", baseUrl: "http://127.0.0.1:9999/v1" }));
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.waitForTimeout(600);
 const ta = page.locator(".composer textarea");

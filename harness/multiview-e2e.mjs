@@ -42,7 +42,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 await page.addInitScript(() => {
   localStorage.setItem("moldable_house_url", "http://127.0.0.1:8789");
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // Precise (CAD) — the mode Auto lands in for a functional part.

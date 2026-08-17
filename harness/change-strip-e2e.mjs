@@ -29,7 +29,7 @@ await page.addInitScript((all) => {
   moldable_llm: JSON.stringify({ provider: "custom", model: "stub", baseUrl: "http://localhost:8899/v1" }),
   moldable_signin_prompted: "1",
 });
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
 // Plan off so the send goes straight to a build — the plan card is a different probe.

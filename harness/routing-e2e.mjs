@@ -45,7 +45,7 @@ const init = (extra = {}) => (ctxVals) => {
 {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   await page.addInitScript(init(), { moldable_geneng: JSON.stringify({ provider: "meshy", model: "meshy" }) });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(600);
   const ta = page.locator(".composer textarea");
@@ -69,7 +69,7 @@ const init = (extra = {}) => (ctxVals) => {
     moldable_geneng: JSON.stringify({ provider: "meshy", model: "meshy" }),
     moldable_provider_keys: JSON.stringify({ meshy: "msy_mock" }),
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(600);
   const ta = page.locator(".composer textarea");
@@ -92,7 +92,7 @@ const init = (extra = {}) => (ctxVals) => {
     moldable_geneng: JSON.stringify({ provider: "meshy", model: "meshy" }),
     moldable_provider_keys: JSON.stringify({ meshy: "msy_mock" }),
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.getByRole("button", { name: "Templates", exact: true }).click();
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();

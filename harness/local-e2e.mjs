@@ -47,7 +47,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // ---- A) Engine level: numeric OCCT exception → human message. ----
 {
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   const res = await page.evaluate(async () => {
     const mod = await import("/src/engine/selectEngine.ts");
@@ -73,7 +73,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
     localStorage.setItem("moldable_local_mock", "1");
     localStorage.setItem("moldable_ai_apply", "auto"); // no preview gating — keep the flow linear
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(800);
 
@@ -112,7 +112,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
     // otherwise hang against the sandbox network and mask the fallback.
     localStorage.setItem("moldable_llm", JSON.stringify({ provider: "custom", model: "test-model", baseUrl: "http://127.0.0.1:9999/v1" }));
   });
-  await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+  await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
   await page.waitForTimeout(600);
   const ta = page.locator(".composer textarea");

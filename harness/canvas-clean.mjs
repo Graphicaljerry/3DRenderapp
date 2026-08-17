@@ -7,7 +7,7 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
 const page = await browser.newPage({ viewport: { width: 1600, height: 1000 }, deviceScaleFactor: 2 });
 const THEME = process.env.THEME === "light" ? "light" : "dark";
 await page.addInitScript((t) => { localStorage.setItem("moldable_theme", t); }, THEME);
-await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
+await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
 // Empty chat shows the TemplateStrip — tap Phone stand (fall back to the Templates modal)

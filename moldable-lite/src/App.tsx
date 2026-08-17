@@ -7223,9 +7223,9 @@ export default function App() {
     }
   }
 
-  function startNew() {
+  function startNew(opts?: { fromLaunchpad?: boolean }) {
     localStorage.removeItem("moldable_last_project");
-    startFresh();
+    if (!opts?.fromLaunchpad) startFresh();
     projectRef.current = null;
     setPins([]);
     setPlateOf({});
@@ -7256,7 +7256,13 @@ export default function App() {
     setCodeBuffer("");
     setGuided(false);
     if (svgDraft) { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }
-    clearImage();
+    if (!opts?.fromLaunchpad) clearImage(); // the Launchpad's own attachments ride along
+    // An un-applied AI preview belonged to the part being left, and a new part has
+    // nothing to apply it to. Dropping it is not cosmetic: the queued-ask effect refuses
+    // to run while `pending` is set, so a preview left on the old canvas silently
+    // swallowed the next request instead of building it.
+    setPending(null);
+    pendingRef.current = null;
     setShowLibrary(false);
   }
 
@@ -7313,11 +7319,14 @@ export default function App() {
         // pinned in some earlier session must not silently steer this build. Auto is
         // re-assertable in one tap from the workspace seg once inside.
         onSubmit={(text, engine) => {
+          startNew({ fromLaunchpad: true });
           pickMode(engine);
           setEntered(true);
-          // A chosen engine is an instruction; only Auto routes (and the paid-mesh
-          // confirm still guards anything that bills).
-          void send(text, engine === "auto" ? undefined : engine, engine === "auto" ? { routeAuto: true } : undefined);
+          setQueuedAsk({
+            promptText: text,
+            forceMode: engine === "auto" ? undefined : engine,
+            override: engine === "auto" ? { routeAuto: true } : undefined,
+          });
         }}
         planOn={planOn}
         onTogglePlan={setPlan}

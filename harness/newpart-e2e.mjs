@@ -10,11 +10,11 @@
 // throws away the user's work: the new ask must land in a NEW project, and the old
 // project must still exist untouched.
 //
-// THIS PROBE FAILS TODAY, ON PURPOSE. The bug is real and unfixed: it is the regression
-// test written before the fix, not after. A first attempt — startNew() on submit plus
-// the queuedAsk hand-off the preview-promote path uses — correctly stopped the append
-// but left the second request never sending at all, so it was reverted rather than
-// shipped half-working. Whatever fixes this has to pass all six checks below.
+// Written before the fix, and it took two goes. The first attempt — startNew() on submit
+// plus the queuedAsk hand-off — stopped the append but left the second request never
+// sending, because the queue effect refuses to run while an AI preview is `pending` and
+// nothing had ever cleared one. That is a second bug in its own right, and the nastier
+// of the two: a preview left on the old canvas silently swallowed the next request.
 import { chromium } from "playwright";
 
 const STUB = "http://localhost:8899";

@@ -1931,6 +1931,17 @@ export default function App() {
       // reopened: the transcript filter would drop it, and the canvas banner skips
       // anything replayed, so the record would exist in the store and nowhere on screen.
       reply: m.reply,
+      // The CARD turns. Each of these renders a card INSTEAD of text, so a message
+      // carrying one has little or no `text` of its own — and dropping the card on save
+      // brought it back as an empty bubble with nothing in it but a Delete action. The
+      // plan card is the worst of them: plan-first exists to produce one artefact, the
+      // spec you read and agreed to, and reopening the project threw it away and left a
+      // blank row where it had been. They restore frozen if they were frozen, and still
+      // answerable if they were never answered.
+      plan: m.plan, clarify: m.clarify, confirm: m.confirm, offer: m.offer,
+      // What the reply actually moved. Cheap (a few numbers) and it is the half of the
+      // answer people skim for.
+      changed: m.changed,
       ts: m.ts, model: m.model, usage: m.usage, steps: m.steps, sources: m.sources,
       thinking: m.thinking && m.thinking.length > 4000 ? m.thinking.slice(0, 4000) + "…" : m.thinking,
     };
@@ -7447,6 +7458,14 @@ export default function App() {
     setMessages((p.chat ?? []).map((c) => ({
       id: mid(), ts: c.ts ?? Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images,
       model: c.model, usage: c.usage, steps: c.steps, thinking: c.thinking, sources: c.sources, reply: c.reply,
+      // Cast at the boundary, once: the store carries these opaquely (it has no business
+      // re-declaring App's card shapes), and this is the single point where they come back
+      // into the app's own types.
+      plan: c.plan as ChatMessage["plan"],
+      clarify: c.clarify as ChatMessage["clarify"],
+      confirm: c.confirm as ChatMessage["confirm"],
+      offer: c.offer as ChatMessage["offer"],
+      changed: c.changed as ChatMessage["changed"],
       replayed: true,
     })));
     setPins(p.pins ?? []);

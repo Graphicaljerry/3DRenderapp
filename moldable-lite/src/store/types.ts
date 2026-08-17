@@ -27,6 +27,16 @@ export interface ChatTurn {
   steps?: string[];
   thinking?: string; // capped at save time — reasoning can run long and the sync row has a budget
   sources?: { url: string; title?: string }[];
+  /** The card turns. A message carrying one of these renders a CARD rather than text, so
+   *  it has little or no `text` of its own — dropping them on save brought the turn back
+   *  as an empty bubble. Typed loosely on purpose: the shapes live in App's ChatMessage,
+   *  and the store's job is to carry them, not to re-declare them. */
+  plan?: unknown;
+  clarify?: unknown;
+  confirm?: unknown;
+  offer?: unknown;
+  /** Dimensions and parameters this reply moved — the facts the chat leads with. */
+  changed?: unknown;
 }
 
 export interface Pin {

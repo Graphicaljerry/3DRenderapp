@@ -162,7 +162,7 @@ export type ChatMessage = {
    *  an inch-unit import, take the computed print orientation. One card type for all
    *  of them; `kind` tells the dispatcher what accepting means. The card freezes
    *  either way, so the transcript records what was chosen. */
-  offer?: { text: string; yes: string; no: string; kind: "inches" | "orient" | "flush"; done?: boolean; accepted?: boolean };
+  offer?: { text: string; yes: string; no: string; kind: "inches" | "orient" | "flush" | "undelete"; done?: boolean; accepted?: boolean };
   /** A live web lookup. The step timeline said "Searching the web…" in the same grey
    *  as every other stage, so a lookup that takes 20 s read as the app hanging — and
    *  with the globe deliberately switched ON, nothing confirmed it was actually
@@ -1150,7 +1150,16 @@ export default function App() {
   // send path closes over `result`/`geometry` state, which only reflect the promote
   // (or discard) after a render. Queue the ask; the effect re-enters send() next
   // render, when its closures see the right base model.
-  type QueuedAsk = { promptText: string; forceMode?: Mode; override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean } };
+  type SendOverride = {
+    llm?: LlmSettings; genEng?: { provider: string; model: string };
+    skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean;
+    /** Retry/Edit: re-attach the photos this message was sent with (see sentPhotos).
+     *  Carried as an override rather than done at the click, because the composer may
+     *  still be holding the LAST send's attachments until a pending preview resolves —
+     *  send() consumes this at the one moment the composer is genuinely free. */
+    photosFrom?: string;
+  };
+  type QueuedAsk = { promptText: string; forceMode?: Mode; override?: SendOverride };
   const [queuedAsk, setQueuedAsk] = useState<QueuedAsk | null>(null);
   useEffect(() => {
     if (!queuedAsk || pending) return;
@@ -1350,6 +1359,63 @@ export default function App() {
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
+
+  /** Right-click → Delete, on the part itself.
+   *
+   *  The canvas menu could delete a logo layer but not the thing the project is about,
+   *  so the only way to get a part off the plate was to start a new one — which also
+   *  threw away the conversation that got you there.
+   *
+   *  This takes the part off the plate and NOTHING else: the chat, the version history
+   *  and any other layers stay, so the next ask builds in the same project. The model
+   *  itself is held right here rather than rebuilt, so putting it back is exact and
+   *  free — no kernel run, and it works for imported meshes, which have no recipe to
+   *  rebuild from. Undo can't cover this (it steps the version chain, and deleting
+   *  appends nothing), which is why the receipt carries its own way back.
+   *
+   *  `pending` is why this keys off GEOMETRY rather than `result`: an AI build that is
+   *  still a proposal shows its mesh as `geometry` while `result` is whatever was there
+   *  before — null, on a first build. Guarding on `result` made the menu item do
+   *  nothing at all in the most ordinary case there is, the part you just asked for. */
+  const deletedModel = useRef<{
+    result: EngineResult | null; geometry: THREE.BufferGeometry;
+    dims: { x: number; y: number; z: number } | null; report: PrintabilityReport | null;
+    pending: PendingChange | null;
+  } | null>(null);
+  function deleteModel() {
+    const g = geometryRef.current;
+    if (!g) return;
+    deletedModel.current = { result: resultRef.current, geometry: g, dims, report, pending: pendingRef.current };
+    dissolveSeparation(); // split pieces are copies of a part that is going away
+    setResult(null);
+    setGeometry(null);
+    setDims(null);
+    setReport(null);
+    setModelSelected(false);
+    setSelectedFeature(null);
+    setSelectMode(false);
+    setTransformMode("off");
+    setPending(null); // whatever it proposed, it proposed it about this part
+    pendingRef.current = null;
+    appendMsg({
+      role: "assistant",
+      text: "Took the part off the plate. Your chat and every saved version are still here — ask for a change and I'll build from them, or put it back below.",
+      offer: { text: "", yes: "Put it back", no: "Leave it off", kind: "undelete" },
+    });
+  }
+  function restoreDeletedModel() {
+    const d = deletedModel.current;
+    if (!d) return;
+    deletedModel.current = null;
+    setResult(d.result);
+    setGeometry(d.geometry);
+    setDims(d.dims);
+    setReport(d.report);
+    // An un-applied proposal goes back to being un-applied — Apply/Discard still mean
+    // what they meant, and the change isn't silently committed by having been deleted.
+    setPending(d.pending);
+    pendingRef.current = d.pending;
+  }
   const [status, setStatus] = useState<"idle" | "generating">("idle");
   const statusRef = useRef<"idle" | "generating">("idle");
   statusRef.current = status;
@@ -1478,12 +1544,14 @@ export default function App() {
   // screenshot of the CURRENT model — "circle it and ask". `view` remembers where the
   // camera looked when the mark was drawn; `region` is the raycast 3D extent of what
   // the circle actually landed on (display coords) — hard numbers for the AI.
+  type PhotoView = { azimuthDeg: number; elevationDeg: number } | null;
+  type PhotoRegion = { min: [number, number, number]; max: [number, number, number]; centroid: [number, number, number]; normal: [number, number, number]; hits: number } | null;
   const [image, setImage] = useState<{
     blob: Blob;
     url: string;
     markup?: boolean;
-    view?: { azimuthDeg: number; elevationDeg: number } | null;
-    region?: { min: [number, number, number]; max: [number, number, number]; centroid: [number, number, number]; normal: [number, number, number]; hits: number } | null;
+    view?: PhotoView;
+    region?: PhotoRegion;
   } | null>(null);
   // Extra reference angles for multi-view mesh generation (front is `image`).
   type ViewSlot = "left" | "back" | "right";
@@ -1491,6 +1559,15 @@ export default function App() {
   // UNLABELLED extra reference photos — what a multi-file drop attaches. The named view
   // slots above stay for users who want to say which side is which; these don't ask.
   const [refs, setRefs] = useState<{ blob: Blob; url: string }[]>([]);
+  /** What is staged RIGHT NOW — same reason resultRef exists. restorePhotos is reached
+   *  through send(), which a memoised chat row can call from a closure several renders
+   *  old, and its one decision ("is something already staged?") has to be about the live
+   *  composer rather than that render's snapshot of it. Refs assigned during render
+   *  always hold the committed values. */
+  const imageRef = useRef(image);
+  imageRef.current = image;
+  const refsRef = useRef(refs);
+  refsRef.current = refs;
   function pickView(slot: ViewSlot, file: File) {
     void downscaleImage(file).then((eff) => {
       setViews((v) => {
@@ -1512,6 +1589,38 @@ export default function App() {
       Object.values(v).forEach((x) => x && URL.revokeObjectURL(x.url));
       return {};
     });
+  }
+
+  /** The photos a message was actually sent with, keyed by that message's id.
+   *
+   *  Retry and Edit re-send the words and nothing else, which was wrong in the one case
+   *  people use them most: a build FROM a photo. The composer is emptied on every
+   *  successful send, and the transcript keeps only 420px thumbnails (see chatThumb), so
+   *  by the time the Retry menu is on screen the real attachments are gone from both
+   *  places — the model was being asked to rebuild a part it could no longer see, and
+   *  the retried bubble showed no pictures, which was the only clue.
+   *
+   *  Blobs, not object URLs: clearImage revokes those. They live as long as the tab, so
+   *  a retry after a reload has nothing to restore and falls back to text — the one case
+   *  where the old behaviour is still what happens. */
+  type SentPhotos = {
+    front: { blob: Blob; markup?: boolean; view?: PhotoView; region?: PhotoRegion } | null;
+    refs: Blob[];
+    views: Partial<Record<ViewSlot, Blob>>;
+  };
+  const sentPhotos = useRef(new Map<string, SentPhotos>());
+  /** Put a message's attachments back in the composer so the resend carries them.
+   *  Deliberately NOT a silent parallel channel: the photos reappear where they were
+   *  typed, so a retry looks exactly like sending the same thing again. */
+  function restorePhotos(msgId: string): boolean {
+    const shot = sentPhotos.current.get(msgId);
+    // Whatever is staged right now was staged for the NEXT message, not this retry.
+    // Overwriting it would throw away work the user can see, so the staged photos win.
+    if (!shot || imageRef.current || refsRef.current.length) return false;
+    if (shot.front) setImage({ ...shot.front, url: URL.createObjectURL(shot.front.blob) });
+    setRefs(shot.refs.map((b) => ({ blob: b, url: URL.createObjectURL(b) })));
+    setViews(Object.fromEntries(Object.entries(shot.views).map(([k, b]) => [k, { blob: b, url: URL.createObjectURL(b) }])));
+    return true;
   }
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
@@ -2137,22 +2246,29 @@ export default function App() {
     scheduleSync();
   }
   /** Re-run a chat message with a specific model (Perplexity-style). Persists the
-   *  choice and passes it straight to send() so it takes effect immediately. */
-  function retryWithModel(text: string, msgMode: Mode, value: string) {
+   *  choice and passes it straight to send() so it takes effect immediately.
+   *
+   *  `photosFrom` is what makes the photos come back — send() unpacks it once the
+   *  composer is free. See SendOverride. */
+  function retryWithModel(text: string, msgMode: Mode, value: string, msgId?: string) {
     const i = value.indexOf("|");
     const prov = i < 0 ? value : value.slice(0, i);
     const mdl = i < 0 ? "" : value.slice(i + 1);
     if (msgMode === "generative") {
       pickEngine(prov, mdl);
-      void send(text, "generative", { genEng: { provider: prov, model: mdl } });
+      void send(text, "generative", { genEng: { provider: prov, model: mdl }, photosFrom: msgId });
     } else {
       pickBrain(prov as LlmProviderId, mdl);
       const overLlm: LlmSettings =
         prov === "anthropic"
           ? { provider: "anthropic", model: mdl }
           : { provider: prov as LlmProviderId, model: llm.provider === prov ? llm.model : llmPreset(prov as LlmProviderId).defaultModel, baseUrl: prov === "custom" ? llm.baseUrl : undefined };
-      void send(text, "precise", { llm: overLlm });
+      void send(text, "precise", { llm: overLlm, photosFrom: msgId });
     }
+  }
+  /** "Edit" on a sent message: the reworded ask, with the same photos attached. */
+  function resendEdited(text: string, msgMode?: Mode, msgId?: string) {
+    void send(text, msgMode, { photosFrom: msgId });
   }
   function pickEngine(provider: string, gmodel: string) {
     localStorage.setItem(GENENG_LS, JSON.stringify({ provider, model: gmodel }));
@@ -5566,7 +5682,7 @@ export default function App() {
   // "Thinking…" bubbles side by side, two API calls, and the loser of the race
   // surfacing as a network error. A ref flips the instant the first call enters.
   const sendingRef = useRef(false);
-  async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean }) {
+  async function send(promptText: string, forceMode?: Mode, override?: SendOverride) {
     if (sendingRef.current) return;
     partStarted.current = true;
     // Typing while an AI proposal is on canvas BUILDS ON the proposal instead of
@@ -5582,6 +5698,15 @@ export default function App() {
       setInput("");
       setQueuedAsk({ promptText, forceMode, override });
       return;
+    }
+    // Nothing is holding the composer now, so this is the moment a Retry/Edit can put
+    // its photos back. One render later than the click, and one earlier than the send
+    // that has to see them.
+    if (override?.photosFrom) {
+      const restored = restorePhotos(override.photosFrom);
+      const rest = { ...override, photosFrom: undefined };
+      if (restored) { setQueuedAsk({ promptText, forceMode, override: rest }); return; }
+      override = rest;
     }
     sendingRef.current = true;
     setImproveBefore(null); // the composer is being emptied; there is nothing left to revert
@@ -5637,6 +5762,7 @@ export default function App() {
     if (o.kind === "inches") void inchRescue();
     else if (o.kind === "orient") void autoOrientDrop();
     else if (o.kind === "flush") void flushPockets();
+    else if (o.kind === "undelete") restoreDeletedModel();
   }
   /** Convert an inch-unit import: 1 in = 25.4 mm, uniformly. */
   async function inchRescue() {
@@ -5775,7 +5901,7 @@ export default function App() {
     }
   }
 
-  async function sendInner(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean }) {
+  async function sendInner(promptText: string, forceMode?: Mode, override?: SendOverride) {
     if (pendingRef.current) discardPending(true); // safety net — send() promotes a held proposal before ever reaching here
     const p = promptText.trim();
     if (status === "generating") return;
@@ -5808,6 +5934,18 @@ export default function App() {
     // reaching another machine (see chatThumb).
     const preThumb = image ? await chatThumb(image.blob) : undefined;
     const preRefThumbs = refs.length ? (await Promise.all(refs.map((r) => chatThumb(r.blob)))).filter((u): u is string => !!u) : undefined;
+    // Keep the full-size originals against this message id — Retry and Edit resend from
+    // here, because the thumbnails above are all the transcript itself will hold.
+    if (image || refs.length || Object.keys(views).length) {
+      sentPhotos.current.set(userMsgId, {
+        front: image ? { blob: image.blob, markup: image.markup, view: image.view, region: image.region } : null,
+        refs: refs.map((r) => r.blob),
+        views: Object.fromEntries(Object.entries(views).map(([k, v]) => [k, v!.blob])),
+      });
+      // Bounded: ~10 photos a message, and a long session is still only a handful of
+      // photo messages. Oldest out first — insertion order is what a Map iterates.
+      while (sentPhotos.current.size > 20) sentPhotos.current.delete(sentPhotos.current.keys().next().value!);
+    }
     setInput("");
     setMessages((m) => [...m,
       { id: userMsgId, ts: Date.now(), role: "user", text: p || (image ? (image.markup ? "Change the marked region" : "Recreate this part") : ""), image: preThumb, images: preRefThumbs, mode: forceMode ?? mode },
@@ -7564,6 +7702,7 @@ export default function App() {
         onDeleteMessage={(id) => setMessages((m) => m.filter((x) => x.id !== id))}
         onDeleteMessages={(ids) => { const kill = new Set(ids); setMessages((m) => m.filter((x) => !kill.has(x.id))); }}
         onRetryModel={retryWithModel}
+        onResendEdit={resendEdited}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}
         onOpenTemplates={() => setShowTemplates(true)}
@@ -7597,6 +7736,7 @@ export default function App() {
         onDuplicateAttachment={(id: string) => void duplicateLayer(id)}
         standDown={standDownTools}
         onRemoveAttachment={removeAttachment}
+        onDeleteModel={deleteModel}
         partCount={partCount}
         separated={separated}
         separatedIds={separatedRef.current?.ids ?? []}

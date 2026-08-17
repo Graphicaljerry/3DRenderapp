@@ -30,12 +30,24 @@ export interface Usage {
   est: boolean;       // true when tokens were estimated rather than provider-reported
 }
 
-/** USD per MILLION tokens, in/out. Checked against provider price pages Aug 2026.
- *  Update here when providers reprice — this table is the meter's ground truth for
- *  everything except OpenRouter, whose live catalogue carries its own prices. */
+/** USD per MILLION tokens, in/out. Re-checked against platform.claude.com/docs pricing
+ *  on 17 Aug 2026. Update here when providers reprice — this table is the meter's ground
+ *  truth for everything except OpenRouter, whose live catalogue carries its own prices.
+ *
+ *  FIRST MATCH WINS, so the narrow rows sit above the family rows.
+ *
+ *  The Claude rows had drifted badly: Opus read 15/75 (the Opus 4.1 price, kept by the
+ *  two retired models and nothing current) and Fable 20/100, so the meter quoted 2-3×
+ *  what a build actually costs. That number is not just the bill — it is the "≈N
+ *  cr/build" printed beside every model in the picker, which is what a model gets
+ *  chosen on. */
 const PRICES: { re: RegExp; in: number; out: number }[] = [
-  { re: /fable|mythos/i, in: 20, out: 100 },
-  { re: /opus/i, in: 15, out: 75 },
+  { re: /fable|mythos/i, in: 10, out: 50 },
+  // Opus 4.1 and Opus 4 kept the old pricing when they were retired; everything from
+  // Opus 4.5 up is a third of that.
+  { re: /opus-?4[-.]1|opus-?4(?![-.\d])/i, in: 15, out: 75 },
+  { re: /opus/i, in: 5, out: 25 },
+  { re: /sonnet-?5/i, in: 2, out: 10 },
   { re: /sonnet/i, in: 3, out: 15 },
   { re: /haiku/i, in: 1, out: 5 },
   { re: /gpt-5\.?1?(?!.*mini|.*nano)/i, in: 1.25, out: 10 },

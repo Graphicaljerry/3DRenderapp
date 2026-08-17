@@ -2645,7 +2645,9 @@ interface Props {
     answer: (msgId: string, qid: string, value: string) => void;
     build: (msgId: string, withAnswers: boolean) => void;
   };
-  onRetryModel: (text: string, mode: Mode, value: string) => void;
+  onRetryModel: (text: string, mode: Mode, value: string, msgId: string) => void;
+  /** "Edit" on a sent message — resends the reworded ask with that message's photos. */
+  onResendEdit: (text: string, mode: Mode | undefined, msgId: string) => void;
   onExample: () => void;
   onTemplate: (t: Template) => void;
   onOpenTemplates: () => void;
@@ -2671,6 +2673,8 @@ interface Props {
    *  exactly one tool is ever lit — see armRail(). */
   standDown: () => void;
   onRemoveAttachment: (id: string) => void;
+  /** Right-click → Delete on the part itself: off the plate, project and history intact. */
+  onDeleteModel: () => void;
   /** Copy a layer — same colour, same words, offset just below it. */
   onDuplicateAttachment: (id: string) => void;
   partCount: number; // disconnected solids inside the model mesh (1 = a single part)
@@ -3511,7 +3515,7 @@ export function Workspace(p: Props) {
             )}
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage}
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} onResendEdit={p.onResendEdit} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage}
             selecting={msgSel} onToggleSelect={msgSelToggle} />
 
           {p.providerWall && (
@@ -3979,6 +3983,11 @@ export function Workspace(p: Props) {
                         <Item label="Rename" onClick={() => { setShowLayers(true); setRenaming("model"); }} />
                         <Item label="Duplicate" hint="A copy on its own plate — then iterate the live model" onClick={p.onKeepAside} />
                         <Item label="Copy" onClick={() => p.clipboardCtl.copy({ kind: "model" })} />
+                        {/* Sits with Rename/Duplicate/Copy because that is where the
+                            attachment menu puts Delete, and both menus open on the same
+                            gesture — a part being the project's whole point is not a
+                            reason to make it the one thing you can't remove. */}
+                        <Item label="Delete" hint="Off the plate — the chat and saved versions stay" onClick={p.onDeleteModel} />
                         <div className="pmenu-sep" />
                         {p.separated ? (
                           <Item label="Regroup parts" hint="Undo the split exactly" onClick={p.onRegroup} />
@@ -5239,10 +5248,12 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, selecting, onToggleSelect }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, onResendEdit, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, selecting, onToggleSelect }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
-  onRetryModel: (text: string, mode: Mode, value: string) => void;
+  onRetryModel: (text: string, mode: Mode, value: string, msgId: string) => void;
+  /** "Edit" on a sent message — resends the reworded ask with that message's photos. */
+  onResendEdit: (text: string, mode: Mode | undefined, msgId: string) => void;
   clarifyCtl: Props["clarifyCtl"];
   planCtl: Props["planCtl"];
   onDeleteMessage: (id: string) => void;
@@ -5277,7 +5288,9 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   function submitEdit(m: ChatMessage) {
     const t = editText.trim();
     setEditingId(null);
-    if (t) onChip(t, m.mode);
+    // Not onChip: a reworded ask is the SAME request said better, so it goes out with the
+    // photos the original carried rather than as bare text.
+    if (t) onResendEdit(t, m.mode, m.id);
   }
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
@@ -5289,7 +5302,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
     cancelEdit: () => rowCb.current.setEditingId(null),
     setEditText: (s: string) => rowCb.current.setEditText(s),
-    onRetryModel: (text: string, mode: Mode, value: string) => rowCb.current.onRetryModel(text, mode, value),
+    onRetryModel: (text: string, mode: Mode, value: string, msgId: string) => rowCb.current.onRetryModel(text, mode, value, msgId),
     // App rebuilds these arrows every render; the rows must not see that churn.
     hasBrainKey: (p: LlmProviderId) => rowCb.current.hasBrainKey(p),
     hasGenKey: (p: string) => rowCb.current.hasGenKey(p),
@@ -5754,7 +5767,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
   api: {
     startEdit: (m: ChatMessage) => void; submitEdit: (m: ChatMessage) => void;
     cancelEdit: () => void; setEditText: (s: string) => void;
-    onRetryModel: (text: string, mode: Mode, value: string) => void;
+    onRetryModel: (text: string, mode: Mode, value: string, msgId: string) => void;
     hasBrainKey: (p: LlmProviderId) => boolean; hasGenKey: (p: string) => boolean;
     clarifyAnswer: (msgId: string, qid: string, v: string) => void;
     clarifyBuild: (msgId: string, withAnswers: boolean) => void;
@@ -5965,9 +5978,9 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                   {m.usage && ` · ${fmtTok(m.usage.inTok + m.usage.outTok)} tok · ${m.usage.usd != null ? `${fmtCredits(usdToCredits(m.usage.usd), m.usage.est)} ${PRICING.unitShort}` : fmtUSD(null, false)}`}
                 </span>
               )}
-              {/* Retry / edit any typed prompt — including one sent with a photo, so
-                  a failed generation can be re-run (the attached photo, if still in
-                  the composer, rides along). */}
+              {/* Retry / edit any typed prompt. Both put this message's own photos back
+                  in the composer first (see sentPhotos), so re-running a build made FROM
+                  a photo doesn't quietly become a text-only guess. */}
               {(m.role === "user" ? !!m.text : !m.streaming) && (
                 <div className="msg-actions">
                   {m.role === "user" && m.text && (
@@ -5976,7 +5989,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                         <span className="msg-act" style={{ opacity: 0.4 }}>Retry</span>
                       ) : (
                         <RetryMenu mode={m.mode ?? "precise"} brain={brain} hasBrainKey={hasBrainKey} genProvider={genProvider} genModel={genModel} hasGenKey={hasGenKey}
-                          onPick={(value) => onRetryModel(m.text, m.mode ?? "precise", value)} />
+                          onPick={(value) => onRetryModel(m.text, m.mode ?? "precise", value, m.id)} />
                       )}
                       <button className="msg-act" disabled={busy} title="Edit this message and resend" onClick={() => startEdit(m)}>Edit</button>
                     </>

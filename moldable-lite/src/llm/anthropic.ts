@@ -11,8 +11,9 @@ export const API_URL = "https://api.anthropic.com/v1/messages";
 // cents in these labels drifted from the table and gave the picker two currencies.
 export const MODELS = [
   { id: "claude-fable-5", label: "Claude Fable 5 (most capable)", recommended: true },
+  { id: "claude-opus-5", label: "Claude Opus 5 (newest Opus)" },
   { id: "claude-sonnet-5", label: "Claude Sonnet 5 (balanced)" },
-  { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+  { id: "claude-opus-4-8", label: "Claude Opus 4.8 (previous Opus)" },
   { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fastest)" },
 ];
 

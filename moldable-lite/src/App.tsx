@@ -11,7 +11,7 @@ import { geometryToSTL } from "./print/stl";
 import type { SplitPiece } from "./print/split";
 import type { ViewerHandle, PickedFeature, SelectKind, ShowcaseScene, TransformMode, TransformCommit, Measurement } from "./components/Viewer";
 import { getEngineSelection, type EngineSelection } from "./engine/selectEngine";
-import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, FX_LABEL, isRib, type SurfFxSlot } from "./engine/previewEngine";
+import { previewSetBase, previewBoolean, previewIntersect, growMesh, displaceMesh, verifySolid, FX_LABEL, isRib, type SurfFxSlot } from "./engine/previewEngine";
 import { splitConnectedParts, connectedPartCount, meshVolume } from "./print/separate";
 import type { GenerativeEngine } from "./engine/generativeEngine";
 import type { BuildInput, EngineResult, ExportFormat, CadOp, PointOp, HoleOp, ScrewOp, SolidOp } from "./engine/types";
@@ -40,7 +40,7 @@ import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAd
 import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
 import { reloadIfStaleChunk } from "./lib/staleChunk";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
-import { repairGeometry } from "./print/repair";
+import { diagnoseMesh, repairMeshForPrint, describeRepair, repairMessage, DIAGNOSE_BUDGET_TRIANGLES, type MeshDefects } from "./print/meshdoctor";
 import { preflightExport, preflightSummary } from "./print/preflight";
 import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, scaleAboutBase } from "./print/resize";
 import { blobToDataURL } from "./gen/util";
@@ -1368,6 +1368,10 @@ export default function App() {
   // (engine routing is gated on `modePref === "auto"` — see pickMode / send)
   const [dims, setDims] = useState<{ x: number; y: number; z: number } | null>(null);
   const [report, setReport] = useState<PrintabilityReport | null>(null);
+  // The named-defect pass that sits beside the printability report: it costs a full
+  // weld + adjacency walk, so it rides the same idle callback and skips CAD results
+  // and meshes over the budget (see computeDefects).
+  const [defects, setDefects] = useState<MeshDefects | null>(null);
   const reportJob = useRef(0); // guards the deferred printability pass against stale results
 
   /** Right-click → Delete, on the part itself.
@@ -1390,17 +1394,18 @@ export default function App() {
   const deletedModel = useRef<{
     result: EngineResult | null; geometry: THREE.BufferGeometry;
     dims: { x: number; y: number; z: number } | null; report: PrintabilityReport | null;
-    pending: PendingChange | null;
+    defects: MeshDefects | null; pending: PendingChange | null;
   } | null>(null);
   function deleteModel() {
     const g = geometryRef.current;
     if (!g) return;
-    deletedModel.current = { result: resultRef.current, geometry: g, dims, report, pending: pendingRef.current };
+    deletedModel.current = { result: resultRef.current, geometry: g, dims, report, defects, pending: pendingRef.current };
     dissolveSeparation(); // split pieces are copies of a part that is going away
     setResult(null);
     setGeometry(null);
     setDims(null);
     setReport(null);
+    setDefects(null);
     setModelSelected(false);
     setSelectedFeature(null);
     setSelectMode(false);
@@ -1421,6 +1426,7 @@ export default function App() {
     setGeometry(d.geometry);
     setDims(d.dims);
     setReport(d.report);
+    setDefects(d.defects);
     // An un-applied proposal goes back to being un-applied — Apply/Discard still mean
     // what they meant, and the change isn't silently committed by having been deleted.
     setPending(d.pending);
@@ -2766,6 +2772,23 @@ export default function App() {
     }
   }
 
+  /** The named-defect pass. Null means "not diagnosed", never "clean" — the panels
+   *  say which. Skipped for replicad results because their exports re-run the kernel,
+   *  so defects in this display mesh are neither what ships nor actionable. */
+  function computeDefects(geo: THREE.BufferGeometry, kind: EngineResult["kind"]): MeshDefects | null {
+    if (kind === "replicad") return null;
+    const tris = (geo.getAttribute("position")?.count ?? 0) / 3;
+    if (tris > DIAGNOSE_BUDGET_TRIANGLES) return null;
+    try {
+      return diagnoseMesh(geo);
+    } catch {
+      // A geometry with no position attribute, or one too big to allocate the adjacency
+      // for. The panel already renders "not diagnosed" for null, so a silent skip is
+      // honest here — nothing downstream reads this as a clean bill of health.
+      return null;
+    }
+  }
+
   function applyResult(res: EngineResult, name: string, summary: string, promptText: string, extras?: { splitPieces?: Version["splitPieces"] }) {
     dissolveSeparation(); // a committed result replaces the model — the dry-fit sandbox's floating parts must not linger
     clearPaintHistory(); // strokes are keyed to the old triangle list; they can't replay onto new geometry
@@ -2850,6 +2873,7 @@ export default function App() {
     scheduleIdle(() => {
       if (reportJob.current !== job) return;
       setReport(computeReport(geo));
+      setDefects(computeDefects(geo, res.kind));
       // Disconnected solids (e.g. a box printed beside its lid) unlock "Separate parts".
       try { setPartCount(connectedPartCount(geo)); } catch { setPartCount(1); }
     });
@@ -3269,13 +3293,13 @@ export default function App() {
     setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
   }
 
-  /** One-click mesh repair: weld seams, drop bad triangles, fill holes, fix winding. */
   /** Meshy's print-repair, for a mesh Meshy generated.
    *
-   *  repairMesh() above welds seams and fills boundary holes and says in its own header
-   *  that it cannot do self-intersections — which is the failure sculpted meshes actually
-   *  have and the one that makes a slicer refuse the file. This hands the job to the
-   *  engine that made the mesh, by task id, so nothing is uploaded anywhere.
+   *  repairMesh() below fixes topology — welds, windings, debris, holes — and says so in
+   *  print/meshdoctor's own header: it cannot touch self-intersections, which is the
+   *  failure sculpted meshes actually have and the one that makes a slicer refuse the
+   *  file. This hands that job to the engine that made the mesh, by task id, so nothing
+   *  is uploaded anywhere.
    *
    *  Only offered when there IS a task id from Meshy: repairing an imported STL or a
    *  mesh from another engine would mean hosting the file at a public URL first, and a
@@ -3320,28 +3344,36 @@ export default function App() {
       setStatus("idle");
     }
   }
-  function repairMesh() {
+  /** The free repair, in full: weld, drop degenerates, make every shell's winding agree
+   *  with itself, turn inside-out shells out, delete debris, lid the holes — then ask
+   *  the Manifold kernel whether the result is actually a solid before the receipt is
+   *  allowed to claim anything. Nothing leaves the machine. */
+  async function repairMesh() {
     if (!result || result.kind === "replicad" || status === "generating") return;
+    setStatus("generating");
     try {
-      const out = repairGeometry(result.geometry);
+      const out = repairMeshForPrint(result.geometry);
+      const verdict = await verifySolid(out.geometry);
+      const summary = describeRepair(out.report, verdict);
+      if (!summary.fixed.length) {
+        // Nothing changed, so committing a version would put an identical mesh in the
+        // history and make Undo a no-op that looks like a bug.
+        setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: repairMessage(out.report, verdict) }]);
+        return;
+      }
       // A real version: the repaired bytes are re-serialized so undo/redo restores
       // exactly this state (keeping the OLD blob would restore the broken mesh).
       applyResult(
         { ...result, geometry: out.geometry, dims: out.dims, glb: geometryToSTL(out.geometry), meshXform: undefined },
         project?.name ?? "Model",
-        `Repaired the mesh — ${out.holesFilled} hole(s) filled, ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter} open edges`,
+        `Repaired the mesh — ${summary.fixed.join(", ")}`,
         "repair mesh",
       );
-      setMessages((m) => [
-        ...m,
-        {
-          id: mid(),
-          role: "assistant",
-          text: `Repaired the mesh: ${out.holesFilled} hole(s) filled, ${out.degenerateRemoved} bad triangle(s) removed, open edges ${out.boundaryEdgesBefore} → ${out.boundaryEdgesAfter}${out.flippedWinding ? ", surface flipped right-side-out" : ""}. Exports now use the repaired mesh. Undo reverts it.`,
-        },
-      ]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: repairMessage(out.report, verdict) }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Repair failed: " + String(err?.message ?? err), error: true }]);
+    } finally {
+      setStatus("idle");
     }
   }
 
@@ -5418,9 +5450,11 @@ export default function App() {
    *  job-token dance as the build path, because a treated mesh is 100× the triangles. */
   function restat(geo: THREE.BufferGeometry) {
     const job = ++reportJob.current;
+    const kind = resultRef.current?.kind ?? "generative";
     scheduleIdle(() => {
       if (reportJob.current !== job) return;
       setReport(computeReport(geo));
+      setDefects(computeDefects(geo, kind));
     });
   }
   useEffect(() => {
@@ -7542,6 +7576,7 @@ export default function App() {
     setGeometry(null);
     setDims(null);
     setReport(null);
+    setDefects(null);
     setCodeBuffer("");
     setGuided(false);
     if (svgDraft) { URL.revokeObjectURL(svgDraft.url); setSvgDraft(null); }
@@ -7864,6 +7899,7 @@ export default function App() {
         geometry={geometry}
         dims={dims}
         report={report}
+        defects={defects}
         analysisOverlay={analysisOverlay}
         pockets={pocketReport}
         printPrep={{
@@ -8078,7 +8114,7 @@ export default function App() {
         onLiveParams={(v) => void applyParamsLive(v)}
         onSaveParams={saveParamsVersion}
         onOpenSlicer={busyExport(openSlicer)}
-        onRepair={repairMesh}
+        onRepair={() => void repairMesh()}
         onDeepRepair={meshyTaskId ? deepRepairMesh : undefined}
         onSimplify={simplifyMesh}
         onSplit={splitMesh}

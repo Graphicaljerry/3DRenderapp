@@ -3,6 +3,7 @@
 import { wrap, type Remote } from "comlink";
 import type { BufferGeometry, BufferAttribute } from "three";
 import type { PreviewApi } from "../worker/preview.worker";
+import type { SolidVerdict } from "../print/meshdoctor";
 
 let api: Remote<PreviewApi> | null = null;
 function ensure(): Remote<PreviewApi> {
@@ -58,6 +59,35 @@ export async function previewIntersect(tool: Float32Array): Promise<Float32Array
 export async function growMesh(positions: Float32Array, delta: number): Promise<Float32Array | null> {
   const r = await ensure().grow(positions, delta);
   return r.ok ? r.positions : null;
+}
+
+/** Second opinion on a repaired mesh, from the Manifold kernel.
+ *
+ *  Null means the worker never answered (it died, or comlink couldn't reach it) and
+ *  the caller must say the check did not run rather than imply a pass. An answer of
+ *  `solid: false` covers both a named kernel rejection and a kernel that threw on the
+ *  mesh — including the rare case of the WASM failing to boot, which errs toward
+ *  "unverified", the safe direction for a print. */
+export async function verifySolid(geometry: BufferGeometry): Promise<SolidVerdict | null> {
+  const pos = geometry.getAttribute("position") as BufferAttribute;
+  const idx = geometry.index;
+  let r: Awaited<ReturnType<PreviewApi["verify"]>>;
+  try {
+    r = await ensure().verify(
+      new Float32Array(pos.array as Float32Array),
+      idx ? new Uint32Array(idx.array as ArrayLike<number>) : null,
+    );
+  } catch {
+    return null;
+  }
+  if (!r.ok) return { solid: false, status: r.error, volumeMM3: 0, genus: 0, shells: 0 };
+  return {
+    solid: r.status === "NoError" && !r.empty,
+    status: r.empty && r.status === "NoError" ? "empty result" : r.status,
+    volumeMM3: r.volume,
+    genus: r.genus,
+    shells: r.shells,
+  };
 }
 
 /** Physical surface treatment: subdivide + displace the mesh in the preview worker.

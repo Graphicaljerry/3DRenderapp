@@ -261,6 +261,14 @@ export interface PreviewApi {
    *  its area-weighted normal. Correct on non-convex shapes (interior steps move OUT,
    *  where bbox scaling would pull them in) — powers "Make it fit" clearance. */
   grow(positions: Float32Array, delta: number): Promise<{ ok: true; positions: Float32Array } | { ok: false; error: string }>;
+  /** Manifold's own verdict on a mesh: does a solid-modelling kernel accept it as a
+   *  closed, coherently wound solid, and what does it measure? The local repair
+   *  (print/meshdoctor) counts edges; this is the second opinion that lets the UI use
+   *  the word "watertight" without it meaning only "our own counter is happy". */
+  verify(positions: Float32Array, indices: Uint32Array | null): Promise<
+    { ok: true; status: string; empty: boolean; volume: number; genus: number; shells: number }
+    | { ok: false; error: string }
+  >;
 }
 
 /** Refined-but-not-yet-displaced meshes, keyed by base identity + pattern + scale.
@@ -642,6 +650,36 @@ const api: PreviewApi = {
       return transfer({ ok: true, positions: soup }, [soup.buffer]);
     } catch (e: any) {
       return { ok: false, error: String(e?.message ?? e) };
+    }
+  },
+
+  async verify(positions, indices) {
+    try {
+      const wasm = await ensureManifold();
+      // NOT toManifold(): that helper is for geometry we already believe in. Here the
+      // mesh is the thing under test, so the Manifold is built and then interrogated —
+      // a rejected mesh comes back empty with a named status rather than throwing.
+      const mesh = new wasm.Mesh({
+        numProp: 3,
+        vertProperties: positions,
+        triVerts: indices && indices.length ? indices : seq(positions.length / 3),
+      });
+      mesh.merge();
+      const m = new wasm.Manifold(mesh);
+      const status: string = m.status();
+      const empty: boolean = m.isEmpty();
+      let volume = 0, genus = 0, shells = 0;
+      if (!empty) {
+        volume = m.volume();
+        genus = m.genus();
+        const parts = m.decompose();
+        shells = parts.length;
+        for (const p of parts) p.delete();
+      }
+      m.delete();
+      return { ok: true as const, status, empty, volume, genus, shells };
+    } catch (e: any) {
+      return { ok: false as const, error: String(e?.message ?? e) };
     }
   },
 

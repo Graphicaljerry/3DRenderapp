@@ -1,6 +1,11 @@
-// Best-effort mesh repair for AI-generated meshes: weld seams, drop degenerate
-// triangles, fill simple boundary holes (fan to loop centroid), fix inverted
-// winding. Honest scope: cracks/holes yes; self-intersections no.
+// The SVG extruder's closer: weld seams, drop degenerate triangles, fan-fill the
+// boundary loops, flip the whole surface when its signed volume came out negative.
+// Enough for geometry this codebase generated itself and knows the shape of.
+//
+// NOT the print repair any more — print/meshdoctor is, and svg/extrude.ts is the only
+// caller left. The difference that matters: a global flip cannot fix a mesh where a
+// FEW faces are wound backwards (it swaps which ones are wrong), and this pass reports
+// one number, "open edges", for six different defects.
 
 import * as THREE from "three";
 import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";

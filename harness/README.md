@@ -42,6 +42,7 @@ Screenshots (`shot-*.png`) land beside the scripts and are gitignored.
 | `hf-fallback-e2e.mjs` | Free-GPU rejection → automatic keyed-engine retry → honest double error (stubbed HF Space + relay) |
 | `routing-e2e.mjs` | Mesh/CAD auto-routing + prompt polish (mock LLM brain on :8788) |
 | `printprep-e2e.mjs`, `printpack2-e2e.mjs` | Overhang heatmap, auto-orientation, thin walls, elephant-foot chamfer, tolerance coupon, fastener presets |
+| `meshrepair-e2e.mjs` | Local mesh repair (`print/meshdoctor`): named defects on purpose-built broken meshes (deleted face, backwards windings, near-duplicate vertices, floating tetra, zero-area triangle, inside-out shell, non-manifold edge) with before/after numbers, the Manifold cross-check, and the Printability/Export panels + Repair button in the real UI. Honours `PORT=` when 5173 is taken by another checkout |
 | `library-thumbs-e2e.mjs`, `library-organize-e2e.mjs`, `library-bulk-e2e.mjs` | Studio thumbnails + background upgrade; search/sort/filter/folders; multi-select delete/move |
 | `plan-default-e2e.mjs` | Plan-first: chip states the default, every new part resets to on, a browse does not, the off half really skips, all references reach the planner |
 | `assist-visibility-e2e.mjs` | Escape closes every overlay; the model is named WHILE the reply streams (stub `SLOWBUILD` fixture holds it open); the Thinking dial writes the key `llm.ts` reads; research resets to auto per part |

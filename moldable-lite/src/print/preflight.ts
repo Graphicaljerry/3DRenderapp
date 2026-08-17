@@ -6,14 +6,14 @@
 
 import type { EngineResult } from "../engine/types";
 import { analyzePrintability, type PrintabilityReport, type PrinterDefaults } from "./printability";
-import { repairGeometry, type RepairOutcome } from "./repair";
+import { repairMeshForPrint, describeRepair, type MeshRepairReport } from "./meshdoctor";
 import { HEAVY_TRIANGLES } from "./heavy";
 
 export interface PreflightOutcome {
   /** The result to export — geometry swapped for the repaired one when repair ran. */
   result: EngineResult;
   report: PrintabilityReport;
-  repaired: RepairOutcome | null;
+  repaired: MeshRepairReport | null;
   /** Human-readable problems that survived the gate; empty ⇔ ready. */
   issues: string[];
   ready: boolean;
@@ -27,14 +27,19 @@ const TINY_MM = 3;
 export function preflightExport(result: EngineResult, printer: PrinterDefaults): PreflightOutcome {
   const opts = { bed: printer.bed, overhangThresholdDeg: printer.overhangThresholdDeg };
   let out = result;
-  let repaired: RepairOutcome | null = null;
+  let repaired: MeshRepairReport | null = null;
   let report = analyzePrintability(result.geometry, opts);
 
   if (result.kind !== "replicad" && !report.manifold.isWatertight) {
     try {
-      repaired = repairGeometry(result.geometry);
-      out = { ...result, geometry: repaired.geometry, dims: repaired.dims };
-      report = analyzePrintability(repaired.geometry, opts);
+      // tinyShellMM3: 0 turns the debris sweep OFF here. The Repair button may delete a
+      // 0.02 mm³ speck because a person clicked it and reads the receipt; an export is
+      // not the moment to remove geometry nobody asked about. Everything else — welding,
+      // winding, holes — only ever makes the file more printable.
+      const fix = repairMeshForPrint(result.geometry, { tinyShellMM3: 0 });
+      repaired = fix.report;
+      out = { ...result, geometry: fix.geometry, dims: fix.dims };
+      report = analyzePrintability(fix.geometry, opts);
     } catch {
       repaired = null; // export the original; the issues below still tell the truth
     }
@@ -70,9 +75,8 @@ export function preflightSummary(pf: PreflightOutcome): string {
   const s = pf.report.boundingBox.size;
   const dims = `${s.x} × ${s.y} × ${s.z} mm`;
   const bed = pf.report.bedFit.fitsAsIs ? "fits the bed" : "fits the bed rotated 90°";
-  const fixes = pf.repaired
-    ? ` Auto-repaired first: ${pf.repaired.holesFilled} hole(s) filled, ${pf.repaired.degenerateRemoved} bad triangle(s) removed${pf.repaired.flippedWinding ? ", surface flipped right-side-out" : ""}.`
-    : "";
+  const fixed = pf.repaired ? describeRepair(pf.repaired, null).fixed : [];
+  const fixes = fixed.length ? ` Auto-repaired first: ${fixed.join(", ")}.` : "";
   if (pf.ready) return `Print-ready: watertight, ${dims}, ${bed}.${fixes}`;
   return `Heads-up: ${pf.issues.join("; ")}.${fixes} Details in the Printability tab.`;
 }

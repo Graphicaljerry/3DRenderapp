@@ -9,6 +9,7 @@ import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { BuildPlan } from "../llm/plan";
 import { MATERIALS, DEFAULT_MATERIAL, DEFAULT_PRINT, DEFAULT_SPOOL, estimateFilament, materialById, fmtGrams, fmtMoney } from "../print/filament";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
+import { defectLines, needsRepair, DIAGNOSE_BUDGET_TRIANGLES, TINY_SHELL_MM3, type MeshDefects } from "../print/meshdoctor";
 import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
 import { FASTENER_GROUPS, findFastener, insertBossHint, fastenerHole, fastenerLabel, fastenerFor, fastenerCalNote } from "../cad/fasteners";
@@ -1500,9 +1501,11 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
     thin.run();
   }, [p.geometry, thin]);
 
-  // The five checks that actually run. Nothing here is claimed that the code does
-  // not compute — floating islands are deliberately absent.
+  // The five checks that actually run. Nothing here is claimed that the code does not
+  // compute; the named defects below (floating shells included) come from the same
+  // print/meshdoctor pass the Printability panel shows, not from a second opinion.
   const tight = r?.manifold.isWatertight ?? null;
+  const defectList = isMesh && p.defects && needsRepair(p.defects) ? defectLines(p.defects) : null;
   const fits = r?.bedFit.fitsRotated ?? null;
   const heavy = r ? r.triangleCount > HEAVY_TRIANGLES : null;
   const maxDim = p.dims ? Math.max(p.dims.x, p.dims.y, p.dims.z) : null;
@@ -1564,15 +1567,20 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
       )}
       {p.pockets && pocketAdvice(p.pockets) && <p className="fine">{pocketAdvice(p.pockets)}</p>}
 
-      {r && !tight && isMesh && (
-        <button className="ghost sm" disabled={busy} onClick={p.onRepair}>Fix model — make it watertight</button>
+      {/* Named, so the fix button is a decision rather than a leap of faith. A mesh can
+          pass "Watertight" and still be inside-out or trailing debris, which is why this
+          list — and the button under it — key off the defect pass, not off `tight`. */}
+      {defectList && (
+        <>
+          <p className="fine">Found: {defectList.join(", ")}.</p>
+          <button className="ghost sm" disabled={busy} onClick={p.onRepair}>Repair mesh — free, on this machine</button>
+        </>
       )}
-      {/* Only for a mesh the engine itself made, and only when the local pass has
-          something left to fix. The local repair welds seams and fills holes; this one
-          reaches self-intersections, which is what a sculpted mesh actually fails on and
-          what print/repair.ts says in its own header it cannot do. It costs credits, so
-          the button says so rather than surprising anyone. */}
-      {r && !tight && isMesh && p.onDeepRepair && (
+      {/* Only for a mesh the engine itself made. The local repair above fixes topology;
+          this one reaches self-intersections, which is what a sculpted mesh actually
+          fails on and what print/meshdoctor says in its own header it cannot do. It
+          costs credits, so the button says so rather than surprising anyone. */}
+      {isMesh && p.onDeepRepair && (defectList || tight === false) && (
         <button className="ghost sm" disabled={busy} onClick={p.onDeepRepair}
           title="Sends this mesh back to Meshy for a print-repair pass — watertight topology plus the self-intersections the local fix can't reach. Costs about 10 Meshy credits, refunded if the task fails. The model is named by its job id, not uploaded.">
           Deep repair — self-intersections too <em>· ~10 credits</em>
@@ -2734,6 +2742,9 @@ interface Props {
   geometry: THREE.BufferGeometry | null;
   dims: { x: number; y: number; z: number } | null;
   report: PrintabilityReport | null;
+  /** The named-defect pass on the display mesh. Null = not diagnosed (a CAD result, a
+   *  mesh over the budget, or the pass hasn't run yet) — never "no defects". */
+  defects: MeshDefects | null;
   analysisOverlay: { positions: Float32Array; colors: Float32Array } | null; // printability paint-on overlay
   printPrep: PrintPrepCtl;
   /** Which way drilled pockets open in this orientation — null when there are none. */
@@ -4971,7 +4982,7 @@ export function Workspace(p: Props) {
                   <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onLive={p.onLiveParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
                 )}
                 {dockPanel === "print" && (
-                  <PrintabilityPanel report={p.report} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} pockets={p.pockets} />
+                  <PrintabilityPanel report={p.report} defects={p.defects} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} pockets={p.pockets} />
                 )}
                 {dockPanel === "code" && (
                   <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
@@ -6253,7 +6264,7 @@ function CodePanel({ activeKind, codeText, streamingText, generating, onRerun }:
   );
 }
 
-function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep, nozzleMM, pockets }: { report: PrintabilityReport | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl; nozzleMM: number; pockets: PocketFacing | null }) {
+function PrintabilityPanel({ report, defects, canRepair, busy, onRepair, onSimplify, onSplit, onFitToPlate, prep, nozzleMM, pockets }: { report: PrintabilityReport | null; defects: MeshDefects | null; canRepair: boolean; busy: boolean; onRepair: () => void; onSimplify: () => void; onSplit: () => void; onFitToPlate: () => void; prep: PrintPrepCtl; nozzleMM: number; pockets: PocketFacing | null }) {
   if (!report) return <div className="panel muted">No model analysed yet.</div>;
   const sug = prep.orient.suggestion;
   const thin = prep.thin.report;
@@ -6279,11 +6290,50 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
           ))}
         </ul>
       )}
+
+      {/* "Not watertight" is one label over six different problems, and they need
+          different answers — a hole gets lidded, a non-manifold edge cannot be. These
+          rows name what is actually wrong, so the repair below is a decision. */}
+      {canRepair && (
+        <>
+          {/* .dock-sub, not an h3: this panel only ever renders inside the inspector
+              dock, and `.dock-body > .panel > h3` is display:none there. */}
+          <p className="dock-sub" style={{ marginTop: 12 }}>What's wrong with this mesh</p>
+          {!defects ? (
+            <p className="fine">
+              {report.triangleCount > DIAGNOSE_BUDGET_TRIANGLES
+                ? `Not scanned — ${Math.round(report.triangleCount / 1000)}k triangles is past the budget for the automatic check. Simplify the model and it scans on the rebuild.`
+                : "Scanning…"}
+            </p>
+          ) : !needsRepair(defects) ? (
+            <p className="fine">No open edges, no non-manifold edges, no inverted faces, no debris shells. Self-intersections are not checked — nothing local can see those.</p>
+          ) : (
+            <>
+              {row("Open edges", defects.boundaryEdges > 0 ? `${defects.boundaryEdges.toLocaleString()} across ${defects.holes} ${defects.holes === 1 ? "hole" : "holes"}` : "none", defects.boundaryEdges === 0)}
+              {row("Non-manifold edges", defects.nonManifoldEdges.toLocaleString(), defects.nonManifoldEdges === 0)}
+              {row("Inverted faces", defects.invertedFaces.toLocaleString(), defects.invertedFaces === 0)}
+              {row("Inside-out shells", defects.insideOutShells.toLocaleString(), defects.insideOutShells === 0)}
+              {row("Zero-area triangles", defects.degenerateTriangles.toLocaleString(), defects.degenerateTriangles === 0)}
+              {/* Several shells is only a fault when one of them is debris — a box
+                  printed beside its lid is two shells on purpose. */}
+              {row("Separate shells", defects.debrisShells > 0 ? `${defects.shellCount}, ${defects.debrisShells} debris` : defects.shellCount.toLocaleString(), defects.debrisShells === 0)}
+              {defects.shellCount > 1 && (
+                <p className="fine">
+                  Shells by volume: {defects.shells.map((v) => `${v >= 1 ? v.toFixed(1) : v.toPrecision(2)} mm³`).join(", ")}
+                  {defects.shellCount > defects.shells.length ? ", …" : ""} — repair deletes only those under {TINY_SHELL_MM3} mm³.
+                </p>
+              )}
+            </>
+          )}
+        </>
+      )}
+
       {canRepair && (
         <div className="param-actions" style={{ flexWrap: "wrap" }}>
-          {!report.manifold.isWatertight && (
-            <button className="primary sm" disabled={busy} onClick={onRepair}>
-              Fix model — make it watertight
+          {(defects ? needsRepair(defects) : !report.manifold.isWatertight) && (
+            <button className="primary sm" disabled={busy} onClick={onRepair}
+              title="Welds duplicate vertices, drops zero-area triangles, makes every shell's winding agree, turns inside-out shells the right way round, deletes debris shells and lids the holes it can lid safely. Runs here — no upload, no key, no credits. Undoable, and it reports what it could not fix.">
+              Repair mesh — free, on this machine
             </button>
           )}
           <button className="ghost sm" disabled={busy} onClick={onSimplify}>
@@ -6350,7 +6400,7 @@ function PrintabilityPanel({ report, canRepair, busy, onRepair, onSimplify, onSp
         </div>
       )}
       {pockets && pocketAdvice(pockets) && <p className="fine">⚠️ Pockets: {pocketAdvice(pockets)}</p>}
-      <p className="fine">Generated meshes are often not watertight — that's expected. Simplify when a slicer (e.g. Bambu Studio) chokes on the triangle count. Wall/overhang are heuristics; bed-fit &amp; watertight are exact for this mesh.</p>
+      <p className="fine">Generated meshes are often not watertight — that's expected, and Repair fixes most of it here for free. Simplify when a slicer (e.g. Bambu Studio) chokes on the triangle count. Wall/overhang are heuristics; bed-fit, watertight and the defect counts are exact for this mesh. Self-intersections are the one class nothing local can see.</p>
     </div>
   );
 }

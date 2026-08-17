@@ -917,6 +917,70 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 459 — mesh repair that runs on your machine, and six defects an audit caught
+
+Jerry: bigger phone heading; fix the multi-image composer; then five agents (Mobbin
+research ×2, an end-to-end walk, a print-readiness feature, a code audit).
+
+- **Phone heading.** The cap in the phone clamp was dead code — 9.4vw only reached the
+  44px ceiling at 468px, wider than any handset, so the vw term did all the sizing and
+  raising the ceiling would have changed nothing. Now `clamp(2.3rem, 11.5vw, 3.4rem)`:
+  37px at 320, 45px at 390, 50px at 430. Two lines at every width measured.
+
+- **`print/meshdoctor.ts` (new, 688 lines) — local mesh repair, no network, no credits.**
+  Names defects instead of reporting one "open edges" number for six different problems:
+  boundary edges AND how many holes they close into, non-manifold edges, inverted faces,
+  inside-out shells, degenerate triangles, separate shells with their volumes in mm³.
+  Repairs what can be repaired locally: welds near-duplicates (three's `mergeVertices`
+  buckets on a fixed grid, so pairs straddling a bucket line survive it — this searches
+  neighbouring cells), drops zero-area triangles, re-winds faces per shell, deletes
+  debris under 1 mm³ AND 2% of the diagonal (both, and each deletion named with its
+  volume), fans holes up to 512 edges.
+  **manifold-3d is the VERDICT, never the repair** — every Manifold op needs a valid
+  manifold to start with, which is exactly what a broken mesh isn't; `verifySolid()` in
+  the preview worker runs the result through it before the UI may say "watertight".
+  meshoptimizer deliberately unused (welds on exact equality; can't say what it removed).
+  Budget `DIAGNOSE_BUDGET_TRIANGLES = 300_000`, measured: 113ms @67k, 505ms @159k,
+  1.13s @312k — within a few percent of the printability pass sharing the same idle callback.
+  **Cannot fix, and says so:** self-intersections (undetected — the receipt refuses the
+  words "print-ready" and points at Deep repair), non-manifold edges, holes over 512
+  edges, near-degenerate slivers, shells above the debris threshold.
+  20 checks in `harness/meshrepair-e2e.mjs`, half of them against the real UI.
+
+- **Six defects an audit reproduced, two of them shipped that morning.**
+  - Removing the FRONT photo called `clearImage()` — deleting every other attached photo
+    and all three view slots. Five attached, drop the blurry first, lose four.
+  - A failed first build saved a shell project (chat, no code); reopening handed the
+    kernel an empty program, and the catch appended a hidden error turn EVERY time —
+    unbounded growth, a stale kernel banner, and it synced.
+  - Stop was checked only around the stream. The kernel pass that follows is the slow
+    half of a real build, and Stop did nothing there. Checked in both places now; the
+    Comlink worker has no signal, so a mid-kernel stop can't interrupt it but does
+    refuse to deliver and version the result.
+  - **Hugging Face — the free default — dropped the abort signal entirely** (declared
+    with two params, TypeScript accepts it as a `GenFn`), while the engine comment
+    claimed every provider honoured it.
+  - A stopped stream recorded zero spend though the provider bills for what it streamed.
+  - The Launchpad's Improve left ~⅓ of its rewrite unreachable (grows only in `onChange`,
+    `overflow-y: hidden`).
+
+- **Card turns now persist.** `toChatTurn` dropped `plan`/`clarify`/`confirm`/`offer`, and
+  each renders a CARD rather than text — so reopening a project turned the approved plan,
+  the one artefact plan-first exists to produce, into an empty bubble containing only its
+  Delete action. Found by the end-to-end agent; its other eight steps passed, including
+  dimension claims exact to **0.000 mm** against real geometry and all four exports parsing.
+
+- **From the Mobbin research:** you can now pick which photo is the FRONT (index 0 is
+  load-bearing — the mesh engines build from it — and was whatever order the file picker
+  returned). `Hint` became a tap-to-open popover: it was a bare `title=`, i.e. nothing at
+  all on the phone people photograph parts with. Deliberately NOT taken: always-visible
+  view slots, gauge-style quality meters, a pre-picker guidance interstitial.
+
+Known-stale: `printprep-e2e.mjs` Part B uses a `.tabs button` selector from before the tab
+strip moved into the inspector dock (pre-existing; its Part A passes). The Ollama probe
+puts two console errors in every load. One run logged a duplicate `createRoot` warning
+that did not recur — worth a look.
+
 ## Build 458 — Stop, the reply that survives a failed build, a calmer front door
 
 Jerry: "Please fix it" — the whole open list, plus "it's still on v456".

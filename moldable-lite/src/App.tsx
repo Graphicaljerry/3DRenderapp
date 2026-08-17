@@ -107,6 +107,33 @@ function scheduleIdle(fn: () => void): void {
   else setTimeout(fn, 32);
 }
 
+/** The factual diff behind a reply: the size it is now, the size it replaced when that
+ *  moved, and every named parameter whose value changed. Called only where a build
+ *  actually produced geometry, so the size is always worth stating — on a FIRST build
+ *  it is the headline fact and there is simply nothing it replaced. */
+function describeChange(
+  dims: { x: number; y: number; z: number },
+  was?: { x: number; y: number; z: number },
+  prevParams?: Record<string, number>,
+  nextParams?: Record<string, number>,
+): ChatMessage["changed"] {
+  const r = (n: number) => Math.round(n * 10) / 10;
+  const same = (a?: { x: number; y: number; z: number }, b?: { x: number; y: number; z: number }) =>
+    !!a && !!b && r(a.x) === r(b.x) && r(a.y) === r(b.y) && r(a.z) === r(b.z);
+  const params: { name: string; from: number; to: number }[] = [];
+  for (const [k, to] of Object.entries(nextParams ?? {})) {
+    const from = prevParams?.[k];
+    // Only keys that existed before AND moved: a brand-new parameter is not a change
+    // the user made, it is scaffolding from a fresh build, and listing all of them
+    // would bury the one line that matters.
+    if (typeof from === "number" && typeof to === "number" && r(from) !== r(to)) {
+      params.push({ name: k, from: r(from), to: r(to) });
+    }
+  }
+  const moved = !same(dims, was) && !!was;
+  return { dims: { x: r(dims.x), y: r(dims.y), z: r(dims.z) }, was: moved ? { x: r(was!.x), y: r(was!.y), z: r(was!.z) } : undefined, params: params.length ? params.slice(0, 6) : undefined };
+}
+
 export type ChatMessage = {
   id: string; role: "user" | "assistant"; text: string; error?: boolean; streaming?: boolean; image?: string; mode?: Mode;
   ts?: number; // when it was said (epoch ms) — older saved chats predate the field
@@ -140,6 +167,18 @@ export type ChatMessage = {
    *  online. This gets its own block under the timeline (like the reasoning panel):
    *  a pulsing globe while it runs, then what it came back with. */
   web?: { query: string; done?: boolean; found?: boolean; sources?: { url: string; title?: string }[] };
+  /** What this reply actually DID to the model, as facts rather than prose.
+   *
+   *  Replies read as a paragraph of millimetres — "60 × 40 × 12 mm body, 3 mm corner
+   *  radius, two M4 clearance holes 40 mm apart" — and nothing in it says which of
+   *  those numbers MOVED. People skim; a wall of correct technical text is the same
+   *  as no text. This is computed from the geometry and the parameter map before and
+   *  after, so it is what changed, not what the model said it changed. */
+  changed?: {
+    dims: { x: number; y: number; z: number };
+    was?: { x: number; y: number; z: number };
+    params?: { name: string; from: number; to: number }[];
+  };
   // Direct-edit receipt (magnet pockets, holes…). Repeating the same action rewrites
   // THIS message with a running count instead of posting another identical bubble.
   receipt?: string;
@@ -6471,6 +6510,7 @@ export default function App() {
           // defaultParams inside main(); so after any adjustment, "make the walls 4 mm"
           // rebuilt with the old 2.5 and reported success on unchanged geometry.
           // A key survives only if the edit left its default alone.
+          const prevDims = result?.dims;
           const prevDefs = cadDefaults ?? {};
           const newDefs = extractParams(newCode) ?? {};
           const kept: CadParams = {};
@@ -6480,8 +6520,11 @@ export default function App() {
           const editParams = Object.keys(kept).length ? kept : undefined;
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
           const summary = askSummary(`Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, p);
+          // The edit path already has both parameter maps in hand for the "keep the
+          // user's adjustments" logic above, so the diff costs nothing extra here.
+          const changed = describeChange(res.dims, prevDims, prevDefs, newDefs);
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, changed, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -6537,8 +6580,11 @@ export default function App() {
           if (!name) name = deriveName(p);
           if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
           summary = askSummary(summary, p);
+          // A FRESH part has nothing to diff against, so this reports size only; an edit
+          // that came the long way round (the fast path bailed) still gets its before.
+          const changed = describeChange(res.dims, result?.dims, cadDefaults ?? undefined, bi.kind === "code" ? extractParams(bi.code) ?? undefined : undefined);
           const how = await deliverResult(res, name, summary, p, !!visionImage);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, changed, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           ok = true;
           break;
         } catch (err: any) {

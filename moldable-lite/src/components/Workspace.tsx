@@ -5658,6 +5658,53 @@ function ClarifyCard({ msgId, c, busy, api }: {
 
 /** One chat bubble. Memoised: chat history is immutable once written, so a row only
     re-renders when something about THAT message changes. */
+/** The measurable part of a reply, as chips: the size it is now, the size it replaced,
+ *  and every named parameter whose number moved. Reads in a glance, and unlike the prose
+ *  it cannot be wrong about what happened — it is the diff, not a description of it. */
+function ChangeStrip({ changed }: { changed: NonNullable<ChatMessage["changed"]> }) {
+  const mm = (d: { x: number; y: number; z: number }) => `${d.x} × ${d.y} × ${d.z} mm`;
+  // defaultParams keys are camelCase identifiers ("wallThickness"); the panel that shows
+  // them as sliders already speaks in words, so the chat should not be the one place a
+  // user meets the variable name.
+  const label = (k: string) => {
+    const spaced = k.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/[_-]+/g, " ").trim();
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1).toLowerCase();
+  };
+  return (
+    <div className="change-strip">
+      <span className="chg chg-size">
+        <span className="chg-k">Size</span>
+        <span className="chg-v">{mm(changed.dims)}</span>
+        {changed.was && <span className="chg-was">was {mm(changed.was)}</span>}
+      </span>
+      {changed.params?.map((p) => (
+        <span key={p.name} className="chg">
+          <span className="chg-k">{label(p.name)}</span>
+          <span className="chg-v">{p.from} → {p.to} mm</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/** A source's mark, drawn locally.
+ *
+ *  These chips used to load `google.com/s2/favicons?domain=<host>`, which told Google the
+ *  domain of every page a dimension lookup touched, plus the user's IP, on every build —
+ *  from an app whose whole pitch is that your work stays on your device. referrerPolicy
+ *  did not help: the domain was the query string. A letter on a colour derived from the
+ *  hostname keeps sources distinguishable at a glance and asks nobody. */
+function SiteMark({ host }: { host: string }) {
+  let h = 0;
+  for (let i = 0; i < host.length; i++) h = (h * 31 + host.charCodeAt(i)) % 360;
+  const name = host.replace(/^www\./, "");
+  return (
+    <span className="src-fav src-mark" aria-hidden style={{ background: `oklch(0.62 0.11 ${h})` }}>
+      {name.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
 const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, thinking, busy, brainProvider, brainModel, genProvider, genModel, selectMode, selected, api }: {
   m: ChatMessage; fresh: boolean; editing: boolean; editText: string; thinking: string; busy: boolean;
   brainProvider: LlmProviderId; brainModel: string; genProvider: string; genModel: string;
@@ -5768,6 +5815,12 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                     ))}
                   </div>
                 )}
+                {/* Facts before prose. The paragraph underneath is correct and nobody
+                    reads it: a reply lists six millimetre figures and none of them says
+                    which one MOVED. This is computed from the geometry and parameter map
+                    before and after, so it is the change itself rather than the model's
+                    account of it — and it is three chips, which survives skimming. */}
+                {!m.streaming && m.changed && <ChangeStrip changed={m.changed} />}
                 {m.role === "assistant" && m.streaming ? (
                   /* Working reply: a step timeline — done stages check off and draw a
                      connector line down to the next; `text` is the live (shimmering) one. */
@@ -5795,7 +5848,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                       <span className="web-live-src">
                         {m.web.sources.map((sc, i) => (
                           <a key={i} className="src-chip" href={sc.url} target="_blank" rel="noopener noreferrer" title={sc.title ?? sc.url}>
-                            <img className="src-fav" src={`https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(hostOf(sc.url))}`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                            <SiteMark host={hostOf(sc.url)} />
                             {hostOf(sc.url)}
                           </a>
                         ))}
@@ -5845,7 +5898,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                       {/* The site's own mark makes a source recognisable at a glance
                           (harvard.edu reads differently from a random blog). Self-hides
                           on failure — same contract as the ref-strip photos. */}
-                      <img className="src-fav" src={`https://www.google.com/s2/favicons?sz=32&domain=${encodeURIComponent(hostOf(sc.url))}`} alt="" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { e.currentTarget.style.display = "none"; }} />
+                      <SiteMark host={hostOf(sc.url)} />
                       {hostOf(sc.url)}
                     </a>
                   ))}

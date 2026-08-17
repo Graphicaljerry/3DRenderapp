@@ -3485,3 +3485,14 @@ details.guide { margin-top: 10px; }
 /* Objects panel: Edit on a duplicated version — the swap-back-to-live affordance. */
 .lp-edit { border: 1px solid var(--bord-strong); background: none; color: var(--accent-d); font-size: var(--fs-tiny); font-weight: 600; padding: 3px 8px; border-radius: var(--r-full); cursor: pointer; }
 .lp-edit:hover { border-color: var(--accent); background: var(--accent-w); }
+
+/* What a reply CHANGED, as chips above its prose. Hairlines and one accent value each —
+   this is a reading aid, not a second card competing with the bubble it sits in. */
+.change-strip { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 8px; }
+.chg { display: inline-flex; align-items: baseline; gap: 6px; padding: 4px 9px; border: 1px solid var(--bord); border-radius: var(--r-sm); background: var(--chrome); }
+.chg-k { font-size: var(--fs-tiny); color: var(--mut); }
+.chg-v { font-size: var(--fs-sm); font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.chg-was { font-size: var(--fs-tiny); color: var(--subt); text-decoration: line-through; font-variant-numeric: tabular-nums; }
+.chg-size .chg-v { color: var(--accent-d); }
+/* The locally drawn source mark that replaced the Google favicon fetch. */
+.src-mark { display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 9px; font-weight: 700; border-radius: var(--r-xs); }

@@ -1975,7 +1975,7 @@ export default function App() {
     // silently dropping the version the first one recorded.
     projectRef.current = next;
     setProject(next);
-    void putProject(next).then(adoptStored);
+    autosave(next);
     scheduleSync();
   }
 
@@ -1987,6 +1987,36 @@ export default function App() {
     if (!cur || cur.id !== stored.id || !mergeChanged(cur, stored)) return;
     projectRef.current = stored;
     setProject(stored);
+  }
+
+  /** Autosave — with the failure actually reaching the person doing the work.
+   *
+   *  Every one of these calls used to be `void putProject(next).then(adoptStored)`: a
+   *  single-argument `.then`, so a rejected write had nowhere to go. putProject guards
+   *  its READ but not `b.put`; the localStorage backend's lsWrite calls setItem bare
+   *  while its sibling lsRead is try/caught; and there is no `unhandledrejection`
+   *  listener anywhere, so the ErrorBoundary never sees it either. In private mode — or
+   *  any time IndexedDB is unavailable and the ~5 MB localStorage budget fills up, which
+   *  base64 thumbnails do first — the app went on accepting edits and quietly saved none
+   *  of them. The explicit save (saveNamedVersion) has always reported its errors; only
+   *  the automatic path was silent.
+   *
+   *  Reported once per run of failures rather than once per write: a backend that cannot
+   *  write fails EVERY save, and a banner per keystroke is its own kind of broken. A
+   *  save that succeeds re-arms the warning. */
+  const saveFailedRef = useRef(false);
+  function autosave(next: Project) {
+    void putProject(next).then((stored) => {
+      saveFailedRef.current = false;
+      adoptStored(stored);
+    }).catch((err: unknown) => {
+      if (saveFailedRef.current) return;
+      saveFailedRef.current = true;
+      setMessages((m) => [...m, {
+        id: mid(), ts: Date.now(), role: "assistant", error: true,
+        text: `**Couldn't save this project.** ${String((err as Error)?.message ?? err)}\n\nWhat is on screen is still here, but it is not being written to disk — export the part before you close the tab.`,
+      }]);
+    });
   }
 
   // ---- chat memory: every message is saved into the project, continuously ----
@@ -2003,7 +2033,7 @@ export default function App() {
         const next = { ...pr, chat, pins, updatedAt: Date.now() };
         projectRef.current = next;
         setProject(next);
-        void putProject(next).then(adoptStored);
+        autosave(next);
         scheduleSync();
       } else {
         // No project yet (e.g. every attempt failed) — create a shell so the
@@ -2027,7 +2057,7 @@ export default function App() {
       const next = { ...pr, plates: { count: plateCount, of: plateOf, names: plateNames }, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next).then(adoptStored);
+      autosave(next);
       scheduleSync();
     }, 600);
     return () => clearTimeout(t);
@@ -2042,7 +2072,7 @@ export default function App() {
       const next = { ...pr, partColors, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next).then(adoptStored);
+      autosave(next);
       scheduleSync();
     }, 600);
     return () => clearTimeout(t);
@@ -2058,7 +2088,7 @@ export default function App() {
       const next = { ...pr, facePaint: nextFp, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next).then(adoptStored);
+      autosave(next);
       scheduleSync();
     }, 700);
     return () => clearTimeout(t);
@@ -2077,7 +2107,7 @@ export default function App() {
       const next = { ...pr, thumb, thumbV: THUMB_V, updatedAt: Date.now() };
       projectRef.current = next;
       setProject(next);
-      void putProject(next).then(adoptStored);
+      autosave(next);
       scheduleSync();
     }, 500);
     return () => clearTimeout(t);
@@ -2862,7 +2892,7 @@ export default function App() {
       const next = { ...p, versions };
       projectRef.current = next;
       setProject(next);
-      void putProject(next).then(adoptStored); // quiet save — the next real change carries it to the cloud
+      autosave(next); // quiet save — the next real change carries it to the cloud
     }, 400);
   }
 
@@ -6110,6 +6140,12 @@ export default function App() {
     // Advancing to a new stage checks the current one off into `steps` (the timeline
     // draws its connector line); writing `text` directly instead updates the active
     // row in place — that's the channel for progress ticks like "running 40%".
+    // Closing the run checks the LAST stage off too. setStage only ever archives the
+    // stage it is replacing, so whatever was showing when the reply arrived was never
+    // added to `steps` — the trail reliably ended one step short, and the missing one
+    // was the kernel pass, the step people most want to see. Every site that stops the
+    // placeholder streaming goes through this.
+    const closeStage = (x: ChatMessage) => (x.text ? [...(x.steps ?? []), x.text] : x.steps);
     const setStage = (text: string) => {
       setMessages((m) => m.map((x) => (x.id === placeholderId
         ? { ...x, text, steps: x.text && x.text !== text ? [...(x.steps ?? []), x.text] : x.steps, streaming: true }
@@ -6343,7 +6379,7 @@ export default function App() {
       }
       const prov = getProvider(ge.provider);
       if (prov?.needsKey && !providerKeys[prov.id]) {
-        setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `${prov.label} needs an API key — add it in Settings (just opened), then press Retry on your message.`, streaming: false } : x)));
+        setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: `${prov.label} needs an API key — add it in Settings (just opened), then press Retry on your message.`, steps: closeStage(x), streaming: false } : x)));
         setShowSettings(true);
         return;
       }
@@ -6552,7 +6588,7 @@ export default function App() {
     if (!llmReady(effLlm, { anthropic: key, ...llmKeys })) {
       // Intercept inline instead of force-opening Settings on whatever pane was last
       // used and throwing the prompt away. The card keeps the sentence and both exits.
-      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Precise CAD needs an AI provider — pick one in the card below.", streaming: false } : x)));
+      setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: "Precise CAD needs an AI provider — pick one in the card below.", steps: closeStage(x), streaming: false } : x)));
       setProviderWall(promptText);
       return;
     }
@@ -6879,7 +6915,7 @@ export default function App() {
           // user's adjustments" logic above, so the diff costs nothing extra here.
           const changed = describeChange(res.dims, prevDims, prevDefs, newDefs);
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, changed, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), steps: closeStage(x), streaming: false, changed, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -6952,7 +6988,7 @@ export default function App() {
           // that came the long way round (the fast path bailed) still gets its before.
           const changed = describeChange(res.dims, result?.dims, cadDefaults ?? undefined, bi.kind === "code" ? extractParams(bi.code) ?? undefined : undefined);
           const how = await deliverResult(res, name, summary, p, !!visionImage);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), streaming: false, changed, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), steps: closeStage(x), streaming: false, changed, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           ok = true;
           break;
         } catch (err: any) {
@@ -9977,6 +10013,9 @@ function SettingsModal({
   const [oh, setOh] = useState(printer.overhangThresholdDeg);
   const [nozzle, setNozzle] = useState(printer.nozzleMM);
   const [fitCal, setFitCalState] = useState<number | null>(() => fitCalibration());
+  /** Did the last calibration edit actually reach storage? Starts true so the warning
+   *  only ever appears in response to a real failed write, not on a fresh open. */
+  const [fitCalSaved, setFitCalSaved] = useState(true);
   const [preset, setPreset] = useState(printer.name ?? "custom");
 
   function saveAll() {
@@ -10437,9 +10476,17 @@ function SettingsModal({
                 onChange={(e) => {
                   const v = e.target.value === "" ? null : Math.max(0, Math.min(1, +e.target.value));
                   setFitCalState(v);
-                  saveFitCalibration(v);
+                  // A number that came off a printed coupon and a pair of calipers is
+                  // too expensive to lose quietly — say so rather than showing it in a
+                  // field it will not survive a reload in.
+                  setFitCalSaved(saveFitCalibration(v));
                 }}
               />
+              {!fitCalSaved && (
+                <p className="fine err-note">
+                  This browser refused to store the value — it applies for now but will be gone when you reload. Private browsing and a full storage quota both do this.
+                </p>
+              )}
               <p className="fine">
                 Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: 0.05 mm for one notch, then +0.1 mm per extra notch. That is the gap per side.
               </p>

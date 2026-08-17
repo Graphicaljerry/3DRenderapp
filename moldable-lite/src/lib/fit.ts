@@ -34,11 +34,25 @@ export function fitCalibration(): number | null {
   return null;
 }
 
-export function saveFitCalibration(v: number | null) {
+/** Returns whether the value actually stuck.
+ *
+ *  This is the one swallowed write in the app where the discarded input cost the user a
+ *  PRINT: they run the tolerance coupon, measure it with calipers, and type the number
+ *  in. A bare `catch {}` here — private mode, a full quota — dropped it and left every
+ *  later fitClearance() quietly using the default, with the UI still showing the value
+ *  as accepted. Reading it back is what makes the answer honest: a setItem that throws
+ *  is not the only way to lose it. */
+export function saveFitCalibration(v: number | null): boolean {
   try {
-    if (v == null || !isFinite(v)) localStorage.removeItem(FIT_CAL_LS);
-    else localStorage.setItem(FIT_CAL_LS, String(r2(v)));
-  } catch {}
+    if (v == null || !isFinite(v)) {
+      localStorage.removeItem(FIT_CAL_LS);
+      return localStorage.getItem(FIT_CAL_LS) == null;
+    }
+    localStorage.setItem(FIT_CAL_LS, String(r2(v)));
+    return localStorage.getItem(FIT_CAL_LS) === String(r2(v));
+  } catch {
+    return false;
+  }
 }
 
 /** Effective clearance for a fit, honouring the printed calibration: the measured

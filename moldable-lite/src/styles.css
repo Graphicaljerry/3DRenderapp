@@ -317,6 +317,8 @@ button:disabled { cursor: default; }
 .brand.big { display: flex; align-items: center; gap: 8px; }
 .brand.big .wordmark { font-size: var(--fs-2xl); }
 .fine { font-size: var(--fs-sm); color: var(--mut); margin: 14px 0 6px; }
+/* Fine print that is reporting a failure, not explaining a feature. */
+.fine.err-note { color: var(--danger); margin-top: 6px; }
 .link { background: none; border: none; color: var(--accent-d); font-size: var(--fs-md); font-weight: 500; padding: 6px 0; }
 
 /* ---------- app shell ---------- */
@@ -2264,7 +2266,13 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    at z-index 30, and these sat under it at left:12px z-index 6. top:64px also clears the
    rail flyout (Face/Edge/Corner/Point), which stays open while a feature is selected and
    otherwise lands exactly on this panel's header row. */
-.pin-panel { position: absolute; top: 64px; left: calc(10px + var(--rail-w) + 12px); z-index: 6; width: 290px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); padding: 12px; box-shadow: var(--shadow-md); }
+/* Above the rail and its flyouts, not under them. This panel opens in the same strip a
+   flyout occupies (left of the rail + a gap, vs the flyout's left: 100% + 10px), and at
+   z-index 6 against the flyout's calc(--z-rail + 1) = 41 the tool palette won the overlap
+   — measured: elementFromPoint at the centre of "Drill hole" returned .rail-fly, so the
+   button could be seen and not clicked. A panel you opened to do one job outranks the
+   palette you opened it from. */
+.pin-panel { position: absolute; top: 64px; left: calc(10px + var(--rail-w) + 12px); z-index: calc(var(--z-rail) + 2); width: 290px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); padding: 12px; box-shadow: var(--shadow-md); }
 .pin-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; font-size: var(--fs-sm); font-weight: 600; color: var(--ink2); margin-bottom: 8px; }
 .pin-head .x { background: none; border: none; color: var(--subt); font-size: var(--fs-lg); padding: 0; }
 .pin-panel textarea { width: 100%; border: 1px solid var(--bord); border-radius: var(--r-md); padding: 8px 10px; font-size: var(--fs-md); font-family: inherit; resize: vertical; background: var(--bg); color: var(--ink); }

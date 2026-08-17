@@ -5068,7 +5068,15 @@ function commitTransform(s: Internals, emit: (c: TransformCommit) => void) {
 
 /** Boundary edges of a triangle soup (the selected face) as [ax,ay,az,bx,by,bz,…] — an edge
  *  shared by two triangles is interior; those touched once bound the face. Computed once per drag. */
-export function faceBoundary(cap: Float32Array): Float32Array {
+// Not exported — deliberately. Nothing outside this file has ever called either of
+// these, and while they carried `export`, React Refresh had to compare them across
+// evaluations: its isLikelyComponentType() classifies a plain function by name, so a
+// lowercase one is never a component, and both are re-created every evaluation so the
+// identity check fails too. That rejected the Fast Refresh boundary for this whole
+// file — 5,500 lines of viewer — and every save fell back to a full page reload,
+// re-booting the OCCT kernel and throwing away the model on screen. Same defect that
+// was removed from App.tsx; re-export either one and the reloads come back.
+function faceBoundary(cap: Float32Array): Float32Array {
   // WELD the cap's vertices first — genuinely, not by grid rounding. Rounding to a
   // 0.01 mm grid splits two copies of the same seam vertex that happen to straddle a
   // cell line (boolean seams jitter positions by a few microns), their shared edge
@@ -5120,7 +5128,7 @@ export function faceBoundary(cap: Float32Array): Float32Array {
  *  outward-facing triangles, and each boundary edge keeps its in-triangle order, which makes
  *  buildGhost's walls face outward for a positive (along +n) extrude; a negative extrude
  *  mirrors the solid, so every triangle is flipped to restore outward orientation. */
-export function buildSolidPrism(cap: Float32Array, bnd: Float32Array, n: [number, number, number], dist: number): Float32Array {
+function buildSolidPrism(cap: Float32Array, bnd: Float32Array, n: [number, number, number], dist: number): Float32Array {
   const ghost = buildGhost(cap, bnd, n, dist); // offset cap + side walls
   const out = new Float32Array(ghost.length + cap.length);
   out.set(ghost, 0);

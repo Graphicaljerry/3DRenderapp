@@ -14,6 +14,7 @@ import type { ThinWallReport } from "../print/thinwalls";
 import type { OrientSuggestion } from "../print/orient";
 import { FASTENER_GROUPS, findFastener, insertBossHint, fastenerHole, fastenerLabel, fastenerFor, fastenerCalNote } from "../cad/fasteners";
 import { TEXTURE_KINDS, PATTERN_KINDS, RIB_KINDS, FX_LABEL, FX_TIP, FX_START, isRib, type SurfacePattern, type SurfFxSlot } from "../engine/previewEngine";
+import { useEscape } from "../lib/useEscape";
 
 /** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
  *  wall-thickness check, elephant-foot chamfer. All local geometry — no AI calls. */
@@ -155,11 +156,14 @@ function MarkOverlay({ viewerRef, onDone, onCancel }: {
   const cvRef = useRef<HTMLCanvasElement>(null);
   const pts = useRef<{ x: number; y: number }[]>([]);
   const drawing = useRef(false);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onCancel]);
+  // Escape via the shared stack, like every other overlay. Its own window listener,
+  // keyed on `onCancel`, worked the first time Mark was opened and then stopped: the
+  // parent passes a fresh arrow each render, so the effect tore down and re-subscribed
+  // constantly, and Escape stopped reaching this overlay while it was still on screen —
+  // leaving Cancel as the only way out of a second Mark session. That is the exact
+  // failure useEscape's header describes, and it is why the stack subscribes once on
+  // mount and reads the handler through a ref.
+  useEscape(onCancel);
 
   const fit = () => {
     const cv = cvRef.current!;
@@ -2470,6 +2474,14 @@ function SelectionActions({ p, onMore }: { p: Props; onMore: () => void }) {
         acts.push({ key: "rest", label: "Rest on plate", title: "Turn the part so this face lies on the build plate", run: () => p.printPrep.orient.face([feat.nx!, feat.ny!, feat.nz!]), primary: true });
       }
       acts.push({ key: "push", label: "Push/Pull", title: "Move this face in or out", run: () => p.modifyCtl.set({ op: "push", size: 2 }) });
+      // Drilling had NO reachable entry point. `Hole…` lives in DirectOpBar, which only
+      // renders inside a ContextBar gated on `!p.modifyCtl.op` — and Modify, which
+      // absorbed Select and is now the only tool that arms face-picking, sets an op the
+      // moment it arms. So the gate could never be satisfied: picking a face always
+      // meant modifyCtl.op was set. The help text still said "click a face → Hole…".
+      // The verb belongs on this row with the other face verbs anyway; the old bar is
+      // unreachable and should be retired separately.
+      if (p.holeCtl.canStart) acts.push({ key: "hole", label: "Hole…", title: "Drill a hole here — exact offsets, magnet snapping, or aligned to another hole", run: p.holeCtl.start });
     }
     if (kind === "edge" || kind === "vertex" || kind === "face") {
       acts.push({ key: "round", label: "Round", title: "Fillet this", run: () => p.modifyCtl.set({ op: "round", size: 2 }) });
@@ -4839,7 +4851,13 @@ export function Workspace(p: Props) {
                   <button className="x" aria-label="Clear selection" onClick={p.facesCtl.clear}><IconX /></button>
                 </ContextBar>
               )}
-              {p.featureCtl.mode && !p.modifyCtl.op && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
+              {/* `!p.modifyCtl.op` used to be part of this condition and made the hint
+                  unreachable for the same reason Hole… was: the only tool that arms
+                  picking sets an op as it arms. Multi-face selection is not exclusive
+                  with Modify — DockSelection's `applyAll` branch reads modifyCtl.op to
+                  apply the armed op to the whole selection — so the hint belongs here
+                  whenever picking is live and nothing is picked yet. */}
+              {p.featureCtl.mode && p.featureCtl.kind !== "point" && p.facesCtl.faces.length === 0 && !p.featureCtl.selected && (
                 <div className="box-hint">Shift-click faces to build a selection · shift-drag to box-select</div>
               )}
               {p.measureCtl.mode && !p.measureCtl.draft && (

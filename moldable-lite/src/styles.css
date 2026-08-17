@@ -1597,6 +1597,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .ps-thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
 .ps-thumbs .refthumb { width: 44px; height: 44px; }
 .refthumb.ps-front { border-color: var(--accent); }
+/* Any picture but the front one is a button: tap it to promote it. Bordered on hover so
+   the affordance is discoverable without printing an instruction under the row. */
+.ps-imgbtn { display: block; width: 100%; height: 100%; padding: 0; border: none; background: none; cursor: pointer; }
+.refthumb.ps-pick:hover { border-color: var(--accent); }
+.ps-imgbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ps-tag {
   position: absolute; left: 0; right: 0; bottom: 0; text-align: center;
   font-size: 9px; line-height: 13px; letter-spacing: .02em;
@@ -2155,7 +2160,17 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   font-size: var(--fs-micro); font-weight: 700; line-height: 1;
   color: var(--mut); cursor: help; user-select: none;
 }
-.hint:hover, .hint:focus-visible { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); outline: none; }
+.hint:hover, .hint:focus-visible, .hint.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); outline: none; }
+/* Tap-to-open, because `title` is a hover and a phone has none. Anchored to the mark and
+   clamped to the viewport width so a long sentence never runs off the right edge. */
+.hint-wrap { position: relative; display: inline-flex; }
+.hint-pop {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 40;
+  width: max-content; max-width: min(320px, calc(100vw - 32px));
+  padding: 8px 10px; border: 1px solid var(--bord); border-radius: var(--r-md);
+  background: var(--surf); color: var(--ink2); font-size: var(--fs-sm); line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+}
 
 .dock-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 0 0 2px; }
 .dock-head .x { border: none; background: none; color: var(--subt); font-size: var(--fs-lg); line-height: 1; padding: 0 2px; cursor: pointer; }

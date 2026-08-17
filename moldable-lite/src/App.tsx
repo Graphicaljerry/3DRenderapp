@@ -1619,6 +1619,26 @@ export default function App() {
     views: Partial<Record<ViewSlot, Blob>>;
   };
   const sentPhotos = useRef(new Map<string, SentPhotos>());
+  /** Make attached photo `i` the front one, swapping it with whatever holds that slot.
+   *
+   *  Index 0 is load-bearing — the mesh engines read it as the front view — and until now
+   *  it was whatever the file picker returned first, with no way to change it short of
+   *  removing everything and re-picking in order. Swap rather than splice: the other
+   *  photos keep their places, so promoting one picture doesn't quietly reshuffle the
+   *  rest. Reads through the refs, since the strip's click handler can be several
+   *  renders old (same reason restorePhotos does). */
+  function promotePhoto(i: number) {
+    const cur = imageRef.current;
+    const rs = refsRef.current;
+    const pick = rs[i - 1];
+    if (i <= 0 || !cur || !pick) return;
+    // Deliberately dropped: markup/view/region describe a MARKED screenshot, which is
+    // never part of this strip. Carrying them onto a plain reference photo would tell
+    // send() to treat it as an edit pointer.
+    setImage({ blob: pick.blob, url: pick.url });
+    setRefs(rs.map((r, k) => (k === i - 1 ? { blob: cur.blob, url: cur.url } : r)));
+  }
+
   /** Put a message's attachments back in the composer so the resend carries them.
    *  Deliberately NOT a silent parallel channel: the photos reappear where they were
    *  typed, so a retry looks exactly like sending the same thing again. */
@@ -7541,6 +7561,7 @@ export default function App() {
         refUrls={refs.map((r) => r.url)}
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
+        onPromote={promotePhoto}
         onDropUrls={dropImageUrls}
         fetchingImages={fetchingImages}
         onPickFiles={pickImages}
@@ -7669,6 +7690,7 @@ export default function App() {
         refUrls={refs.map((r) => r.url)}
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
+        onPromote={promotePhoto}
         onDropUrls={dropImageUrls}
         fetchingImages={fetchingImages}
         photoAdvice={imageAdvice({ provider: llm.provider, mesh: mode === "generative" })}
@@ -9035,7 +9057,7 @@ function LaunchOptions({ engine, onEngine, webMode, onCycleWeb, planOn, onToggle
   );
 }
 
-function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
+function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPromote, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onExample: () => void;
@@ -9048,6 +9070,8 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
   refUrls: string[];
   maxPhotos: number;
   onRemoveRef: (i: number) => void;
+  /** Make attached photo i the front view. */
+  onPromote: (i: number) => void;
   onDropUrls: (dt: DataTransfer) => void;
   fetchingImages: number;
   onPickFiles: (fs: File[]) => void;
@@ -9164,6 +9188,7 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
               advice={photoAdvice}
               onRemove={(i) => (i === 0 ? onClearImage() : onRemoveRef(i - 1))}
               onClear={onClearImage}
+              onPromote={onPromote}
             />
           )}
           {fetchingImages > 0 && (

@@ -828,28 +828,43 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine, mode }: {
  *  (the mesh engines treat it as the front view), one count, one advice line. Individual
  *  removal matters at this size — with ten attached, dropping the blurry one used to
  *  mean clearing the lot and re-picking the other nine. */
-export function PhotoStrip({ urls, max, advice, onRemove, onClear, onZoom }: {
+export function PhotoStrip({ urls, max, advice, onRemove, onClear, onPromote, onZoom }: {
   /** Front first, then the extras — the same order they are sent in. */
   urls: string[];
   max: number;
   advice?: string;
   onRemove: (i: number) => void;
   onClear: () => void;
+  /** Make photo `i` the front one. Everything downstream keys off index 0 — the mesh
+   *  engines take it as the front view and the named view slots call it "Front — the
+   *  reference photo above" — but which file lands there was decided by whatever order
+   *  the file picker happened to return. The only correction was to remove them all and
+   *  re-pick in the right order. Clicking a photo promotes it. */
+  onPromote?: (i: number) => void;
   onZoom?: (u: string) => void;
 }) {
   if (!urls.length) return null;
   return (
     <div className="photostrip" aria-label="Attached reference pictures">
       <div className="ps-thumbs">
-        {urls.map((u, i) => (
-          <div className={`refthumb${i === 0 ? " ps-front" : ""}`} key={`${i}-${u}`}>
-            <img src={u} alt={i === 0 ? "Front reference" : `Reference ${i + 1}`}
-              onClick={onZoom ? () => onZoom(u) : undefined}
-              style={onZoom ? { cursor: "zoom-in" } : undefined} />
-            {i === 0 && <span className="ps-tag">Front</span>}
-            <button type="button" className="mv-x" aria-label={i === 0 ? "Remove the front picture" : `Remove reference ${i + 1}`} onClick={() => onRemove(i)}><IconX /></button>
-          </div>
-        ))}
+        {urls.map((u, i) => {
+          const promotable = !!onPromote && i > 0;
+          return (
+            <div className={`refthumb${i === 0 ? " ps-front" : ""}${promotable ? " ps-pick" : ""}`} key={`${i}-${u}`}>
+              {promotable ? (
+                <button type="button" className="ps-imgbtn" title="Use this as the front view" aria-label={`Use reference ${i + 1} as the front view`} onClick={() => onPromote(i)}>
+                  <img src={u} alt={`Reference ${i + 1}`} />
+                </button>
+              ) : (
+                <img src={u} alt={i === 0 ? "Front reference" : `Reference ${i + 1}`}
+                  onClick={onZoom ? () => onZoom(u) : undefined}
+                  style={onZoom ? { cursor: "zoom-in" } : undefined} />
+              )}
+              {i === 0 && <span className="ps-tag" title="The view the engine builds from — click another picture to make it the front">Front</span>}
+              <button type="button" className="mv-x" aria-label={i === 0 ? "Remove the front picture" : `Remove reference ${i + 1}`} onClick={() => onRemove(i)}><IconX /></button>
+            </div>
+          );
+        })}
       </div>
       {/* The shooting advice is a paragraph, and a paragraph under the thumbnails buries
           the two things this row is for — how many are attached, and how to drop them.
@@ -1664,8 +1679,33 @@ function ExportPanel({ p, busy }: { p: Props; busy: boolean }) {
 
 /* Hover help. `title` alone is invisible until you already suspect there is something
    to learn — this marks the spot. Focusable so it is reachable without a pointer. */
+/** The "?" that carries a sentence too long to print.
+ *
+ *  It was a bare `title=` attribute, which is a desktop-only affordance: touch has no
+ *  hover, so on a phone the text simply did not exist. That mattered more than usual
+ *  once the photo strip's shooting advice moved behind it — the most useful sentence in
+ *  a build-from-photo app ("a ruler or coin in frame nails the scale") became
+ *  unreachable on the device most photos are taken with.
+ *
+ *  Now it opens on tap or click and closes on the next one, Escape, or a click outside.
+ *  `title` stays for the desktop hover people already expect. */
 function Hint({ text }: { text: string }) {
-  return <span className="hint" tabIndex={0} role="note" aria-label={text} title={text}>?</span>;
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return (
+    <span className="hint-wrap" ref={wrap}>
+      <button type="button" className={`hint${open ? " on" : ""}`} aria-expanded={open} aria-label={text} title={text} onClick={() => setOpen((o) => !o)}>?</button>
+      {open && <span className="hint-pop" role="note">{text}</span>}
+    </span>
+  );
 }
 
 function DockRow({ k, v }: { k: string; v: string }) {
@@ -2643,6 +2683,8 @@ interface Props {
   refUrls: string[]; // extra unlabelled reference photos riding with the composer image
   maxPhotos: number; // how many pictures one request carries, front photo included
   onRemoveRef: (i: number) => void;
+  /** Make attached photo i the front view — see PhotoStrip's onPromote. */
+  onPromote: (i: number) => void;
   onDropUrls: (dt: DataTransfer) => void;
   fetchingImages: number;
   photoAdvice: string; // model-aware format/resolution guidance for attachments
@@ -3662,6 +3704,7 @@ export function Workspace(p: Props) {
                   advice={p.photoAdvice}
                   onRemove={(i) => (i === 0 ? p.onClearImage() : p.onRemoveRef(i - 1))}
                   onClear={p.onClearImage}
+                  onPromote={p.onPromote}
                 />
                 {p.mode === "precise" && (
                   <div className="ps-actions">

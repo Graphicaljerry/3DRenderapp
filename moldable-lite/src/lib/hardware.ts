@@ -319,21 +319,21 @@ export const TSLOT_NUTS: TSlotNut[] = [
   {
     id: "tnut_m3_20", label: "M3 drop-in T-nut (20 series)", thread: 3, slot: 6,
     len: 10, width: 6, thickness: 5,
-    aka: ["m3 t-nut", "m3 tnut", "m3 t nut", "m3 drop-in nut", "m3 t slot nut"],
+    aka: ["m3 t-nut", "m3 tnut", "m3 t nut", "m3 drop-in", "m3 drop-in nut", "m3 t slot nut"],
     verified: false,
     note: "vendor-to-vendor spread of roughly ±0.5 mm on every dimension; design to the slot, not to this",
   },
   {
     id: "tnut_m4_20", label: "M4 drop-in T-nut (20 series)", thread: 4, slot: 6,
     len: 10, width: 6, thickness: 5,
-    aka: ["m4 t-nut", "m4 tnut", "m4 t nut", "m4 drop-in nut", "m4 t slot nut"],
+    aka: ["m4 t-nut", "m4 tnut", "m4 t nut", "m4 drop-in", "m4 drop-in nut", "m4 t slot nut"],
     verified: false,
     note: "vendor-to-vendor spread of roughly ±0.5 mm on every dimension; design to the slot, not to this",
   },
   {
     id: "tnut_m5_20", label: "M5 drop-in T-nut (20 series)", thread: 5, slot: 6,
     len: 10, width: 6, thickness: 5,
-    aka: ["m5 t-nut", "m5 tnut", "m5 t nut", "m5 drop-in nut", "m5 t slot nut", "t nut"],
+    aka: ["m5 t-nut", "m5 tnut", "m5 t nut", "m5 drop-in", "m5 drop-in nut", "m5 t slot nut", "t nut"],
     verified: false,
     note: "the common one. Listings quote 10.3×6×5 and 9.7×9.8×4.5 for the same part number family — design to the slot, not to this",
   },
@@ -607,7 +607,10 @@ const FILLER = /(bearings?|nuts?|nyloc[k]?|locknuts?|washers?|screws?|bolts?|ext
 // first with a nut is exactly the silent wrong answer this file exists to stop. So the
 // word that was stripped gets put back on the other end and tried again, which is how
 // "washer m5" reaches the row whose label is "M5 washer".
-const CATEGORY_WORDS = ["washer", "square", "tnut", "t nut", "t-nut", "nut", "bearing", "dowel", "rail", "header"];
+const CATEGORY_WORDS = [
+  "washer", "square", "tnut", "t nut", "t-nut", "drop-in", "drop in", "dropin",
+  "nut", "bearing", "dowel", "rail", "header",
+];
 
 // Seal and closure suffixes. 608, 608ZZ and 608-2RS are one bearing.
 const SEAL = /(2rs|2rz|2z|ddu|du|rs|zz|z)$/;
@@ -649,13 +652,18 @@ export function lookupHardware(query: string): HardwareMatch | null {
   // Same, with the category words stripped out: "608 bearing" → "608".
   const stripped = norm(raw.replace(/\b/g, " ").replace(FILLER, " "));
 
-  // Before trusting the bare size, re-attach any category word the query carried, so
-  // word order stops mattering: "washer m5" → "m5washer" → the M5 washer row.
-  if (stripped) {
-    for (const word of CATEGORY_WORDS) {
-      if (!raw.includes(word)) continue;
-      const rejoined = norm(stripped + word);
-      if (INDEX.has(rejoined)) return INDEX.get(rejoined)!;
+  // Before trusting the bare size, pair each size-looking token with any category word
+  // the query carried, so word order stops mattering: "washer m5" and "t-nut m5" reach
+  // the same rows as "m5 washer" and "M5 T-nut". Category words are tried in the order
+  // listed, which is why the specific ones ("square", "t-nut") sit ahead of "nut".
+  const tokens = raw.split(/[^a-z0-9.]+/).filter((t) => t.length >= 2);
+  for (const word of CATEGORY_WORDS) {
+    if (!raw.includes(word)) continue;
+    for (const tok of tokens) {
+      const after = norm(tok + word);
+      if (INDEX.has(after)) return INDEX.get(after)!;
+      const before = norm(word + tok);
+      if (INDEX.has(before)) return INDEX.get(before)!;
     }
   }
   if (stripped && INDEX.has(stripped)) return INDEX.get(stripped)!;

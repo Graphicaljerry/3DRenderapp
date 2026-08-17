@@ -1803,7 +1803,12 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    FOUR, in ONE row. An explicit column count, not auto-fill: with four items auto-fill
    lands on three-plus-an-orphan at a range of widths, and the whole block has to stay
    short enough that the composer above it never scrolls off. */
-.launch-recents { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; align-items: stretch; max-width: 560px; }
+/* The shelf fills the column the composer sits in, rather than stopping at 560px and
+   leaving four 131px stamps under a 700px input. A project tile's job is to be
+   recognised at a glance from its render — that is the whole reason it carries a
+   thumbnail instead of a filename — and at 131 wide the parts inside were smaller than
+   the text under them. */
+.launch-recents { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: stretch; }
 @media (max-width: 700px) { .launch-recents { grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 340px; } }
 .launch-recent {
   display: flex; flex-direction: column; gap: 8px; padding: 0; min-width: 0;

@@ -1840,9 +1840,14 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    composer be the largest thing on the screen. Desktop is untouched. */
 @media (max-width: 760px) {
   .launch-top { padding: 12px 16px; }
-  .launch-col { gap: 12px; }
-  /* Ramps 30px → 38px across phone widths instead of sticking at the desktop floor. */
-  .launch-h1 { font-size: clamp(1.85rem, 8vw, 2.4rem); letter-spacing: -0.025em; line-height: 1.06; }
+  /* 2vh of tail padding is desktop breathing room; on a phone it is the last 17px
+     between "everything fits" and a page that scrolls for no reason. */
+  .launch-col { gap: 12px; padding-bottom: 0; }
+  /* Ramps 34px → 44px across phone widths instead of sticking at the desktop floor.
+     The question IS the screen — it earns the extra size, and the room comes out of the
+     project tiles below, which were showing a 4:3 crop of a centred object on a plain
+     backdrop: the tallest thing on the screen carrying the least information per pixel. */
+  .launch-h1 { font-size: clamp(2.15rem, 9.4vw, 2.75rem); letter-spacing: -0.028em; line-height: 1.04; }
   /* Supporting copy, sized like supporting copy. At 15px over three full-bleed lines this
      was the second-heaviest block on the screen — more ink than the composer it was
      introducing — and it is the one thing here that stops being useful after the first
@@ -1858,7 +1863,17 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      part), everything below is another (start from something that exists). A wider gap is
      the only thing separating them — the flex column's uniform 12px had the template
      shelf reading as one more line of the composer's own furniture. */
-  .launch-sect { margin-top: 10px; }
+  .launch-sect { margin-top: 8px; }
+  /* Project tiles: 16:9 rather than 4:3. These are studio renders of one centred object
+     — the crop loses backdrop, not part — and two rows of them were 244px of a 852px
+     screen. Tighter meta and grid gap on top, because the whole point is that the four
+     tiles AND the row of links under them stay above the fold on a 393×852 phone with
+     no browser chrome to hide behind. Measured, not guessed. */
+  .lr-thumb { aspect-ratio: 16 / 9; }
+  .lr-thumb svg { width: 22px; height: 22px; }
+  .launch-recents { gap: 8px; }
+  .launch-recent { gap: 6px; }
+  .lr-meta { padding: 0 9px 8px; }
   /* Tertiary: an advanced aside should not carry the same weight as the shelf above it. */
   .launch-signin { margin-top: 6px; padding: 11px 12px; }
   .launch-guided { font-size: var(--fs-sm); } /* `.adv summary` is already --fs-sm */

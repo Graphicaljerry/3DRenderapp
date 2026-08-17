@@ -917,6 +917,64 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 456 — Opus 5 is on the list, Retry keeps your photos, the part can be deleted
+
+Jerry, three questions in one message: "Where is Opus 5? / When I click retry on the
+button under the bubble, does it not retry with the photos I attached? / How come the
+app doesn't let me right click the mode and delete it from the canvas/buildplate?"
+All three were real; the second and third were bugs, the first was staleness.
+
+- **Opus 5** added to `MODELS` in `llm/anthropic.ts` (`claude-opus-5`), and 4.8
+  relabelled "previous Opus" so the pair reads as a pair. Adding it surfaced a
+  worse neighbour: **`llm/pricing.ts` still carried the RETIRED Opus 4.1 figures**
+  (15/75) for every Opus and 20/100 for Fable, so the "≈N cr/build" beside each
+  row — the number a model gets picked on — was **2–3× the real cost**. Every
+  Claude row re-checked against platform.claude.com pricing (17 Aug 2026): Fable
+  10/50, Opus 5 / 4.8 / 4.7 / 4.6 → 5/25, Sonnet 5 → 2/10 (its intro price is now
+  standard), Sonnet 4.6 3/15, Haiku 4.5 1/5. The table is first-match-wins, so
+  the retired Opus 4.1/4 row sits ABOVE the family row, and `sonnet-5` above
+  `sonnet`.
+
+- **Retry and Edit resend the photos.** They resent the words alone: `clearImage()`
+  empties the composer on every successful send, and the transcript only ever held
+  420px thumbnails (`chatThumb`), so by the time either button is on screen the
+  real attachments are gone from both places. A build made FROM a photo was
+  silently retried as a text-only guess. New `sentPhotos` map in App.tsx keys the
+  original Blobs by user-message id (bounded at 20 messages, tab-lifetime — a
+  retry after reload still falls back to text).
+  **The timing is the fix, not the map.** Restoring at the click was too early:
+  the composer can still be holding the last send's attachments until a pending
+  proposal resolves, so the restore declined ("something is staged") and the ask
+  went out bare anyway. It now travels as `SendOverride.photosFrom`, which
+  `send()` unpacks *after* the pending branch — the one moment the composer is
+  genuinely free — then re-queues through `queuedAsk` so the next render's
+  closure sees the restored state. `imageRef`/`refsRef` mirror the composer for
+  the same reason `resultRef` exists.
+
+- **Right-click → Delete on the part.** Layers had a Delete; the thing the project
+  is about did not, so clearing the plate meant starting a new project and losing
+  the chat with it. `deleteModel()` takes the part off the plate and nothing else
+  — chat, version chain and other layers stay — and posts an `offer` card
+  (`kind: "undelete"`, the fifth kind) with "Put it back", because Undo steps the
+  version chain and a delete appends nothing to it.
+  It keys off **geometry, not `result`**: a part you just asked for is still an
+  un-applied proposal (`geometry` is the proposal, `result` is null on a first
+  build), so the first cut guarded on `result` and did nothing at all in the most
+  ordinary case there is. Restoring puts the proposal back AS a proposal.
+
+- **Probes** (both committed, both driving the real UI): `harness/retry-photos-e2e.mjs`
+  — Opus 5 in the list, photo build, retry, edit, delete/restore; it asserts the
+  stub actually SAW the image AND that the bubble shows it, because the payload
+  check alone passed against the broken build (a canvas snapshot and an uncleared
+  composer both put pictures on the wire). `harness/delete-model-e2e.mjs` covers
+  the pending-proposal delete specifically.
+
+Still open from Jerry's earlier list: the stop/interrupt button (needs real
+AbortSignal plumbing — `openaiCompat.ts` passes `signal: undefined`), the vanishing
+assistant reply on build failure (`harness/buildfail-e2e.mjs` fails on purpose), the
+"improve prompt" audit, multi-image composer consistency + a toggle for the
+left/back/right slots, and the signed-out Launchpad UI.
+
 ## Build 448 — Escape works, the model says its name while it works, thinking gets a dial
 
 Jerry: "Fix the Escape key on both modals… I still can't see what models are being used

@@ -2463,10 +2463,14 @@ details.guide { margin-top: 10px; }
   .topbar .brand { min-width: 0; flex: 1 1 auto; overflow: hidden; }
   .topbar .brand > :last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* One statusbar row: it scrolls sideways rather than wrapping under itself, Export
-     pinned by its own auto margin. Build/update chips are diagnostics — shed. */
+     pinned by its own auto margin. Build/update chips are diagnostics — shed.
+     SCOPED to the statusbar. A bare `.build-tag` also hid the version beside the
+     wordmark on the Launchpad, where it is the only thing that answers "did my update
+     land?" — the one question a phone user has no other way to check, and the exact
+     confusion that cost a round trip when a docs-only commit desynced the number. */
   .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 5px 2px max(6px, env(safe-area-inset-bottom)); }
   .statusbar > * { flex: 0 0 auto; }
-  .build-tag, .update-chip { display: none; }
+  .statusbar .build-tag, .statusbar .update-chip { display: none; }
   .bedchip-name { display: none; } /* the volume identifies the printer well enough here */
   .statusbar .primary { padding: 0 14px; font-size: var(--fs-sm); }
   /* ---- thumb-sized targets in the fixed chrome ----
@@ -3397,7 +3401,7 @@ details.guide { margin-top: 10px; }
      the canvas, and Export keeps its own auto margin. */
   .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 10px; }
   .statusbar > * { flex: 0 0 auto; }
-  .build-tag { display: none; }
+  .statusbar .build-tag { display: none; }
   /* The cards still float — full-bleed is the phone's answer, and a tablet has the
      room to keep the app's grammar. */
   .split { padding: 0 10px 8px; gap: 8px; }
@@ -3418,7 +3422,7 @@ details.guide { margin-top: 10px; }
   .split { padding: 0 12px 8px; }
   .statusbar { flex-wrap: nowrap; overflow-x: auto; }
   .statusbar > * { flex: 0 0 auto; }
-  .build-tag { display: none; }
+  .statusbar .build-tag { display: none; }
   /* The zoom cluster steps out of the rail's column. Both are pinned to the bottom-left
      and on a short stage the rail reaches down into the zoom cluster's 132px (measured
      48×54 of overlap at 1180×820); one rail-width to the right there is nothing else —

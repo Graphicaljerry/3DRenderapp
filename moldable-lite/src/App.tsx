@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Workspace, FILAMENT_SWATCHES, AnchoredMenu, PhotoStrip } from "./components/Workspace";
+import { Workspace, AnchoredMenu, PhotoStrip } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { whenAgo } from "./lib/when";
 import { markActive, clearActive, sessionIsFresh } from "./lib/session";
@@ -38,6 +38,7 @@ import { fetchBalance, loadBalance, saveBalance, usdToCredits, fmtCredits, ageLa
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
+import { FILAMENT_SWATCHES } from "./print/filament";
 import { reloadIfStaleChunk } from "./lib/staleChunk";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { diagnoseMesh, repairMeshForPrint, describeRepair, repairMessage, DIAGNOSE_BUDGET_TRIANGLES, type MeshDefects } from "./print/meshdoctor";
@@ -1901,8 +1902,17 @@ export default function App() {
       if (!alive || kicked) return;
       kicked = true;
       setBooting(true);
+      // A catch, not a bare .then chain. If the kernel selection rejects — a WASM fetch
+      // that 404s behind a proxy, a browser without the features it probes for — the app
+      // used to leave `booting` cleared and the engine null, with nothing said: an empty
+      // workspace where every action quietly did nothing.
       getEngineSelection()
         .then((s) => alive && setSel(s))
+        .catch((e: unknown) => {
+          if (!alive) return;
+          setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", error: true,
+            text: `**The CAD engine didn't start.** ${String((e as Error)?.message ?? e)}\n\nReload the page; if it keeps happening the OpenCascade files may be blocked by your network.` }]);
+        })
         .finally(() => alive && setBooting(false));
     };
     const whenIdle = () => {
@@ -2350,7 +2360,7 @@ export default function App() {
   });
   useEffect(() => { void detectOllama().then(setOllamaInfo); }, []);
   /** Switch the brain to a detected local model — free, private, offline. */
-  function useOllama(pickedModel: string) {
+  function applyOllamaModel(pickedModel: string) {
     const s: LlmSettings = { provider: "ollama", model: pickedModel };
     localStorage.setItem(LLM_LS, JSON.stringify(s));
     setLlm(s);
@@ -4230,7 +4240,7 @@ export default function App() {
     if (!silent) setTimeout(() => commitLogos(`Duplicated ${src.name}`), 0);
   }
   /** A .ttf/.otf/.woff2 the user handed over — usable immediately, this session. */
-  async function useFontFile(file: File) {
+  async function loadFontFile(file: File) {
     const fam = file.name.replace(/\.(ttf|otf|woff2?)$/i, "");
     try {
       await registerFontBytes(fam, await file.arrayBuffer());
@@ -7737,7 +7747,7 @@ export default function App() {
                 count: ollamaInfo.models.length,
                 // Prefer a code-capable local model for CAD generation; else the first.
                 model: (ollamaInfo.models.find((m) => /coder|qwen|deepseek|codestral/i.test(m.name)) ?? ollamaInfo.models[0]).name,
-                onUse: (m: string) => { useOllama(m); },
+                onUse: (m: string) => { applyOllamaModel(m); },
                 onDismiss: () => {
                   setOllamaDismissed(true);
                   try { localStorage.setItem("moldable_ollama_dismissed", "1"); } catch { /* private mode */ }
@@ -8011,7 +8021,7 @@ export default function App() {
               else if (textToolRef.current) setTextToolState({ ...textToolRef.current, family, custom: true });
             } catch (err: any) { setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]); }
           },
-          uploadFont: (f: File) => void useFontFile(f),
+          uploadFont: (f: File) => void loadFontFile(f),
           placed: attachments.flatMap((a) => (a.text ? [{ id: a.id, spec: a.text }] : [])),
           editId: textEditId,
           // Done drops the canvas selection too. A still-selected word stayed the panel's
@@ -8256,8 +8266,8 @@ export default function App() {
             if (mo && f) {
               void applyDirectOp(modifyOpType(mo.op, f.kind), mo.op === "push" ? dist : Math.abs(dist));
               setModifyOp({ op: mo.op, size: Math.abs(dist) }); // the dragged size becomes the typed size
-            } else if (f?.kind === "face") applyDirectOp("extrude", dist);
-            else applyDirectOp("fillet", Math.abs(dist));
+            } else if (f?.kind === "face") void applyDirectOp("extrude", dist);
+            else void applyDirectOp("fillet", Math.abs(dist));
           },
           pushLive: previewDirectOp,
           liveMm: liveDragMm,

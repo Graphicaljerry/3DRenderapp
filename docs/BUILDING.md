@@ -30,6 +30,8 @@ cd moldable-lite
 npm install
 npm run dev        # http://localhost:5173
 npm run build      # typecheck + production build → dist/
+npm run check      # typecheck + lint — run this before you push
+npm run suite      # the whole Playwright suite, three isolated lanes
 ```
 
 - **Deploy = push to `main`.** `.github/workflows/deploy-pages.yml` publishes
@@ -104,6 +106,22 @@ alongside `npm run dev`. The stub also records what each request actually carrie
 (`GET /_stats` → bytes and images per request; `GET /_reset` empties the log), so a
 probe can assert on the payload rather than on the UI's account of itself. The
 convention is: probe → production build → commit → push branch → fast-forward `main`.
+
+`npm run suite` (`harness/run-suite.mjs`) runs all 61 probes across three lanes on
+their own vite ports and **exits non-zero if any check fails** — most probes print
+`FAIL` and then exit 0 on their own, so their exit codes cannot be trusted. It
+starts and health-checks its own servers, and re-runs any probe whose server died
+mid-flight rather than reporting it as a failure. `--list` shows the routing;
+`--lane <name>` or bare probe names run a subset. Probes take their port from
+`PORT`; the stub-LLM and fixed-mock-port probes bake their URLs into browser-side
+init scripts, so they are routed into shared lanes instead.
+
+`npm run lint` enforces exactly three rules — `react-refresh/only-export-components`,
+`@typescript-eslint/no-floating-promises` and `react-hooks/rules-of-hooks`. It is
+deliberately not a recommended preset: those three catch the two defect classes an
+audit found (a non-component export silently costing a full page reload on every
+save, and an unhandled promise silently dropping every autosave), and `tsc` passes
+on both.
 
 ## More depth
 

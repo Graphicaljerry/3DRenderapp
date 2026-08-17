@@ -3141,6 +3141,48 @@ vocabulary; auto-repair without a caveat line.
   pattern: boot app → "Try the built-in example" → drive UI → assert). Delete harnesses.
 - The worker/engine test pattern and winding rules live in NOTES_PREVIEW_ENGINE.md.
 
+## Suite health pass — 2026-08-17 (builds 465–469)
+
+All 61 Playwright probes were run across three isolated lanes and every failure was
+given a verdict. The result matters more than the count: **the app was in far better
+shape than its test suite.** 26 passed; of the 35 failures, 23 were STALE PROBES
+asserting on UI that had legitimately changed (`.pb-export` → the Export dock,
+"Extrude all" → "Push / Pull all", "Check fit" → "Check clearance", "Zoom to fit" →
+"Reset view", the Select rail tool deleted by 044ab7f), 10 were harness bugs, and
+only 4 were the app. `stamp-probe` was retired outright: it asserted the old
+`v <sha> · <date>` stamp while `pwa-e2e` asserts the current `/^v\d+$/` and passes,
+so the suite was contradicting itself.
+
+Fixed and verified (harness/regress-465-e2e.mjs):
+- **Drilling a hole had no reachable entry point.** `Hole…` renders only in
+  DirectOpBar, gated on `!modifyCtl.op` — and Modify, which absorbed Select and is
+  the only tool that arms face-picking, sets an op as it arms. The verb moved to the
+  selection row. And it still would not have worked: `.pin-panel` sat at z-index 6
+  under the tool flyout's 41, so "Drill hole" could be seen and not clicked.
+- **Escape stopped cancelling Mark after the first use** — MarkOverlay was the only
+  overlay not on the shared `useEscape` stack.
+- **The finished step list always dropped its last step** — `setStage` archives the
+  stage it replaces, so the kernel pass was never in the trail.
+- **Autosave failures were structurally unobservable** — seven `void put(...).then()`
+  calls with no rejection path, over a backend whose localStorage writer is
+  unguarded. Also the printed-tolerance calibration, which cost a physical print.
+- **Viewer.tsx was not a Fast Refresh boundary** (two dead exports), so every save
+  reloaded the page and re-warmed the OCCT kernel. Same for Workspace.tsx via
+  FILAMENT_SWATCHES, now moved to `print/filament.ts`.
+
+New standing infrastructure: `npm run suite` (exits non-zero — 45 probes print FAIL
+and exit 0 on their own), `npm run lint` (three rules, chosen against the two defect
+classes above; a recommended preset produced 719 style errors and buried them), and
+`harness/observability-e2e.mjs` (boot timings, heap growth, unhandled rejections,
+failed requests, console noise). Observability baseline on this machine: shell 1.0 s,
+workspace 2.1 s, first model 2.7 s, zero rejections/page errors/console errors, heap
+flat across a session of orbiting and panel switching.
+
+Still open from the pass: 23 stale probes need retiring or rewriting one by one, and
+the audit's other findings (LibraryModal's partial bulk-delete, `lib/hardware.ts` —
+692 lines that have never had a caller, ~26 dead CSS classes, two emoji-as-icon spots
+where the right SVG exists unused).
+
 ## Agreed priority order for what's next
 
 1. ~~**Template gallery**~~ — shipped (see above).

@@ -149,14 +149,14 @@ async function call(
   // and quietly discarded the third. Pressing Stop did nothing here for up to the full
   // five-minute timeout, and if the job finished, the mesh the user had cancelled was
   // delivered to the canvas anyway.
-  const onAbort = () => { try { reader.cancel(); } catch { /* already closed */ } };
+  const onAbort = () => { try { void reader.cancel(); } catch { /* already closed */ } };
   signal?.addEventListener("abort", onAbort, { once: true });
 
   let timer: ReturnType<typeof setTimeout>;
   const deadline = new Promise<never>((_, rej) => {
     timer = setTimeout(() => {
       try {
-        reader.cancel();
+        void reader.cancel();
       } catch {}
       rej(new Error(`Generation timed out after ${Math.round(ms / 1000)}s — the free GPU queue may be busy. Try again, or add a free hf_… token in Settings for priority.`));
     }, ms);

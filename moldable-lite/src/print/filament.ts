@@ -122,3 +122,17 @@ export function fmtMoney(v: number, currency = "$"): string {
 export function materialById(id: string): Material {
   return MATERIALS.find((m) => m.id === id) ?? MATERIALS[0];
 }
+
+/** The swatch row the paint picker offers, and the palette a saved project's custom
+ *  colours are validated against.
+ *
+ *  Lives here rather than in Workspace.tsx because that file is a Fast Refresh boundary
+ *  and this is a non-component export: React Refresh compares exports across evaluations,
+ *  a fresh array literal is never identical to the last one, and the boundary is rejected
+ *  — so every save to the 7,000-line workspace forced a full page reload. App.tsx imports
+ *  it, so dropping the keyword was not an option; it needed a module that is not a
+ *  component file. Filament colours are what it is, so filament.ts is where it goes. */
+export const FILAMENT_SWATCHES = [
+  "#E02D2D", "#F5820F", "#F5C400", "#25B34B", "#1C8FE0", "#3B4CC0",
+  "#8E44AD", "#E85AAE", "#8B5A2B", "#111418", "#9AA0A6", "#F5F5F5",
+];

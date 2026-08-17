@@ -7,7 +7,7 @@ import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
 import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { BuildPlan } from "../llm/plan";
-import { MATERIALS, DEFAULT_MATERIAL, DEFAULT_PRINT, DEFAULT_SPOOL, estimateFilament, materialById, fmtGrams, fmtMoney } from "../print/filament";
+import { MATERIALS, DEFAULT_MATERIAL, DEFAULT_PRINT, DEFAULT_SPOOL, FILAMENT_SWATCHES, estimateFilament, materialById, fmtGrams, fmtMoney } from "../print/filament";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import { defectLines, needsRepair, DIAGNOSE_BUDGET_TRIANGLES, TINY_SHELL_MM3, type MeshDefects } from "../print/meshdoctor";
 import type { ThinWallReport } from "../print/thinwalls";
@@ -581,10 +581,7 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGra
 
 // A Bambu-Basic-flavoured filament palette for quick per-part painting (+ a custom picker).
 // Also the per-face Paint tool's filament list — triColor indexes exported.
-export const FILAMENT_SWATCHES = [
-  "#E02D2D", "#F5820F", "#F5C400", "#25B34B", "#1C8FE0", "#3B4CC0",
-  "#8E44AD", "#E85AAE", "#8B5A2B", "#111418", "#9AA0A6", "#F5F5F5",
-];
+
 
 /** Per-part fill-colour picker in the Objects panel — Bambu-Studio-style. A painted part
     renders tinted in the viewer and exports as its own filament slot, so the slicer opens

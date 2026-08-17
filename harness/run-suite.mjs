@@ -15,6 +15,8 @@
 //     that added it), so each lane gets its own vite. The stub LLM is the exception —
 //     13 probes bake localhost:8899 into addInitScript callbacks, which run in the
 //     browser where process.env does not exist — so those share one lane and one stub.
+//     Eight more stand up their own mock on a fixed 8787/8788 for the same reason; they
+//     share a lane too, which is enough, because a lane runs one probe at a time.
 //
 // Usage:
 //   node run-suite.mjs                 # everything
@@ -35,7 +37,7 @@ const STUB_PROBES = [
   "assist-visibility-e2e", "audit-fixes-e2e", "buildfail-e2e", "change-strip-e2e",
   "delete-model-e2e", "launchpad-widths-e2e", "newpart-e2e", "photo-front-e2e",
   "plan-default-e2e", "plan-payload-e2e", "plan-persist-e2e", "retry-photos-e2e",
-  "stop-e2e",
+  "stop-e2e", "regress-465-e2e",
 ];
 
 // Scripts in here that are tools, not tests — they generate screenshots, icons and
@@ -44,9 +46,24 @@ const STUB_PROBES = [
 const NOT_TESTS = new Set([
   "app-shots", "canvas-clean", "canvas-shot", "canvas-shots", "dims-probe2", "enter",
   "gen-icons", "gen-thumbs", "ipad-audit", "lib", "load-perf", "local-debug", "probe",
+  // stamp-probe was RETIRED, not moved: it asserted `v <sha> · <date>`, a build stamp the
+  // app deliberately replaced with a numeric build number. pwa-e2e asserts the current
+  // /^v\d+$/ and passes, so the suite was contradicting itself and stamp-probe was the
+  // half that was wrong. Deleted rather than rewritten — version-visible-e2e already
+  // covers the stamp being present and readable.
   "run-suite", "selbox-probe", "shots2", "stub-llm", "templates", "triage",
   "ui-overlap-sweep", "viewer-frames",
 ]);
+
+// Probes that stand up their own mock server on a FIXED port (8787 or 8788) and hand the
+// URL to the page through addInitScript — browser context, where process.env does not
+// exist, so PORT cannot reach them. Two of these in different lanes race for the socket
+// and the loser dies with EADDRINUSE, which reads as a broken app. They all go in one
+// lane instead: a lane runs its probes one at a time, so same-lane means no contention.
+const FIXED_MOCK_PORT = [
+  "context-e2e", "double-send-e2e", "house-e2e", "local-e2e",
+  "precision-e2e", "preview-e2e", "printpack2-e2e", "routing-e2e",
+];
 
 const allProbes = readdirSync(HERE)
   .filter((f) => f.endsWith(".mjs"))
@@ -55,15 +72,18 @@ const allProbes = readdirSync(HERE)
   .sort();
 
 const stub = allProbes.filter((n) => STUB_PROBES.includes(n));
-const plain = allProbes.filter((n) => !STUB_PROBES.includes(n));
-const half = Math.ceil(plain.length / 2);
+const mock = allProbes.filter((n) => !STUB_PROBES.includes(n) && FIXED_MOCK_PORT.includes(n));
+const rest = allProbes.filter((n) => !STUB_PROBES.includes(n) && !FIXED_MOCK_PORT.includes(n));
+// Lane a carries the mock-port set plus enough of the remainder to stay level with b.
+const spare = Math.max(0, Math.ceil((rest.length - mock.length) / 2));
+const plain = [...mock, ...rest.slice(0, spare)];
 
 // Three lanes, because this machine has four cores. A fourth concurrent browser starves
 // the other three and turns slow probes into "failures" that are really timeouts.
 const LANES = [
   { name: "stub", port: 5173, stub: true, probes: stub },
-  { name: "a", port: 5211, stub: false, probes: plain.slice(0, half) },
-  { name: "b", port: 5212, stub: false, probes: plain.slice(half) },
+  { name: "a", port: 5211, stub: false, probes: plain },
+  { name: "b", port: 5212, stub: false, probes: rest.slice(spare) },
 ];
 
 const args = process.argv.slice(2);

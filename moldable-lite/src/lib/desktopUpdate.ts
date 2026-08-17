@@ -100,7 +100,7 @@ async function manualUpdate(currentBuild: number): Promise<Extract<UpdateState, 
 /** Relaunch into the freshly installed build. */
 export async function restartApp(): Promise<void> {
   try {
-    (await import("@tauri-apps/plugin-process")).relaunch();
+    await (await import("@tauri-apps/plugin-process")).relaunch();
   } catch (e) {
     console.warn("desktop update: relaunch failed", e);
   }
@@ -109,7 +109,7 @@ export async function restartApp(): Promise<void> {
 /** Open a download in the system browser (the webview blocks target=_blank). */
 export async function openDownload(url: string): Promise<void> {
   try {
-    (await import("@tauri-apps/plugin-opener")).openUrl(url);
+    await (await import("@tauri-apps/plugin-opener")).openUrl(url);
   } catch {
     window.open(url, "_blank"); // dev/web fallback
   }

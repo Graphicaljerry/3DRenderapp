@@ -50,7 +50,11 @@ async function openSync(page) {
 
 // ---- A) Desktop build ----------------------------------------------------------
 {
-  const page = await boot("http://localhost:5174/", true);
+  // Was hardcoded to 5174 — a port nothing in this harness serves. It crashed in a
+  // second with ERR_CONNECTION_REFUSED after running zero assertions, and the whole
+  // desktop-auth half of the file went unexercised. The other half of this same file
+  // already read PORT correctly, which is how it hid.
+  const page = await boot(`http://localhost:${process.env.PORT ?? 5173}/`, true);
   const body = await openSync(page);
   check("A1 desktop offers password sign-in", /Sign in/.test(body) && (await page.locator('input[type="password"]').count()) > 0);
   check("A2 desktop hides Continue with Google/GitHub (they can't complete here)",

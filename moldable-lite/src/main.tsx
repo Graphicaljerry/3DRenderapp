@@ -1,3 +1,11 @@
+/* eslint-disable react-refresh/only-export-components --
+   The entry module has no exports and should not have any: it mounts the root and owns
+   the boot splash, the preload-error recovery and the service-worker handoff. Nothing
+   imports it, so there is nothing to export TO. That means it can never be a Fast Refresh
+   boundary — which is exactly why the two components declared here must stay small and
+   free of app state: an edit to this file reloads the page, by design rather than by
+   accident. (When App.tsx's boundary was broken, its invalidation propagated up to here
+   and hit this same wall, and that is what turned every App.tsx save into a full reload.) */
 import React from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";

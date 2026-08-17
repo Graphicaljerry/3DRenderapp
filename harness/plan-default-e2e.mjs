@@ -48,19 +48,28 @@ await page.addInitScript(() => {
 await page.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
 
-// --- 1. the chip states the default, on the row with the send button ---
-const chip = page.locator(".plan-toggle");
-check("Launchpad shows a plan chip", await chip.count() === 1);
-check("chip is ON by default", (await chip.getAttribute("class") ?? "").includes("on"), await chip.innerText());
-check("chip says so in words", /plan first\s*·\s*on/i.test(await chip.innerText()), await chip.innerText());
-const inFoot = await page.evaluate(() => !!document.querySelector(".launch-composer-foot .plan-toggle"));
-check("chip sits in the composer foot, not a menu", inFoot);
+// --- 1. the options chip states the default, on the row with the send button ---
+// Build 449 folded engine + research + plan into one control. Plan state is still
+// spelled out on the TRIGGER rather than only inside the menu: planning runs before the
+// build and puts a spec card on screen you did not ask for, so hiding "on" behind a tap
+// would undo the reason it was surfaced at all.
+const chip = page.locator(".lo-trigger");
+check("Launchpad shows one build-options chip", await chip.count() === 1);
+check("the trigger states plan is on, without opening anything",
+  /(^|·\s*)plan\b/i.test(await chip.innerText()) && !/no plan/i.test(await chip.innerText()), await chip.innerText());
+check("the trigger names the engine too", /auto/i.test(await chip.innerText()), await chip.innerText());
+const inFoot = await page.evaluate(() => !!document.querySelector(".launch-composer-foot .lo-trigger"));
+check("chip sits in the composer foot, beside send", inFoot);
 
 // --- 2. it is a real control, not a label ---
+const planItem = () => page.locator(".pmenu-item", { hasText: /plan first|build straight away/i }).first();
 await chip.click();
-check("clicking turns it off", !(await chip.getAttribute("class") ?? "").includes("on"), await chip.innerText());
+await planItem().click();
+check("turning it off is reflected on the trigger", /no plan/i.test(await chip.innerText()), await chip.innerText());
 await chip.click();
-check("clicking turns it back on", (await chip.getAttribute("class") ?? "").includes("on"));
+await planItem().click();
+check("turning it back on is too", !/no plan/i.test(await chip.innerText()), await chip.innerText());
+await page.keyboard.press("Escape");
 
 // --- 3. every attached reference reaches the PLANNER ---
 await page.setInputFiles(".launch-composer input[type=file]", files);
@@ -108,9 +117,9 @@ await page.keyboard.press("Escape");
 // Home, then a new part: the chip must be back on.
 await page.locator(".brandbtn").click();
 await page.waitForSelector(".launch-composer textarea", { timeout: 30_000 });
-const chip2 = page.locator(".plan-toggle");
+const chip2 = page.locator(".lo-trigger");
 check("a NEW part is planned again, whatever the last one chose",
-  (await chip2.getAttribute("class") ?? "").includes("on"), await chip2.innerText());
+  !/no plan/i.test(await chip2.innerText()), await chip2.innerText());
 check("localStorage no longer pins plan off", await page.evaluate(() => localStorage.getItem("moldable_plan")) !== "off");
 
 // --- 6. the chip is a gate, not a label: OFF must actually skip the plan ---
@@ -130,9 +139,13 @@ check("localStorage no longer pins plan off", await page.evaluate(() => localSto
   });
   await off.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await off.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
-  const oc = off.locator(".plan-toggle");
-  if ((await oc.getAttribute("class") ?? "").includes("on")) await oc.click();
-  check("chip is off before the send", !(await oc.getAttribute("class") ?? "").includes("on"), await oc.innerText());
+  const oc = off.locator(".lo-trigger");
+  if (!/no plan/i.test(await oc.innerText())) {
+    await oc.click();
+    await off.locator(".pmenu-item", { hasText: /plan first/i }).first().click();
+    await off.keyboard.press("Escape");
+  }
+  check("chip is off before the send", /no plan/i.test(await oc.innerText()), await oc.innerText());
 
   await off.locator(".launch-composer textarea").fill("A SPECIFIC 30 mm small plate, 5 mm thick");
   await off.locator(".launch-composer .send").click();
@@ -161,16 +174,18 @@ check("localStorage no longer pins plan off", await page.evaluate(() => localSto
   });
   await cold.goto("http://localhost:5173/", { waitUntil: "domcontentloaded" });
   await cold.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
-  const cc = cold.locator(".plan-toggle");
+  const cc = cold.locator(".lo-trigger");
   check("a cold load starts planned, whatever a closed tab pinned",
-    (await cc.getAttribute("class") ?? "").includes("on"), await cc.innerText());
+    !/no plan/i.test(await cc.innerText()), await cc.innerText());
 
   // --- 8. ...but a look around the shelves is not a new part -----------------
   // "All templates" and "All projects" enter the WORKSPACE to show their modal, and the
   // wordmark is the only way back — so the trip runs goHome. Turning the chip off and
   // going to look at something must not quietly undo the choice.
   await cc.click();
-  check("chip turned off on the Launchpad", !(await cc.getAttribute("class") ?? "").includes("on"));
+  await cold.locator(".pmenu-item", { hasText: /plan first/i }).first().click();
+  await cold.keyboard.press("Escape");
+  check("chip turned off on the Launchpad", /no plan/i.test(await cc.innerText()), await cc.innerText());
   // ".launch-more", not the words: the button is labelled with the template COUNT
   // ("All 12"), so matching on "templates" finds nothing and the trip never happens.
   await cold.locator(".launch-more").first().click();
@@ -182,8 +197,8 @@ check("localStorage no longer pins plan off", await page.evaluate(() => localSto
   await cold.locator(".brandbtn").click();
   await cold.waitForSelector(".launch-composer textarea", { timeout: 30_000 });
   check("browsing templates does not undo a Launchpad choice",
-    !(await cold.locator(".plan-toggle").getAttribute("class") ?? "").includes("on"),
-    await cold.locator(".plan-toggle").innerText());
+    /no plan/i.test(await cold.locator(".lo-trigger").innerText()),
+    await cold.locator(".lo-trigger").innerText());
   await cold.close();
 }
 

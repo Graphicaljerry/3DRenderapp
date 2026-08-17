@@ -1757,6 +1757,17 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   .launch-composer-foot .launch-attach { padding: 5px 7px; }
   .launch-composer-foot .web-toggle { padding: 0 7px; }
 }
+/* One options chip replaced three controls, so the row has room again — but the label
+   grows with what is off-default ("Sculpted model · No research · No plan"), which is
+   exactly when it must not reach the send button. Truncate rather than overrun: the
+   menu carries the full state, and the tooltip carries the sentence. */
+.lo-wrap { display: inline-flex; min-width: 0; }
+.lo-trigger { min-width: 0; }
+.lo-trigger .web-state { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Three engine names do not fit one 268px row of equal thirds — stack them instead, so
+   each keeps its full words rather than being clipped to "Functi…". */
+.lo-engines { flex-direction: column; gap: 4px; }
+.lo-engines .pm-opt { text-align: left; padding: 6px 8px; }
 .launch-fine { margin: 0; font-size: var(--fs-sm); color: var(--mut); }
 /* One breathing rhythm for the zones below the composer: 26px between zones, 10px
    inside them — the create zone keeps its dominance and everything under it reads

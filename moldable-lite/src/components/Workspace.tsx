@@ -104,7 +104,7 @@ function useSoloMenu(open: boolean, close: () => void) {
   }, [open]);
 }
 
-function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
+export function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
   const ref = useRef<HTMLDivElement>(null);
   useSoloMenu(true, onClose); // mounted == open
   const [h, setH] = useState(0);

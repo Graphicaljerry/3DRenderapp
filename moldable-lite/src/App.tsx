@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
-import { Workspace, FILAMENT_SWATCHES } from "./components/Workspace";
+import { Workspace, FILAMENT_SWATCHES, AnchoredMenu } from "./components/Workspace";
 import { LibraryModal } from "./components/LibraryModal";
 import { whenAgo } from "./lib/when";
 import { markActive, clearActive, sessionIsFresh } from "./lib/session";
@@ -50,7 +50,7 @@ import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/exampl
 import { TemplatesModal } from "./components/TemplatesModal";
 import { TEMPLATES, templateThumb, type Template } from "./cad/templates";
 import { openInSlicer, type SlicerTarget } from "./lib/slicer";
-import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconGlobe, IconSun, IconMoon, IconChecklist } from "./components/icons";
+import { IconGitHub, IconGoogle, IconUser, IconX, IconArrowUp, IconPaperclip, IconCube, IconSun, IconMoon, IconSliders } from "./components/icons";
 import { SOLIDS, sliceAt, iso, type IsoView } from "./launch/plateSolids";
 import { analyzePrintability, DEFAULT_PRINTER, thinWallLimitMM, type PrintabilityReport, type PrinterDefaults } from "./print/printability";
 import { overhangOverlay } from "./print/overhang";
@@ -8647,6 +8647,76 @@ function LaunchBackdrop() {
 /* The Launchpad. Replaces the KeyCard gate, which was a full-screen stop with eight
    competing actions and no way to make anything. The primary element is a composer
    that submits straight into the existing send(); sign-in is a link, not a wall. */
+/** Engine + research + plan-first, folded into one chip on the composer row.
+ *
+ *  Three controls in three places asked one question — how should the next build run —
+ *  and the segmented engine row cost a whole band under the card plus an explainer
+ *  sentence that had to re-state itself for every selection. Folding them together is
+ *  what every current AI composer does (Cursor, Perplexity, Langdock, Gemini), and it
+ *  also ends the phone squeeze: one chip instead of three on a row that had 8.7px of
+ *  slack at 320px.
+ *
+ *  The trigger still names the ENGINE at rest rather than saying "Options", because that
+ *  is the choice that decides whether a build spends money, and appends anything else
+ *  currently off its default — folding controls away must never hide one that is doing
+ *  something. */
+function LaunchOptions({ engine, onEngine, webMode, onCycleWeb, planOn, onTogglePlan }: {
+  engine: ModePref; onEngine: (v: ModePref) => void;
+  webMode: "auto" | "on" | "off"; onCycleWeb: () => void;
+  planOn: boolean; onTogglePlan: (v: boolean) => void;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const ENGINES = [
+    ["auto", "Auto", "Reads your request and picks — and says so before anything paid runs"],
+    ["precise", "Functional part", "Exact millimetres, editable dimensions, STEP export — free with your AI key"],
+    ["generative", "Sculpted model", "Organic, high-detail mesh from a paid engine — about $0.10–0.40 a run"],
+  ] as const;
+  const engineName = ENGINES.find(([v]) => v === engine)![1];
+  const notes: string[] = [engineName];
+  if (webMode !== "auto") notes.push(webMode === "on" ? "Research on" : "No research");
+  // Plan state is stated ALWAYS, not only when off-default. Folding it behind a menu
+  // would otherwise undo the reason it was surfaced in 446: planning runs before your
+  // build and puts a spec card on screen you did not ask for, and the whole complaint
+  // was that nothing said so. Research stays quiet at "auto" because it usually does
+  // nothing visible — it earns a word only when it is off its default.
+  notes.push(planOn ? "Plan" : "No plan");
+  return (
+    <span className="lo-wrap">
+      <button ref={btn} type="button" className={`web-toggle lo-trigger${engine !== "auto" || notes.length > 1 ? " on" : ""}`}
+        aria-haspopup="menu" aria-expanded={!!anchor}
+        title="How the next build runs — which engine builds it, whether the web is searched for real dimensions first, and whether you get a spec to check before anything is generated"
+        onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
+        <IconSliders size={13} />
+        <span className="web-state">{notes.join(" · ")}</span>
+      </button>
+      {anchor && (
+        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={268}>
+          <div className="pmenu-item pmenu-choice" role="none">
+            <b>How it gets built</b>
+            <span>{ENGINES.find(([v]) => v === engine)![2]}</span>
+            <div className="pmenu-opts lo-engines" role="radiogroup" aria-label="How it gets built">
+              {ENGINES.map(([v, label, hint]) => (
+                <button key={v} role="radio" aria-checked={engine === v} className={`pm-opt${engine === v ? " on" : ""}`}
+                  title={hint} onClick={() => onEngine(v)}>{label}</button>
+              ))}
+            </div>
+          </div>
+          <div className="pmenu-sep" />
+          <button role="menuitem" className="pmenu-item" onClick={onCycleWeb}>
+            <b>Research · {webMode}</b>
+            <span>{webMode === "auto" ? "Looks up named real-world products before building" : webMode === "on" ? "Always searches for real dimensions first" : "Never searches — builds from your words alone"}</span>
+          </button>
+          <button role="menuitem" className="pmenu-item" onClick={() => onTogglePlan(!planOn)}>
+            <b>{planOn ? "Plan first" : "Build straight away"}</b>
+            <span>{planOn ? "A short spec to check and correct before anything is generated" : "Skips the spec. One cheap call saved, a rebuild often spent"}</span>
+          </button>
+        </AnchoredMenu>
+      )}
+    </span>
+  );
+}
+
 function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onFree, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, animateIn = true }: {
   model: string;
   theme: "light" | "dark";
@@ -8824,59 +8894,22 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
                 e.currentTarget.value = "";
               }}
             />
-            <button
-              type="button"
-              className={`web-toggle web-${webMode}`}
-              onClick={onCycleWeb}
-              aria-label={`Look things up online: ${webMode}`}
-              title="Web search for real dimensions (and product photos) before building — Auto: looks up named real-world products · On: always research · Off: never. Click to cycle."
-            >
-              <IconGlobe size={13} />
-              <span className="web-state"><span className="fw-more">Research</span><span className="fw-short">Web</span> · {webMode}</span>
-            </button>
-            {/* Planning was already on by default and there was nothing anywhere saying
-                so — you typed a sentence, pressed send, and a spec card you never asked
-                for appeared. A step that runs before your build spends anything should
-                announce itself on the same row as the send button, not in a menu two
-                screens away. */}
-            <button
-              type="button"
-              className={`web-toggle plan-toggle${planOn ? " on" : ""}`}
-              onClick={() => onTogglePlan(!planOn)}
-              aria-pressed={planOn}
-              aria-label={`Plan first: ${planOn ? "on" : "off"}`}
-              title={planOn
-                ? "Plan first — you get a short spec (size, steps, and the assumptions being made for you) to check and correct BEFORE anything is generated. One cheap call; it saves rebuilds. Click to build straight away instead."
-                : "Building straight away — no spec to check first. Click to plan first."}
-            >
-              <IconChecklist size={13} />
-              <span className="web-state">Plan<span className="fw-more"> first</span> · {planOn ? "on" : "off"}</span>
-            </button>
+            {/* Engine, research and plan-first behind ONE control, on the same row as
+                the send button. They were three separate places — two chips in here and
+                a whole segmented row with its own explainer sentence below the card —
+                for three answers to a single question: how should the next build run.
+                Cursor, Perplexity, Langdock and Gemini all fold exactly this into one
+                composer row, and Gemini nests thinking effort inside the model menu the
+                same way. The trigger keeps the engine visible, because that is the
+                choice that decides whether a build costs money. */}
+            <LaunchOptions
+              engine={engine} onEngine={setEngine}
+              webMode={webMode} onCycleWeb={onCycleWeb}
+              planOn={planOn} onTogglePlan={onTogglePlan}
+            />
           </div>
           <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>
         </form>
-        {/* Below the card, not inside it: the composer's foot row is absolutely
-            positioned, and anything in flow down there lands on top of it. */}
-        <div className="launch-engines" role="radiogroup" aria-label="How to build it">
-          {([
-            ["auto", "Auto", "The app reads your request and picks the right engine — it tells you before anything paid runs."],
-            ["precise", "Functional part", "Exact millimetres, editable dimensions, STEP export — built free with your AI key."],
-            ["generative", "Sculpted model", "Organic, high-detail mesh from a paid 3D engine — typically $0.10–$0.40 per generation."],
-          ] as const).map(([v, label, hint]) => (
-            <button key={v} type="button" role="radio" aria-checked={engine === v} className={`lp-eng${engine === v ? " on" : ""}`} title={hint} onClick={() => setEngine(v)}>{label}</button>
-          ))}
-          {/* Self-contained sentences. These used to read as continuations of whichever
-              chip was selected — "picks per request · asks before anything paid runs" —
-              which parses on a desktop, where the hint sits on the same line as the word
-              "Auto". On a phone the chips take the whole row and the hint wraps beneath
-              them, leaving a fragment with no subject. */}
-          <span className="lp-eng-hint">
-            {engine === "auto" ? "Auto picks per request · asks before anything paid runs"
-              : engine === "precise" ? "Exact mm · free with your AI key"
-              : "Organic detail · paid engine, ~$0.10–0.40 per run"}
-          </span>
-        </div>
-
         {/* Your own work outranks the samples, so it sits above them. Shown whenever
             projects EXIST rather than only when signed in — they are stored locally
             either way, and hiding a signed-out user's own parts would be a lie.

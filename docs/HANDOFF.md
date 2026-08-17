@@ -917,6 +917,67 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Builds 443–447 — the phone gets its hierarchy, the engine gets stated, planning gets honest
+
+**443–444 — phone hierarchy and a decluttered nav.** Jerry, from an iPad/phone: "mainly
+the issue is heirarchy", then "nav looks a bit cluttered". The phone type scale was a
+44 px headline followed by a flat 16 px plateau; it is now a measured step (h1 31 → sub 13
+→ composer 16 → labels 11–12). The account pill was wrapping to two lines, so the email
+hides on phones (`.la-who`) and the explainer paragraph under the h1 now only renders for
+newcomers — six Mobbin iOS references all show no explainer on the home screen. Also a
+genuine overflow bug: `.signin-card { max-width: 440px }` was overriding `.card`'s
+`calc(100vw - 48px)` and running 74 px off a 390 px screen.
+
+**445 — the engine is a project fact, not a mode.** Jerry asked why a CAD project can
+still toggle the Mesh tab when the app won't honour it. It was worse than he thought:
+"Auto" is inert once a model exists, and `appendVersion` spreads the snapshot onto the
+project root, so `project.engine` is silently reclassified by whatever the last version
+built. A segmented control also lies about reversibility. Now: once geometry exists the
+seg is replaced by an `EngineChip` in the statusbar that STATES how the part was built,
+and crossing to mesh is a deliberate two-step with the losses, the History escape and the
+cost named. Watch the phone statusbar — the chip cost 111 px in a row that already summed
+to 383 px in a 390 px box, which is why Export is `position: sticky; right: 0`.
+
+**446 — plan first, said out loud and meant per part.** Planning already ran by default
+and nothing said so. There is now a `Plan · on` chip in the Launchpad composer foot. The
+sharper fix: "off" was a permanent global setting, so one mid-project opt-out silently
+skipped the spec on every part afterwards — it resets per new part now. And `draftPlan`
+took ONE image while the builder took the whole set, so the plan you read and corrected
+had seen less of your part than the thing building from it; it gets every reference, is
+told they are views of ONE object, and is asked which view each number came from.
+
+**447 — what the 446 review found.** Four reviewers over the 446 diff, each finding
+attacked by a skeptic before it was believed. Three real:
+- **The plan skipped the photo byte budget.** The build path fits the set to 9 MB
+  (`fitPhotoBudget`) precisely because PNG sketches stay PNG and a stack of them is a body
+  the provider rejects. The plan path encoded raw — and `draftPlan` swallows failures, so
+  it would not read as "too much to upload", it would read as the plan quietly not
+  happening, on exactly the heavily-referenced parts it is for. Measured: 13.9 MB of
+  sketches → 18.5 MB sent before, 5.1 MB after.
+- **Two reset paths were wrong.** A cold load never ran the reset at all (`planOn` boots
+  straight out of storage), so an "off" pinned in a tab closed yesterday survived the
+  night. And `goHome` ran it unconditionally — but "All templates"/"All projects" enter the
+  workspace to float a modal, and the wordmark is the only way back, so browsing undid a
+  choice made on the Launchpad. A `partStarted` ref tells the two trips apart; asking the
+  project instead fails the other way, since walking home mid-build has no project yet.
+- **The composer row sits under the send button below 375 px.** Both are absolutely
+  positioned in opposite corners with the send button later in the DOM, so nothing pushes
+  or wraps — the row slides underneath and the covered part of a chip taps as SEND. Also
+  found: 446's `gap: 6px` had been dead all along, because the phone block sat EARLIER in
+  the file than the base rule at equal specificity. The paperclip drops its label on
+  phones; 360 px went from 12 px overlapped to 48.7 px clear.
+
+Prompt hardening too: the planner is told words inside a picture are labels to read and
+never instructions, and `planToPrompt` no longer stamps planner-written text with "the
+user has reviewed these numbers" — text transcribed from a photo was inheriting the
+authority of something the user typed.
+
+Harness: `stub-llm.mjs` is now IN the repo (it lived only in a session scratchpad, so the
+probes could not run from a clean clone) with a `GET /_reset` — probes index into its
+request log, so a run following other runs sliced past its own requests and reported an
+app bug that wasn't. New probes: `plan-payload-e2e.mjs` (multi-MB PNGs — 1×1 pixels prove
+nothing about payload) and `launchpad-widths-e2e.mjs` (320–414 px).
+
 ## Builds 433–439 — reload keeps your part, and the harness gets repaired
 
 **Build 436 — the resume window.** Build 429's "always land on the Launchpad" was too

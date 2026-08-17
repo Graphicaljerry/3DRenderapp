@@ -11,10 +11,20 @@ regression suites: re-run the relevant ones after touching the areas they cover.
 # 1. dev server (relay included) — from moldable-lite/
 npm run dev
 
-# 2. from this directory
+# 2. stub LLM on :8899 — from this directory, leave it running
+node stub-llm.mjs
+
+# 3. from this directory
 npm install                 # playwright (the npm package only)
 node cost-e2e.mjs           # or any other *-e2e.mjs
 ```
+
+`stub-llm.mjs` stands in for the AI: canned build code, plan JSON, clarify questions and
+history moves, keyed off what the request asks for. It also records what each request
+actually CARRIED — `GET /_stats` returns `{bytes, images, each[]}` per request, so a probe
+can assert on the payload rather than on the UI's account of itself, and `GET /_reset`
+empties the log (probes that index into it must call this first, or they slice past their
+own requests once earlier runs have filled it).
 
 Chromium: scripts launch `executablePath: "/opt/pw-browsers/chromium"` (the Claude
 Code remote container's pre-installed browser). On another machine, either run
@@ -33,6 +43,9 @@ Screenshots (`shot-*.png`) land beside the scripts and are gitignored.
 | `routing-e2e.mjs` | Mesh/CAD auto-routing + prompt polish (mock LLM brain on :8788) |
 | `printprep-e2e.mjs`, `printpack2-e2e.mjs` | Overhang heatmap, auto-orientation, thin walls, elephant-foot chamfer, tolerance coupon, fastener presets |
 | `library-thumbs-e2e.mjs`, `library-organize-e2e.mjs`, `library-bulk-e2e.mjs` | Studio thumbnails + background upgrade; search/sort/filter/folders; multi-select delete/move |
+| `plan-default-e2e.mjs` | Plan-first: chip states the default, every new part resets to on, a browse does not, the off half really skips, all references reach the planner |
+| `plan-payload-e2e.mjs` | The plan request stays inside the photo byte budget on a heavy PNG sketch set (multi-MB fixtures — 1×1 pixels prove nothing here) |
+| `launchpad-widths-e2e.mjs` | The composer's chip row clears the send button at 320–414px (it slides UNDER it, so the covered part taps as Send) |
 | `flashfix-e2e.mjs`, `theme-toggle-e2e.mjs` | Reload-loop guard (sync churn) and light/dark pre-paint parity |
 | `pwa-e2e.mjs`, `settings-e2e.mjs`, `touch-e2e.mjs`, `ipad-audit.mjs` | Install/offline, Settings panes, mobile/touch behaviour |
 | `sandbox*-e2e.mjs`, `fit-e2e.mjs`, `plates-e2e.mjs`, `hole-e2e.mjs`, `measure2-e2e.mjs`, `dims-e2e.mjs`, `precision-e2e.mjs`, `preview-e2e.mjs`, `mark-e2e.mjs`, `context-e2e.mjs`, `ux-e2e.mjs`, `house-e2e.mjs`, `local-e2e.mjs`, `export-e2e.mjs` | Earlier feature suites — separation/fit, build plates, hole tool, measuring, dims box, AI preview, mark & ask, chat context, house AI, on-device model, exports |

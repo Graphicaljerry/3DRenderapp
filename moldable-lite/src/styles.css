@@ -1515,18 +1515,7 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    read "a plan is coming" at a glance, not "there is a plan setting". */
 .plan-toggle.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
 .plan-toggle:not(.on) { opacity: 0.65; }
-.fw-short { display: none; } /* the phone spelling; the rules below swap the pair */
-/* Three chips on one row, and on a phone the row has 298px before it reaches the send
-   button floating in the composer's bottom-right corner. Measured at 390px: the full
-   wording came to 338px and the plan chip rendered UNDERNEATH the send button.
-   Each label keeps the word that identifies it and sheds the rest — "Photos",
-   "Web · auto", "Plan · on" — and the tooltips still carry the full sentence. */
-@media (max-width: 760px) {
-  .launch-composer-foot .fw-more { display: none; }
-  .launch-composer-foot .fw-short { display: inline; }
-  .launch-composer-foot { gap: 6px; }
-  .launch-composer-foot .web-toggle { padding: 0 8px; }
-}
+.fw-short { display: none; } /* the phone spelling; the composer's phone block swaps the pair */
 .link-inline { color: var(--accent-d); text-decoration: underline; }
 .link-inline:hover { color: var(--accent); }
 /* OpenRouter "recommended for CAD" chips in Settings. */
@@ -1752,6 +1741,22 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .launch-attach:hover { background: var(--chrome); color: var(--ink2); }
 .launch-composer .send { position: absolute; right: 12px; bottom: 12px; width: 34px; height: 34px; border: none; border-radius: var(--r-full); background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
 .launch-composer .send:disabled { opacity: .45; }
+/* Phone. The foot row and the send button are both absolutely positioned inside the
+   composer, in opposite bottom corners, and the send button comes later in the DOM — so
+   when the row outgrows the space between them nothing pushes and nothing wraps: the row
+   slides underneath and the send circle paints over it, and the covered part of a chip
+   taps as SEND. Room is freed in the order that costs the least meaning — the paperclip
+   drops its word, the two toggles keep their state readout, and the spacing tightens.
+   MUST stay after the base .launch-composer-foot rule: same specificity, so the later
+   one wins, and while this block sat further up the file its gap was silently dead.
+   Measured at 320/344/360/375/390/414 by harness/launchpad-widths-e2e.mjs. */
+@media (max-width: 760px) {
+  .launch-composer-foot { gap: 6px; }
+  .launch-composer-foot .fw-more { display: none; }
+  .launch-composer-foot .fw-short { display: inline; }
+  .launch-composer-foot .launch-attach { padding: 5px 7px; }
+  .launch-composer-foot .web-toggle { padding: 0 7px; }
+}
 .launch-fine { margin: 0; font-size: var(--fs-sm); color: var(--mut); }
 /* One breathing rhythm for the zones below the composer: 26px between zones, 10px
    inside them — the create zone keeps its dominance and everything under it reads

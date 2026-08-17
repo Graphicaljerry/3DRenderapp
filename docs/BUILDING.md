@@ -95,9 +95,11 @@ reconcilable. `PRICING.unit` renames the unit everywhere (it is "credits" rather
 ## How changes get verified
 
 Every feature is checked end-to-end with **Playwright** against a local stub LLM
-server before it ships (no real API spend). Reusable harness bits are in
-`harness/`; the convention is: probe → production build → commit → push branch →
-fast-forward `main`.
+server before it ships (no real API spend): `node harness/stub-llm.mjs` on :8899
+alongside `npm run dev`. The stub also records what each request actually carried
+(`GET /_stats` → bytes and images per request; `GET /_reset` empties the log), so a
+probe can assert on the payload rather than on the UI's account of itself. The
+convention is: probe → production build → commit → push branch → fast-forward `main`.
 
 ## More depth
 

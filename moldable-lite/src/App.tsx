@@ -1594,7 +1594,21 @@ export default function App() {
    *  saying so. The setting outlived the reason for it. Turning it off is now a
    *  decision about the part in front of you, and the Launchpad's chip both states the
    *  default and lets you drop it for the build you are about to make. */
-  const startPlanned = () => { setPlanOn(true); try { localStorage.removeItem("moldable_plan"); } catch { /* private mode */ } };
+  /** Was this trip into the workspace about a PART?
+   *
+   *  "All templates" and "All projects" also enter the workspace — only to float a modal
+   *  over an empty canvas — and the wordmark is the only way back out, so a look at the
+   *  shelves runs the same goHome() that finishing a part does. Without something to tell
+   *  them apart, going to browse silently undoes a choice made on the Launchpad you are
+   *  about to return to. Asking the project instead would be wrong in the other
+   *  direction: walk home while the first build is still running and there is no project
+   *  yet, though a part is plainly under way. */
+  const partStarted = useRef(false);
+  const startPlanned = () => {
+    setPlanOn(true);
+    partStarted.current = false;
+    try { localStorage.removeItem("moldable_plan"); } catch { /* private mode */ }
+  };
   const setClarify = (v: boolean) => {
     setClarifyOn(v);
     try { localStorage.setItem("moldable_clarify", v ? "on" : "off"); } catch { /* private mode */ }
@@ -1935,13 +1949,19 @@ export default function App() {
   }
   useEffect(() => {
     const id = localStorage.getItem("moldable_last_project");
+    const warm = !!id && sessionIsFresh();
+    // A cold load lands on the Launchpad, and what you do from there is start a NEW part.
+    // planOn boots straight out of storage, so this is the one case the resets in
+    // startNew/goHome cannot reach — neither ever runs — and without it an "off" pinned
+    // mid-part in a tab you closed yesterday is still in force this morning. Coming back
+    // into a WARM part keeps the pin: that is the same part, not a new one.
+    if (!warm) startPlanned();
     if (id) {
       // Reopen only if the last sitting is still warm. A refresh while you are working
       // keeps the part on screen, the way every other engineering tool behaves; a load
       // hours later — after lunch, or the next morning — lands on the Launchpad with the
       // part offered on the shelf. The old code had no clock at all: it reopened the last
       // part on EVERY load, so the app only ever showed you where you had just been.
-      const warm = sessionIsFresh();
       void getProject(id).then((p) => {
         if (!p) return;
         if (warm) { setEntered(true); void openProjectById(p); }
@@ -5423,6 +5443,7 @@ export default function App() {
   /** Enter the guided "fix a broken part" flow: precise mode, a photo-first nudge,
    *  and a helper message with the coin/card-for-scale trick. */
   function startGuided() {
+    partStarted.current = true;
     setGuided(true);
     setMode("precise");
     setInput("");
@@ -5450,6 +5471,7 @@ export default function App() {
   const sendingRef = useRef(false);
   async function send(promptText: string, forceMode?: Mode, override?: { llm?: LlmSettings; genEng?: { provider: string; model: string }; skipClarify?: boolean; skipPlan?: boolean; routeAuto?: boolean }) {
     if (sendingRef.current) return;
+    partStarted.current = true;
     // Typing while an AI proposal is on canvas BUILDS ON the proposal instead of
     // silently throwing it away: the previewed change is kept as its own version
     // (Undo/History step back through it) and the ask re-runs next render, when the
@@ -5839,9 +5861,18 @@ export default function App() {
       // and correct — was drafted from a single photo. So the spec you checked for
       // accuracy had seen less of your part than the thing building it, and a dimension
       // only visible in the third photo could not appear in the plan at all.
+      //
+      // Through the SAME byte budget the build request uses, and for the same reason.
+      // Camera photos are ~4 MB after the attach-time resize and sail through; PNG
+      // sketches stay PNG so line art keeps its edges, and a stack of those is a body
+      // the provider rejects outright. The build has always fitted the set; the plan did
+      // not, which put the biggest request in the flow on the path that swallows its own
+      // failures — so it would not read as "too much to upload", it would read as the
+      // plan quietly not happening, on exactly the heavily-referenced parts it is for.
+      // Same budget as the build also means both see the same pictures.
       const planImgs: { dataBase64: string; mediaType: string }[] = [];
-      for (const b of [image?.blob, ...refs.map((r) => r.blob)]) {
-        if (!b) continue;
+      const planBlobs = [image?.blob, ...refs.map((r) => r.blob)].filter((b): b is Blob => !!b);
+      for (const b of await fitPhotoBudget(planBlobs)) {
         try {
           const du = await blobToDataURL(b);
           planImgs.push({ dataBase64: du.split(",")[1], mediaType: b.type || "image/png" });
@@ -7023,6 +7054,7 @@ export default function App() {
   }
 
   async function openProjectById(p: Project) {
+    partStarted.current = true;
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
@@ -7124,8 +7156,9 @@ export default function App() {
     setBeenHome(true);
     setEntered(false);
     // Back at the front door, the next thing you start is a new part — so the chip you
-    // are about to look at has to already be telling the truth about it.
-    startPlanned();
+    // are about to look at has to already be telling the truth about it. Only if a part
+    // is what you walked away from, though; see partStarted.
+    if (partStarted.current) startPlanned();
     // Walking out is a decision. Without this the freshness stamp is still warm, so the
     // very next reload would carry you back into the part you just left.
     clearActive();
@@ -8753,9 +8786,13 @@ function Launchpad({ model, theme, onToggleTheme, onContinue, onExample, onAllTe
           />
           <div className="launch-composer-foot">
             {/* Attaches, like every chat app's clip — drop and paste land in the same
-                place. The GUIDED photo flow keeps its own door ("Fix a broken part"). */}
-            <button type="button" className="launch-attach" title={`Up to ${maxPhotos} pictures in one request. ${photoAdvice}`} onClick={() => fileRef.current?.click()}>
-              <IconPaperclip /> Photos<span className="fw-more"> &amp; sketches</span>
+                place. The GUIDED photo flow keeps its own door ("Fix a broken part").
+                Icon alone on a phone: a paperclip has meant "attach" for thirty years,
+                so its label is the one thing on this row that can go without costing
+                anyone information — and it buys the two toggles beside it, whose whole
+                job is to state a setting, the room to keep saying it. */}
+            <button type="button" className="launch-attach" aria-label="Attach photos and sketches" title={`Up to ${maxPhotos} pictures in one request. ${photoAdvice}`} onClick={() => fileRef.current?.click()}>
+              <IconPaperclip /><span className="fw-more">Photos &amp; sketches</span>
             </button>
             <input
               ref={fileRef}

@@ -212,8 +212,23 @@ export type ModePref = "auto" | Mode; // composer switch: Auto lets the app pick
 
 export type SettingsPane = "ai" | "mesh" | "printer" | "appearance" | "sync";
 // User chat-bubble tint presets (mixed over the bubble base in CSS, both themes).
-export const DEFAULT_USER_TINT = "#498a6f";
-export const BUBBLE_TINTS: { label: string; color: string }[] = [
+//
+// NOT exported, and that matters more than it looks. Nothing outside this file uses
+// either one — but while they were exported, React Refresh had to treat App.tsx as a
+// module with non-component exports and compare them across evaluations. BUBBLE_TINTS is
+// a fresh array literal every time, so the identity check always failed, the Fast Refresh
+// boundary was rejected, and Vite propagated the invalidation up to main.tsx — which has
+// no exports at all, so its boundary failed too and the page hard-reloaded.
+//
+// The visible symptom was a React warning about createRoot being called twice on the same
+// container: main.tsx got re-imported under a `?t=` URL, which is a second module record
+// in the SAME document, so its top-level body ran again. Dev-only (the warning string
+// isn't in the production React build, and dist/ has no HMR client at all), but the cost
+// was real: every save of this file — or of anything it imports — threw away app state
+// and re-warmed the ~11 MB OCCT wasm. Dropping two keywords let Fast Refresh work in
+// place. Re-export either one and the reloads come back.
+const DEFAULT_USER_TINT = "#498a6f";
+const BUBBLE_TINTS: { label: string; color: string }[] = [
   { label: "Green", color: "#498a6f" },
   { label: "Teal", color: "#14b8a6" },
   { label: "Green", color: "#22c55e" },

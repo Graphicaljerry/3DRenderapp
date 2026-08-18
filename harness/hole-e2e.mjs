@@ -11,7 +11,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
+await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
 await awaitBuild(page);
 
 // 1) Pick a flat face → the selection row offers "Hole…".
@@ -20,9 +20,17 @@ await awaitBuild(page);
 // verb never appears, and this reads as a missing feature. It also arms Modify, which
 // absorbed the standalone Select tool and owns picking now.
 const canvas = page.locator(".viewerCanvas canvas");
+// Every click below is expressed as a fraction of the canvas, so its box is needed
+// before the first one. It was simply missing — the probe threw ReferenceError on line
+// 37 the moment it got past the pick, which is why nothing after step 1 had ever run.
+const box = await canvas.boundingBox();
 const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
-// Hunt for a FLAT face: the desk hook is mostly curved and Hole… is deliberately offered
-// only where holeCtl.canStart allows it (a flat, non-curved face on a CAD model).
+// The phone stand, not the headphone desk hook. The hook is curved almost everywhere and
+// a click on it never produced a face pick at all (0 of 30 sampled points), so this probe
+// spent its life reporting a missing Hole… verb on a model it could not select a face of.
+// The stand is flat-sided; regress-465-e2e drills it end to end on the same path.
+// The `until` predicate stays: it stops the hunt on a face that actually OFFERS Hole…
+// rather than on the first thing that selects.
 const picked = await pickFace(page, { until: async () => (await holeItem.count()) > 0 });
 check("flat face offers Hole…", picked && (await holeItem.count()) > 0);
 await holeItem.click();
@@ -48,7 +56,10 @@ const snapped = placed && placed.every((v) => Number.isInteger(Number(v)));
 check("click places the hole, snapped to the magnet", !!placed && snapped, `${before1} → ${placed}`);
 check("panel still open after placing", (await page.locator(".hole-panel").count()) === 1);
 const afterPlace = await axisVals();
-await canvas.click({ position: { x: box.width * 0.9, y: box.height * 0.32 } });
+// Off the model but still ON the canvas — and clear of the Inspector dock, which
+// overlays the canvas's top-right corner and swallowed this click entirely
+// ("subtree intercepts pointer events") rather than letting it reach the viewer.
+await canvas.click({ position: { x: box.width * 0.75, y: box.height * 0.92 } });
 await page.waitForTimeout(200);
 check("stray click off the plane is ignored", JSON.stringify(await axisVals()) === JSON.stringify(afterPlace) && (await page.locator(".hole-panel").count()) === 1);
 
@@ -64,9 +75,12 @@ await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 } });
 await page.waitForSelector(".hp-ref", { timeout: 15_000 });
 check("reference picked — Δ and spacing shown", (await page.locator(".hp-ref .hp-axis").count()) === 2);
 const refText = await page.locator(".hp-ref .fine").first().innerText();
-// Teal pixels in the viewport = the reference/guide lines. Count once with only the
-// dashed at→ref line, once after aligning an axis: the SOLID guide line must add pixels.
-const tealCount = async () => {
+// The reference/guide lines are 0x498a6f — rgb(73, 138, 111), read straight out of
+// layoutHoleGhost in Viewer.tsx. This counted rgb(20, 184, 166) instead and found zero
+// pixels in every state, so both halves of the comparison were 0 and the check could
+// only ever fail. Count once with just the dashed at→ref line, once after aligning an
+// axis: the SOLID guide has to add pixels.
+const guideCount = async () => {
   const b64 = (await canvas.screenshot()).toString("base64");
   return page.evaluate(async (b64) => {
     const img = new Image();
@@ -79,18 +93,18 @@ const tealCount = async () => {
     const d = g.getImageData(0, 0, c.width, c.height).data;
     let n = 0;
     for (let i = 0; i < d.length; i += 4) {
-      if (Math.abs(d[i] - 20) < 45 && Math.abs(d[i + 1] - 184) < 45 && Math.abs(d[i + 2] - 166) < 45) n++;
+      if (Math.abs(d[i] - 73) < 40 && Math.abs(d[i + 1] - 138) < 40 && Math.abs(d[i + 2] - 111) < 40) n++;
     }
     return n;
   }, b64);
 };
-const tealDashed = await tealCount();
+const guideDashed = await guideCount();
 await page.locator(".hp-ref .hp-axis").first().getByRole("button", { name: "=" }).click();
 await page.waitForTimeout(300);
 const d0 = await page.locator(".hp-ref .hp-axis input").first().inputValue();
 check("align button zeroes the delta", Number(d0) === 0, `Δ=${d0} (ref: ${refText.slice(0, 60)})`);
-const tealAligned = await tealCount();
-check("solid alignment guide line lights up", tealDashed > 0 && tealAligned > tealDashed + 10, `teal px ${tealDashed} → ${tealAligned}`);
+const guideAligned = await guideCount();
+check("solid alignment guide line lights up", guideDashed > 0 && guideAligned > guideDashed + 10, `guide px ${guideDashed} → ${guideAligned}`);
 
 // 4) Exact spacing: type 20 → in-plane centre distance becomes 20 (snapped).
 const spacingInput = page.locator(".hp-ref").getByLabel("Centre-to-centre spacing (mm)");
@@ -110,7 +124,7 @@ await page.getByRole("button", { name: "Drill hole", exact: true }).click();
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Drilled a/.test(b.textContent ?? "")), null, { timeout: 120_000 });
 const proj = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");
-  const p = (await mod.listProjects()).find((x) => x.name === "Headphone desk hook");
+  const p = (await mod.listProjects()).find((x) => x.name === "Phone stand");
   const last = p?.versions[p.versions.length - 1];
   return { versions: p?.versions.length, ops: last?.ops ?? p?.ops ?? [] };
 });

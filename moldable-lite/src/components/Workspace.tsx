@@ -2638,7 +2638,7 @@ interface Props {
     start: () => void;
     cancel: () => void;
     patch: (p: Partial<NonNullable<Props["holeCtl"]["draft"]>>) => void;
-    setAxis: (axis: number, v: number) => void;
+    setAxis: (axis: number, v: number, exact?: boolean) => void;
     apply: () => void;
   };
   magnetCtl: {
@@ -6613,8 +6613,10 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
   const setSpacing = (target: number) => {
     if (!d.ref || spacing < 0.01 || target <= 0) return;
     const k = target / spacing;
-    ctl.setAxis(axes[0], d.ref.center[axes[0]] + (d.at[axes[0]] - d.ref.center[axes[0]]) * k);
-    ctl.setAxis(axes[1], d.ref.center[axes[1]] + (d.at[axes[1]] - d.ref.center[axes[1]]) * k);
+    // Exact: a typed centre-to-centre distance is a measurement, and re-snapping it to
+    // the magnet turns the 20 mm you asked for into 19.91.
+    ctl.setAxis(axes[0], d.ref.center[axes[0]] + (d.at[axes[0]] - d.ref.center[axes[0]]) * k, true);
+    ctl.setAxis(axes[1], d.ref.center[axes[1]] + (d.at[axes[1]] - d.ref.center[axes[1]]) * k, true);
   };
   return (
     <div className="pin-panel hole-panel">
@@ -6688,7 +6690,7 @@ function HolePanel({ ctl, busy }: { ctl: Props["holeCtl"]; busy: boolean }) {
               <span className="hp-axis" key={ax}>
                 <b>Δ{AX[ax]}</b>
                 <input type="number" step={d.snap || 0.1} value={r1(d.at[ax] - d.ref!.center[ax])} onChange={(e) => ctl.setAxis(ax, d.ref!.center[ax] + (Number(e.target.value) || 0))} aria-label={`Offset from reference in ${AX[ax]} (mm)`} />
-                <button className="ghost sm" title={`Align ${AX[ax]} with the reference hole (Δ${AX[ax]} = 0)`} onClick={() => ctl.setAxis(ax, d.ref!.center[ax])}>=</button>
+                <button className="ghost sm" title={`Align ${AX[ax]} with the reference hole (Δ${AX[ax]} = 0)`} onClick={() => ctl.setAxis(ax, d.ref!.center[ax], true)}>=</button>
               </span>
             ))}
           </div>

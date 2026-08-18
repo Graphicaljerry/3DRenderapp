@@ -129,21 +129,28 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   const hasImg = await couponCard.evaluate((el) => !!el.querySelector("img")?.src);
   check("T4 coupon card has a real render", hasImg);
 
-  // Build the headphone desk hook for the hole-preset test.
-  await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
+  // Build the phone stand for the hole-preset test. It was the headphone desk hook, which
+  // is curved nearly everywhere: a click on it never produced a face pick at all (0 of 30
+  // sampled surface points), so this step reported a missing Hole… verb on a model whose
+  // faces it could not select in the first place. The stand is flat-sided; hole-e2e and
+  // regress-465-e2e both drill it on this same path.
+  await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
   await awaitBuild(page);
 
   // T5: face → Hole… → pick "M3 heat-set insert" → ⌀4, 5.5 deep + boss hint.
-  // pickFace projects real surface vertices instead of clicking canvas fractions — the
-  // headphone hook is an awkward shape and the old fixed positions simply missed it — and
-  // it arms Modify, which owns picking since it absorbed the Select tool (044ab7f).
+  // pickFace projects real surface vertices instead of clicking canvas fractions, and it
+  // arms Modify, which owns picking since it absorbed the Select tool (044ab7f).
   const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
-  // Hunt for a FLAT face — the hook is mostly curved and Hole… is correctly absent there.
+  // The predicate stops the hunt on a face that actually OFFERS Hole…, not on the first
+  // thing that selects.
   const picked = await pickFace(page, { until: async () => (await holeItem.count()) > 0 });
   check("T5 face offers Hole…", picked && (await holeItem.count()) > 0);
   await holeItem.click();
   await page.waitForSelector(".hole-panel");
-  await page.locator(".hole-panel select").first().selectOption({ label: "M3 heat-set insert (⌀4.0 · 5.5 mm)" });
+  // By value, not by label. The menu text is built by fastenerLabel() from the CALIBRATED
+  // bore, so it reads "⌀4", or "⌀4.15" on a machine with a measured clearance — matching
+  // the printed string made this step fail on formatting rather than on behaviour.
+  await page.locator(".hole-panel select").first().selectOption({ value: "hsi-m3" });
   await page.waitForTimeout(200);
   const dia = await page.locator(".hole-panel input[type=number]").first().inputValue();
   check("T5 M3 insert preset sets ⌀4", dia === "4", dia);
@@ -152,16 +159,37 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await page.locator(".hole-panel .x").click();
 
   // T6: voronoi texture applies as real geometry.
-  await page.getByRole("button", { name: "Surface texture" }).click();
-  await page.getByRole("button", { name: "Voronoi", exact: true }).click();
-  await page.getByRole("button", { name: "Apply to model" }).click();
-  await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("voronoi") && b.textContent.includes("surface texture")), null, { timeout: 120_000 });
-  check("T6 voronoi texture applied", true);
+  // The rail slot is "Pattern" now — patterns and textures are one displacement of the
+  // outer shell, so they share a slot and split by tab inside it (a "Surface texture"
+  // button has not existed since). Voronoi is a TEXTURE, so the tab has to be switched.
+  await page.locator(".canvas-rail").getByRole("button", { name: "Pattern" }).click();
+  await page.locator(".pattern-fly .mode-seg button", { hasText: "Texture" }).click();
+  // The swatches are radios in .fx-grid, not buttons — getByRole("button") never matched.
+  await page.locator(".fx-grid [role=radio]", { hasText: "Voronoi" }).first().click();
+  // "Apply to model" was never the label — the button in .fx-actions reads Apply (or
+  // Update/Remove once something is already on the surface).
+  const triBefore = await page.evaluate(() => window.__viewerS?.()?.mesh?.geometry?.getAttribute?.("position")?.count ?? 0);
+  await page.locator(".fx-actions button.primary").click();
+  // Assert the GEOMETRY, not a chat line. This waited on a bubble reading "voronoi …
+  // surface texture" and no such sentence is written anywhere: applying a surface effect
+  // records a History step ("Voronoi texture — 6 mm, 0.6 mm raised"), and direct-edit
+  // chat receipts were deliberately muted. Displacement subdivides the shell, so the
+  // vertex count is the honest evidence that real relief was cut.
+  const applied = await page.waitForFunction(
+    (n) => (window.__viewerS?.()?.mesh?.geometry?.getAttribute?.("position")?.count ?? 0) > n * 1.5,
+    triBefore, { timeout: 180_000 },
+  ).then(() => true).catch(() => false);
+  const triAfter = await page.evaluate(() => window.__viewerS?.()?.mesh?.geometry?.getAttribute?.("position")?.count ?? 0);
+  check("T6 voronoi texture applied as real geometry", applied, `${triBefore} → ${triAfter} verts`);
 
   // T7: fit calibration field persists.
-  await page.getByRole("button", { name: /account|profile|Settings/i }).first().click().catch(() => {});
-  if (!(await page.locator(".overlay").count())) await page.locator(".topbar .iconbtn").last().click();
-  await page.getByRole("button", { name: "Printer", exact: true }).click();
+  // Through the status bar's printer chip, which opens Settings ALREADY on the Printer
+  // pane. The old route went via the account button — and when nobody is signed in, that
+  // button opens the sign-in modal instead of Settings, so the Printer tab never existed
+  // to be clicked. Probes run signed out.
+  await page.locator(".statusbar .bedchip").click();
+  await page.waitForSelector(".overlay .stabs", { timeout: 15_000 });
+  await page.locator(".overlay .stabs button", { hasText: "Printer" }).click();
   const cal = page.locator('input[placeholder="0.20 (default)"]');
   await cal.scrollIntoViewIfNeeded();
   await cal.fill("0.35");

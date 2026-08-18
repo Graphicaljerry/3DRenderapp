@@ -4458,11 +4458,16 @@ export default function App() {
     setHoleDraft({ at, normal: n, diameter: 5, depth: 0, snap, ref: null, picking: false });
     setSelectedFeature(null);
   }
-  function setHoleAxis(axis: number, value: number) {
+  /** `exact` skips the magnet. The panel's align (=) button and its spacing field both
+   *  ask for a value MEASURED off another hole, and rounding that to the magnet grid left
+   *  Δ at -0.01 mm right after a button whose own tooltip promises Δ = 0 — the reference
+   *  hole's centre is wherever it is, not on a whole millimetre. Hand-typed offsets and
+   *  hand-placed clicks still snap; that is what the magnet is for. */
+  function setHoleAxis(axis: number, value: number, exact = false) {
     setHoleDraft((d) => {
       if (!d) return d;
       const at = [...d.at] as [number, number, number];
-      at[axis] = snapV(value, d.snap);
+      at[axis] = exact ? value : snapV(value, d.snap);
       return { ...d, at };
     });
   }

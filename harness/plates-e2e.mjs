@@ -99,8 +99,10 @@ const dl = page.waitForEvent("download", { timeout: 30_000 });
 // .pb-export no longer exists in any TSX — export moved into the Inspector's Export
 // section as one surface ("One Export surface, opening on print readiness", 866123e).
 await page.locator(".dock-list").getByRole("button", { name: "Export", exact: true }).click();
+// One click, not two. Export used to be a .pb-export MENU; it is a button in the
+// Inspector's Export section now, and the leftover .pmenu click below it was hunting a
+// menu item that no longer exists — after the export had already run.
 await page.locator(".dock-body button", { hasText: /One project \.3mf/ }).first().click();
-await page.locator(".pmenu .pmenu-item", { hasText: "One project .3mf" }).click();
 const download = await dl;
 check("bar exports a project .3mf", (download.suggestedFilename() ?? "").endsWith(".3mf"), download.suggestedFilename());
 

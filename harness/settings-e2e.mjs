@@ -26,18 +26,22 @@ check("sync payload is gzip-compressed inside the envelope", crypt.gz && crypt.s
 check("compressed payload round-trips losslessly", crypt.roundtrip);
 
 // ---- 2) Grouped Settings modal. ----
-// Signed out, the profile button opens Settings directly (Sync tab).
 // Signed out, the avatar's job is getting signed IN — it opens the sign-in popup, not a
-// settings pane (App.tsx: "Signed out, the avatar's job is getting signed IN"). Settings
-// is reached from the menu item, so open the menu and pick it.
-await page.getByRole("button", { name: "Account menu" }).click();
-const settingsItem = page.locator(".pm-item", { hasText: /^Settings$/ }).first();
-if (await settingsItem.count()) await settingsItem.click();
+// settings pane (App.tsx: "Signed out, the avatar's job is getting signed IN"), and the
+// profile MENU that carries the Settings item only renders for a signed-in account. So
+// this opened nothing and then waited 20 s for a modal that was never going to appear.
+// The status bar's printer chip opens Settings in any state; every tab is one click away
+// from there.
+await page.locator(".statusbar .bedchip").click();
 await page.waitForSelector(".card .stabs", { timeout: 20_000 });
 const groups = async () => page.locator(".sgroup .sgroup-head b").allInnerTexts();
 
 await page.locator(".stabs button", { hasText: "AI brain" }).click();
-check("AI tab groups: Brain + AI changes", JSON.stringify(await groups()) === JSON.stringify(["Brain", "AI changes"]), (await groups()).join(", "));
+// Contains, not equals — the exact-list form failed the day Before building and Spend
+// joined the pane, which is a pane gaining sections rather than a defect. The two groups
+// this check is about are the ones named.
+const aiGroups = await groups();
+check("AI tab has Brain + AI changes groups", ["Brain", "AI changes"].every((g) => aiGroups.includes(g)), aiGroups.join(", "));
 await page.locator(".stabs button", { hasText: "3D engine" }).click();
 const engGroups = await groups();
 check("3D engine tab has Engine + Access groups", ["Engine", "Access"].every((g) => engGroups.includes(g)), engGroups.join(", "));
@@ -45,7 +49,8 @@ await page.locator(".stabs button", { hasText: "Printer" }).click();
 const prnGroups = await groups();
 check("Printer tab has Your printer + Print checks groups", ["Your printer", "Print checks"].every((g) => prnGroups.includes(g)), prnGroups.join(", "));
 await page.locator(".stabs button", { hasText: "Sync" }).click();
-check("Sync tab groups: Cloud account + File backup", JSON.stringify(await groups()) === JSON.stringify(["Cloud account", "File backup"]), (await groups()).join(", "));
+const syncGroups = await groups();
+check("Sync tab has Cloud account + File backup groups", ["Cloud account", "File backup"].every((g) => syncGroups.includes(g)), syncGroups.join(", "));
 const backupHidden = await page.getByLabel("Backup passphrase").isVisible().catch(() => false);
 check("file-backup details are collapsed by default", !backupHidden);
 

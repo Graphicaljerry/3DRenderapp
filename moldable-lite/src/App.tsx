@@ -6547,6 +6547,24 @@ export default function App() {
       }
 
       setInput("");
+      if (refinedFromCanvas && genImage) {
+        // Show what was actually sent. The app took this picture on the user's behalf and
+        // handed it to the mesh engine — a transcript that says "I snapshotted it" and
+        // then shows nothing asks people to take that on trust. Same treatment as a photo
+        // they attached themselves: a thumbnail in the bubble, the full-resolution copy
+        // filed against the message so expanding it is HD.
+        const shotThumb = await chatThumb(genImage.blob);
+        if (shotThumb) {
+          setMessages((m) => m.map((x) => (x.id === userMsgId ? { ...x, image: shotThumb } : x)));
+          const pr = projectRef.current;
+          if (pr) {
+            const withShot = { ...pr, photos: { ...(pr.photos ?? {}), [userMsgId]: [genImage.blob] } };
+            projectRef.current = withShot;
+            setProject(withShot);
+            autosave(withShot);
+          }
+        }
+      }
       if (refinedFromCanvas) {
         explainOnce(
           "cad2mesh",

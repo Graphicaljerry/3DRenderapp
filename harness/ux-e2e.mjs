@@ -97,18 +97,11 @@ for (const [x, y] of await modelPoints(page)) {
   await page.keyboard.press("Escape");
 }
 check("object context menu has quick actions", ["Rename", "Duplicate", "Copy"].every((k) => ctxItems.some((v) => v.includes(k))), ctxItems.join(" | ").slice(0, 140));
-await page.locator(".pmenu .pmenu-item", { hasText: "Duplicate" }).click();
-await page.waitForTimeout(600);
-const namesNow = await page.locator(".layers-panel .lp-name").allInnerTexts();
-check("duplicate adds a copy object", namesNow.some((n) => n.includes("copy")), namesNow.join(", "));
-
-// 8) Copy an object, right-click empty space → Paste.
-for (const pos of [[0.6, 0.55], [0.7, 0.5], [0.65, 0.65], [0.5, 0.6]]) {
-  await canvas.click({ button: "right", position: { x: box.width * pos[0], y: box.height * pos[1] } });
-  await page.waitForSelector(".pmenu");
-  if ((await page.locator(".pmenu .pmenu-item", { hasText: /^Copy$/ }).count()) > 0) break;
-  await page.keyboard.press("Escape");
-}
+// The menu opened above is the object menu and it carries both verbs. Copy/Paste runs
+// FIRST, from this same open menu: after a Duplicate the copy lands on its own plate and
+// the plate view changes under the probe, and no right-click on the canvas found an
+// object menu again — the Copy step was failing on that state, not on Copy.
+const names0 = await page.locator(".layers-panel .lp-name").allInnerTexts();
 await page.locator(".pmenu .pmenu-item", { hasText: /^Copy$/ }).click();
 // Top-middle: clear of the model, the left tool rail AND the right-docked Objects panel.
 await canvas.click({ button: "right", position: { x: box.width * 0.55, y: box.height * 0.12 } });
@@ -117,8 +110,31 @@ const emptyItems = await page.locator(".pmenu .pmenu-item").allInnerTexts();
 check("empty-space menu offers Paste", emptyItems.some((v) => v.startsWith("Paste")), emptyItems.join(" | "));
 await page.locator(".pmenu .pmenu-item", { hasText: "Paste" }).click();
 await page.waitForTimeout(600);
-const namesAfterPaste = await page.locator(".layers-panel .lp-name").allInnerTexts();
-check("paste lands a new object", namesAfterPaste.filter((n) => n.includes("copy")).length >= 2, namesAfterPaste.join(", "));
+const names1 = await page.locator(".layers-panel .lp-name").allInnerTexts();
+check("paste lands a new object", names1.length === names0.length + 1, `${names0.join(", ")} → ${names1.join(", ")}`);
+
+// Now Duplicate, from a freshly opened object menu.
+await page.keyboard.press("Escape");
+await page.waitForTimeout(200);
+let dupMenu = false;
+for (const [x, y] of await modelPoints(page)) {
+  await page.mouse.click(x, y, { button: "right" });
+  await page.waitForTimeout(180);
+  if (!(await page.locator(".pmenu").count())) continue;
+  if ((await page.locator(".pmenu .pmenu-item", { hasText: "Duplicate" }).count()) > 0) { dupMenu = true; break; }
+  await page.keyboard.press("Escape");
+}
+check("the object menu reopens on the model", dupMenu);
+if (dupMenu) {
+  await page.locator(".pmenu .pmenu-item", { hasText: "Duplicate" }).click();
+  await page.waitForTimeout(600);
+  const names2 = await page.locator(".layers-panel .lp-name").allInnerTexts();
+  // Count, not spelling. This demanded the word "copy" in the new object's name; a
+  // duplicate is named "<part> · v1" (Duplicate absorbed keep-aside — one concept, one
+  // verb), so the probe was asserting a naming scheme the app had dropped while the
+  // feature itself worked.
+  check("duplicate adds an object", names2.length === names1.length + 1, `${names1.join(", ")} → ${names2.join(", ")}`);
+}
 
 // 9) Right-click a part → part menu with fit tools; screenshot for the record.
 await page.screenshot({ path: "shot-ux.png" });

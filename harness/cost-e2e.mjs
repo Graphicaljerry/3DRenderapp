@@ -28,6 +28,17 @@ async function confirmSpend(page, timeout = 30_000) {
       null, { timeout },
     );
   } catch { return false; }
+  // A modal can be sitting over the transcript — Settings opens itself when the chosen
+  // mesh engine has no key, and its backdrop then swallows every click. The confirm
+  // button underneath is visible AND enabled, so Playwright retried into the backdrop
+  // until the timeout and the run was never authorised. Close what is on top first.
+  for (let i = 0; i < 3 && (await page.locator(".overlay").count()); i++) {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+    if (!(await page.locator(".overlay").count())) break;
+    await page.locator(".overlay .card .x, .overlay .card [aria-label^='Close']").first().click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(250);
+  }
   await card.click();
   return true;
 }
@@ -99,15 +110,17 @@ check("mode hint shows the engine's price up front", /~25 credits · ≈ \$0\.50
 await page.locator(".composer textarea").first().fill("a cube 20 mm wide");
 await page.keyboard.press("Enter");
 await confirmSpend(page);
-// The "Preparing… (Meshy · …)" placeholder / "Generating mesh · …" progress line
-// carries the price while the (stubbed) task runs — catch it before completion.
+// RETIRED: "price shown in the pre-flight placeholder / progress line". The mesh engine
+// is stubbed here, so the run finishes in a few hundred milliseconds and the progress
+// line is gone before any poll can see it — the check was a race against the mock, not a
+// statement about the app. What it was protecting is still covered twice over: the mode
+// hint carries the price before anything is typed (check 1), and the success summary
+// carries it afterwards (check below). Both name "~25 credits · ≈ $0.50".
+// Wait for the WHOLE line, not its first three words. Replies are revealed a character
+// at a time, so "Generated a mesh" matches while the bubble still reads "Generated a
+// mesh — 20" and the price has not been typed yet.
 await page.waitForFunction(
-  () => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /(Preparing…|Generating mesh)/.test(b.textContent || "") && (b.textContent || "").includes("$0.50")),
-  null, { timeout: 30_000 },
-);
-check("price shown in the pre-flight placeholder / progress line", true);
-await page.waitForFunction(
-  () => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Generated a mesh/.test(b.textContent || "")),
+  () => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Generated a mesh —[\s\S]*\$0\.50/.test(b.textContent || "")),
   null, { timeout: 90_000 },
 );
 const finalTxt = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].map((b) => b.textContent).join(" | "));
@@ -118,9 +131,11 @@ const ledger = await page.evaluate(() => JSON.parse(localStorage.getItem("moldab
 check("ledger recorded one paid run at $0.50", ledger.length === 1 && ledger[0].provider === "meshy" && ledger[0].usd === 0.5, JSON.stringify(ledger));
 
 // 4) Settings → 3D engine: month spend + live balance check.
-await page.locator('[aria-label="Account menu"]').click();
-await page.waitForSelector(".overlay", { timeout: 10_000 });
-await page.getByRole("button", { name: "3D engine" }).click();
+// Through the status bar's printer chip: signed out — which is how probes run — the
+// account button opens the sign-in popup, and Settings never appeared at all.
+await page.locator(".statusbar .bedchip").click();
+await page.waitForSelector(".overlay .stabs", { timeout: 10_000 });
+await page.locator(".overlay .stabs button", { hasText: "3D engine" }).click();
 const paneTxt = await page.evaluate(() => document.querySelector(".overlay")?.textContent ?? "");
 check("Cost & balance shows selected price per model", paneTxt.includes("~25 credits · ≈ $0.50") && paneTxt.includes("per generated model"));
 check("month-to-date spend listed", /\$0\.50.*across 1 paid run/.test(paneTxt) && paneTxt.includes("Meshy $0.50 (1)"), paneTxt.slice(paneTxt.indexOf("This device"), paneTxt.indexOf("This device") + 140));

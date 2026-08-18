@@ -11,6 +11,11 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 
 // fresh context → localStorage is empty, so no stored preference → Auto is the default
 // (don't clear the pref in initScript — it runs on every reload and would break persistence)
+// The sign-in modal opens the first time the composer takes focus, and its backdrop then
+// swallows every click that follows — including the send in A8, which is why that step
+// reported "no routing note": the message was never sent. Seeding the prompted flag is
+// what eighteen sibling probes do; this one did not.
+await page.addInitScript(() => localStorage.setItem("moldable_signin_prompted", "1"));
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 // The app boots on the Launchpad — `entered` is in-session only — so waiting for
 // workspace chrome straight after a goto or a reload waited 60 s for something that was

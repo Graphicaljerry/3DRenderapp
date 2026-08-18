@@ -2,7 +2,7 @@
 // and Mark & ask sending REAL 3D region coordinates (verified through a mock relay).
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace, awaitBuild, pickFace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild, pickFace, modelPoints } from "./enter.mjs";
 
 // Mock house relay that CAPTURES the request so we can assert the prompt contents.
 let lastBody = null;
@@ -39,27 +39,38 @@ await page.addInitScript(() => {
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
-await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
+await page.locator(".overlay").getByTitle(/^Build the phone stand\b/).click();
 await awaitBuild(page);
 
 const canvas = page.locator(".viewerCanvas canvas");
 const box = await canvas.boundingBox();
 
 // 1) Shift-click two different faces → both selected, both highlighted, extrude-all offered.
-await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 }, modifiers: ["Shift"] });
-await page.waitForTimeout(400);
-await canvas.click({ position: { x: box.width * 0.42, y: box.height * 0.75 }, modifiers: ["Shift"] });
-// Three things moved. .pin-panel is the point/Note panel now ("Point N · face · x,y,z");
-// the face verbs live in the ContextBar at the selection (20c0138); and picking needs a
-// tool armed at all, because the standalone Select tool was absorbed into Modify
-// (044ab7f) — bare canvas clicks select nothing.
-// Nothing was arming picking, so the ContextBar could never appear: Modify absorbed the
-// standalone Select tool and owns picking now. pickFace arms it and clicks projected
-// surface points rather than canvas fractions.
-await pickFace(page);
+// Four things moved under this step. .pin-panel is the point/Note panel now ("Point N ·
+// face · x,y,z"); the face verbs live in the ContextBar at the selection (20c0138);
+// picking needs a tool armed at all, because the standalone Select tool was absorbed
+// into Modify (044ab7f); and the model is the phone stand rather than the headphone desk
+// hook, which is curved nearly everywhere — a click on it never produced a face pick at
+// all, so nothing downstream could run.
+const picked = await pickFace(page);
+check("a face picks with Modify armed", picked);
 await page.waitForSelector(".ctxbar, .sel-acts", { timeout: 30_000 });
-const selText = await page.evaluate(() => document.querySelector(".dock-body, .ctxbar")?.textContent ?? "");
-check("shift-click builds a multi-face selection", /2\s*(faces|selected)/i.test(selText), selText.slice(0, 120));
+// Shift-click a SECOND projected surface point to add to the selection. Fixed canvas
+// fractions were used here and hit the background.
+// The multi-face row is the readout: "Push / Pull all N". Matching /2 faces|2 selected/
+// matched nothing, so the loop never stopped and shift-clicked its way to six.
+const twoPicked = /Push ?\/ ?Pull all 2\b/;
+const selCount = async () => page.evaluate(() => document.querySelector(".dock-body, .ctxbar, .sel-acts")?.textContent ?? "");
+let selText = await selCount();
+for (const [x, y] of await modelPoints(page)) {
+  if (twoPicked.test(selText)) break;
+  await page.keyboard.down("Shift");
+  await page.mouse.click(x, y);
+  await page.keyboard.up("Shift");
+  await page.waitForTimeout(150);
+  selText = await selCount();
+}
+check("shift-click builds a multi-face selection", twoPicked.test(selText), selText.slice(0, 120));
 
 // 2) The quick-edit row fits inside its panel (the reported overflow), then extrude-all works.
 // "Extrude all {n}" was renamed "Push / Pull all {n}" (3fdd6c4).
@@ -68,17 +79,27 @@ await rowBtn.waitFor();
 const panelBox = await page.locator(".ctxbar, .sel-acts").first().boundingBox();
 const btnBox = await rowBtn.boundingBox();
 check("quick-edit buttons stay inside the panel", btnBox.x + btnBox.width <= panelBox.x + panelBox.width + 1, `btn right ${Math.round(btnBox.x + btnBox.width)} vs panel right ${Math.round(panelBox.x + panelBox.width)}`);
+// The evidence is a new History version, not a chat line: direct edits post no receipt
+// (they were muted as repetitive noise), so waiting on "Extruded 2 faces by 2 mm" was
+// waiting on a sentence the app stopped writing.
+const versionsBefore = await page.evaluate(async () => {
+  const mod = await import("/src/store/projects.ts");
+  return (await mod.listProjects())[0]?.versions.length ?? 0;
+});
 await rowBtn.click();
-await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Extruded 2 faces by 2 mm/.test(b.textContent ?? "")), null, { timeout: 120_000 });
-check("extrude-all applies to both faces locally", true);
+const committed = await page.waitForFunction(async (n) => {
+  const mod = await import("/src/store/projects.ts");
+  return ((await mod.listProjects())[0]?.versions.length ?? 0) > n;
+}, versionsBefore, { timeout: 120_000 }).then(() => true).catch(() => false);
+check("extrude-all applies to both faces locally", committed, `${versionsBefore} version(s) before`);
 
-// Also check the single-face popover (the exact screenshot case): pick one face.
-await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 } });
-await page.waitForSelector(".directop");
-const dop = await page.locator(".directop").last().boundingBox();
-const ext = await page.getByRole("button", { name: "Extrude", exact: true }).boundingBox().catch(() => null);
-if (ext) check("single-face Extrude button fits its wrapper", ext.x + ext.width <= dop.x + dop.width + 1, `btn ${Math.round(ext.x + ext.width)} vs box ${Math.round(dop.x + dop.width)}`);
-await page.getByRole("button", { name: "Select", exact: true }).click(); // tool off
+// RETIRED: "single-face Extrude button fits its wrapper". .directop lives inside a
+// ContextBar gated on `!modifyCtl.op`, and Modify — the only tool that arms face picking
+// since it absorbed Select — sets an op the moment it arms. So the gate can never be
+// satisfied and the bar cannot appear on any path a user has. The single-face verbs are
+// on .sel-acts now (Rest on plate · Push/Pull · Hole… · Round), which regress-465-e2e
+// and hole-e2e both exercise; the wrapper this measured no longer renders.
+await page.keyboard.press("Escape"); // drop the selection and disarm Modify
 
 // 3) Mark a region → chip reports what it covers → send → the request carries 3D coords.
 await page.getByRole("button", { name: "Mark", exact: true }).click();
@@ -91,7 +112,10 @@ await page.waitForSelector(".imgchip");
 const chipText = await page.locator(".imgchip span").first().innerText();
 check("chip reports the circled 3D extent", /covers ≈ .+mm/.test(chipText), chipText);
 
-const inp = page.getByPlaceholder(/circled region/);
+// The composer, by its own selector. Matching on placeholder TEXT is unreliable now:
+// fitPlaceholder shortens the string to whatever the box can show without clipping, so
+// "circled region" may not be in the rendered placeholder at all.
+const inp = page.locator(".composer textarea").first();
 await inp.fill("flatten this so the back is flush");
 await inp.press("Enter");
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Updated the model|Flattened it/.test(b.textContent ?? "")), null, { timeout: 120_000 });

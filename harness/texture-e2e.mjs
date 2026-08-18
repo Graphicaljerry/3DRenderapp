@@ -30,6 +30,17 @@ async function confirmSpend(page, timeout = 30_000) {
       null, { timeout },
     );
   } catch { return false; }
+  // A modal can be sitting over the transcript — Settings opens itself when the chosen
+  // mesh engine has no key, and its backdrop then swallows every click. The confirm
+  // button underneath is visible AND enabled, so Playwright retried into the backdrop
+  // until the timeout and the run was never authorised. Close what is on top first.
+  for (let i = 0; i < 3 && (await page.locator(".overlay").count()); i++) {
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(250);
+    if (!(await page.locator(".overlay").count())) break;
+    await page.locator(".overlay .card .x, .overlay .card [aria-label^='Close']").first().click({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(250);
+  }
   await card.click();
   return true;
 }
@@ -150,7 +161,12 @@ await page.getByRole("button", { name: "Apply", exact: true }).first().click();
 await page.getByRole("button", { name: "Objects", exact: true }).click();
 const badgeMesh = await page.locator(".lp-badge").first().textContent().catch(() => null);
 check("C1 Objects panel badges the mesh with its engine model", !!badgeMesh && /Tripo/i.test(badgeMesh), badgeMesh ?? "no badge");
-check("C2 Select (CAD tooling) hidden for mesh models", (await page.locator('button[aria-label="Select"]').count()) === 0);
+// Select no longer exists as its own tool — Modify absorbed it and owns face picking.
+// A count of zero for a button nobody renders any more passed no matter what the app
+// did; Modify's disabled state is the live version of "CAD tooling is off for a mesh".
+const modifyBtn = page.locator('button[aria-label="Modify"]').first();
+const modifyUsable = async () => (await modifyBtn.count()) > 0 && !(await modifyBtn.isDisabled());
+check("C2 CAD tooling (Modify) is not usable on a mesh model", !(await modifyUsable()));
 await page.locator('button[title^="View options"]').click(); // accessible-name lookup misses it (icon+label span) — same gotcha as the Library Select button
 const grayRow = page.getByRole("menuitemcheckbox", { name: /Grayscale/ });
 check("C3 View menu offers Grayscale", (await grayRow.count()) === 1);
@@ -160,11 +176,13 @@ check("C4 Grayscale persists", await page.evaluate(() => localStorage.getItem("m
 // CAD leg: build a template -> badge says CAD, Select returns.
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/).click();
-await page.waitForFunction(() => document.querySelector(".statusbar .dims")?.textContent?.includes("12"), null, { timeout: 120_000 });
+// Any real dimensions, not the coupon's specific 12 mm: the template's numbers are free
+// to change and this step is about the ENGINE badge, not the part's size.
+await page.waitForFunction(() => /\d/.test(document.querySelector(".statusbar .dims")?.textContent ?? ""), null, { timeout: 120_000 });
 // The Objects panel is still open from C1 — don't toggle it closed.
 const badgeCad = await page.locator(".lp-badge").first().textContent().catch(() => null);
 check("C5 CAD model badges as CAD", badgeCad === "CAD", badgeCad ?? "no badge");
-check("C6 Select tool visible again for CAD", (await page.locator('button[aria-label="Select"]').count()) === 1);
+check("C6 CAD tooling (Modify) is available again for CAD", await modifyUsable());
 
 await browser.close();
 if (fails.length) { console.log(`\n${fails.length} CHECK(S) FAILED`); process.exit(1); }

@@ -3,7 +3,7 @@
 // hole tool, voronoi texture, fit calibration field, and the coupon template card.
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace, awaitBuild } from "./enter.mjs";
+import { enterWorkspace, awaitBuild, pickFace } from "./enter.mjs";
 
 const bodies = [];
 const server = createServer((req, res) => {
@@ -134,22 +134,13 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await awaitBuild(page);
 
   // T5: face → Hole… → pick "M3 heat-set insert" → ⌀4, 5.5 deep + boss hint.
-  // Two changes. Picking needs a tool armed — the standalone Select tool was absorbed
-  // into Modify (044ab7f), so bare canvas clicks select nothing at all. And Hole… lives
-  // on the selection row (.sel-acts) beside the other face verbs now.
-  await page.locator(".canvas-rail").getByRole("button", { name: "Modify" }).click();
-  await page.mouse.move(900, 500); // step off the rail so its flyout stops eating clicks
-  await page.waitForTimeout(400);
-  const canvas = page.locator(".viewerCanvas canvas");
-  const box = await canvas.boundingBox();
-  let holeBtn = false;
-  for (const pos of [[0.42, 0.75], [0.5, 0.72], [0.38, 0.68], [0.5, 0.62], [0.5, 0.5], [0.45, 0.55]]) {
-    await canvas.click({ position: { x: box.width * pos[0], y: box.height * pos[1] } });
-    await page.waitForTimeout(350);
-    if ((await page.locator(".sel-acts button", { hasText: /^Hole…$/ }).count()) > 0) { holeBtn = true; break; }
-  }
-  check("T5 face offers Hole…", holeBtn);
-  await page.locator(".sel-acts button", { hasText: /^Hole…$/ }).click();
+  // pickFace projects real surface vertices instead of clicking canvas fractions — the
+  // headphone hook is an awkward shape and the old fixed positions simply missed it — and
+  // it arms Modify, which owns picking since it absorbed the Select tool (044ab7f).
+  const picked = await pickFace(page);
+  const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
+  check("T5 face offers Hole…", picked && (await holeItem.count()) > 0);
+  await holeItem.click();
   await page.waitForSelector(".hole-panel");
   await page.locator(".hole-panel select").first().selectOption({ label: "M3 heat-set insert (⌀4.0 · 5.5 mm)" });
   await page.waitForTimeout(200);

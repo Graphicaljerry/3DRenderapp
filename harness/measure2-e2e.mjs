@@ -5,7 +5,7 @@
 // 4. Classic two-click measure still works.
 // 5. Measurement labels stay small when zoomed way in (max-px clamp).
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, pickFace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -45,19 +45,11 @@ const box = await canvas.boundingBox();
 const cx = box.width * 0.5, cy = box.height * 0.5;
 await page.getByRole("button", { name: "Top", exact: true }).click();
 await page.waitForTimeout(600);
-// Picking needs a tool armed — Modify absorbed the standalone Select (044ab7f), so bare
-// canvas clicks select nothing — and Hole… sits on the selection row with the other face
-// verbs now, not in the old quick-edit bar.
-await page.locator(".canvas-rail").getByRole("button", { name: "Modify" }).click();
-await page.mouse.move(900, 500); // off the rail so its flyout stops intercepting clicks
-await page.waitForTimeout(400);
+// Same as hole-e2e: project real surface points rather than clicking canvas fractions,
+// and arm Modify, which owns picking since it absorbed Select.
+const pickedTop = await pickFace(page);
 const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
-for (const [dx, dy] of [[0, 0], [30, 30], [-30, 20], [0, -40]]) {
-  await canvas.click({ position: { x: cx + dx, y: cy + dy } });
-  await page.waitForTimeout(400);
-  if ((await holeItem.count()) > 0) break;
-}
-check("flat top face offers Hole…", (await holeItem.count()) > 0);
+check("flat top face offers Hole…", pickedTop && (await holeItem.count()) > 0);
 await holeItem.click();
 await page.waitForSelector(".hole-panel");
 await page.locator(".hole-panel").getByLabel("Hole diameter (mm)").fill("7");

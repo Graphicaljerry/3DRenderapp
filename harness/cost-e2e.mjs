@@ -20,6 +20,14 @@ async function confirmSpend(page, timeout = 30_000) {
   } catch {
     return false; // no gate on this path — nothing to authorise
   }
+  // The confirm buttons carry `disabled={busy}`, so being on screen is not the same as
+  // being clickable — clicking a visible-but-disabled button just burns the timeout.
+  try {
+    await page.waitForFunction(
+      () => { const b = document.querySelector(".confirm-card .edit-actions .primary"); return !!b && !b.disabled; },
+      null, { timeout },
+    );
+  } catch { return false; }
   await card.click();
   return true;
 }

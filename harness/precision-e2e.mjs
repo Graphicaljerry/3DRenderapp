@@ -2,7 +2,7 @@
 // and Mark & ask sending REAL 3D region coordinates (verified through a mock relay).
 import { chromium } from "playwright";
 import { createServer } from "node:http";
-import { enterWorkspace, awaitBuild } from "./enter.mjs";
+import { enterWorkspace, awaitBuild, pickFace } from "./enter.mjs";
 
 // Mock house relay that CAPTURES the request so we can assert the prompt contents.
 let lastBody = null;
@@ -53,6 +53,10 @@ await canvas.click({ position: { x: box.width * 0.42, y: box.height * 0.75 }, mo
 // the face verbs live in the ContextBar at the selection (20c0138); and picking needs a
 // tool armed at all, because the standalone Select tool was absorbed into Modify
 // (044ab7f) — bare canvas clicks select nothing.
+// Nothing was arming picking, so the ContextBar could never appear: Modify absorbed the
+// standalone Select tool and owns picking now. pickFace arms it and clicks projected
+// surface points rather than canvas fractions.
+await pickFace(page);
 await page.waitForSelector(".ctxbar, .sel-acts", { timeout: 30_000 });
 const selText = await page.evaluate(() => document.querySelector(".dock-body, .ctxbar")?.textContent ?? "");
 check("shift-click builds a multi-face selection", /2\s*(faces|selected)/i.test(selText), selText.slice(0, 120));

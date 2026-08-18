@@ -168,9 +168,16 @@ if (!clocksDiffer) {
   const ratio = slow.t90 / Math.max(fast.t90, 1);
   check("A4 coast time is frame-rate independent", ratio < 1.5,
     `the ${slow.actual}Hz run took ${ratio.toFixed(2)}x the ${fast.actual}Hz run (a per-call damper would be ~${(fast.actual / slow.actual).toFixed(1)}x)`);
-  // The compensation is visible in the factor itself: slower frames must damp harder.
-  check("A5 the damping factor scales with frame time", slow.damp > fast.damp * 1.8,
-    `${slow.damp.toFixed(4)} at ${slow.actual}Hz vs ${fast.damp.toFixed(4)} at ${fast.actual}Hz`);
+  // The compensation is visible in the factor itself: slower frames must damp harder —
+  // in proportion to how much slower they actually were. The old fixed 1.8x threshold
+  // assumed a 3x clock difference; on this box the real loops ran 33ms vs 50ms (1.51x),
+  // and the formula PREDICTS a 1.43x damp ratio there — which is precisely what was
+  // measured. Failing that is failing the implementation for agreeing with its own
+  // mathematics. A per-call damper still fails this: its ratio is 1.0 regardless of dt.
+  const dtRatio = slowDt / fastDt;
+  const wanted = 1 + (dtRatio - 1) * 0.6; // well under the formula's prediction, well over 1.0
+  check("A5 the damping factor scales with frame time", slow.damp > fast.damp * wanted,
+    `${slow.damp.toFixed(4)} vs ${fast.damp.toFixed(4)} — ratio ${(slow.damp / fast.damp).toFixed(2)}, needed >${wanted.toFixed(2)} for a ${dtRatio.toFixed(2)}x frame-time gap`);
 }
 check("A6 the coast stays in a hand-feel window", fast.t90 < 900 && slow.t90 < 900, `${fast.t90}ms / ${slow.t90}ms`);
 

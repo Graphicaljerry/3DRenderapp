@@ -57,16 +57,35 @@ async function openSync(page) {
   const page = await boot(`http://localhost:${process.env.PORT ?? 5173}/`, true);
   const body = await openSync(page);
   check("A1 desktop offers password sign-in", /Sign in/.test(body) && (await page.locator('input[type="password"]').count()) > 0);
-  check("A2 desktop hides Continue with Google/GitHub (they can't complete here)",
-    !/Continue with Google|Continue with GitHub/.test(body));
-  check("A3 it explains how to get a password", /Set a password/.test(body), body.slice(0, 0));
+
+  // A2-A4 need the app to BELIEVE it is the desktop build, and that is decided at BUILD
+  // time: DESKTOP_PLATFORM comes from import.meta.env.TAURI_ENV_PLATFORM (desktopUpdate.ts),
+  // which vite bakes in and which is empty for a web build. No amount of runtime
+  // window.__TAURI_INTERNALS__ shimming changes it — the shim makes the store CALLS work,
+  // not the branch that decides to use the store. Against `vite dev` these three assert
+  // the web build behaves like the desktop one, which it correctly does not.
+  const isDesktopBuild = await page.evaluate(async () => {
+    const m = await import("/src/lib/desktopUpdate.ts");
+    return !!m.DESKTOP_PLATFORM;
+  }).catch(() => false);
+  if (!isDesktopBuild) {
+    console.log("SKIP A2/A3/A4 desktop-only sign-in — this is a web build "
+      + "(TAURI_ENV_PLATFORM is baked in at build time and is empty here). "
+      + "To exercise them: TAURI_ENV_PLATFORM=darwin npx vite, then PORT=<that> node desktop-auth-e2e.mjs");
+  } else {
+    check("A2 desktop hides Continue with Google/GitHub (they can't complete here)",
+      !/Continue with Google|Continue with GitHub/.test(body));
+    check("A3 it explains how to get a password", /Set a password/.test(body), body.slice(0, 120));
+  }
 
   // Force the Supabase client to initialise so its storage adapter is exercised.
   await page.evaluate(async () => { const m = await import("/src/lib/cloud.ts"); await m.cloudUser(); });
   await page.waitForTimeout(1200);
   const calls = await page.evaluate(() => window.__storeCalls ?? []);
-  check("A4 the session is read through the Tauri store (a real file), not WebView storage",
-    calls.some((c) => c.startsWith("plugin:store|")), calls.slice(0, 3).join(",") || "no store calls");
+  if (isDesktopBuild) {
+    check("A4 the session is read through the Tauri store (a real file), not WebView storage",
+      calls.some((c) => c.startsWith("plugin:store|")), calls.slice(0, 3).join(",") || "no store calls");
+  }
   await page.close();
 }
 

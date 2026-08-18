@@ -20,8 +20,10 @@ await awaitBuild(page);
 // verb never appears, and this reads as a missing feature. It also arms Modify, which
 // absorbed the standalone Select tool and owns picking now.
 const canvas = page.locator(".viewerCanvas canvas");
-const picked = await pickFace(page);
 const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
+// Hunt for a FLAT face: the desk hook is mostly curved and Hole… is deliberately offered
+// only where holeCtl.canStart allows it (a flat, non-curved face on a CAD model).
+const picked = await pickFace(page, { until: async () => (await holeItem.count()) > 0 });
 check("flat face offers Hole…", picked && (await holeItem.count()) > 0);
 await holeItem.click();
 await page.waitForSelector(".hole-panel");

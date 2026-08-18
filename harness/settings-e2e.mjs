@@ -31,7 +31,7 @@ check("compressed payload round-trips losslessly", crypt.roundtrip);
 // settings pane (App.tsx: "Signed out, the avatar's job is getting signed IN"). Settings
 // is reached from the menu item, so open the menu and pick it.
 await page.getByRole("button", { name: "Account menu" }).click();
-const settingsItem = page.locator(".pmenu-item, .menu-item, button", { hasText: /^Settings/ }).first();
+const settingsItem = page.locator(".pm-item", { hasText: /^Settings$/ }).first();
 if (await settingsItem.count()) await settingsItem.click();
 await page.waitForSelector(".card .stabs", { timeout: 20_000 });
 const groups = async () => page.locator(".sgroup .sgroup-head b").allInnerTexts();

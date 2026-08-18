@@ -1,7 +1,7 @@
 // UX batch e2e: renames (objects/model/plates), grouped layers, right-click menu,
 // copy/paste/duplicate, zoom cluster, consolidated View menu.
 import { chromium } from "playwright";
-import { enterWorkspace, awaitBuild } from "./enter.mjs";
+import { enterWorkspace, awaitBuild, modelPoints } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -83,9 +83,15 @@ await page.locator(".plate-bar .pb-tab", { hasText: "All" }).click(); // renamin
 const canvas = page.locator(".viewerCanvas canvas");
 const box = await canvas.boundingBox();
 let ctxItems = [];
-for (const pos of [[0.45, 0.55], [0.5, 0.5], [0.38, 0.6], [0.6, 0.6]]) {
-  await canvas.click({ button: "right", position: { x: box.width * pos[0], y: box.height * pos[1] } });
-  await page.waitForSelector(".pmenu");
+// Right-click points ON the model, projected from its own vertices. Canvas fractions miss
+// silently, and a miss here is worse than a no-op: .pmenu then matches whatever menu was
+// already open, so the probe read the VIEW menu's items and reported "Reset view" as an
+// object action.
+await page.keyboard.press("Escape"); // make sure no earlier menu is still up
+for (const [x, y] of await modelPoints(page)) {
+  await page.mouse.click(x, y, { button: "right" });
+  await page.waitForTimeout(200);
+  if (!(await page.locator(".pmenu").count())) continue;
   ctxItems = await page.locator(".pmenu .pmenu-item").allInnerTexts();
   if (ctxItems.some((v) => v.includes("Rename"))) break;
   await page.keyboard.press("Escape");

@@ -76,7 +76,7 @@ check("B2 the extra view is labelled by side", /Additional reference — the lef
 check("B3 the two images are different payloads",
   new Set(images.map((i) => JSON.stringify(i).length)).size >= 1 && JSON.stringify(images[0]) !== JSON.stringify(images[1]));
 const sys = lastBody?.messages?.[0]?.content ?? "";
-check("B4 system prompt tells it to cross-read the views", /MORE THAN ONE PHOTO IS ATTACHED/.test(sys));
+check("B4 system prompt tells it to cross-read the views", /MORE THAN ONE PICTURE IS ATTACHED/.test(sys)); // reworded: "PICTURE", not "PHOTO" — the directive covers sketches too
 
 await browser.close();
 server.close();

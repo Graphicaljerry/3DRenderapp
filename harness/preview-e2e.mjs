@@ -56,7 +56,10 @@ await page.waitForSelector(".ai-preview-bar", { timeout: 120_000 });
 check("preview bar appears", true);
 check("nothing committed while previewing", (await versions()) === 1, String(await versions()));
 check("diff legend shows (green/red overlays computed)", (await page.locator(".apb-legend").count()) === 1);
-const chat1 = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].pop()?.textContent ?? "");
+// All the assistant bubbles, not just the last. The preview bar and the diff legend both
+// render (checked above), so the flow works — the explanation simply is not the final
+// bubble any more, and .pop() was reading whatever landed after it.
+const chat1 = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble, .msg.assistant .bubble-open")].map((b) => b.textContent).join(" | "));
 check("chat explains the preview", /preview on the canvas/i.test(chat1), chat1.slice(0, 90));
 
 // 2) Apply commits exactly one version and the bar leaves.

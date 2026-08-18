@@ -48,7 +48,14 @@ await page.waitForSelector(".layers-panel");
 await page.mouse.click(EMPTY.x, EMPTY.y); // empty canvas, away from the model
 await page.waitForTimeout(400);
 check("B3 clicking empty canvas puts the tool down", (await rail("Modify").getAttribute("aria-pressed")) === "false");
-check("B4 …and closes the Objects panel", (await page.locator(".layers-panel").count()) === 0);
+// B4 RETIRED. Objects was a floating panel that an empty-canvas tap dismissed; it is a
+// docked Inspector SECTION now (dockPanel === "objects"), and the dock deliberately
+// persists — "the stage is never hidden: every panel now docks beside it". Clicking the
+// canvas is no longer supposed to close it, so the old expectation is asking for
+// behaviour that was intentionally removed. B3 above still covers the half that matters:
+// an empty tap puts the armed TOOL down.
+// (Noted while here: Workspace.tsx:3963 still calls setShowLayers(false) on empty tap,
+//  and showLayers no longer gates this panel — dead, harmless, worth a tidy someday.)
 
 // ---- C) Paint strokes are undoable --------------------------------------------
 await page.keyboard.press("b");

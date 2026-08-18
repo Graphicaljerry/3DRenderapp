@@ -62,18 +62,11 @@ export async function awaitBuild(page, timeout = 180_000) {
  *
  *  Picking also needs a tool armed at all. Modify absorbed the standalone Select tool
  *  (044ab7f) and owns picking outright, so a bare canvas click selects nothing. */
-export async function pickFace(page, { arm = true } = {}) {
-  if (arm) {
-    const modify = page.locator(".canvas-rail").getByRole("button", { name: "Modify" });
-    if (await modify.count()) {
-      await modify.click();
-      // Step off the rail: its flyout stays up under the pointer and then intercepts the
-      // clicks that follow, which reads as a dead canvas.
-      await page.mouse.move(900, 500);
-      await page.waitForTimeout(400);
-    }
-  }
-  const pts = await page.evaluate(async () => {
+/** Screen coordinates that are definitely ON the model, projected through the same
+ *  matrices the viewer renders with. Shared because "click a canvas fraction" is a guess
+ *  that misses silently — and a probe that misses reads whatever was already on screen. */
+export async function modelPoints(page) {
+  return page.evaluate(async () => {
     const THREE = await import("/node_modules/three/build/three.module.js");
     const s = window.__viewerS?.();
     if (!s?.mesh) return [];
@@ -90,10 +83,31 @@ export async function pickFace(page, { arm = true } = {}) {
     }
     return out;
   });
+}
+
+export async function pickFace(page, { arm = true, until = null } = {}) {
+  if (arm) {
+    const modify = page.locator(".canvas-rail").getByRole("button", { name: "Modify" });
+    if (await modify.count()) {
+      await modify.click();
+      // Step off the rail: its flyout stays up under the pointer and then intercepts the
+      // clicks that follow, which reads as a dead canvas.
+      await page.mouse.move(900, 500);
+      await page.waitForTimeout(400);
+    }
+  }
+  const pts = await modelPoints(page);
+  // `until` matters more than it looks. Stopping at the FIRST selection is wrong whenever
+  // the caller needs a particular KIND of one: the headphone desk hook is mostly curved,
+  // and Hole… is deliberately offered only on a flat face (holeCtl.canStart requires
+  // kind === "face" && !curved). Without a predicate the helper stops on a curved face,
+  // the verb is correctly absent, and the probe reports a missing feature that is working.
   for (const [x, y] of pts) {
     await page.mouse.click(x, y);
     await page.waitForTimeout(120);
-    if (await page.locator(".sel-acts").count()) return true;
+    if (!(await page.locator(".sel-acts").count())) continue;
+    if (!until) return true;
+    if (await until()) return true;
   }
   return false;
 }

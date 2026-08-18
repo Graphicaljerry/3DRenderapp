@@ -82,7 +82,8 @@ const fitRatioOk = !!afterFit && Math.abs(afterFit[1] / afterFit[0] - 300 / 600)
 check("B3 proportions kept (uniform)", fitRatioOk, JSON.stringify(afterFit));
 
 // Typed resize: back to the 3D view (the toolbar lives there) → Transform → Resize → 50%
-await page.getByRole("button", { name: "3D View", exact: true }).click();
+// No "3D View" tab any more: the stage is never hidden — every Inspector section docks
+// BESIDE a live viewer instead of covering it, so there is nothing to switch back to.
 await page.getByRole("button", { name: "Transform", exact: true }).click();
 await page.getByRole("button", { name: "Set size", exact: true }).click();
 const wBefore = afterFit[0];
@@ -128,7 +129,8 @@ await page.getByRole("button", { name: "Printability", exact: true }).click();
 await page.getByRole("button", { name: /Scale to fit bed/ }).click();
 await page.waitForFunction((src) => { const d = eval(src); return d && d[0] < 260; }, sbDims, { timeout: 60_000 });
 check("C2 Fit to plate scales the CAD import (parametric op)", true);
-await page.getByRole("button", { name: "3D View", exact: true }).click();
+// No "3D View" tab any more: the stage is never hidden — every Inspector section docks
+// BESIDE a live viewer instead of covering it, so there is nothing to switch back to.
 await page.keyboard.press("Control+z");
 await page.waitForFunction((src) => { const d = eval(src); return d && d[0] === 600; }, sbDims, { timeout: 60_000 });
 const undoErr = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent?.includes("failed to rebuild")));

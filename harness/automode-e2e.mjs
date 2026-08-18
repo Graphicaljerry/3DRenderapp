@@ -23,7 +23,14 @@ const labels = await seg.allInnerTexts();
 check("A1 three engine options: Auto · Precise · Generative", labels.length === 3 && labels[0] === "Auto" && /Precise/.test(labels[1]) && /Generative/.test(labels[2]), JSON.stringify(labels));
 const onLabel = async () => (await page.locator(".modebar .seg button.on").innerText()).trim();
 check("A2 Auto is the default selection", (await onLabel()) === "Auto", await onLabel());
-check("A3 Auto hint explains it picks the engine", /Auto picks/i.test(await page.locator(".modehint").innerText()), (await page.locator(".modehint").innerText()).slice(0, 60));
+// A3 RETIRED, not rewritten. The "Auto picks…" hint was deliberately deleted: it
+// "used to restate the mode on every idle frame … which is what the ? beside Auto is
+// for, and cost a whole row above the input for nothing" (Workspace.tsx). .modehint now
+// renders only when it says something the controls do not already show — what Auto
+// actually CHOSE, the photo/markup states, and generative pricing. Asserting the old copy
+// is asking the app to keep a line it decided was noise; the thing this guarded is gone
+// as a concept, so the check goes with it rather than being loosened into something
+// trivially true. What Auto chose is covered by A8 below and by routing-e2e.
 
 // switch to Precise → the CAD brain picker stays; switch to Generative → engine picker
 await page.locator(".modebar .seg button", { hasText: "Precise" }).click();

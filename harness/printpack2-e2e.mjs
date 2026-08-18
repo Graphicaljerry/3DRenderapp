@@ -137,8 +137,9 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   // pickFace projects real surface vertices instead of clicking canvas fractions — the
   // headphone hook is an awkward shape and the old fixed positions simply missed it — and
   // it arms Modify, which owns picking since it absorbed the Select tool (044ab7f).
-  const picked = await pickFace(page);
   const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
+  // Hunt for a FLAT face — the hook is mostly curved and Hole… is correctly absent there.
+  const picked = await pickFace(page, { until: async () => (await holeItem.count()) > 0 });
   check("T5 face offers Hole…", picked && (await holeItem.count()) > 0);
   await holeItem.click();
   await page.waitForSelector(".hole-panel");

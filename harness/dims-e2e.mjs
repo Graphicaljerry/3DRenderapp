@@ -79,9 +79,15 @@ await page.waitForTimeout(350);
 check("empty click deselects", !(await selected()));
 const dimsOff = await colorCount(DIM_LINE);
 const tealOff = await colorCount(SEL_TEAL);
-check("box + size lines hide on deselect",
-  dimsOff < 60 && tealOff <= teal0 + 40 && tealOff < tealSel * 0.6,
-  `dims ${dimsOff}px, accent ${teal0} (idle) → ${tealSel} (selected) → ${tealOff} (deselected)`);
+// The accent count is dropped from this assertion, not loosened. Measured across a real
+// run it moves 483 → 491 → 483: eight pixels of range on a 483-pixel floor, because the
+// selection box is a thin anti-aliased wireframe and the accent is also the build plate,
+// the gizmo and the measure chrome. A signal with 1.6% range cannot tell you whether a
+// box is drawn; asserting on it either way is measuring noise. The dimension-line count
+// DOES have range (0 vs hundreds) and is kept, and "did it deselect" is already asserted
+// directly against the app's own state on the line above.
+check("box + size lines hide on deselect", dimsOff < 60,
+  `dims ${dimsOff}px (accent, not asserted: ${teal0} idle → ${tealSel} selected → ${tealOff} deselected)`);
 await page.screenshot({ path: "shot-dims-deselected.png" });
 
 // 4) View ▾ → Dimensions "Always" → permanent box with nothing selected (old behaviour).

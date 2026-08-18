@@ -51,6 +51,9 @@ check("A1 multi-view row hidden with no photo", (await page.locator(".mv").count
 
 // Attach the front photo through the composer's file input.
 await page.locator(".composer input[type=file]").setInputFiles({ name: "front.png", mimeType: "image/png", buffer: RED });
+// The view row is opt-in now: attaching a photo used to reveal three empty black
+// squares, so it sits behind "Add left, back & right views" (.mv-open) until asked for.
+await page.locator(".mv-open").click();
 await page.waitForSelector(".mv", { timeout: 15_000 });
 check("A2 multi-view row appears for CAD once a photo is attached", true);
 const slots = await page.locator(".mv-slot").count();

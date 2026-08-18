@@ -51,7 +51,9 @@ await page.locator(".lib-toolbar select").nth(1).selectOption("all");
 // Sort by name.
 await page.locator(".lib-toolbar select").nth(0).selectOption("name");
 await page.waitForTimeout(200);
-check("sort by name A–Z", (await cardNames())[0] === "Dragon figurine" && (await cardNames())[2] === "Headphone desk hook mount", (await cardNames()).join(", "));
+// A–Z of Dragon / Headphone / Storage is D, H, S — so index 2 is "Storage box", not the
+// Headphone one. The app was sorting correctly and the check was simply miscounted.
+check("sort by name A–Z", (await cardNames())[0] === "Dragon figurine" && (await cardNames())[1] === "Headphone desk hook mount" && (await cardNames())[2] === "Storage box", (await cardNames()).join(", "));
 
 // Folders: move the box into a new "Prototypes" folder via the card's select.
 const boxCard = page.locator(".lib-card", { hasText: "Storage box" });

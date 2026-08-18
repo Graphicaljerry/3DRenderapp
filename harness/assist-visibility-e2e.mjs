@@ -80,8 +80,16 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
 
   // The cold-load reset puts plan back ON (447's contract) — turn it off for this
   // probe's build so the send goes straight to the slow build fixture, no plan card.
-  const chip = page.locator(".plan-toggle");
-  if ((await chip.getAttribute("class") ?? "").includes("on")) await chip.click();
+  // The Launchpad's separate Plan and Research toggles folded into one control
+  // (LaunchOptions): a `.lo-trigger` chip reading "Auto · Plan", with the choices in a
+  // menu behind it. `.plan-toggle` is gone from every TSX. Sibling probes already drive
+  // the new shape; this file was simply missed.
+  const chip = page.locator(".lo-trigger");
+  if (!/no plan/i.test(await chip.innerText())) {
+    await chip.click();
+    await page.locator(".pmenu-item", { hasText: /plan first/i }).first().click();
+    await page.keyboard.press("Escape");
+  }
 
   await page.locator(".launch-composer textarea").fill("A SLOWBUILD SPECIFIC 30 mm small plate, 5 mm thick");
   await page.locator(".launch-composer .send").click();
@@ -124,7 +132,9 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
   });
   await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
-  await page.locator("button.link", { hasText: /built-in example/i }).first().click();
+  // Reworded: "See a finished example" on the Launchpad. The old wording survives only
+  // inside the workspace, on a different control.
+  await page.getByRole("button", { name: "See a finished example" }).click();
   await page.waitForSelector(".opt-trigger", { timeout: 120_000 });
   await page.locator(".opt-trigger").click();
   await page.waitForSelector(".pmenu-item", { timeout: 10_000 });
@@ -159,9 +169,13 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
   await seedInto(page, { moldable_web_mode: "off" });
   await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
-  const web = page.locator(".launch-composer-foot .web-toggle").first();
+  // Research's state moved inside the folded menu — the trigger itself now reads
+  // "Auto · Plan", so reading the chip's own text can never find "Research · auto".
+  await page.locator(".lo-trigger").click();
+  const menuText = await page.locator(".pmenu").innerText();
+  await page.keyboard.press("Escape");
   check("a cold load puts research back on auto, like plan",
-    /research\s*·\s*auto/i.test(await web.innerText()), await web.innerText());
+    /research\s*·\s*auto/i.test(menuText), menuText.replace(/\n/g, " · ").slice(0, 120));
   check("the stale web pin is gone from storage",
     await page.evaluate(() => localStorage.getItem("moldable_web_mode")) === null);
   await page.close();

@@ -23,7 +23,10 @@ const report = await page.evaluate(async () => {
     return m ? { k: m[1], v: parseFloat(m[2]) } : null;
   };
 
-  for (const t of TEMPLATES) {
+  // CAD rows only. The set gained six kind:"mesh" templates that carry a prompt and no
+  // code; feeding those to the OCCT kernel just produces "your code must define
+  // function main", which is the harness testing its own bad input, not the engine.
+  for (const t of TEMPLATES.filter((t) => t.kind === "cad")) {
     const r = { id: t.id, ok: true, steps: {}, note: "" };
     out.templates.push(r);
     const step = async (name, fn, optional = false) => {

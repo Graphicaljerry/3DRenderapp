@@ -3183,6 +3183,65 @@ the audit's other findings (LibraryModal's partial bulk-delete, `lib/hardware.ts
 692 lines that have never had a caller, ~26 dead CSS classes, two emoji-as-icon spots
 where the right SVG exists unused).
 
+### Finishing pass (build 470)
+
+The rest of the audit's list, cleared:
+
+- **All 30 stale/broken probes repaired**, not quarantined. The pattern was almost
+  always the same three shapes: a renamed string ("Check fit" → "Check clearance",
+  "Make it fit" → "Cut to fit", "Zoom to fit" → "Reset view", "Fit to plate — scale
+  down" → "Scale to fit bed"), a control that moved (`.pb-export` → the Export dock,
+  face verbs → the ContextBar, the Launchpad's Plan/Research toggles → one folded
+  `.lo-trigger` with a menu), or a missing precondition (no `enterWorkspace`, no
+  `moldable_signin_prompted` seed so the sign-in backdrop ate every click, no tool
+  armed so canvas clicks selected nothing).
+
+  Four were the probe's own logic rather than a rename, and those are the interesting
+  ones: `library-organize` had its alphabet wrong (A–Z of Dragon/Headphone/Storage puts
+  Storage at index 2, not Headphone — the app was right); `library-thumbs` used an
+  ASYNC predicate in `waitForFunction`, which resolves on the first poll regardless of
+  the value, so its "wait" gated nothing; `theme-toggle` read `backgroundColor` off
+  `.composer textarea`, which is `background: none`, so it saw rgba(0,0,0,0) in every
+  theme and two of its five checks could only ever pass; and `local-e2e`'s mock assumed
+  call #1 was the CAD call when one send now fans out to four (router → plan → prepare
+  → CAD), so it fed the bad program to the ROUTER and the repair loop it was testing
+  never ran. It keys off the system prompt now.
+
+  `damping-e2e` is the one that cannot be judged here: its A1 measures the probe's own
+  rAF pump, while the viewer's loop is render-bound at ~53 ms/frame on software GL in
+  BOTH runs, so A4/A5 were comparing a situation with itself. It now derives the real
+  frame time from the damping factor and SKIPS those two with an explanation when the
+  throttle never reached the render loop, instead of asserting either way.
+
+- **lib/hardware.ts is wired up.** 692 lines of ISO-sourced bearing/nut/washer/
+  extrusion/board dimensions that had never had a caller in their entire git history —
+  its own docstring described the caller ("a prompt builder feeding it free text") and
+  that caller was never written. `hardwareFacts()` in llm/prompts.ts now injects the
+  nominal figures when a request names a known part, and nothing at all otherwise.
+  Wiring it exposed a lopsided index: a washer's id carries its category ("w_m2") so
+  "washer m5" resolved, but a hex nut is keyed on the bare thread ("m3") so "M3 nut
+  trap" and "M5 nyloc" — about as common as maker phrasing gets — resolved to nothing,
+  and the token sweep skips keys under three characters. Category aliases fix it;
+  `harness/hardware-lookup-e2e.mjs` guards both directions, including that a near miss
+  still returns NOTHING ("washer m5" must never come back a nut).
+
+- **Dead CSS removed** — 55 single-line rules, ~5 kB. Done conservatively after a first
+  attempt with a hand-rolled parser desynced inside an `@media` block and was reverted:
+  single-line rules only, brace balance checked, and `:not()` contents excluded from the
+  deadness test. That last one mattered — `.rail-fly .seg:not(.kind-seg)` targets the
+  LIVE `.seg` and only mentions the dead class inside `:not()`; deleting it would have
+  broken every flyout's button row.
+
+- **Emoji out of the UI**: the texture chip rendered 🎨/⬜ while `IconTexturize` — a
+  checkerboard glyph built for that exact button — sat in icons.tsx with zero call
+  sites. Same for two ⚠️ strings where `IconWarn` was already imported and used
+  correctly three lines away.
+
+- **LibraryModal reports its failures.** `refresh()` was try/finally with no catch (a
+  failed read cleared the spinner and left a stale list), and the bulk move/delete loops
+  stopped at the first error leaving a half-applied change, uneven tombstones, and a
+  modal that never refreshed. They now continue, collect, and name what did not happen.
+
 ## Agreed priority order for what's next
 
 1. ~~**Template gallery**~~ — shipped (see above).

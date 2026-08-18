@@ -7,6 +7,25 @@
 import { chromium } from "playwright";
 import { enterWorkspace } from "./enter.mjs";
 
+
+/** Say yes to the paid-spend confirmation, if one appears.
+ *
+ *  Mesh generation is gated on an explicit confirm now (7e7ac51): the app posts a
+ *  confirm-card naming the engine and the per-run cost, and nothing is called until the
+ *  primary button is clicked. Probes written before that gate existed sat waiting for
+ *  progress lines that were never coming — the run had not been authorised, so no task
+ *  was ever created. Spending is the user's call; the probe just has to make it. */
+async function confirmSpend(page, timeout = 30_000) {
+  const card = page.locator(".confirm-card .edit-actions .primary").first();
+  try {
+    await card.waitFor({ state: "visible", timeout });
+  } catch {
+    return false; // no gate on this path — nothing to authorise
+  }
+  await card.click();
+  return true;
+}
+
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
@@ -72,6 +91,7 @@ check("A1 chip defaults to Color: off — print-first", /Color: off/.test((await
 // 2) Generate with the default → Tripo body must say texture:false, pbr:false.
 await page.locator(".composer textarea").first().fill("a cube 20 mm wide");
 await page.keyboard.press("Enter");
+await confirmSpend(page);
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Generated a mesh/.test(b.textContent || "")), null, { timeout: 90_000 });
 check("A2 default request is geometry-only (texture:false, pbr:false)", tripoBodies.length === 1 && tripoBodies[0].texture === false && tripoBodies[0].pbr === false, JSON.stringify(tripoBodies[0]));
 
@@ -80,6 +100,7 @@ await chip.click();
 check("A3 chip flips to Color: on", /Color: on/.test((await chip.textContent()) ?? ""));
 await page.locator(".composer textarea").first().fill("a cube 25 mm wide");
 await page.keyboard.press("Enter");
+await confirmSpend(page);
 await page.waitForFunction(() => tripoBodies ? true : true, null, { timeout: 1000 }).catch(() => {});
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].filter((b) => /Generated a mesh/.test(b.textContent || "")).length >= 2, null, { timeout: 90_000 });
 check("A4 toggled request asks for textures (texture:true, pbr:true)", tripoBodies.length === 2 && tripoBodies[1].texture === true && tripoBodies[1].pbr === true, JSON.stringify(tripoBodies[1]));

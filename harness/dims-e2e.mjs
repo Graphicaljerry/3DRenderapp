@@ -46,7 +46,10 @@ const colorCount = async (rgb, tol = 12) => {
   }, { b64, rgb, tol });
 };
 const DIM_LINE = [0x33, 0x56, 0x6b]; // dimension lines/ticks (slate-teal)
-const SEL_TEAL = [0x14, 0xb8, 0xa6]; // selection box + anchors
+// The selection box and its corner anchors are #498a6f now (Viewer.tsx), not the old
+// teal. The dims-line half of this assertion kept passing, which is why only half of it
+// looked broken.
+const SEL_TEAL = [0x49, 0x8a, 0x6f]; // selection box + anchors
 
 // 1) Default mode = "select": nothing selected → NO dims box, no size lines.
 const dims0 = await colorCount(DIM_LINE);

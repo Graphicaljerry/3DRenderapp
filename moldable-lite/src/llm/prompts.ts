@@ -176,7 +176,9 @@ Rules:
 // themselves live in lib/fit.ts, which every hole the app cuts also goes through —
 // re-exported here so the prompt layer's existing importers keep working.
 import { fitClearance, fitCalibration, type FitId } from "../lib/fit";
+import { lookupHardware } from "../lib/hardware";
 export { FIT_CLEARANCE, fitCalibration, saveFitCalibration, fitClearance, boreAllowance, bore, fitSource, boreNote, isCalibrated } from "../lib/fit";
+
 export type { FitId } from "../lib/fit";
 
 export function fitDirective(fit: FitId): string {
@@ -185,6 +187,35 @@ export function fitDirective(fit: FitId): string {
   const how = fit === "loose" ? "loose / sliding" : fit === "press" ? "press / interference" : "snug";
   const cal = fitCalibration() != null ? " (calibrated to this user's printer)" : "";
   return `\n\n[Fit: ${how} — target about ${mm} mm clearance${cal} on any mating/insert dimension (a hole over a shaft, a slot over a tab, a socket for a part). Expose it as a numeric \`clearance\` parameter = ${mm} and apply it only to those fitted features, not to cosmetic or screw-clearance holes.]`;
+}
+
+/** Nominal dimensions for a piece of real hardware the request names, if it names one.
+ *
+ *  lib/hardware.ts existed for 692 lines and was never called — its own docstring
+ *  describes this caller ("a prompt builder feeding it free text") and the caller was
+ *  never written. The point it makes is the reason to wire it up: asking a model to
+ *  recall a bearing's outer diameter mid-generation fails QUIETLY. It does not stop and
+ *  say it is unsure; it writes a number that reads like a spec, and a 608 pocket bored
+ *  to 21.5 instead of 22 is a part you find out is wrong after the print.
+ *
+ *  Silent when nothing matches, so the ordinary prompt is unchanged and costs nothing
+ *  extra. Nominal figures only — clearance is applied downstream by bore()/fitClearance()
+ *  against the user's own printed calibration, so stating a pre-clearanced number here
+ *  would apply it twice. */
+export function hardwareFacts(userText: string): string {
+  const hit = lookupHardware(userText);
+  if (!hit) return "";
+  const { category, part } = hit;
+  const dims = Object.entries(part)
+    .filter(([k, v]) => typeof v === "number" && k !== "verified")
+    .map(([k, v]) => `${k} ${v} mm`)
+    .join(", ");
+  if (!dims) return "";
+  const caveat = (part as { verified?: boolean }).verified === false
+    ? " (one or more figures unconfirmed — say so if the fit is critical)"
+    : "";
+  const note = (part as { note?: string }).note ? ` ${(part as { note?: string }).note}.` : "";
+  return `\n\n[Known hardware: ${(part as { label?: string }).label ?? ""} (${category}) — NOMINAL dimensions ${dims}${caveat}.${note} These are the size of the metal, straight off the standard; they are NOT pre-clearanced. Use them as the true part size and let the clearance directive above size any pocket or bore around them. Do not substitute a remembered figure.]`;
 }
 
 export function replicadRepairMessage(err: { name: string; message: string; stack?: string }): string {

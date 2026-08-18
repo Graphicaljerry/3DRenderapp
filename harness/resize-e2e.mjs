@@ -74,7 +74,7 @@ check("B1 oversize GLB imports as a mesh at true size (no silent rescale of impo
 
 // Printability tab → the too-big block offers Fit to plate (MESH branch: baked scale)
 await page.getByRole("button", { name: "Printability", exact: true }).click();
-await page.getByRole("button", { name: /Fit to plate — scale down/ }).click();
+await page.getByRole("button", { name: /Scale to fit bed/ }).click();
 await page.waitForFunction((src) => { const d = eval(src); return d && d[0] < 260; }, sbDims, { timeout: 30_000 });
 const afterFit = await page.evaluate((src) => eval(src), sbDims);
 check("B2 Fit to plate shrinks the mesh onto the bed", !!afterFit && afterFit[0] <= 256 && afterFit[1] <= 256 && afterFit[2] <= 256, JSON.stringify(afterFit));
@@ -125,7 +125,7 @@ await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .
 await page.waitForFunction((src) => { const d = eval(src); return d && d[0] === 600; }, sbDims, { timeout: 30_000 });
 check("C1 STL imports as an editable CAD solid (boots the kernel on demand)", true);
 await page.getByRole("button", { name: "Printability", exact: true }).click();
-await page.getByRole("button", { name: /Fit to plate — scale down/ }).click();
+await page.getByRole("button", { name: /Scale to fit bed/ }).click();
 await page.waitForFunction((src) => { const d = eval(src); return d && d[0] < 260; }, sbDims, { timeout: 60_000 });
 check("C2 Fit to plate scales the CAD import (parametric op)", true);
 await page.getByRole("button", { name: "3D View", exact: true }).click();

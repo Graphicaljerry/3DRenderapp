@@ -14,17 +14,25 @@ await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
 await awaitBuild(page);
 
-// 1) Pick a flat face → the quick-edit offers "Hole…".
+// 1) Pick a flat face → the selection row offers "Hole…".
+// Two changes since this was written. Picking needs a tool armed at all — the standalone
+// Select tool was absorbed into Modify (044ab7f), so bare canvas clicks select nothing.
+// And Hole… sits on the selection row (.sel-acts) with the other face verbs rather than
+// in the old quick-edit bar.
+await page.locator(".canvas-rail").getByRole("button", { name: "Modify" }).click();
+await page.mouse.move(900, 500); // off the rail, so its flyout stops intercepting clicks
+await page.waitForTimeout(400);
 const canvas = page.locator(".viewerCanvas canvas");
 const box = await canvas.boundingBox();
+const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
 let holeBtn = null;
-for (const pos of [[0.42, 0.75], [0.5, 0.72], [0.38, 0.68], [0.5, 0.62]]) {
+for (const pos of [[0.42, 0.75], [0.5, 0.72], [0.38, 0.68], [0.5, 0.62], [0.5, 0.5], [0.45, 0.55], [0.55, 0.6]]) {
   await canvas.click({ position: { x: box.width * pos[0], y: box.height * pos[1] } });
   await page.waitForTimeout(350);
-  if ((await page.getByRole("button", { name: "Hole…" }).count()) > 0) { holeBtn = true; break; }
+  if ((await holeItem.count()) > 0) { holeBtn = true; break; }
 }
 check("flat face offers Hole…", !!holeBtn);
-await page.getByRole("button", { name: "Hole…" }).click();
+await holeItem.click();
 await page.waitForSelector(".hole-panel");
 check("hole panel opens with the drill ghost", true);
 

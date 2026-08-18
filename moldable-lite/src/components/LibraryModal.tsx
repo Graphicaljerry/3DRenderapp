@@ -24,10 +24,21 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
   const [selMode, setSelMode] = useState(false);
   const [selIds, setSelIds] = useState<Set<string>>(new Set());
 
+  /** Anything the storage layer refuses, said out loud. These were try/finally or bare
+   *  awaits: a failed read cleared the spinner and left the previous list on screen, and
+   *  a mid-loop failure in a bulk action left some projects moved or deleted and some
+   *  not, tombstones recorded unevenly, and the modal never refreshed — with nothing on
+   *  screen to say why. */
+  const [err, setErr] = useState<string | null>(null);
+  const say = (what: string, e: unknown) => setErr(`${what}: ${String((e as Error)?.message ?? e)}`);
+
   async function refresh() {
     setLoading(true);
     try {
       setItems(await listProjects());
+      setErr(null);
+    } catch (e) {
+      say("Couldn't read your library", e);
     } finally {
       setLoading(false);
     }
@@ -62,7 +73,12 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
       if (!typed) return;
       name = typed;
     }
-    await putProject({ ...p, folder: name, updatedAt: Date.now() }); // updatedAt so it syncs across devices
+    try {
+      await putProject({ ...p, folder: name, updatedAt: Date.now() }); // updatedAt so it syncs across devices
+      setErr(null);
+    } catch (e) {
+      say(`Couldn't move “${p.name}”`, e);
+    }
     void refresh();
     onMutated?.();
   }
@@ -85,10 +101,18 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
   async function deleteSelected() {
     if (!selIds.size) return;
     if (!confirm(`Delete ${selIds.size} model${selIds.size === 1 ? "" : "s"}? This can't be undone.`)) return;
+    // Keep going past a failure and report what survived. Stopping at the first error
+    // left the rest of the selection in place with no explanation.
+    const stuck: string[] = [];
     for (const id of selIds) {
-      await deleteProject(id);
-      recordTombstone(id); // sync merges — without this the account copy rides right back in
+      try {
+        await deleteProject(id);
+        recordTombstone(id); // sync merges — without this the account copy rides right back in
+      } catch {
+        stuck.push(items.find((i) => i.id === id)?.name ?? id);
+      }
     }
+    setErr(stuck.length ? `Couldn't delete ${stuck.length} of ${selIds.size}: ${stuck.slice(0, 3).join(", ")}${stuck.length > 3 ? "…" : ""}` : null);
     exitSelect();
     void refresh();
     onMutated?.();
@@ -102,10 +126,17 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
       if (!typed) return;
       name = typed;
     }
+    const stuck: string[] = [];
     for (const id of selIds) {
       const p = items.find((i) => i.id === id);
-      if (p) await putProject({ ...p, folder: name, updatedAt: Date.now() });
+      if (!p) continue;
+      try {
+        await putProject({ ...p, folder: name, updatedAt: Date.now() });
+      } catch {
+        stuck.push(p.name);
+      }
     }
+    setErr(stuck.length ? `Couldn't move ${stuck.length} of ${selIds.size}: ${stuck.slice(0, 3).join(", ")}${stuck.length > 3 ? "…" : ""}` : null);
     exitSelect();
     void refresh();
     onMutated?.();
@@ -118,6 +149,9 @@ export function LibraryModal({ onOpen, onClose, currentId, refreshTick, onMutate
           <h2>Project library</h2>
           <button className="x" onClick={onClose}><IconX size={16} /></button>
         </div>
+        {/* Outside the loading/empty branches on purpose: a bulk action that half-failed
+            still has a list to show, and the reason has to survive alongside it. */}
+        {err && <p className="fine err-note" role="alert">{err}</p>}
         {loading ? (
           <p className="fine">Loading…</p>
         ) : items.length === 0 ? (

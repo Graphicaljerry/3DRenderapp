@@ -12,7 +12,10 @@ const check = (name, ok, detail = "") => {
 
 // 1) Entry gate → "start from a template" link opens the gallery with no key.
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
-await page.getByText(/start from a template/i).click();
+// "Start from a template" is a <p class="launch-label"> now — a heading, not a control —
+// so clicking it did nothing and .tpl-grid never appeared. The gallery door beside it is
+// the "All {N}" button (.launch-more).
+await page.locator(".launch-more").first().click();
 await page.waitForSelector(".overlay .tpl-grid", { timeout: 30_000 });
 check("keycard link opens gallery", true);
 // Count isn't pinned — templates get added; every card having a real thumbnail is.

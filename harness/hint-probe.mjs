@@ -15,7 +15,9 @@ await page.waitForTimeout(600);
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
 
-for (const [btn, label] of [["Measure", "measure hint"], ["Select", "box-select hint"]]) {
+// Modify absorbed Select ("One editing tool: Modify absorbs Select", 044ab7f) and owns
+// picking outright, so it is what arms the box-select hint now. There is no Select button.
+for (const [btn, label] of [["Measure", "measure hint"], ["Modify", "box-select hint"]]) {
   await page.getByRole("button", { name: btn, exact: true }).click();
   await page.waitForSelector(".box-hint", { timeout: 10_000 });
   const hint = await page.locator(".box-hint").boundingBox();

@@ -65,15 +65,26 @@ const FIXED_MOCK_PORT = [
   "precision-e2e", "preview-e2e", "printpack2-e2e", "routing-e2e",
 ];
 
+// Probes that must run ALONE. hmr-boundary-e2e tests Fast Refresh by touching App.tsx,
+// Workspace.tsx and Viewer.tsx — vite then pushes those edits into every other lane's
+// browser mid-probe, which is a great way to manufacture failures that mean nothing. It
+// is a real test and it passes; it just cannot share a machine with the others.
+// Run it on its own:  node run-suite.mjs hmr-boundary-e2e
+const SOLO = ["hmr-boundary-e2e"];
+
 const allProbes = readdirSync(HERE)
   .filter((f) => f.endsWith(".mjs"))
   .map((f) => f.replace(/\.mjs$/, ""))
   .filter((n) => !NOT_TESTS.has(n))
   .sort();
 
-const stub = allProbes.filter((n) => STUB_PROBES.includes(n));
-const mock = allProbes.filter((n) => !STUB_PROBES.includes(n) && FIXED_MOCK_PORT.includes(n));
-const rest = allProbes.filter((n) => !STUB_PROBES.includes(n) && !FIXED_MOCK_PORT.includes(n));
+// SOLO probes are excluded from a full run but still runnable by name.
+const named0 = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const runnable = named0.length ? allProbes : allProbes.filter((n) => !SOLO.includes(n));
+
+const stub = runnable.filter((n) => STUB_PROBES.includes(n));
+const mock = runnable.filter((n) => !STUB_PROBES.includes(n) && FIXED_MOCK_PORT.includes(n));
+const rest = runnable.filter((n) => !STUB_PROBES.includes(n) && !FIXED_MOCK_PORT.includes(n));
 // Lane a carries the mock-port set plus enough of the remainder to stay level with b.
 const spare = Math.max(0, Math.ceil((rest.length - mock.length) / 2));
 const plain = [...mock, ...rest.slice(0, spare)];

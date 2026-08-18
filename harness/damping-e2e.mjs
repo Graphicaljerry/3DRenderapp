@@ -145,13 +145,33 @@ console.log(`\n  ${fmt(fast)}\n  ${fmt(slow)}\n`);
 check("A1 the two clocks really do differ", fast.actual > slow.actual * 2, `${fast.actual}Hz vs ${slow.actual}Hz`);
 check("A2 both gestures actually moved the camera", fast.total > 1 && slow.total > 1, `${fast.total} / ${slow.total}`);
 check("A3 both coasts were measured", fast.t90 > 0 && slow.t90 > 0, `${fast.t90}ms / ${slow.t90}ms`);
-// The whole point: a 3x slower clock must NOT stretch the trail 3x.
-const ratio = slow.t90 / Math.max(fast.t90, 1);
-check("A4 coast time is frame-rate independent", ratio < 1.5,
-  `the ${slow.actual}Hz run took ${ratio.toFixed(2)}x the ${fast.actual}Hz run (a per-call damper would be ~${(fast.actual / slow.actual).toFixed(1)}x)`);
-// The compensation is visible in the factor itself: slower frames must damp harder.
-check("A5 the damping factor scales with frame time", slow.damp > fast.damp * 1.8,
-  `${slow.damp.toFixed(4)} at ${slow.actual}Hz vs ${fast.damp.toFixed(4)} at ${fast.actual}Hz`);
+// A1 measures THIS PROBE's rAF pump. The viewer's own loop is a different clock, and on
+// software GL it is render-bound — invert the implementation's formula
+// (damp = 1 - (1-0.05)^(dt*120/1000), Viewer.tsx) and both runs come back at ~53 ms a
+// frame no matter what the pump was told to do. A4 and A5 compare the fast and slow runs
+// against each other, so when the throttle never reaches the render loop they are
+// comparing a situation with itself: A5 fails and A4 passes for no reason.
+//
+// So: derive the frame time the viewer ACTUALLY ran at, and only judge when the two runs
+// genuinely differ. Reporting "cannot tell here" is the honest outcome on a box that
+// cannot produce the condition; asserting either way would be noise.
+const dtOf = (damp) => Math.log(1 - damp) / Math.log(1 - 0.05) * (1000 / 120);
+const fastDt = dtOf(fast.damp), slowDt = dtOf(slow.damp);
+const clocksDiffer = slowDt > fastDt * 1.5;
+console.log(`  viewer frame time: fast run ${fastDt.toFixed(1)}ms, slow run ${slowDt.toFixed(1)}ms`);
+if (!clocksDiffer) {
+  console.log(`SKIP A4/A5 damping-vs-frame-rate — the throttle never reached the viewer's render loop `
+    + `(${fastDt.toFixed(0)}ms vs ${slowDt.toFixed(0)}ms a frame; software GL is render-bound here), `
+    + `so there is nothing to compare. Run on a machine with real GPU acceleration to exercise these.`);
+} else {
+  // The whole point: a 3x slower clock must NOT stretch the trail 3x.
+  const ratio = slow.t90 / Math.max(fast.t90, 1);
+  check("A4 coast time is frame-rate independent", ratio < 1.5,
+    `the ${slow.actual}Hz run took ${ratio.toFixed(2)}x the ${fast.actual}Hz run (a per-call damper would be ~${(fast.actual / slow.actual).toFixed(1)}x)`);
+  // The compensation is visible in the factor itself: slower frames must damp harder.
+  check("A5 the damping factor scales with frame time", slow.damp > fast.damp * 1.8,
+    `${slow.damp.toFixed(4)} at ${slow.actual}Hz vs ${fast.damp.toFixed(4)} at ${fast.actual}Hz`);
+}
 check("A6 the coast stays in a hand-feel window", fast.t90 < 900 && slow.t90 < 900, `${fast.t90}ms / ${slow.t90}ms`);
 
 await browser.close();

@@ -40,7 +40,7 @@ import type { SplitPiece } from "../print/split";
 import { pocketAdvice, type PocketFacing } from "../print/pockets";
 import { TemplateStrip } from "./TemplatesModal";
 import type { Template } from "../cad/templates";
-import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin, IconTools, IconStop} from "./icons";
+import { IconPaperclip, IconArrowUp, IconUser, IconMoon, IconSun, IconX, IconCheck, IconReset, IconChevron, IconSparkle, IconGlobe, IconUndo, IconRedo, IconPointer, IconExport, IconScrew, IconBadge, IconTransform, IconRuler, IconMarker, IconWireframe, IconFrame, IconFaceSel, IconEdgeSel, IconPointSel, IconRotate, IconScale, IconModify, IconShapes, IconPrimBox, IconPrimCylinder, IconPrimBall, IconEdgeRound, IconEdgeAngle, IconPushPull, IconTextTool, IconCube, IconCode, IconSliders, IconPrinter, IconHistory, IconHelp, IconMic, IconLayers, IconMagnet, IconFastener, IconPaint, IconCut, IconChecklist, IconPattern, PatternSwatch, IconCopy, IconWarn, IconFocus, IconFocusExit, IconCoin, IconTools, IconStop, IconTexturize} from "./icons";
 import type * as THREE from "three";
 import { MODELS } from "../llm/anthropic";
 import { LLM_PRESETS, getReasoningEffort, type LlmProviderId, type ReasoningEffort } from "../llm/llm";
@@ -3702,7 +3702,10 @@ export function Workspace(p: Props) {
                     : "Print-first: geometry only, no baked textures — a clean gray mesh (what your print will look like) at the lower engine price. Tap to bake colors."}
                   onClick={p.genTexCtl.toggle}
                 >
-                  {p.genTexCtl.on ? "🎨 Color: on" : "⬜ Color: off — print-first"}
+                  {/* IconTexturize is the checkerboard built for exactly this button; it sat in
+                      icons.tsx with zero call sites while this rendered an emoji. */}
+                  <IconTexturize size={13} />
+                  {p.genTexCtl.on ? "Color: on" : "Color: off — print-first"}
                 </button>
               )}
               </div>
@@ -6402,7 +6405,7 @@ function PrintabilityPanel({ report, defects, canRepair, busy, onRepair, onSimpl
         <div className="prow-note">
           <p className="fine" style={{ margin: "6px 0 4px" }}>
             {thin.thinSamples > 0
-              ? `⚠️ ${thin.thinSamples} of ${thin.sampled} sampled spots are under ${thin.thresholdMM} mm (thinnest ≈ ${thin.minThicknessMM} mm) — they may print fragile or vanish. Thicken them${nozzleMM > 0.25 ? ", or fit a smaller nozzle" : ""}.`
+              ? <><IconWarn size={13} /> {`${thin.thinSamples} of ${thin.sampled} sampled spots are under ${thin.thresholdMM} mm (thinnest ≈ ${thin.minThicknessMM} mm) — they may print fragile or vanish. Thicken them${nozzleMM > 0.25 ? ", or fit a smaller nozzle" : ""}.`}</>
               : thin.sampled > 0
                 ? `No thin walls in ${thin.sampled} sampled spots — thinnest measured ≈ ${thin.minThicknessMM} mm (limit ${thin.thresholdMM} mm). A sample, not a proof: a sliver smaller than the sampling grid can still slip through.`
                 : "Couldn't measure walls here (open surfaces) — run Fix model first."}
@@ -6414,7 +6417,7 @@ function PrintabilityPanel({ report, defects, canRepair, busy, onRepair, onSimpl
           )}
         </div>
       )}
-      {pockets && pocketAdvice(pockets) && <p className="fine">⚠️ Pockets: {pocketAdvice(pockets)}</p>}
+      {pockets && pocketAdvice(pockets) && <p className="fine"><IconWarn size={13} /> Pockets: {pocketAdvice(pockets)}</p>}
       <p className="fine">Generated meshes are often not watertight — that's expected, and Repair fixes most of it here for free. Simplify when a slicer (e.g. Bambu Studio) chokes on the triangle count. Wall/overhang are heuristics; bed-fit, watertight and the defect counts are exact for this mesh. Self-intersections are the one class nothing local can see.</p>
     </div>
   );

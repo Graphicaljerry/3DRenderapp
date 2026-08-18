@@ -141,7 +141,6 @@
   color: var(--ink);
 }
 
-
 /* ---------- touch / trackpad / Pencil (iPadOS + phones) ----------
    The app is a TOOL, not a document: dragging must orbit/move/measure, never
    start a native text selection (iPad trackpad + Pencil drags painted the whole
@@ -223,7 +222,6 @@ button, [role="button"] { touch-action: manipulation; } /* no double-tap zoom on
 [data-theme="dark"] .chip { background: #22262c; }
 [data-theme="dark"] .compose-field { background: var(--ctl); }
 [data-theme="dark"] .compose-field:focus-within { background: var(--bg); }
-[data-theme="dark"] .pnum { background: var(--bg); color: var(--ink); }
 [data-theme="dark"] .imgchip { background: #22262c; }
 
 * { box-sizing: border-box; }
@@ -313,12 +311,14 @@ button:disabled { cursor: default; }
 .card input:focus, .card select:focus { border-color: var(--accent); background: var(--bg); }
 .row3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
 .row3 input { width: 100%; }
-.sect-label { font-size: var(--fs-md); font-weight: 500; color: var(--mut); margin: 22px 0 2px; border-top: 1px solid var(--bord); padding-top: 16px; }
 .brand.big { display: flex; align-items: center; gap: 8px; }
 .brand.big .wordmark { font-size: var(--fs-2xl); }
 .fine { font-size: var(--fs-sm); color: var(--mut); margin: 14px 0 6px; }
 /* Fine print that is reporting a failure, not explaining a feature. */
 .fine.err-note { color: var(--danger); margin-top: 6px; }
+/* An icon standing in for a word — the warning triangle that replaced a ⚠️ — sits on
+   the text baseline rather than hanging off it. */
+.fine > svg { vertical-align: -2px; margin-right: 3px; }
 .link { background: none; border: none; color: var(--accent-d); font-size: var(--fs-md); font-weight: 500; padding: 6px 0; }
 
 /* ---------- app shell ---------- */
@@ -992,7 +992,6 @@ button:disabled { cursor: default; }
 .ins-note { font-size: var(--fs-tiny); line-height: 1.45; color: var(--subt); margin-top: 6px; }
 
 /* Material picker: the toolbar dot mirrors the chosen colour; swatch grid inside. */
-.mat-dot { width: 15px; height: 15px; border-radius: var(--r-full); border: 1.5px solid var(--bord-strong); flex: 0 0 auto; }
 .mat-swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin: 2px 0 8px; }
 .mat-swatch { height: 26px; border-radius: var(--r-sm); border: 2px solid transparent; cursor: pointer; }
 .mat-swatch.on { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent); }
@@ -1031,8 +1030,6 @@ button:disabled { cursor: default; }
 .lp-plates { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; padding: 2px 4px 8px; border-bottom: 1px solid var(--bord-subtle); margin-bottom: 4px; }
 .lp-plates button { border: 1px solid transparent; background: var(--ctl); color: var(--mut); border-radius: var(--r-sm); padding: 3px 8px; font-size: var(--fs-tiny); font-weight: 600; }
 .lp-plates button.on { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--ink); border-color: var(--accent); }
-.lp-plates .lp-export { margin-left: auto; color: var(--accent-d); }
-.lp-plates .lp-export:disabled { opacity: .4; }
 .lp-plate { background: var(--ctl); color: var(--mut); border-radius: var(--r-full); padding: 1.5px 7px; font-size: var(--fs-micro); font-weight: 700; flex: 0 0 auto; }
 .lp-plate:hover { color: var(--accent-d); border-color: var(--accent); }
 .lp-plates .lp-add { padding: 3px 7px; }
@@ -1084,10 +1081,6 @@ button:disabled { cursor: default; }
 @media (max-width: 900px) { .apb-hint { display: none; } }
 
 /* Launchpad engine chooser — the cost question answered before the first build */
-.launch-engines { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
-.lp-eng { font: inherit; font-size: var(--fs-md); padding: 5px 12px; border-radius: var(--r-full); border: 1px solid var(--bord-strong); background: var(--bg); color: var(--ink2); }
-.lp-eng.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
-.lp-eng-hint { font-size: var(--fs-sm); color: var(--mut); margin-left: 2px; }
 /* Paid-mesh confirm card */
 .confirm-card .cc-text { margin: 0 0 8px; }
 
@@ -1114,9 +1107,6 @@ button:disabled { cursor: default; }
 /* plate tab labels + inline rename */
 .pb-name { max-width: 76px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; color: var(--ink2); }
 .pb-edit { width: 96px; height: 22px; padding: 0 8px; border: 1px solid var(--accent); border-radius: var(--r-full); background: var(--bg); color: var(--ink); font-size: var(--fs-sm); }
-.lp-plates .lp-export-wrap { margin-left: auto; }
-.lp-export { border: none; background: none; color: var(--accent-d); font-size: var(--fs-tiny); font-weight: 600; }
-.lp-export:disabled { opacity: .4; }
 
 /* ---------- build plates: Bambu-style tabs over the 3D view + assignment menus ---------- */
 /* The plate bar gets its own centred row above the view-angle buttons at EVERY width.
@@ -1138,8 +1128,6 @@ button:disabled { cursor: default; }
 .pb-x:hover { background: var(--bord); color: var(--ink); }
 .pb-add { border: none; background: none; padding: 4px 9px; font-size: var(--fs-md); font-weight: 700; color: var(--mut); border-radius: var(--r-full); }
 .pb-add:hover { background: var(--surf); color: var(--accent-d); }
-.pb-export { border: none; background: none; padding: 4px 10px; font-size: var(--fs-sm); font-weight: 600; color: var(--accent-d); border-radius: var(--r-full); }
-.pb-export:hover { background: var(--surf); }
 /* small anchored menu shared by plate pickers + plate export — portaled to <body> and
    fixed-positioned by AnchoredMenu, so scroll containers can never clip or bury it */
 .pmenu { position: fixed; z-index: var(--z-portal); max-height: min(46vh, 340px); overflow-y: auto; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-md); box-shadow: var(--shadow-md); padding: 4px; display: flex; flex-direction: column; }
@@ -1273,7 +1261,6 @@ button:disabled { cursor: default; }
    sizes to its content — forcing equal columns there collided the two. */
 .canvas-rail .rail-fly .seg:not(.kind-seg) { display: flex; width: 100%; }
 .canvas-rail .rail-fly .seg:not(.kind-seg) > button { flex: 1 1 0; min-width: 0; justify-content: center; }
-.canvas-rail .rail-fly .kind-seg { width: max-content; max-width: 100%; }
 .magnet-sizes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .magnet-sizes .msize { padding: 5px 0; border: 1px solid var(--bord); border-radius: var(--r-sm); background: var(--ctl); color: var(--ink2); font-size: var(--fs-tiny); font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
 .magnet-sizes .msize:hover { border-color: var(--bord-strong); color: var(--ink); }
@@ -1328,16 +1315,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .export-wrap { margin-left: auto; position: relative; }
 /* z-index above the docked side panel (6): the transient menu always wins. */
 .export-menu { position: absolute; right: 0; bottom: 46px; z-index: var(--z-popover); width: 280px; max-width: calc(100vw - 20px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); box-shadow: var(--shadow-md); padding: 6px; }
-.export-item { display: flex; flex-direction: column; align-items: flex-start; width: 100%; background: none; border: none; border-radius: var(--r-md); padding: 8px 10px; text-align: left; }
-.export-item:hover:not(:disabled) { background: var(--surf); }
-.export-item:disabled { opacity: 0.4; cursor: default; }
-.export-item .ef { font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
-.export-item .ed { font-size: var(--fs-tiny); color: var(--mut); }
-.export-ready { display: flex; align-items: center; gap: 6px; padding: 7px 10px 9px; margin-bottom: 6px; border-bottom: 1px solid var(--bord); font-size: var(--fs-sm); font-weight: 600; }
-.export-ready .mini { margin-left: auto; padding: 4px 9px; font-size: var(--fs-tiny); flex: none; }
-.export-ready.ok { color: var(--accent-d); }
-.export-ready.fix { color: var(--warn); }
-.export-ready.no { color: var(--danger); }
 
 /* ---------- buttons ---------- */
 .primary { background: var(--accent); color: #fff; border: none; border-radius: var(--r-md); padding: 9px 16px; font-size: var(--fs-md); font-weight: 600; }
@@ -1513,16 +1490,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .web-toggle { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--mut); font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; transition: background-color .15s ease, border-color .15s ease, color .15s ease; }
 .web-toggle:hover { border-color: var(--bord-strong); color: var(--ink2); }
 .web-toggle .web-state { font-weight: 600; }
-.web-toggle.web-on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
-.web-toggle.web-off { opacity: 0.65; }
 /* Plan-first, on the Launchpad's composer row. Same chip as Research beside it — they
    are both "what happens before the build" — but this one is ON by default, so it
    carries the accent as its resting state rather than as an exception. Off is the
    quiet state here, which is the reverse of Research and deliberate: the row has to
    read "a plan is coming" at a glance, not "there is a plan setting". */
-.plan-toggle.on { border-color: var(--accent); color: var(--accent-d); background: var(--accent-w); }
-.plan-toggle:not(.on) { opacity: 0.65; }
-.fw-short { display: none; } /* the phone spelling; the composer's phone block swaps the pair */
 .link-inline { color: var(--accent-d); text-decoration: underline; }
 .link-inline:hover { color: var(--accent); }
 /* OpenRouter "recommended for CAD" chips in Settings. */
@@ -1787,7 +1759,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 @media (max-width: 760px) {
   .launch-composer-foot { gap: 6px; }
   .launch-composer-foot .fw-more { display: none; }
-  .launch-composer-foot .fw-short { display: inline; }
   .launch-composer-foot .launch-attach { padding: 5px 7px; }
   .launch-composer-foot .web-toggle { padding: 0 7px; }
   /* The 44px touch size the in-project composer gives this button would cost the
@@ -1807,7 +1778,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    each keeps its full words rather than being clipped to "Functi…". */
 .lo-engines { flex-direction: column; gap: 4px; }
 .lo-engines .pm-opt { text-align: left; padding: 6px 8px; }
-.launch-fine { margin: 0; font-size: var(--fs-sm); color: var(--mut); }
 /* One breathing rhythm for the zones below the composer: 26px between zones, 10px
    inside them — the create zone keeps its dominance and everything under it reads
    as reference material rather than competing calls to action. */
@@ -1829,8 +1799,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   padding: 0; border: 0; background: none; color: var(--ink2); font-size: var(--fs-md); }
 .launch-guided:hover { color: var(--ink); }
 .launch-guided .gc-go { color: var(--accent-d); }
-.launch-resume { align-self: flex-start; padding: 8px 14px; border-radius: var(--r-full); border: 1px solid var(--accent); background: var(--bg); color: var(--accent-d); font-size: var(--fs-md); }
-.launch-resume:hover { background: var(--accent-w); }
 /* Recent projects: the same chip language as the templates below, with a real
    thumbnail so you recognise the part rather than reading its name. */
 /* A GRID, not wrapped inline-flex: every card takes the same column width, so a
@@ -1906,7 +1874,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   .launch-composer textarea { font-size: 1rem; }
   /* Section labels and the engine hint are scaffolding — quieter than the things they label. */
   .launch-label, .lp-eng-hint { font-size: var(--fs-tiny); }
-  .launch-engines { gap: 6px; }
   /* Grouping does as much work as size here: everything above is one job (describe the
      part), everything below is another (start from something that exists). A wider gap is
      the only thing separating them — the flex column's uniform 12px had the template
@@ -1945,7 +1912,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    off-screen and untappable. */
 .signin-card { max-width: min(440px, calc(100vw - 28px)); }
 .signin-card .social-col { margin: 12px 0 10px; }
-.signin-card .magicrow { margin-bottom: 4px; }
 .signin-card .sync-status { margin: 10px 0 2px; }
 .signin-card .modal-actions { margin-top: 14px; }
 .signin-card .param-actions { margin-top: 12px; }
@@ -1999,7 +1965,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .ctxbar .directop-row { display: inline-flex; align-items: center; gap: 5px; }
 .ctxbar .directop-row input { width: 56px; padding: 4px 6px; border: 1px solid var(--bord); border-radius: var(--r-sm); font: inherit; font-size: var(--fs-sm); background: var(--bg); color: var(--ink); }
 .ctxbar .ghost.sm { padding: 4px 9px; font-size: var(--fs-sm); }
-.ctxbar .multiface { display: inline-flex; align-items: center; gap: 5px; }
 @media (prefers-reduced-motion: reduce) { .ctxbar { animation: none; } }
 
 /* The ask-the-AI half of a selection, now in the dock instead of a floating card. */
@@ -2255,12 +2220,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .viewer:has(.inspector-dock:not([style*="none"])) .viewer-head { padding-right: calc(var(--dock-w, 262px) + 32px); }
 .viewer-body:has(.inspector-dock:not([style*="none"])) .export-menu { right: calc(var(--dock-w, 262px) + 24px); }
 
-.side-panel { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 6; width: 300px; max-width: calc(100% - 24px); display: flex; flex-direction: column; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); box-shadow: var(--shadow-md); overflow: hidden; }
-.side-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; border-bottom: 1px solid var(--bord); font-size: var(--fs-md); font-weight: 600; color: var(--ink); }
-.side-head .x { background: none; border: none; color: var(--subt); font-size: var(--fs-lg); padding: 0; cursor: pointer; }
-.side-body { flex: 1; min-height: 0; overflow: auto; }
-.side-body .panel { height: auto; overflow: visible; padding: 14px; }
-
 /* ---------- pins & generation timer ---------- */
 /* Clears the tool rail that opens these panels: the rail is left:10px, --rail-w wide,
    at z-index 30, and these sat under it at left:12px z-index 6. top:64px also clears the
@@ -2282,7 +2241,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
    the plate bar's row only when there IS one. */
 .viewer-body:has(.plate-bar) .split-panel { bottom: 98px; }
 .split-panel { position: absolute; left: 12px; bottom: 58px; z-index: 6; width: 290px; max-width: calc(100% - 24px); background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); padding: 12px; box-shadow: var(--shadow-md); }
-.split-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
 .split-list { max-height: 190px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 .split-row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; }
 .split-swatch { width: 14px; height: 14px; border-radius: var(--r-xs); flex: none; border: 1px solid color-mix(in srgb, var(--ink) 15%, transparent); }
@@ -2363,9 +2321,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .social-col { display: flex; flex-direction: column; gap: 8px; margin: 10px 0 4px; }
 .social { display: inline-flex; align-items: center; justify-content: center; gap: 9px; font-weight: 600; padding: 10px 12px; margin-top: 0; }
 .chip.resume { border-color: var(--accent); color: var(--accent); font-weight: 600; }
-.magicrow { display: flex; gap: 8px; margin-top: 10px; }
-.magicrow input { flex: 1; min-width: 0; }
-.magicrow .ghost { white-space: nowrap; }
 .stabs button { flex: 1; padding: 8px 6px; font-size: var(--fs-md); }
 .pane-desc { font-size: var(--fs-md); color: var(--mut); margin: 12px 0 2px; line-height: 1.45; }
 .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 22px; }
@@ -2423,13 +2378,7 @@ details.guide { margin-top: 10px; }
 /* ---------- parameter sliders ---------- */
 /* Two-line row: name + value up top, full-width slider underneath — the
    slider never collapses, even in the 300px docked panel. */
-.param-row { display: grid; grid-template-columns: 1fr 84px 28px; grid-template-areas: "name num unit" "slider slider slider"; align-items: center; column-gap: 10px; row-gap: 7px; padding: 10px 0; border-bottom: 1px solid #eef0f2; }
-.pname { grid-area: name; font-size: var(--fs-md); color: var(--ink2); overflow: hidden; text-overflow: ellipsis; }
-.param-row input[type="range"] { grid-area: slider; accent-color: var(--accent); width: 100%; margin: 0; }
-.pnum { grid-area: num; height: 32px; padding: 0 8px; border: 1px solid var(--bord); border-radius: var(--r-md); font-size: var(--fs-md); width: 100%; }
-.punit { grid-area: unit; font-size: var(--fs-tiny); color: var(--subt); }
 .param-actions { display: flex; gap: 8px; margin-top: 14px; }
-.export-sep { height: 1px; background: var(--bord); margin: 6px 4px; }
 
 /* ---------- responsive: stack chat over viewer on small screens ---------- */
 @media (max-width: 900px) {
@@ -2450,7 +2399,6 @@ details.guide { margin-top: 10px; }
   .chat-resize { display: none; } /* stacked layout: no column to resize */
   .chat-rail-label { writing-mode: horizontal-tb; transform: none; }
   .chat-rail { border-radius: var(--r-lg); }
-  .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
   .modehint { display: none; }
   .messages { padding: 12px; }
   .statusbar { flex-wrap: wrap; row-gap: 6px; }
@@ -2607,6 +2555,7 @@ details.guide { margin-top: 10px; }
 
 /* ---- Texture toggle chip (generative mode hint row) ---- */
 .texchip {
+  display: inline-flex; align-items: center; gap: 5px;
   border: 1px solid var(--bord);
   background: var(--bg);
   color: var(--ink2);
@@ -3082,7 +3031,6 @@ details.guide { margin-top: 10px; }
   .viewer-body { border-radius: 0; }
   .statusbar { padding-left: 10px; padding-right: 10px; }
 
-
   /* ---- the phone's bottom bar ----
      One line along the thumb arc: tools at the leading edge, the Inspector at the
      trailing one, the model in between. The rail used to lie here as a strip of
@@ -3415,7 +3363,6 @@ details.guide { margin-top: 10px; }
   .split { padding: 0 10px 8px; gap: 8px; }
   /* Both edges of the canvas belong to the model here: the chat is below it, not
      beside it, so nothing needs a collapsed rail on the left. */
-  .side-panel { top: 8px; right: 8px; bottom: 8px; left: 8px; width: auto; max-width: none; }
 }
 
 /* ON ITS SIDE. Wide enough for two columns, short enough that every band of chrome is
@@ -3488,7 +3435,6 @@ details.guide { margin-top: 10px; }
 .plan-sect:nth-of-type(2) { padding-left: 9px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
 .plan-edit { width: 100%; font: inherit; font-size: var(--fs-md); padding: 2px 6px; border: 1px solid var(--bord); border-radius: var(--r-xs); background: var(--ctl); color: var(--ink); }
 .plan-actions { display: flex; align-items: center; gap: 8px; margin-top: 13px; flex-wrap: wrap; }
-.plan-toggle.on { color: var(--accent-d); border-color: var(--accent); }
 /* Parameters: what "add a parameter for X" or "make X adjustable" actually produces,
    made visible and editable before the build spends anything — a row per slider,
    name left, value right, editable in place while the plan is open for editing. */
@@ -3515,7 +3461,6 @@ details.guide { margin-top: 10px; }
 .meas-input { width: 72px; font: inherit; font-size: var(--fs-md); padding: 2px 6px; border: 1px solid var(--accent); border-radius: var(--r-xs); background: var(--bg); color: var(--ink); font-variant-numeric: tabular-nums; }
 .meas-drivers { display: flex; flex-wrap: wrap; gap: 4px; }
 .meas-actions { display: flex; gap: 6px; }
-
 
 /* ---------- touch targets ----------
    Keyed to a coarse pointer rather than a breakpoint: an iPad at 1024px is still a

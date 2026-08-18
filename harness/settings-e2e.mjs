@@ -27,8 +27,13 @@ check("compressed payload round-trips losslessly", crypt.roundtrip);
 
 // ---- 2) Grouped Settings modal. ----
 // Signed out, the profile button opens Settings directly (Sync tab).
+// Signed out, the avatar's job is getting signed IN — it opens the sign-in popup, not a
+// settings pane (App.tsx: "Signed out, the avatar's job is getting signed IN"). Settings
+// is reached from the menu item, so open the menu and pick it.
 await page.getByRole("button", { name: "Account menu" }).click();
-await page.waitForSelector(".card .stabs");
+const settingsItem = page.locator(".pmenu-item, .menu-item, button", { hasText: /^Settings/ }).first();
+if (await settingsItem.count()) await settingsItem.click();
+await page.waitForSelector(".card .stabs", { timeout: 20_000 });
 const groups = async () => page.locator(".sgroup .sgroup-head b").allInnerTexts();
 
 await page.locator(".stabs button", { hasText: "AI brain" }).click();

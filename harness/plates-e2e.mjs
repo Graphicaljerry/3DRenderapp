@@ -96,7 +96,10 @@ check("plate 2 part offset one stride right", t2 && Math.abs(t2[0] - (307.2 + 12
 
 // 6) The bar's export menu triggers a real download.
 const dl = page.waitForEvent("download", { timeout: 30_000 });
-await page.locator(".plate-bar .pb-export").click();
+// .pb-export no longer exists in any TSX — export moved into the Inspector's Export
+// section as one surface ("One Export surface, opening on print readiness", 866123e).
+await page.locator(".dock-list").getByRole("button", { name: "Export", exact: true }).click();
+await page.getByRole("button", { name: /One project \.3mf/ }).click();
 await page.locator(".pmenu .pmenu-item", { hasText: "One project .3mf" }).click();
 const download = await dl;
 check("bar exports a project .3mf", (download.suggestedFilename() ?? "").endsWith(".3mf"), download.suggestedFilename());

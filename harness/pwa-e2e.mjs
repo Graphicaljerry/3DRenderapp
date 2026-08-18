@@ -3,7 +3,7 @@
 // boots with the network fully OFF. Plus: numeric-only build stamp.
 import { chromium } from "playwright";
 import { spawn } from "node:child_process";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const preview = spawn("npx", ["vite", "preview", "--port", "4173", "--strictPort"], {
   cwd: "/home/user/3DRenderapp/moldable-lite",
@@ -70,7 +70,10 @@ check("offline: OCCT kernel loads from cache (Engine · replicad)", true);
 // Build a template offline — the whole local CAD path works with no network.
 await page.getByRole("button", { name: "Templates", exact: true }).click();
 await page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.toLowerCase().includes("tolerance test coupon"), null, { timeout: 120_000 });
+// Exactly the anti-pattern enter.mjs retired: waiting on a chat bubble to echo the
+// template's name proves nothing about a model appearing, and breaks whenever the blurb
+// is reworded. awaitBuild asks the viewer whether it is holding geometry.
+await awaitBuild(page);
 check("offline: template builds a real model (no network)", true);
 await page.screenshot({ path: "shot-pwa-offline.png" });
 

@@ -78,8 +78,12 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("Your attachment looks")), null, { timeout: 45_000 });
   const classifyBody = bodies.find((b) => b.includes("route requests")) ?? "";
   check("T2 classify request carried the image", /image|img|data:/.test(classifyBody), classifyBody.slice(0, 60));
-  const genOn = await page.evaluate(() => document.querySelector(".seg button.on")?.textContent ?? "");
-  check("T2 sketch routed to Generative", genOn.includes("Generative"), genOn);
+  // The seg binds to modePref, not the routed mode — App calls setMode(routedMode) only,
+  // so in Auto the chip deliberately stays "Auto" and the chat announces the pick. The
+  // routing is what this checks, so read the announcement, not the chip.
+  const routed = await page.evaluate(() => document.body.innerText);
+  check("T2 sketch routed to Generative", /chose \*{0,2}Generative|Generative \(AI mesh\)/.test(routed),
+    (routed.match(/.{0,60}Generative.{0,40}/) ?? ["no routing line"])[0].replace(/\n/g, " "));
   await page.close();
 }
 
@@ -130,16 +134,22 @@ const PNG_1x1 = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUl
   await awaitBuild(page);
 
   // T5: face → Hole… → pick "M3 heat-set insert" → ⌀4, 5.5 deep + boss hint.
+  // Two changes. Picking needs a tool armed — the standalone Select tool was absorbed
+  // into Modify (044ab7f), so bare canvas clicks select nothing at all. And Hole… lives
+  // on the selection row (.sel-acts) beside the other face verbs now.
+  await page.locator(".canvas-rail").getByRole("button", { name: "Modify" }).click();
+  await page.mouse.move(900, 500); // step off the rail so its flyout stops eating clicks
+  await page.waitForTimeout(400);
   const canvas = page.locator(".viewerCanvas canvas");
   const box = await canvas.boundingBox();
   let holeBtn = false;
-  for (const pos of [[0.42, 0.75], [0.5, 0.72], [0.38, 0.68], [0.5, 0.62]]) {
+  for (const pos of [[0.42, 0.75], [0.5, 0.72], [0.38, 0.68], [0.5, 0.62], [0.5, 0.5], [0.45, 0.55]]) {
     await canvas.click({ position: { x: box.width * pos[0], y: box.height * pos[1] } });
     await page.waitForTimeout(350);
-    if ((await page.getByRole("button", { name: "Hole…" }).count()) > 0) { holeBtn = true; break; }
+    if ((await page.locator(".sel-acts button", { hasText: /^Hole…$/ }).count()) > 0) { holeBtn = true; break; }
   }
   check("T5 face offers Hole…", holeBtn);
-  await page.getByRole("button", { name: "Hole…" }).click();
+  await page.locator(".sel-acts button", { hasText: /^Hole…$/ }).click();
   await page.waitForSelector(".hole-panel");
   await page.locator(".hole-panel select").first().selectOption({ label: "M3 heat-set insert (⌀4.0 · 5.5 mm)" });
   await page.waitForTimeout(200);

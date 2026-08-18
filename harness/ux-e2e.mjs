@@ -35,7 +35,7 @@ await page.keyboard.press("Escape");
 await page.waitForSelector(".zoom-ctl");
 await page.getByRole("button", { name: "Zoom in", exact: true }).click();
 await page.getByRole("button", { name: "Zoom out", exact: true }).click();
-await page.getByRole("button", { name: "Zoom to fit", exact: true }).click();
+await page.getByRole("button", { name: "Reset view", exact: true }).click();
 check("zoom cluster works", true);
 
 // 3) Grouped layers: separate → Part 2 shown indented under the model with a group label.

@@ -4,6 +4,21 @@
 import { chromium } from "playwright";
 import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
+
+/** Open the template gallery at any width.
+ *
+ *  Below 760 px the topbar's Templates and Library links are `display: none` by design —
+ *  "both live one tap away" — so getByRole finds zero buttons and the probe reported a
+ *  missing feature that was deliberately relocated. The in-workspace strip is the phone
+ *  door; the topbar link is the desktop one. */
+async function openTemplates(page) {
+  const top = page.getByRole("button", { name: "Templates", exact: true });
+  if (await top.count() && await top.first().isVisible()) { await top.first().click(); return; }
+  const more = page.locator(".tpl-strip .more, .tpl-more, .launch-more").first();
+  if (await more.count()) { await more.click(); return; }
+  throw new Error("no way into the template gallery at this width");
+}
+
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
@@ -12,7 +27,7 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
   const page = await browser.newPage({ viewport: { width: 1194, height: 834 } });
   await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
-  await page.getByRole("button", { name: "Templates", exact: true }).click();
+  await openTemplates(page);
   await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
   await awaitBuild(page);
   await page.waitForTimeout(500);
@@ -55,7 +70,7 @@ for (const [name, w, h] of [["iphone", 390, 844], ["iphone-max", 430, 932]]) {
   const page = await browser.newPage({ viewport: { width: w, height: h } });
   await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
   await enterWorkspace(page);
-  await page.getByRole("button", { name: "Templates", exact: true }).click();
+  await openTemplates(page);
   await page.waitForTimeout(600);
   await page.keyboard.press("Escape");
   await page.waitForTimeout(300);

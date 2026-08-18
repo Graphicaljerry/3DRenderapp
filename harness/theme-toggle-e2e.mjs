@@ -16,7 +16,11 @@ await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "d
 await enterWorkspace(page);
 
 const probe = () => page.evaluate(() => {
-  const ta = document.querySelector(".composer textarea");
+  // .compose-field textarea is `background: none` — the visible colour is on the parent
+  // wrapper. Reading the textarea returned rgba(0,0,0,0) in every theme, which parses to
+  // r=g=b=0, so "is it dark" was always true and two of this probe's checks could only
+  // ever pass.
+  const ta = document.querySelector(".compose-field") ?? document.querySelector(".composer textarea");
   const bg = getComputedStyle(ta).backgroundColor;
   const [r, g, b] = bg.match(/\d+/g).map(Number);
   return {

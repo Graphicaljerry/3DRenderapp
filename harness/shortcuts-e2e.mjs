@@ -24,11 +24,12 @@ const EMPTY = { x: box.x + box.width * 0.6, y: box.y + box.height * 0.16 };
 await page.mouse.click(EMPTY.x, EMPTY.y); // focus the canvas, not the composer
 await page.keyboard.press("v");
 await page.waitForTimeout(250);
-check("A1 V arms Select", (await rail("Select").getAttribute("aria-pressed")) === "true");
+// V arms Modify now — the rail button Select used to be. Same key, same picking.
+check("A1 V arms Modify", (await rail("Modify").getAttribute("aria-pressed")) === "true");
 await page.keyboard.press("m");
 await page.waitForTimeout(250);
 check("A2 M switches to Measure (one tool at a time)",
-  (await rail("Measure").getAttribute("aria-pressed")) === "true" && (await rail("Select").getAttribute("aria-pressed")) === "false");
+  (await rail("Measure").getAttribute("aria-pressed")) === "true" && (await rail("Modify").getAttribute("aria-pressed")) === "false");
 await page.keyboard.press("b");
 await page.waitForTimeout(250);
 check("A3 B arms Paint", (await rail("Paint").getAttribute("aria-pressed")) === "true");
@@ -46,7 +47,7 @@ await page.getByRole("button", { name: "Objects", exact: true }).click();
 await page.waitForSelector(".layers-panel");
 await page.mouse.click(EMPTY.x, EMPTY.y); // empty canvas, away from the model
 await page.waitForTimeout(400);
-check("B3 clicking empty canvas puts the tool down", (await rail("Select").getAttribute("aria-pressed")) === "false");
+check("B3 clicking empty canvas puts the tool down", (await rail("Modify").getAttribute("aria-pressed")) === "false");
 check("B4 …and closes the Objects panel", (await page.locator(".layers-panel").count()) === 0);
 
 // ---- C) Paint strokes are undoable --------------------------------------------

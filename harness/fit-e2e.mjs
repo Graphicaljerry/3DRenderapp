@@ -34,7 +34,7 @@ check("Part 2 listed as its own object", rowNames.some((n) => n.includes("Part 2
 check("separate button gone (model now 1 part)", (await page.getByRole("button", { name: /Separate \d+ parts/ }).count()) === 0);
 
 // 3) Check fit at the printed position (lid beside the box) → no interference.
-const fitBtn = page.getByRole("button", { name: "Check fit" });
+const fitBtn = page.getByRole("button", { name: "Check clearance" });
 await fitBtn.waitFor({ timeout: 10_000 }); // Part 2 was auto-selected by separate
 await fitBtn.click();
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent?.includes("doesn't intersect")), { timeout: 60_000 });

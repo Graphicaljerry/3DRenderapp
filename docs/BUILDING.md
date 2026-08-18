@@ -47,6 +47,16 @@ npm run suite      # the whole Playwright suite, three isolated lanes
 - Node 20+ is fine. No env vars, no secrets in the repo — the app is
   bring-your-own-key by design.
 
+## Hardware dimensions in the prompt
+
+`lib/hardware.ts` holds nominal ISO/datasheet dimensions for bearings, nuts, washers,
+extrusion, boards, dowel pins, DIN rail and connectors. When a request names one,
+`hardwareFacts()` (llm/prompts.ts) puts the real figures in the prompt instead of
+letting the model recall them — a wrong bearing bore is a part you discover is wrong
+after the print. Figures are NOMINAL: clearance is applied downstream by
+`bore()`/`fitClearance()` against the user's printed calibration, so never pre-clearance
+a number in that table or it gets applied twice.
+
 ## API keys — where they come from, where they go
 
 All keys are pasted **in the app**: Settings → **AI brain** (the chat/CAD model)

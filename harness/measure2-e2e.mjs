@@ -12,6 +12,9 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
 page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
+// The sign-in modal opens the first time the composer takes focus, and its backdrop then
+// swallows every click that follows — including the ones this probe makes on the canvas.
+await page.addInitScript(() => { localStorage.setItem("moldable_signin_prompted", "1"); });
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 await page.getByRole("button", { name: "Templates", exact: true }).click();
@@ -42,14 +45,20 @@ const box = await canvas.boundingBox();
 const cx = box.width * 0.5, cy = box.height * 0.5;
 await page.getByRole("button", { name: "Top", exact: true }).click();
 await page.waitForTimeout(600);
-await canvas.click({ position: { x: cx, y: cy } });
+// Picking needs a tool armed — Modify absorbed the standalone Select (044ab7f), so bare
+// canvas clicks select nothing — and Hole… sits on the selection row with the other face
+// verbs now, not in the old quick-edit bar.
+await page.locator(".canvas-rail").getByRole("button", { name: "Modify" }).click();
+await page.mouse.move(900, 500); // off the rail so its flyout stops intercepting clicks
 await page.waitForTimeout(400);
-if ((await page.getByRole("button", { name: "Hole…" }).count()) === 0) {
-  await canvas.click({ position: { x: cx + 30, y: cy + 30 } });
+const holeItem = page.locator(".sel-acts button", { hasText: /^Hole…$/ });
+for (const [dx, dy] of [[0, 0], [30, 30], [-30, 20], [0, -40]]) {
+  await canvas.click({ position: { x: cx + dx, y: cy + dy } });
   await page.waitForTimeout(400);
+  if ((await holeItem.count()) > 0) break;
 }
-check("flat top face offers Hole…", (await page.getByRole("button", { name: "Hole…" }).count()) > 0);
-await page.getByRole("button", { name: "Hole…" }).click();
+check("flat top face offers Hole…", (await holeItem.count()) > 0);
+await holeItem.click();
 await page.waitForSelector(".hole-panel");
 await page.locator(".hole-panel").getByLabel("Hole diameter (mm)").fill("7");
 

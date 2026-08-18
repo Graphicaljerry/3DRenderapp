@@ -39,6 +39,20 @@ await page.waitForFunction(() => document.body.textContent.includes("Engine · r
 await page.getByRole("button", { name: "Library", exact: true }).click();
 
 // The upgrade runs in the background: poll the store until the stamp lands.
+// waitForFunction with an ASYNC predicate resolves on the first poll no matter what the
+// promise resolves to — verified against this Playwright build with a predicate that
+// sleeps and returns false: it resolved in 537 ms instead of timing out. So this "wait"
+// gated nothing and the read below happened before the background upgrade had written.
+// Resolve the value first, then let a synchronous predicate do the gating.
+await page.evaluate(async () => {
+  const { getProject } = await import("/src/store/projects.ts");
+  window.__thumbPoll = setInterval(async () => {
+    const p = await getProject("stale-thumb-test");
+    window.__thumbV = p?.thumbV ?? null;
+  }, 100);
+});
+await page.waitForFunction(() => window.__thumbV === 2, null, { timeout: 30_000 });
+await page.evaluate(() => clearInterval(window.__thumbPoll));
 await page.waitForFunction(async () => {
   const { getProject } = await import("/src/store/projects.ts");
   const p = await getProject("stale-thumb-test");
@@ -49,7 +63,7 @@ const upgraded = await page.evaluate(async () => {
   const p = await getProject("stale-thumb-test");
   return { thumb: (p?.thumb ?? "").slice(0, 22), len: (p?.thumb ?? "").length };
 });
-check("stale project re-stamped to thumbV=2", true);
+check("stale project re-stamped to thumbV=2", await page.evaluate(() => window.__thumbV === 2));
 check("thumb replaced with a studio webp", upgraded.thumb.startsWith("data:image/webp") && upgraded.len > 2000, JSON.stringify(upgraded));
 
 // The open Library repaints with the new shot (its card shows an <img> whose src is the new webp).

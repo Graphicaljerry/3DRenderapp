@@ -609,8 +609,29 @@ const FILLER = /(bearings?|nuts?|nyloc[k]?|locknuts?|washers?|screws?|bolts?|ext
 // "washer m5" reaches the row whose label is "M5 washer".
 const CATEGORY_WORDS = [
   "washer", "square", "tnut", "t nut", "t-nut", "drop-in", "drop in", "dropin",
-  "nut", "bearing", "dowel", "rail", "header",
+  "nyloc", "nylock", "locknut", "nut", "bearing", "dowel", "rail", "header",
 ];
+
+/** The category word each table's rows should ALSO answer to.
+ *
+ *  Without this the index is lopsided: a washer's id already carries its category
+ *  ("w_m2", label "M2 washer"), so "washer m5" resolves — but a hex nut is keyed on the
+ *  bare thread ("m3"), so "M3 nut" and "M5 nyloc" resolved to nothing at all. Both are
+ *  about as common as maker phrasing gets, and the token sweep cannot rescue them
+ *  because it skips keys under three characters, which every M-thread key is.
+ *
+ *  `put` never clobbers an existing key, so these are additions only: a row that already
+ *  answers to a category-qualified name keeps the meaning it had. */
+const CATEGORY_ALIASES: Partial<Record<HardwareCategory, string[]>> = {
+  bearing: ["bearing"],
+  hexNut: ["nut", "hexnut", "nyloc", "nylock", "locknut"],
+  squareNut: ["squarenut", "square nut"],
+  washer: ["washer"],
+  extrusion: ["extrusion", "profile"],
+  tSlotNut: ["tnut", "t nut", "tslotnut"],
+  dowelPin: ["dowel", "pin"],
+  dinRail: ["rail", "dinrail"],
+};
 
 // Seal and closure suffixes. 608, 608ZZ and 608-2RS are one bearing.
 const SEAL = /(2rs|2rz|2z|ddu|du|rs|zz|z)$/;
@@ -628,6 +649,14 @@ const INDEX: Map<string, HardwareMatch> = (() => {
       put(part.id, hit);
       put(part.label, hit);
       for (const a of part.aka ?? []) put(a, hit);
+      // …and the same names with the category word on either end, so word order and the
+      // habit of naming the category ("M3 nut trap", "nyloc M5") both reach the row.
+      for (const alias of CATEGORY_ALIASES[category] ?? []) {
+        for (const base of [part.id, part.label, ...(part.aka ?? [])]) {
+          put(base + alias, hit);
+          put(alias + base, hit);
+        }
+      }
     }
   }
   return m;

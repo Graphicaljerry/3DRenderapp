@@ -51,7 +51,9 @@ const init = (extra = {}) => (ctxVals) => {
   const ta = page.locator(".composer textarea");
   await ta.fill("a swirling coral reef centerpiece"); // matches NEITHER regex → brain decides
   await ta.press("Enter");
-  await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("routed it to")), null, { timeout: 30_000 });
+  // "routed it to" is gone from src entirely — the Auto engine mode says
+  // "**Auto** chose **Generative (AI mesh)**" instead (ce1d29f).
+  await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /\*\*Auto\*\* chose|Auto.{0,3} chose/.test(b.textContent)), null, { timeout: 30_000 });
   check("T1 brain got a classify request", requests.includes("classify"), requests.join(","));
   const routedTxt = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].map((b) => b.textContent).join(" | "));
   check("T1 routed notice → Generative", routedTxt.includes("Generative (AI mesh)"));

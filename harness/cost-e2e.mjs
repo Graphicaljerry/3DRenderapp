@@ -5,6 +5,25 @@
 import { chromium } from "playwright";
 import { enterWorkspace } from "./enter.mjs";
 
+
+/** Say yes to the paid-spend confirmation, if one appears.
+ *
+ *  Mesh generation is gated on an explicit confirm now (7e7ac51): the app posts a
+ *  confirm-card naming the engine and the per-run cost, and nothing is called until the
+ *  primary button is clicked. Probes written before that gate existed sat waiting for
+ *  progress lines that were never coming — the run had not been authorised, so no task
+ *  was ever created. Spending is the user's call; the probe just has to make it. */
+async function confirmSpend(page, timeout = 30_000) {
+  const card = page.locator(".confirm-card .edit-actions .primary").first();
+  try {
+    await card.waitFor({ state: "visible", timeout });
+  } catch {
+    return false; // no gate on this path — nothing to authorise
+  }
+  await card.click();
+  return true;
+}
+
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
 const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} ${name}${detail ? " — " + detail : ""}`); if (!ok) fails.push(name); };
@@ -71,6 +90,7 @@ check("mode hint shows the engine's price up front", /~25 credits · ≈ \$0\.50
 // 2) Run a text→3D generation (digits in the prompt skip the LLM prompt-polish).
 await page.locator(".composer textarea").first().fill("a cube 20 mm wide");
 await page.keyboard.press("Enter");
+await confirmSpend(page);
 // The "Preparing… (Meshy · …)" placeholder / "Generating mesh · …" progress line
 // carries the price while the (stubbed) task runs — catch it before completion.
 await page.waitForFunction(

@@ -18,7 +18,7 @@ await page.addInitScript(() => {
   // fallback can fail fast in dev, replacing it before a poll would see it.
   window.__retrySeen = [];
   new MutationObserver(() => {
-    for (const b of document.querySelectorAll(".msg.assistant .bubble")) {
+    for (const b of document.querySelectorAll(".msg.assistant .bubble, .msg.assistant .bubble-open")) {
       if (b.textContent && b.textContent.includes("retrying on your Meshy")) window.__retrySeen.push(1);
     }
   }).observe(document.documentElement, { subtree: true, childList: true, characterData: true });
@@ -53,12 +53,15 @@ await page.locator(".composer textarea").first().click();
 await page.keyboard.press("Enter");
 
 // The announcement shows while the keyed retry runs…
-await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent.includes("retrying on your Meshy")), null, { timeout: 60_000 });
+// While a reply is still streaming its container carries `bubble-open`, not `bubble`, so
+// the retry notice — which only exists mid-stream — was invisible to a .bubble query. The
+// fallback chain itself always worked; the probe was looking at the wrong element.
+await page.waitForFunction(() => /retrying on your/.test(document.body.innerText), null, { timeout: 60_000 });
 check("fallback announced before the keyed retry", true);
 // …then the combined error proves the whole chain (rejection → fallback attempt →
 // honest double report).
-await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /Fallback \(Meshy\)/.test(b.textContent)), null, { timeout: 180_000 });
-const finalTxt = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].map((b) => b.textContent).join(" | "));
+await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble, .msg.assistant .bubble-open")].some((b) => /Fallback \(Meshy\)/.test(b.textContent)), null, { timeout: 180_000 });
+const finalTxt = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble, .msg.assistant .bubble-open")].map((b) => b.textContent).join(" | "));
 check("both errors surfaced (free GPU + fallback)", /Free GPU:.*(quota|rejected)/i.test(finalTxt) && /Fallback \(Meshy\)/.test(finalTxt), finalTxt.slice(-160));
 await page.screenshot({ path: "shot-hf-fallback.png" });
 

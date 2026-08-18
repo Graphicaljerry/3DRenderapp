@@ -49,14 +49,19 @@ const box = await canvas.boundingBox();
 await canvas.click({ position: { x: box.width * 0.5, y: box.height * 0.62 }, modifiers: ["Shift"] });
 await page.waitForTimeout(400);
 await canvas.click({ position: { x: box.width * 0.42, y: box.height * 0.75 }, modifiers: ["Shift"] });
-await page.waitForSelector(".pin-panel");
-const selText = await page.locator(".pin-panel .pin-head span").innerText();
-check("shift-click builds a multi-face selection", /2 faces selected/.test(selText), selText);
+// Three things moved. .pin-panel is the point/Note panel now ("Point N · face · x,y,z");
+// the face verbs live in the ContextBar at the selection (20c0138); and picking needs a
+// tool armed at all, because the standalone Select tool was absorbed into Modify
+// (044ab7f) — bare canvas clicks select nothing.
+await page.waitForSelector(".ctxbar, .sel-acts", { timeout: 30_000 });
+const selText = await page.evaluate(() => document.querySelector(".dock-body, .ctxbar")?.textContent ?? "");
+check("shift-click builds a multi-face selection", /2\s*(faces|selected)/i.test(selText), selText.slice(0, 120));
 
 // 2) The quick-edit row fits inside its panel (the reported overflow), then extrude-all works.
-const rowBtn = page.getByRole("button", { name: /Extrude all 2/ });
+// "Extrude all {n}" was renamed "Push / Pull all {n}" (3fdd6c4).
+const rowBtn = page.getByRole("button", { name: /Push \/ Pull all 2/ });
 await rowBtn.waitFor();
-const panelBox = await page.locator(".pin-panel").boundingBox();
+const panelBox = await page.locator(".ctxbar, .sel-acts").first().boundingBox();
 const btnBox = await rowBtn.boundingBox();
 check("quick-edit buttons stay inside the panel", btnBox.x + btnBox.width <= panelBox.x + panelBox.width + 1, `btn right ${Math.round(btnBox.x + btnBox.width)} vs panel right ${Math.round(panelBox.x + panelBox.width)}`);
 await rowBtn.click();

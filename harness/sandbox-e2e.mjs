@@ -42,7 +42,7 @@ check("Regroup parts restores the fused model",
 
 // 3) Make it fit with no overlap → honest "nothing to carve" message.
 await page.getByRole("button", { name: /Separate 2 parts/ }).click();
-await page.getByRole("button", { name: "Make it fit" }).click();
+await page.getByRole("button", { name: "Cut to fit" }).click();
 await page.waitForFunction(() => [...document.querySelectorAll(".msg.assistant .bubble")].pop()?.textContent?.includes("Nothing to carve"), null, { timeout: 60_000 });
 check("make-it-fit refuses when nothing overlaps", true);
 
@@ -68,7 +68,7 @@ const carve = await page.evaluate(async () => {
   const before = sep.meshVolume(await pe.previewIntersect(soup));
   const grown = await pe.growMesh(soup, 0.2);
   if (!grown) return { error: "grow failed" };
-  const carved = await pe.previewBoolean(grown, -1); // the "Make it fit" cut
+  const carved = await pe.previewBoolean(grown, -1); // the "Cut to fit" cut
   if (!carved) return { error: "carve failed" };
   // Re-check the raw lid against the carved model.
   const g2 = { boundingBox: null };

@@ -1,6 +1,7 @@
 // The composer engine switch now has three options — Auto (default), Precise (CAD),
 // Generative (AI mesh) — Auto lets the app classify each new ask and pick the engine.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -11,6 +12,10 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
 // fresh context → localStorage is empty, so no stored preference → Auto is the default
 // (don't clear the pref in initScript — it runs on every reload and would break persistence)
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
+// The app boots on the Launchpad — `entered` is in-session only — so waiting for
+// workspace chrome straight after a goto or a reload waited 60 s for something that was
+// never coming. Every one of the three load points here needs the door clicked.
+await enterWorkspace(page);
 await page.waitForSelector(".modebar .seg", { timeout: 60_000 });
 
 const seg = page.locator(".modebar .seg button");
@@ -28,12 +33,14 @@ check("A5 picking Generative selects it", (await onLabel()) === "Generative (AI 
 
 // preference persists across reload
 await page.reload({ waitUntil: "domcontentloaded" });
+await enterWorkspace(page);
 await page.waitForSelector(".modebar .seg", { timeout: 60_000 });
 check("A6 the chosen engine persists across reload", (await onLabel()) === "Generative (AI mesh)", await onLabel());
 
 // back to Auto, persists
 await page.locator(".modebar .seg button", { hasText: "Auto" }).click();
 await page.reload({ waitUntil: "domcontentloaded" });
+await enterWorkspace(page);
 await page.waitForSelector(".modebar .seg", { timeout: 60_000 });
 check("A7 Auto persists across reload", (await onLabel()) === "Auto", await onLabel());
 

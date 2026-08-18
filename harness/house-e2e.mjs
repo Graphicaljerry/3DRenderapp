@@ -73,6 +73,10 @@ const check = (name, ok, detail = "") => {
   const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
   page.on("console", (m) => { if (m.type() === "error") console.error("[page]", m.text()); });
   await page.addInitScript(() => {
+    // The sign-in modal opens the first time the composer takes focus, and its backdrop
+    // then swallows every click that follows. Eighteen sibling probes seed this; these did
+    // not, so they failed on an overlay rather than on anything they were testing.
+    localStorage.setItem("moldable_signin_prompted", "1");
     localStorage.setItem("moldable_house_url", "http://127.0.0.1:8787");
   });
   await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });

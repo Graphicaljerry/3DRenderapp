@@ -6,6 +6,7 @@
 //  C. acting BEFORE the deferred warm-up (instant "Try the built-in example")
 //     preempts it via ensureEngine() — the example builds, no "try again" bounce.
 import { chromium } from "playwright";
+import { enterWorkspace } from "./enter.mjs";
 
 const results = [];
 const check = (name, ok, note = "") => {
@@ -71,6 +72,10 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
   check("B1 UI was on screen before the kernel wasm was requested", uiAt > 0 && wasmAt > uiAt, `ui=${Math.round(uiAt)}ms wasm=${Math.round(wasmAt)}ms`);
   check("B2 wasm waits for the load event (idle warm-up)", loadEnd > 0 && wasmAt >= loadEnd, `load=${Math.round(loadEnd)}ms wasm=${Math.round(wasmAt)}ms`);
   // ...and the warm-up must actually finish: the engine pill reports the kernel.
+  // The engine pill is workspace chrome. A bare load stays on the Launchpad, where it
+  // does not exist, so this waited 60 s for a string that was never going to appear —
+  // and reported the kernel as never warming when it had warmed fine.
+  await enterWorkspace(page);
   const engineReady = await page
     .waitForFunction(() => document.body.textContent.includes("Engine · replicad"), { timeout: 60000 })
     .then(() => true)
@@ -84,7 +89,9 @@ const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromi
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
   await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`);
   // Click the example link the moment it exists — before idle warm-up.
-  await page.click("text=built-in example", { timeout: 15000 });
+  // Reworded: the Launchpad link is "See a finished example" now. The old wording
+  // survives only inside the workspace, on a different control.
+  await page.getByRole("button", { name: "See a finished example" }).click({ timeout: 15000 });
   const built = await page
     .waitForFunction(() => document.body.textContent.includes("Example L-bracket") || document.body.textContent.includes("L-bracket"), { timeout: 90000 })
     .then(() => true)

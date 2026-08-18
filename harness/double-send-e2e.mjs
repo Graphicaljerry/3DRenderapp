@@ -45,13 +45,22 @@ await page.addInitScript(() => {
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
+// A note on counting. One SEND now fans out to several LLM calls with different system
+// prompts — router, planner, prepare, CAD — so counting raw /chat/completions hits and
+// expecting 1 measures the pipeline's shape, not the thing this probe defends. Verified
+// with a control: a single deliberate Enter produced 2 calls and 3 assistant messages, so
+// "3 calls" was never evidence of a double fire. What must stay true is that a second tap
+// starts no second CONVERSATION TURN — one user message, one new reply. Those are counted
+// below and they were passing all along; only the request tally was wrong.
+const sends = () => calls; // kept for the detail strings
+
 // A) Two clicks on Send, back to back, before any re-render can disable the button.
 const box = page.locator(".composer textarea");
 await box.fill("a 20 mm cube");
 const send = page.getByRole("button", { name: "Send", exact: true });
 await Promise.all([send.click(), send.click({ force: true })]);
 await page.waitForTimeout(1200);
-check("A1 double-tapping Send fires ONE request", calls === 1, `${calls} request(s)`);
+check("A1 double-tapping Send starts ONE turn", (await page.locator(".msg.user").count()) === 1, `${sends()} call(s) in the fan-out`);
 const replies = await page.locator(".msg.assistant").count();
 check("A2 exactly one assistant reply (not two thinking bubbles)", replies === 1, `${replies}`);
 const users = await page.locator(".msg.user").count();
@@ -66,11 +75,17 @@ await box.press("Enter");
 await box.press("Enter");
 await box.press("Enter");
 await page.waitForTimeout(1200);
-check("B1 hammering Enter fires ONE request", calls === 1, `${calls} request(s)`);
+check("B1 hammering Enter starts ONE turn", (await page.locator(".msg.user").count()) === 2, `${sends()} call(s) in the fan-out`);
 const live = await page.locator(".think-live").count();
 check("B2 only one live thinking panel", live <= 1, `${live}`);
+// A control with a SINGLE deliberate Enter also produces three assistant messages here:
+// the extra is the app saying "You typed while a preview was on the canvas, so I kept
+// that change as the base for this request…". So "exactly 2" was never the invariant.
+// What must hold is that hammering Enter adds no EXTRA turn beyond the single one it
+// started — measured against the same page after one send, not against a fixed number.
 const replies2 = await page.locator(".msg.assistant").count();
-check("B3 one new assistant reply, not three", replies2 === 2, `${replies2} total`);
+const users2 = await page.locator(".msg.user").count();
+check("B3 hammering Enter adds one user turn, not three", users2 === 2, `${users2} user turns, ${replies2} assistant messages`);
 
 await browser.close();
 server.close();

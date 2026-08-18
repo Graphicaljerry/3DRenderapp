@@ -36,7 +36,7 @@ import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/scre
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchBalance, loadBalance, saveBalance, usdToCredits, fmtCredits, ageLabel, PRICING, type Balance } from "./llm/credits";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, hardwareFacts, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
 import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
 import { FILAMENT_SWATCHES } from "./print/filament";
 import { reloadIfStaleChunk } from "./lib/staleChunk";
@@ -6755,7 +6755,11 @@ export default function App() {
     // Researched dims + fit apply to BOTH the text and the vision message.
     const fitLine = guided ? fitDirective(fit) : "";
     const factsBlock = researched ? `\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : "";
-    const extras = factsBlock + fitLine;
+    // If the request names a piece of standard hardware — a 608, an M5 nyloc, 2020
+    // extrusion — hand over its published dimensions rather than letting the model
+    // recall them. Empty string when nothing matches, so ordinary prompts are unchanged.
+    const hardwareLine = hardwareFacts(p);
+    const extras = factsBlock + hardwareLine + fitLine;
     const pWithFacts = p + extras;
     // projectRef, not the render's `project`: this runs after several awaits, and the
     // log has to describe the part as it is NOW.

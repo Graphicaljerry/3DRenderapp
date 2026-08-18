@@ -15,22 +15,43 @@ await page.addInitScript(() => {
 await page.goto(`http://localhost:${process.env.PORT ?? 5173}/`, { waitUntil: "domcontentloaded" });
 await enterWorkspace(page);
 
-const probe = () => page.evaluate(() => {
-  // .compose-field textarea is `background: none` — the visible colour is on the parent
-  // wrapper. Reading the textarea returned rgba(0,0,0,0) in every theme, which parses to
-  // r=g=b=0, so "is it dark" was always true and two of this probe's checks could only
-  // ever pass.
-  const ta = document.querySelector(".compose-field") ?? document.querySelector(".composer textarea");
-  const bg = getComputedStyle(ta).backgroundColor;
-  const [r, g, b] = bg.match(/\d+/g).map(Number);
+/** What the composer ACTUALLY looks like, measured off rendered pixels.
+ *
+ *  Two earlier versions of this were unmeasurable. Reading `.composer textarea` gave
+ *  rgba(0,0,0,0) — that element is `background: none`, the colour lives on the wrapper —
+ *  and since that parses to r=g=b=0, "is it dark" was always true and two checks could
+ *  only ever pass. Reading the wrapper instead gives
+ *  `color(srgb 0.92549 0.92549 0.929412 / 0.06)`: a modern colour syntax whose FLOATS a
+ *  /\d+/g match shreds into nonsense, and a 6% translucent overlay whose own
+ *  backgroundColor tells you nothing about what shows through it anyway.
+ *
+ *  So: screenshot the element, hand the PNG back to the page, and average the pixels.
+ *  That is the composited result — the thing a person sees — and it is immune to which
+ *  colour syntax, which token and how many stacked translucent layers produced it. */
+const probe = async () => {
+  const el = page.locator(".compose-field").first();
+  const shot = (await el.screenshot()).toString("base64");
+  const px = await page.evaluate(async (b64) => {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = "data:image/png;base64," + b64; });
+    const cv = document.createElement("canvas");
+    cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+    const cx = cv.getContext("2d");
+    cx.drawImage(img, 0, 0);
+    const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+    let r = 0, g = 0, bl = 0, n = 0;
+    for (let i = 0; i < d.length; i += 4) { r += d[i]; g += d[i + 1]; bl += d[i + 2]; n++; }
+    return { r: r / n, g: g / n, b: bl / n };
+  }, shot);
+  const mean = (px.r + px.g + px.b) / 3;
   return {
-    theme: document.documentElement.dataset.theme,
-    scheme: document.documentElement.style.colorScheme,
-    bg,
-    light: (r + g + b) / 3 > 160,
-    dark: (r + g + b) / 3 < 90,
+    theme: await page.evaluate(() => document.documentElement.dataset.theme),
+    scheme: await page.evaluate(() => document.documentElement.style.colorScheme),
+    bg: `rgb(${px.r.toFixed(0)}, ${px.g.toFixed(0)}, ${px.b.toFixed(0)})`,
+    light: mean > 160,
+    dark: mean < 90,
   };
-});
+};
 
 const atDark = await probe();
 check("dark boot: composer is dark", atDark.theme === "dark" && atDark.dark, JSON.stringify(atDark));

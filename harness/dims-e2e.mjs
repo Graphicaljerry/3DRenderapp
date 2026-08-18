@@ -53,6 +53,11 @@ const SEL_TEAL = [0x49, 0x8a, 0x6f]; // selection box + anchors
 
 // 1) Default mode = "select": nothing selected → NO dims box, no size lines.
 const dims0 = await colorCount(DIM_LINE);
+// The accent is not the selection box's private colour — it is also the measure lines,
+// the gizmo and the dimension leaders (Viewer.tsx uses 0x498a6f in nine places). So an
+// absolute "under 20 accent pixels" can never be right: some accent chrome legitimately
+// stays on the canvas. Baseline it instead, and require deselect to come back to it.
+const teal0 = await colorCount(SEL_TEAL);
 check("clean canvas by default (no gray box)", dims0 < 60, `${dims0} dim px`);
 
 // 2) Click the object → selection box + dims appear around it.
@@ -74,7 +79,9 @@ await page.waitForTimeout(350);
 check("empty click deselects", !(await selected()));
 const dimsOff = await colorCount(DIM_LINE);
 const tealOff = await colorCount(SEL_TEAL);
-check("box + size lines hide on deselect", dimsOff < 60 && tealOff < 20, `dims ${dimsOff}px, sel ${tealOff}px`);
+check("box + size lines hide on deselect",
+  dimsOff < 60 && tealOff <= teal0 + 40 && tealOff < tealSel * 0.6,
+  `dims ${dimsOff}px, accent ${teal0} (idle) → ${tealSel} (selected) → ${tealOff} (deselected)`);
 await page.screenshot({ path: "shot-dims-deselected.png" });
 
 // 4) View ▾ → Dimensions "Always" → permanent box with nothing selected (old behaviour).

@@ -24,12 +24,13 @@
 //   node run-suite.mjs plates-e2e fit-e2e   # named probes, in the lane that owns them
 //   node run-suite.mjs --list          # what would run, and where
 import { spawn } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, writeFileSync, mkdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, "..", "moldable-lite");
+const LOGDIR = "/tmp/suite-logs"; // one file per probe, so a crash can be read afterwards
 
 // The 13 that need the stub. Kept as an explicit list rather than grepped at runtime:
 // this is a routing decision, and it should change deliberately, with a diff.
@@ -124,7 +125,15 @@ const sh = (cmd, opts = {}) => new Promise((res) => {
   let out = "";
   p.stdout.on("data", (d) => { out += d; });
   p.stderr.on("data", (d) => { out += d; });
-  p.on("close", (code) => res({ code, out }));
+  let done = false;
+  const finish = (code) => { if (done) return; done = true; res({ code, out }); };
+  // 'exit', not 'close'. 'close' waits for every pipe to close as well as the process to
+  // end — and a chromium that outlives its probe inherits stdout and holds that pipe open
+  // indefinitely. The lane then waits forever with NOTHING running: a 15-minute run with
+  // an idle CPU, no probe process alive, and not one line printed from that lane. The
+  // 150 ms grace lets buffered output land before the promise settles.
+  p.on("exit", (code) => setTimeout(() => finish(code), 150));
+  p.on("error", () => finish(-1));
 });
 
 const up = async (url) => (await sh(`curl -s -o /dev/null -w '%{http_code}' ${url}`)).out.trim() === "200";
@@ -181,8 +190,20 @@ await Promise.all(lanes.map(async (lane) => {
       await ensureServers(lane);
       r = await sh(`cd ${HERE} && PORT=${lane.port} timeout ${TIMEOUT} node ${probe}.mjs 2>&1`);
     }
+    // NO orphan sweep here. A pkill is machine-wide and the lanes run concurrently, so
+    // one lane finishing a probe killed the browsers the other two were mid-way through:
+    // "Target page, context or browser has been closed", and a run that had been passing
+    // 40 probes dropped to 25. Resolving on 'exit' above is what actually fixes the hang
+    // an orphan used to cause; the orphan itself is harmless.
     const v = readVerdict(r);
     const secs = Math.round((Date.now() - t0) / 1000);
+    // Keep every probe's stdout. Without it a "crashed after 3 checks" line is a dead end
+    // — the stack trace that says WHY is gone, and the only way to triage is to re-run the
+    // probe by hand, which is how a suite run turns into an afternoon.
+    try {
+      mkdirSync(LOGDIR, { recursive: true });
+      writeFileSync(join(LOGDIR, `${probe}.log`), r.out);
+    } catch { /* logging must never fail a run */ }
     results.push({ probe, lane: lane.name, secs, ...v });
     console.log(`${v.ok ? "ok  " : "FAIL"}  ${probe.padEnd(24)} ${String(secs).padStart(4)}s  ${v.why}`);
     for (const l of v.failLines) console.log(`        ${l.trim()}`);
@@ -195,7 +216,7 @@ console.log(`\n${results.length - bad.length}/${results.length} probes passed`);
 const slow = results.filter((r) => r.secs > 180);
 if (slow.length) console.log(`slow (>3 min): ${slow.map((r) => `${r.probe} ${r.secs}s`).join(", ")}`);
 if (bad.length) {
-  console.log(`\nfailed:`);
+  console.log(`\nfailed (full output per probe in ${LOGDIR}/<probe>.log):`);
   for (const r of bad) console.log(`  ${r.probe} — ${r.why}`);
 }
 process.exit(bad.length ? 1 : 0);

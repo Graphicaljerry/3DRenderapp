@@ -35,7 +35,10 @@ await page.keyboard.press("Escape");
 await page.waitForSelector(".zoom-ctl");
 await page.getByRole("button", { name: "Zoom in", exact: true }).click();
 await page.getByRole("button", { name: "Zoom out", exact: true }).click();
-await page.getByRole("button", { name: "Reset view", exact: true }).click();
+// The zoom cluster's third button is "Frame model" (aria-label), not "Zoom to fit" —
+// "Reset view" is the VIEW MENU's item for the same action, checked above. Renaming both
+// sites to the menu wording was my error: this one is a different control.
+await page.getByRole("button", { name: "Frame model", exact: true }).click();
 check("zoom cluster works", true);
 
 // 3) Grouped layers: separate → Part 2 shown indented under the model with a group label.

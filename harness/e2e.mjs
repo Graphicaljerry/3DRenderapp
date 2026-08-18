@@ -21,8 +21,15 @@ check("keycard link opens gallery", true);
 // Count isn't pinned — templates get added; every card having a real thumbnail is.
 const cards = await page.locator(".overlay .tpl-card").count();
 check("gallery shows the template cards", cards >= 10, `${cards}`);
-const thumbs = await page.locator(".overlay .tpl-thumb img").count();
-check("every card has a real thumbnail", thumbs === cards, `${thumbs}/${cards}`);
+// Mesh templates deliberately show a sculpt GLYPH, not a render: the generative engine
+// returns something different every run, so a photo-real card "would promise a specific
+// result the card can't deliver" (TemplatesModal). Requiring an <img> on all twelve was
+// asking the app to make a promise it decided not to make. What must hold is that no card
+// is blank, and that the CAD ones — which build deterministically — do carry a render.
+const imgs = await page.locator(".overlay .tpl-thumb img").count();
+const glyphs = await page.locator(".overlay .tpl-thumb-empty").count();
+check("no template card is blank", imgs + glyphs === cards, `${imgs} rendered + ${glyphs} glyph = ${imgs + glyphs} of ${cards}`);
+check("the deterministic CAD templates carry a real render", imgs >= 6, `${imgs} renders`);
 
 // 2) Tap "Headphone desk hook" → parametric model builds, chat + project + sliders present.
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();

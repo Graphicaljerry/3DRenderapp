@@ -917,7 +917,7 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
-## Builds 470–474 — a suite you can run, and chat photos you can actually look at
+## Builds 470–476 — a suite you can run, and chat photos you can actually look at
 
 - **HD chat photos (474).** Expanding a photo in the transcript showed an enlarged
   *thumbnail*: `chatThumb` writes 420px webp into the chat JSON (deliberately — that is
@@ -943,6 +943,27 @@ The audit's top three findings, all "connect what already exists":
     (1400×1050 and 900×1200 — a mixed-up index shows the wrong photo at a plausible
     size), actual size renders 1:1 inside a pannable box, and all of it still holds after
     a reload, which only the on-disk copy can do.
+
+- **Two small app fixes the probe repairs turned up (475–476).** The hole panel's
+  align (=) button and its spacing field snapped to the magnet on the way in, so a button
+  whose tooltip promises Δ = 0 left Δ at -0.01 and a typed 20 mm spacing became 19.91 —
+  the reference hole's centre is wherever the CAD put it, not on a whole millimetre. Both
+  values are measured off another hole, so they go in exactly now; hand-typed offsets and
+  hand-placed clicks still snap. And "refine this as a mesh" screenshots the model and
+  feeds that picture to the image→3D engine — the reply said so and the transcript showed
+  nothing, so the snapshot now appears in the bubble like any attached photo, HD copy
+  included.
+
+- **Ten probes repaired (475–476), none for reasons to do with the features they cover.**
+  The recurring causes are worth knowing: probes run SIGNED OUT, so the account button
+  opens the sign-in popup rather than Settings (use the status bar's printer chip) and the
+  sign-in modal's backdrop eats the first click unless `moldable_signin_prompted` is
+  seeded; replies are revealed a character at a time, so matching the first few words of a
+  sentence reads a half-written bubble; the headphone desk hook is curved nearly
+  everywhere and no click on it ever picks a face (use the phone stand); and Select,
+  "Surface texture", the export MENU and the .directop bar are all names for things the UI
+  replaced. Three assertions were retired with the reason written down rather than
+  loosened into something trivially true.
 
 - **`harness/run-suite.mjs` (470–473).** 45 of the 61 probes printed `FAIL` and exited 0,
   so anything judging the suite by exit status read a wall of failures as green. The

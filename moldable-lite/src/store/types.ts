@@ -3,6 +3,11 @@ import type { CadOp } from "../engine/types";
 export type StoredEngineKind = "replicad" | "primitive" | "generative";
 
 export interface ChatTurn {
+  /** The message's id in the running app. Saved because it is the key `photos` is
+   *  written under — re-minting ids on reopen (which is what used to happen) orphaned
+   *  every full-resolution photo the moment the reload that should have restored them
+   *  finished. Absent on records written before this existed. */
+  id?: string;
   role: "user" | "assistant";
   text: string;
   error?: boolean;
@@ -160,6 +165,19 @@ export interface Project {
   facePaint?: { count: number; b64: string }; // per-face MMU paint on the model: base64 of a per-triangle palette-index Uint8Array (count guards against a reshaped mesh). Exported as 3MF paint_color.
   genSource?: GenSource;
   chat?: ChatTurn[];
+  /** Full-resolution copies of the photos a message was sent with, keyed by message id.
+   *
+   *  The transcript itself carries only 420px thumbnails (chatThumb) — that is what keeps
+   *  `chat` small enough to live in one IndexedDB record and ride the sync row. But the
+   *  lightbox was then blowing a 420px thumb up to 1100px, a 2.6x upscale, so "expand"
+   *  produced something visibly softer than the picture the user had actually uploaded.
+   *
+   *  These are BLOBS, deliberately. A blob is stored by IndexedDB as bytes and never
+   *  touches the chat JSON, so a full-resolution photo costs the transcript nothing and
+   *  the sync payload nothing. Absent on messages saved before this existed, and on
+   *  projects pulled from another device — the thumbnail is the fallback, and the viewer
+   *  says so rather than pretending. */
+  photos?: Record<string, Blob[]>;
   versions: Version[]; // append-only, oldest -> newest
   headId?: string; // which version the HEAD (live) fields mirror; enables undo/redo over `versions`
   /** Which running copy of the app last wrote this record. Not an identity or a device —

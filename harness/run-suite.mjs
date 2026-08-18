@@ -32,13 +32,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const APP = join(HERE, "..", "moldable-lite");
 const LOGDIR = "/tmp/suite-logs"; // one file per probe, so a crash can be read afterwards
 
-// The 13 that need the stub. Kept as an explicit list rather than grepped at runtime:
+// The ones that need the stub. Kept as an explicit list rather than grepped at runtime:
 // this is a routing decision, and it should change deliberately, with a diff.
 const STUB_PROBES = [
   "assist-visibility-e2e", "audit-fixes-e2e", "buildfail-e2e", "change-strip-e2e",
   "delete-model-e2e", "launchpad-widths-e2e", "newpart-e2e", "photo-front-e2e",
   "plan-default-e2e", "plan-payload-e2e", "plan-persist-e2e", "retry-photos-e2e",
-  "stop-e2e", "regress-465-e2e",
+  "stop-e2e", "regress-465-e2e", "hd-photo-e2e",
 ];
 
 // Scripts in here that are tools, not tests — they generate screenshots, icons and

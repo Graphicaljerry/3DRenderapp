@@ -340,6 +340,21 @@ function loadGenEng(): { provider: string; model: string } {
 let msgSeq = 0;
 const mid = () => `m${++msgSeq}`;
 
+/** Drop full-resolution chat photos whose message is no longer in the transcript.
+ *
+ *  Deleting a message takes its pictures off the screen; without this the megabytes stay
+ *  in IndexedDB for the life of the project with nothing left that could ever show them.
+ *  Returns the same object when nothing is orphaned, so a quiet autosave stays quiet. */
+function prunePhotos(photos: Project["photos"], msgs: { id: string }[]): Project["photos"] {
+  if (!photos) return photos;
+  const live = new Set(msgs.map((m) => m.id));
+  const keys = Object.keys(photos);
+  if (keys.every((k) => live.has(k))) return photos;
+  const out: NonNullable<Project["photos"]> = {};
+  for (const k of keys) if (live.has(k)) out[k] = photos[k];
+  return out;
+}
+
 function sourceText(source: BuildInput): string {
   if (source.kind === "code") return source.code;
   if (source.kind === "spec") return JSON.stringify(source.spec, null, 2);
@@ -1641,6 +1656,11 @@ export default function App() {
     views: Partial<Record<ViewSlot, Blob>>;
   };
   const sentPhotos = useRef(new Map<string, SentPhotos>());
+  /** Full-resolution photos from a send that happened BEFORE the project existed — the
+   *  very first message of a new part. persist() picks them up on the save that creates
+   *  it; without this the first photo a user ever attaches is the one that cannot be
+   *  viewed in HD later. */
+  const pendingPhotos = useRef<{ id: string; blobs: Blob[] } | null>(null);
   /** Drop the front photo and let the next one lead.
    *
    *  Its ✕ was wired straight to clearImage(), which also revokes every OTHER attached
@@ -1692,6 +1712,27 @@ export default function App() {
     setRefs(shot.refs.map((b) => ({ blob: b, url: URL.createObjectURL(b) })));
     setViews(Object.fromEntries(Object.entries(shot.views).map(([k, b]) => [k, { blob: b, url: URL.createObjectURL(b) }])));
     return true;
+  }
+
+  /** The full-resolution copy of picture `idx` on message `msgId`, or null if the only
+   *  thing left is the transcript's thumbnail.
+   *
+   *  `idx` counts the pictures as the bubble draws them: the front photo, then the
+   *  reference strip. Two places can hold the bytes — the session map (this tab only)
+   *  and the project record (survives reload, never leaves the device) — and the project
+   *  is checked first because it is written from the same filtered list the transcript
+   *  renders, so its indices are the ones on screen.
+   *
+   *  The `instanceof` is not paranoia: on a browser with no IndexedDB the store falls
+   *  back to localStorage, which JSON-stringifies a Blob into `{}`. Better to fall back
+   *  to the thumbnail and say so than to hand `{}` to createObjectURL. */
+  async function hdPhoto(msgId: string, idx: number): Promise<Blob | null> {
+    const kept = projectRef.current?.photos?.[msgId]?.[idx];
+    if (kept instanceof Blob) return kept;
+    const live = sentPhotos.current.get(msgId);
+    if (!live) return null;
+    const list = [...(live.front ? [live.front.blob] : []), ...live.refs];
+    return list[idx] ?? null;
   }
 
   const [tab, setTab] = useState<"3d" | "code" | "params" | "print" | "history">("3d");
@@ -1957,6 +1998,9 @@ export default function App() {
    *  many KB, and the sync row it ends up in has a statement timeout behind it. */
   function toChatTurn(m: ChatMessage) {
     return {
+      // The id rides along: it is what the full-resolution photos for this turn are
+      // filed under, and a transcript that comes back with new ids leaves them orphaned.
+      id: m.id,
       role: m.role, text: m.text, error: m.error, image: m.image, images: m.images,
       // `reply` rides along or a failed build disappears again the moment the project is
       // reopened: the transcript filter would drop it, and the canvas banner skips
@@ -1979,6 +2023,15 @@ export default function App() {
   }
 
   function persist(next: Project) {
+    // A send with photos that happened before any project existed is what CREATES one,
+    // here. Its full-resolution copies were stashed rather than dropped (see
+    // pendingPhotos) — fold them in on this save, or the first photo of a new part is
+    // the one photo that can never be reopened in HD.
+    const stashed = pendingPhotos.current;
+    if (stashed) {
+      pendingPhotos.current = null;
+      next = { ...next, photos: { ...(next.photos ?? {}), [stashed.id]: stashed.blobs } };
+    }
     // The ref catches up in the render body, which is too late: the debounced
     // savers below and applyResult all read projectRef.current, and two commits
     // landing before React re-renders made the second spread a stale project —
@@ -2040,7 +2093,7 @@ export default function App() {
       const chat = messages.filter((m) => !m.streaming).map(toChatTurn);
       const pr = projectRef.current;
       if (pr) {
-        const next = { ...pr, chat, pins, updatedAt: Date.now() };
+        const next = { ...pr, chat, pins, photos: prunePhotos(pr.photos, messages), updatedAt: Date.now() };
         projectRef.current = next;
         setProject(next);
         autosave(next);
@@ -6129,7 +6182,13 @@ export default function App() {
     // full-resolution copy per attached photo is what kept chat pictures from ever
     // reaching another machine (see chatThumb).
     const preThumb = image ? await chatThumb(image.blob) : undefined;
-    const preRefThumbs = refs.length ? (await Promise.all(refs.map((r) => chatThumb(r.blob)))).filter((u): u is string => !!u) : undefined;
+    // Kept unfiltered as well as filtered: a photo whose thumbnail failed to render is
+    // not in the transcript either, and the full-resolution list below has to line up
+    // index for index with the pictures actually on screen — that index is what the
+    // viewer asks for when you expand one.
+    const refThumbs = await Promise.all(refs.map((r) => chatThumb(r.blob)));
+    const keptRefThumbs = refThumbs.filter((u): u is string => !!u);
+    const preRefThumbs = keptRefThumbs.length ? keptRefThumbs : undefined;
     // Keep the full-size originals against this message id — Retry and Edit resend from
     // here, because the thumbnails above are all the transcript itself will hold.
     if (image || refs.length || Object.keys(views).length) {
@@ -6141,6 +6200,30 @@ export default function App() {
       // Bounded: ~10 photos a message, and a long session is still only a handful of
       // photo messages. Oldest out first — insertion order is what a Map iterates.
       while (sentPhotos.current.size > 20) sentPhotos.current.delete(sentPhotos.current.keys().next().value!);
+      // …and keep a full-resolution copy ON THE PROJECT, so expanding a photo is still HD
+      // after a reload. Blobs, so this costs the chat JSON and the sync row nothing: the
+      // transcript keeps its 420px thumbnails and IndexedDB holds the bytes beside them.
+      // `image.blob` is already the 1568px downscale the model was sent, not the raw
+      // upload — that is the largest size the app has any use for.
+      // Same order as the bubble draws them: front photo first (when it has a thumbnail),
+      // then every reference photo that produced one.
+      const full = [
+        ...(preThumb ? [image!.blob] : []),
+        ...refs.filter((_, i) => refThumbs[i]).map((r) => r.blob),
+      ];
+      if (full.length) {
+        const pr = projectRef.current;
+        if (pr) {
+          const next = { ...pr, photos: { ...(pr.photos ?? {}), [userMsgId]: full } };
+          projectRef.current = next;
+          setProject(next);
+          autosave(next);
+        } else {
+          // No project yet — this send is what creates one. Stash them for the save that
+          // follows, rather than dropping the only full-resolution copy on the floor.
+          pendingPhotos.current = { id: userMsgId, blobs: full };
+        }
+      }
     }
     setInput("");
     setMessages((m) => [...m,
@@ -7554,8 +7637,14 @@ export default function App() {
     setShowLibrary(false);
     setGeometry(null); // clear first so the newly-opened project gets framed (not left at the old camera)
     setProject(p);
+    // Ids come back with the transcript rather than being re-minted, because the photo
+    // store is keyed by them. Records written before ids were saved have none, so push
+    // the counter past every id that DID come back before minting a replacement for the
+    // ones that didn't — otherwise a fresh id can collide with a restored one.
+    const restoredMax = Math.max(0, ...(p.chat ?? []).map((c) => Number(/^m(\d+)$/.exec(c.id ?? "")?.[1] ?? 0)));
+    if (restoredMax > msgSeq) msgSeq = restoredMax;
     setMessages((p.chat ?? []).map((c) => ({
-      id: mid(), ts: c.ts ?? Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images,
+      id: c.id ?? mid(), ts: c.ts ?? Date.now(), role: c.role, text: c.text, error: c.error, image: c.image, images: c.images,
       model: c.model, usage: c.usage, steps: c.steps, thinking: c.thinking, sources: c.sources, reply: c.reply,
       // Cast at the boundary, once: the store carries these opaquely (it has no business
       // re-declaring App's card shapes), and this is the single point where they come back
@@ -7956,6 +8045,7 @@ export default function App() {
         onDeleteMessages={(ids) => { const kill = new Set(ids); setMessages((m) => m.filter((x) => !kill.has(x.id))); }}
         onRetryModel={retryWithModel}
         onResendEdit={resendEdited}
+        hdPhoto={hdPhoto}
         onExample={loadExample}
         onTemplate={(t) => void loadTemplate(t)}
         onOpenTemplates={() => setShowTemplates(true)}

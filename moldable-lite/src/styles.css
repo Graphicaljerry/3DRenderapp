@@ -421,12 +421,23 @@ button:disabled { cursor: default; }
 /* ---- Click-to-expand photos ---- */
 .zoomable { cursor: zoom-in; }
 .img-lightbox {
-  position: fixed; inset: 0; z-index: 300; background: rgba(10, 12, 11, 0.78);
-  display: flex; align-items: center; justify-content: center; cursor: zoom-out; padding: 4vmin;
+  position: fixed; inset: 0; z-index: 300; background: rgba(10, 12, 11, 0.84);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 12px; cursor: zoom-out; padding: 4vmin;
 }
-/* Fixed width + object-fit rather than max-width alone: "enlarge" must also mean a
-   small photo actually grows, not just that a big one fits. */
-.img-lightbox img { width: min(88vw, 1100px); max-height: 90vh; object-fit: contain; border-radius: var(--r-md); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5); }
+/* Fit is the default view: the whole picture, as large as the window allows, never
+   scaled PAST its own pixels — blowing a 420px thumbnail up to 1100px is what made
+   "expand" look worse than the photo the user uploaded. */
+.lb-stage { display: flex; align-items: center; justify-content: center; max-width: 92vw; max-height: 84vh; cursor: default; }
+.lb-img { max-width: 92vw; max-height: 84vh; border-radius: var(--r-md); box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5); cursor: zoom-in; }
+/* Actual size: the image keeps its own width and the stage becomes the window onto it,
+   panned by dragging (see panFrom). */
+.lb-stage.actual { overflow: auto; cursor: grab; scrollbar-width: thin; }
+.lb-stage.actual:active { cursor: grabbing; }
+.lb-stage.actual .lb-img { max-width: none; max-height: none; border-radius: 0; cursor: zoom-out; }
+.lb-bar { display: flex; align-items: center; gap: 10px; cursor: default; }
+.lb-dim { font-size: var(--fs-tiny); color: rgba(255, 255, 255, 0.72); font-variant-numeric: tabular-nums; }
+.img-lightbox .ghost.sm { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.2); color: #fff; }
 .who { font-size: var(--fs-tiny); font-weight: 500; color: var(--ink2); display: inline-flex; align-items: baseline; gap: 7px; }
 /* When each message was said. Quiet, tabular so a column of them lines up. */
 .msg-time { font-size: var(--fs-micro); font-weight: 400; color: var(--subt); font-variant-numeric: tabular-nums; }

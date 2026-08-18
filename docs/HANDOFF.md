@@ -917,6 +917,43 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Builds 470–474 — a suite you can run, and chat photos you can actually look at
+
+- **HD chat photos (474).** Expanding a photo in the transcript showed an enlarged
+  *thumbnail*: `chatThumb` writes 420px webp into the chat JSON (deliberately — that is
+  what keeps a project inside one IndexedDB record and inside the sync row's statement
+  timeout), and the lightbox stretched it to a fixed 1100px. A 2.6× upscale of a picture
+  the user had uploaded at full size. Now `Project.photos` holds the full-resolution
+  blobs keyed by message id, beside the transcript: blobs cost the chat JSON and the sync
+  payload **nothing**, because IndexedDB stores them as bytes and `sanitizeProject` strips
+  them before the row is built. The viewer fits by default (never scaling past the file's
+  own pixels), offers **Actual size** with drag-to-pan, prints the real dimensions under
+  the picture, and says "Preview size — the full-resolution copy isn't on this device"
+  when the thumbnail is genuinely all there is (older messages, or a project pulled from
+  another machine).
+  - Two schema changes came with it. `ChatTurn.id` is saved and restored, because message
+    ids are the photo store's key and reopening a project used to re-mint them — which
+    orphaned every photo the reload was supposed to bring back. `openProjectById` pushes
+    the id counter past the restored ids so a fallback id can't collide with one.
+  - `mergeProjects` unions `photos` (they are on-device blobs; a cloud copy carries none,
+    so taking the more-recently-touched side alone would delete them), and the chat
+    autosave prunes entries whose message has been deleted.
+  - Verified end to end by `harness/hd-photo-e2e.mjs`: two photos of different sizes go
+    in, the transcript keeps 420px thumbs, each expands to its **own** original
+    (1400×1050 and 900×1200 — a mixed-up index shows the wrong photo at a plausible
+    size), actual size renders 1:1 inside a pannable box, and all of it still holds after
+    a reload, which only the on-disk copy can do.
+
+- **`harness/run-suite.mjs` (470–473).** 45 of the 61 probes printed `FAIL` and exited 0,
+  so anything judging the suite by exit status read a wall of failures as green. The
+  runner judges by what probes print, runs three lanes on their own vite ports, restarts
+  servers that die under it, and writes per-probe logs to `/tmp/suite-logs/`. Two traps
+  found the hard way: resolve on `exit` rather than `close` (an orphaned chromium
+  inherits stdout and holds the pipe open — a 15-minute wait with nothing running), and
+  never `pkill` browsers mid-run (lanes are concurrent; it took the score from 42 to 25).
+  Nine probes were repaired from their own logs and three stale assertions retired with
+  reasons written down.
+
 ## Build 459 — mesh repair that runs on your machine, and six defects an audit caught
 
 Jerry: bigger phone heading; fix the multi-image composer; then five agents (Mobbin

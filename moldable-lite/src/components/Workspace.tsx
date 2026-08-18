@@ -2743,6 +2743,11 @@ interface Props {
   onRetryModel: (text: string, mode: Mode, value: string, msgId: string) => void;
   /** "Edit" on a sent message — resends the reworded ask with that message's photos. */
   onResendEdit: (text: string, mode: Mode | undefined, msgId: string) => void;
+  /** The full-resolution copy of picture `idx` on message `msgId`, when the device still
+   *  holds it. The transcript itself carries 420px thumbnails, so without this the
+   *  lightbox was enlarging one of those to 1100px — a 2.6x upscale of a picture the
+   *  user had uploaded at full size. Null means the thumbnail is genuinely all there is. */
+  hdPhoto: (msgId: string, idx: number) => Promise<Blob | null>;
   onExample: () => void;
   onTemplate: (t: Template) => void;
   onOpenTemplates: () => void;
@@ -3618,7 +3623,7 @@ export function Workspace(p: Props) {
             )}
           </div>
           <Messages messages={p.messages} thinking={p.streamingThink} onChip={p.onSend} onExample={p.onExample} onTemplate={p.onTemplate} onOpenTemplates={p.onOpenTemplates} onStartGuided={p.onStartGuided} resume={p.resume} onResume={p.onResume} status={p.status}
-            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} onResendEdit={p.onResendEdit} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage}
+            brain={p.brain} hasBrainKey={p.hasBrainKey} genProvider={p.genProvider} genModel={p.genModel} hasGenKey={p.hasGenKey} onRetryModel={p.onRetryModel} onResendEdit={p.onResendEdit} hdPhoto={p.hdPhoto} clarifyCtl={p.clarifyCtl} confirmCtl={p.confirmCtl} planCtl={p.planCtl} onDeleteMessage={p.onDeleteMessage}
             selecting={msgSel} onToggleSelect={msgSelToggle} />
 
           {p.providerWall && (
@@ -5390,12 +5395,13 @@ function RetryMenu({ mode, brain, hasBrainKey, genProvider, genModel, hasGenKey,
   return <ModelMenu value={value} groups={groups} title="Retry with a different model" onPick={onPick} label="Retry" />;
 }
 
-function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, onResendEdit, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, selecting, onToggleSelect }: {
+function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTemplates, onStartGuided, resume, onResume, status, brain, hasBrainKey, genProvider, genModel, hasGenKey, onRetryModel, onResendEdit, hdPhoto, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, selecting, onToggleSelect }: {
   messages: ChatMessage[]; thinking: string; onChip: (s: string, forceMode?: Mode) => void; onExample: () => void; onTemplate: (t: Template) => void; onOpenTemplates: () => void; onStartGuided: () => void; resume: string | null; onResume: () => void; status: "idle" | "generating";
   brain: { provider: LlmProviderId; model: string }; hasBrainKey: (p: LlmProviderId) => boolean; genProvider: string; genModel: string; hasGenKey: (p: string) => boolean;
   onRetryModel: (text: string, mode: Mode, value: string, msgId: string) => void;
   /** "Edit" on a sent message — resends the reworded ask with that message's photos. */
   onResendEdit: (text: string, mode: Mode | undefined, msgId: string) => void;
+  hdPhoto: Props["hdPhoto"];
   clarifyCtl: Props["clarifyCtl"];
   planCtl: Props["planCtl"];
   onDeleteMessage: (id: string) => void;
@@ -5405,15 +5411,46 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   onToggleSelect: (id: string) => void;
 }) {
   const endRef = useRef<HTMLDivElement>(null);
-  // Click-to-expand for photos in the transcript. One viewer for every image kind —
-  // the row hands the URL up, Esc or any click dismisses.
-  const [zoomImg, setZoomImg] = useState<string | null>(null);
+  // Click-to-expand for photos in the transcript. The row hands up the thumbnail it is
+  // showing PLUS where it came from (message id + which picture), because the thumbnail
+  // is 420px and this viewer is not: it asks the app for the full-resolution copy and
+  // only falls back to the thumbnail — saying so — when the device no longer holds one.
+  const [zoom, setZoom] = useState<{ thumb: string; msgId?: string; idx?: number } | null>(null);
+  const [hd, setHd] = useState<{ url: string; w: number; h: number } | null>(null);
+  const [oneToOne, setOneToOne] = useState(false);
+  const hdRef = useRef(hdPhoto);
+  hdRef.current = hdPhoto;
   useEffect(() => {
-    if (!zoomImg) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoomImg(null); };
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setZoom(null); };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [zoomImg]);
+  }, [zoom]);
+  useEffect(() => {
+    setHd(null);
+    setOneToOne(false);
+    if (!zoom?.msgId || zoom.idx == null) return;
+    // Through the ref, not the prop: App hands down a fresh arrow on every render (a
+    // keystroke in the composer is enough), and depending on it would revoke and refetch
+    // the blob mid-look — the picture flickering while you are trying to study it.
+    let url: string | null = null;
+    let dropped = false;
+    void hdRef.current(zoom.msgId, zoom.idx).then((blob) => {
+      if (!blob || dropped) return;
+      url = URL.createObjectURL(blob);
+      // Decoded before it is shown, so the size printed under the picture is the file's
+      // own naturalWidth/Height and cannot claim a resolution the file does not have.
+      const probe = new Image();
+      probe.onload = () => { if (!dropped) setHd({ url: url!, w: probe.naturalWidth, h: probe.naturalHeight }); };
+      probe.src = url;
+    });
+    return () => { dropped = true; if (url) URL.revokeObjectURL(url); };
+  }, [zoom]);
+  // Drag to pan at actual size: a phone photo is wider than any window, so the 1:1 view
+  // is a scroll box, and dragging beats hunting for its scrollbar.
+  const stageRef = useRef<HTMLDivElement>(null);
+  const panFrom = useRef<{ x: number; y: number; l: number; t: number } | null>(null);
+  const openZoom = (thumb: string, msgId?: string, idx?: number) => setZoom({ thumb, msgId, idx });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editText, setEditText] = useState("");
   const lastText = messages[messages.length - 1]?.text;
@@ -5437,8 +5474,8 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
   // Identity-stable handlers for the memoised rows below: the parent hands us fresh
   // closures on every keystroke, so route through a ref instead of passing them down
   // (a changing function prop would defeat the memo for every row).
-  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, zoom: setZoomImg as (u: string) => void, toggle: onToggleSelect });
-  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, zoom: setZoomImg, toggle: onToggleSelect };
+  const rowCb = useRef({ startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, zoom: openZoom, toggle: onToggleSelect });
+  rowCb.current = { startEdit, submitEdit, setEditingId, setEditText, onRetryModel, hasBrainKey, hasGenKey, clarifyCtl, confirmCtl, planCtl, onDeleteMessage, zoom: openZoom, toggle: onToggleSelect };
   const rowApi = useMemo(() => ({
     startEdit: (m: ChatMessage) => rowCb.current.startEdit(m),
     submitEdit: (m: ChatMessage) => rowCb.current.submitEdit(m),
@@ -5454,7 +5491,7 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
     deleteMessage: (msgId: string) => rowCb.current.onDeleteMessage(msgId),
     confirmChoose: (msgId: string, yes: boolean) => rowCb.current.confirmCtl.choose(msgId, yes),
     offerChoose: (msgId: string, accepted: boolean) => rowCb.current.confirmCtl.offer(msgId, accepted),
-    zoomImage: (url: string) => rowCb.current.zoom(url),
+    zoomImage: (url: string, msgId?: string, idx?: number) => rowCb.current.zoom(url, msgId, idx),
     toggleSelect: (msgId: string) => rowCb.current.toggle(msgId),
   }), []);
 
@@ -5540,9 +5577,45 @@ function Messages({ messages, thinking, onChip, onExample, onTemplate, onOpenTem
       ))}
       <div ref={endRef} />
       {/* Enlarged photo, portal'd to the body so no card transform can clip it. */}
-      {zoomImg && createPortal(
-        <div className="img-lightbox" role="dialog" aria-label="Enlarged photo — click anywhere or press Esc to close" onClick={() => setZoomImg(null)}>
-          <img src={zoomImg} alt="enlarged reference" />
+      {zoom && createPortal(
+        <div className="img-lightbox" role="dialog" aria-label="Enlarged photo — click the backdrop or press Esc to close" onClick={() => setZoom(null)}>
+          <div
+            ref={stageRef}
+            className={`lb-stage${oneToOne && hd ? " actual" : ""}`}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => {
+              if (!oneToOne || !stageRef.current) return;
+              panFrom.current = { x: e.clientX, y: e.clientY, l: stageRef.current.scrollLeft, t: stageRef.current.scrollTop };
+              stageRef.current.setPointerCapture(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              const from = panFrom.current;
+              if (!from || !stageRef.current) return;
+              stageRef.current.scrollLeft = from.l - (e.clientX - from.x);
+              stageRef.current.scrollTop = from.t - (e.clientY - from.y);
+            }}
+            onPointerUp={() => { panFrom.current = null; }}
+            onPointerCancel={() => { panFrom.current = null; }}
+          >
+            <img
+              className="lb-img"
+              src={hd?.url ?? zoom.thumb}
+              alt="enlarged reference"
+              width={oneToOne && hd ? hd.w : undefined}
+              onClick={() => hd && setOneToOne((v) => !v)}
+              title={hd ? (oneToOne ? "Click to fit" : "Click to view at actual size") : undefined}
+            />
+          </div>
+          <div className="lb-bar" onClick={(e) => e.stopPropagation()}>
+            {hd
+              ? <span className="lb-dim">{hd.w} × {hd.h}</span>
+              /* Not a silent downgrade: photos sent before this build kept no full copy,
+                 and one pulled from another device never had one here. Say which picture
+                 you are actually looking at. */
+              : <span className="lb-dim">Preview size — the full-resolution copy isn't on this device</span>}
+            {hd && <button className="ghost sm" onClick={() => setOneToOne((v) => !v)}>{oneToOne ? "Fit to screen" : "Actual size"}</button>}
+            <button className="ghost sm" onClick={() => setZoom(null)}>Close</button>
+          </div>
         </div>,
         document.body,
       )}
@@ -5928,7 +6001,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
     deleteMessage: (msgId: string) => void;
     confirmChoose: (msgId: string, yes: boolean) => void;
     offerChoose: (msgId: string, accepted: boolean) => void;
-    zoomImage: (url: string) => void;
+    zoomImage: (url: string, msgId?: string, idx?: number) => void;
     toggleSelect: (msgId: string) => void;
   };
 }) {
@@ -6007,7 +6080,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                   checks and step text sit straight on the chat background (both themes
                   carry enough contrast), and the bubble arrives with the reply itself. */}
               <div className={m.role === "assistant" && m.streaming ? "bubble-open" : `bubble ${m.streaming ? "muted" : ""}`}>
-                {m.image && <img className="bubble-img zoomable" src={m.image} alt="reference — click to enlarge" title="Click to enlarge" onClick={() => !selectMode && api.zoomImage(m.image!)} />}
+                {m.image && <img className="bubble-img zoomable" src={m.image} alt="reference — click to enlarge" title="Click to enlarge" onClick={() => !selectMode && api.zoomImage(m.image!, m.id, 0)} />}
                 {/* Every photo travelling with this message, INSIDE the bubble: extra
                     uploads on a user message, product photos found online on a research
                     note. A thumb that 404s or blocks hotlinking hides itself. */}
@@ -6017,7 +6090,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                       // Attached photos enlarge in place; web finds still open their page.
                       <a key={i} href={u.startsWith("data:") ? undefined : u} target="_blank" rel="noopener noreferrer"
                         title={u.startsWith("data:") ? "Attached reference photo — click to enlarge" : "Product photo found online — open full size"}
-                        onClick={u.startsWith("data:") ? () => !selectMode && api.zoomImage(u) : undefined}>
+                        onClick={u.startsWith("data:") ? () => !selectMode && api.zoomImage(u, m.id, (m.image ? 1 : 0) + i) : undefined}>
                         <img className={u.startsWith("data:") ? "zoomable" : undefined} src={u} alt="reference photo" loading="lazy" referrerPolicy="no-referrer" onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }} />
                       </a>
                     ))}

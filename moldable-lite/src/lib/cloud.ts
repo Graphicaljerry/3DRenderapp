@@ -578,6 +578,10 @@ function sanitizeProject(p: Project, lean = false): Project {
     ...p,
     glb: undefined,
     importFile: undefined,
+    // Full-resolution chat photos are blobs, and JSON.stringify turns a Blob into `{}`.
+    // They stay on the device that took them — the transcript's thumbnails are what
+    // travels, and the viewer says so when the HD copy isn't here.
+    photos: undefined,
     thumb: img(p.thumb),
     chat: p.chat?.map((t) => (t.image || t.images?.length
       ? { ...t, image: img(t.image), images: t.images?.map(img).filter((u): u is string => !!u) }

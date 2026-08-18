@@ -107,6 +107,11 @@ export function mergeProjects(mine: Project, theirs: Project, opts: MergeOpts = 
     glb: head?.glb ?? owner.glb ?? other.glb,
     importFile: head?.importFile ?? owner.importFile ?? other.importFile,
     cloudMesh: owner.cloudMesh ?? other.cloudMesh,
+    // Chat photos are on-device blobs — they never ride the sync row, so a copy that
+    // arrived from the cloud carries none. Keyed by message id, so the two sides can
+    // simply be unioned; taking `recent`'s alone would drop every full-resolution photo
+    // on this device the moment a sibling device happened to save a second later.
+    photos: mine.photos || theirs.photos ? { ...theirs.photos, ...mine.photos } : undefined,
   };
 }
 

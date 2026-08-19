@@ -1,0 +1,5 @@
+
+# Seeded design canvases: ~2 MB of editor payload each, regenerated from the
+# .dc.html working files beside them by the /design helper.
+design/**/*.html
+!design/**/*.dc.html

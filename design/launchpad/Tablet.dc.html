@@ -1,0 +1,232 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    /* Moldable's real tokens, lifted from moldable-lite/src/styles.css. Change one here
+       and it moves everywhere it is used, the same way it does in the app. */
+    .pad {
+      --ink: #15181e; --ink2: #2a2e35; --mut: #6b7280; --subt: #9aa0a8;
+      --bord: oklch(91.5% 0.005 160); --bord-subtle: #ececf0; --bord-strong: #c9c9c9;
+      --surf: oklch(95.2% 0.004 160); --bg: oklch(99.4% 0.002 160); --chrome: oklch(97.2% 0.003 160);
+      --launch-bg-page: oklch(93.2% 0.005 160);
+      --ctl: color-mix(in srgb, var(--ink) 6%, transparent);
+      --accent: #498a6f; --accent-d: #376b55; --on-accent: #f9f9f9;
+      --r-xs: 4px; --r-sm: 6px; --r-md: 9px; --r-lg: 12px; --r-full: 999px;
+      --fs-micro: 10px; --fs-tiny: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-lg: 15px; --fs-xl: 18px;
+      --font-display: "Schibsted Grotesk", -apple-system, "Segoe UI", Roboto, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    /* The app's dark theme, same tokens. */
+    .pad.dark {
+      --ink: #ececed; --ink2: #c6c7c9; --mut: #8d8e90; --subt: #666769;
+      --bord: #292a2c; --bord-subtle: #1d1d1f; --bord-strong: #3b3c3e;
+      --surf: oklch(12.8% 0.004 160); --bg: #171719; --chrome: #131314;
+      --launch-bg-page: oklch(11% 0.004 160);
+      --accent: #5aa082; --accent-d: #74b89a; --on-accent: #06120d;
+    }
+    body { margin: 0; }
+    a { color: var(--accent-d); } a:hover { color: var(--accent); }
+    .pad {
+      font-family: "Schibsted Grotesk", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--launch-bg-page); color: var(--ink);
+      position: relative; overflow: hidden;
+      display: flex; flex-direction: column;
+      -webkit-font-smoothing: antialiased;
+    }
+    .launch-top { display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 1; }
+    .brand { display: flex; align-items: center; gap: 8px; }
+    .wordmark { font-family: var(--font-display); font-weight: 700; font-size: var(--fs-xl); letter-spacing: 0.2px; }
+    .build-tag { font-family: var(--font-mono); font-size: var(--fs-tiny); font-weight: 500; line-height: 1;
+      color: var(--ink2); background: var(--ctl); border-radius: var(--r-full); padding: 3px 8px; }
+    .launch-top-right { display: flex; align-items: center; gap: 8px; }
+    .ghost { display: inline-flex; align-items: center; background: var(--ctl); border: 1px solid transparent;
+      border-radius: var(--r-md); padding: 5px 10px; font-size: var(--fs-sm); font-weight: 500; color: var(--ink2); }
+    .launch-main { display: grid; position: relative; z-index: 1; }
+    .launch-col { display: flex; flex-direction: column; }
+    .launch-h1 { margin: 0; font-family: var(--font-display); font-weight: 700; text-wrap: balance; }
+    .launch-sub { margin: 0; color: var(--mut); max-width: 46ch; }
+    .launch-composer { position: relative; margin-top: 4px; }
+    .ta { border: 1px solid var(--bord); border-radius: var(--r-md); background: var(--bg);
+      color: var(--subt); font-size: 1rem; line-height: 1.5; }
+    .launch-composer-foot { position: absolute; left: 14px; bottom: 12px; display: flex; align-items: center; gap: 8px; }
+    .launch-attach { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px;
+      border-radius: var(--r-sm); color: var(--mut); font-size: var(--fs-md); }
+    .web-toggle { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px;
+      border: 1px solid transparent; border-radius: var(--r-md); background: var(--ctl); color: var(--mut);
+      font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
+    .improve { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+      border-radius: var(--r-full); color: var(--mut); }
+    .send { position: absolute; right: 12px; bottom: 12px; width: 34px; height: 34px; border-radius: var(--r-full);
+      background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
+    .launch-sect { display: flex; flex-direction: column; gap: 10px; }
+    .launch-label { margin: 10px 0 0; font-size: var(--fs-sm); font-weight: 500; letter-spacing: 0.01em; color: var(--mut); }
+    .launch-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .launch-label-row .launch-label { margin: 0; }
+    .launch-more { font-size: var(--fs-sm); color: var(--mut); }
+    .launch-recents { display: grid; align-items: stretch; }
+    .launch-recent { display: flex; flex-direction: column; gap: 8px; min-width: 0; border: 1px solid var(--bord);
+      border-radius: var(--r-md); overflow: hidden; color: var(--ink2); font-size: var(--fs-md); text-align: left; }
+    .launch-recent.continue { border-color: var(--accent); }
+    .lr-thumb { width: 100%; display: grid; place-items: center; overflow: hidden;
+      background: var(--ctl); color: var(--subt); border-bottom: 1px solid var(--bord); }
+    .lr-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+    .lr-meta b { font-weight: 500; font-size: var(--fs-md); line-height: 1.25; }
+    .lr-meta em { font-style: normal; font-size: var(--fs-tiny); color: var(--subt); line-height: 1.2; }
+    .launch-recent.continue .lr-meta em { color: var(--accent-d); }
+    .launch-tabs { display: flex; gap: 16px; margin-top: 12px; }
+    .launch-tab { font-size: var(--fs-md); font-weight: 500; color: var(--mut);
+      text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px;
+      text-decoration-color: color-mix(in srgb, var(--mut) 45%, transparent); }
+    .launch-chips { display: flex; flex-wrap: wrap; gap: 7px; }
+    .launch-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px;
+      border-radius: var(--r-sm); border: 1px solid var(--bord); color: var(--ink2); font-size: var(--fs-md); }
+    .launch-guided { margin-top: 2px; align-self: flex-start; display: inline-flex; align-items: baseline; gap: 8px;
+      color: var(--ink2); font-size: var(--fs-md); }
+    .gc-go { color: var(--accent-d); }
+    .launch-foot { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--bord); display: flex;
+      align-items: baseline; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+      font-size: var(--fs-sm); color: var(--mut); }
+    .launch-actions { display: flex; align-items: baseline; gap: 14px; margin-left: auto; }
+    .link { color: var(--accent-d); font-size: var(--fs-md); font-weight: 500; }
+
+  </style>
+</helmet>
+<div class="{{ pad }}" style="width: 834px; height: 1112px;">
+
+  <header class="launch-top" style="padding: 16px 20px">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#2f7a70" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 2 21 7 21 17 12 22 3 17 3 7Z" /><path d="M3 7 12 12 21 7" /><path d="M12 12V22" />
+      </svg>
+      <span class="wordmark">Moldable</span>
+      <span class="build-tag">v480</span>
+    </div>
+    <div class="launch-top-right">
+      <span class="ghost" style="padding: 5px 9px">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
+      </span>
+      <span class="ghost">Sign in</span>
+    </div>
+  </header>
+
+  <main class="launch-main" style="width: 100%; max-width: 1400px; margin: 0 auto; padding: 0 40px 24px; grid-template-columns: minmax(0, 620px); justify-content: center; align-content: center; flex: 1;">
+    <div class="launch-col" style="gap: 14px; padding-bottom: 2vh;">
+      <h1 class="launch-h1" style="font-size: 44px; letter-spacing: -0.032em; line-height: 1.02;">What do you want to make?</h1>
+
+      <sc-if value="{{ first }}" hint-placeholder-val="{{ true }}">
+        <p class="launch-sub" style="font-size: 16px; line-height: 1.55;">Describe a part in plain language. Real millimetres, checked against your printer, exported as the files your slicer wants.</p>
+      </sc-if>
+
+      <form class="launch-composer">
+        <div class="ta" style="min-height: 132px; padding: 18px 18px 52px;">A wall bracket for a 32 mm pipe, 4 mm wall, two M4 holes 40 mm apart…</div>
+        <div class="launch-composer-foot" style="">
+          <span class="launch-attach" style="">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" /></svg>
+            <span>Photos &amp; sketches</span>
+          </span>
+          <span class="web-toggle" style="">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18" opacity=".35" /><circle cx="9" cy="6" r="2.4" fill="var(--bg)" /><circle cx="15" cy="12" r="2.4" fill="var(--bg)" /><circle cx="7" cy="18" r="2.4" fill="var(--bg)" /></svg>
+            <span>Auto · Plan</span>
+          </span>
+          <span class="improve" style="">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5c.9 3.6 1.9 4.6 5.5 5.5-3.6.9-4.6 1.9-5.5 5.5-.9-3.6-1.9-4.6-5.5-5.5 3.6-.9 4.6-1.9 5.5-5.5Z" /><path d="M17.5 15c.4 1.7.9 2.2 2.6 2.6-1.7.4-2.2.9-2.6 2.6-.4-1.7-.9-2.2-2.6-2.6 1.7-.4 2.2-.9 2.6-2.6Z" /></svg>
+          </span>
+        </div>
+        <span class="send">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7" /></svg>
+        </span>
+      </form>
+
+      <sc-if value="{{ returning }}" hint-placeholder-val="{{ true }}">
+        <section class="launch-sect" style="margin-top: 14px;">
+          <p class="launch-label">Your projects · 4 of 11</p>
+          <div class="launch-recents" style="grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px;">
+            <span class="launch-recent continue">
+              <span class="lr-thumb" style="aspect-ratio: 4 / 3;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" /><path d="M4 8.5 12 13l8-4.5M12 13v7" /></svg>
+              </span>
+              <span class="lr-meta" style="padding: 0 10px 10px;">
+                <b>Phone stand</b>
+                <em>Continue · 2 hours ago</em>
+              </span>
+            </span>
+            <span class="launch-recent">
+              <span class="lr-thumb" style="aspect-ratio: 4 / 3;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" /><path d="M4 8.5 12 13l8-4.5M12 13v7" /></svg>
+              </span>
+              <span class="lr-meta" style="padding: 0 10px 10px;">
+                <b>Headphone desk hook</b>
+                <em>Precise CAD · yesterday</em>
+              </span>
+            </span>
+            <span class="launch-recent">
+              <span class="lr-thumb" style="aspect-ratio: 4 / 3;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" /><path d="M4 8.5 12 13l8-4.5M12 13v7" /></svg>
+              </span>
+              <span class="lr-meta" style="padding: 0 10px 10px;">
+                <b>Box with lid</b>
+                <em>Precise CAD · 3 days ago</em>
+              </span>
+            </span>
+            <span class="launch-recent">
+              <span class="lr-thumb" style="aspect-ratio: 4 / 3;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5Z" /><path d="M4 8.5 12 13l8-4.5M12 13v7" /></svg>
+              </span>
+              <span class="lr-meta" style="padding: 0 10px 10px;">
+                <b>Dragon head trophy</b>
+                <em>AI mesh · last week</em>
+              </span>
+            </span>
+          </div>
+          <div class="launch-tabs">
+            <span class="launch-tab">All projects</span>
+            <span class="launch-tab">Open an empty workspace</span>
+          </div>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{ first }}" hint-placeholder-val="{{ true }}">
+        <section class="launch-sect" style="margin-top: 14px;">
+          <div class="launch-label-row">
+            <p class="launch-label">Start from a template</p>
+            <span class="launch-more">All 12</span>
+          </div>
+          <div class="launch-chips">
+            <span class="launch-chip">Phone stand</span>
+            <span class="launch-chip">Box with lid</span>
+            <span class="launch-chip">Headphone desk hook</span>
+            <span class="launch-chip">Squeeze bag clip</span>
+          </div>
+          <span class="launch-guided" style="">Fix a broken part: photo in, replacement out <span class="gc-go">→</span></span>
+        </section>
+        <footer class="launch-foot" style="">
+          <span>Sizes are AI-generated — check the fit before a long print. Runs in your browser; designs and keys stay on this device. <span class="link">Sign in to sync</span></span>
+          <span class="launch-actions">
+            <span class="link">See a finished example</span>
+            <span class="link">Open an empty workspace</span>
+          </span>
+        </footer>
+      </sc-if>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script data-dc-script data-props='{"state":{"editor":"enum","options":["First run","Returning"],"default":"First run"},"dark":{"editor":"boolean","default":false},"$preview":{"width":834,"height":1112}}'>
+class Component extends DCLogic {
+  renderVals() {
+    // veteran = signed in OR 2+ projects (App.tsx). It decides the whole screen: a first
+    // run gets the blurb, the templates and the footer; a returning visitor gets the
+    // project shelf instead and none of the onboarding.
+    const first = (this.props.state ?? 'First run') === 'First run';
+    return { first, returning: !first, pad: this.props.dark ? 'pad dark' : 'pad' };
+  }
+}
+</script>
+</body>
+</html>

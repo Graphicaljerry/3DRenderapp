@@ -20,6 +20,7 @@ import { LLM_PRESETS, llmPreset, llmReady, generateLlm, getReasoningEffort, type
 import { isAbort } from "./llm/openaiCompat";
 import { fetchHouseStatus, houseStatus as houseStatusNow, type HouseStatus } from "./llm/house";
 import { localSupported, localDownloaded } from "./llm/local";
+import { inPlaneAxes, onFacePlane } from "./cad/facePlane";
 import { detectProductQuery, researchDimensions, canResearch } from "./llm/research";
 import { classifyIntent, polishMeshPrompt } from "./llm/router";
 import { refineRequest, applyAnswers, defaultAnswers, type ClarifyQuestion } from "./llm/clarify";
@@ -4444,18 +4445,19 @@ export default function App() {
   holeRef.current = holeDraft;
   const snapV = (v: number, snap: number) => (snap > 0 ? Math.round(v / snap) * snap : Math.round(v * 100) / 100);
   /** The two editable in-plane axes (0=x 1=y 2=z), given the face normal. */
-  const holeAxes = (n: [number, number, number]): [number, number] => {
-    const k = [Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])].indexOf(Math.max(Math.abs(n[0]), Math.abs(n[1]), Math.abs(n[2])));
-    return k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1];
-  };
+  const holeAxes = inPlaneAxes;
   function startHole() {
     const f = selectedFeature;
     if (!f || f.kind !== "face") return;
     const n: [number, number, number] = [f.nx ?? 0, f.ny ?? 0, f.nz ?? 1];
-    const at: [number, number, number] = [...(f.at ?? [f.cx, f.cy, f.cz])] as [number, number, number];
+    const picked: [number, number, number] = [...(f.at ?? [f.cx, f.cy, f.cz])] as [number, number, number];
+    const at: [number, number, number] = [...picked];
     const snap = 1;
     for (const i of holeAxes(n)) at[i] = snapV(at[i], snap); // magnet the click straight away
-    setHoleDraft({ at, normal: n, diameter: 5, depth: 0, snap, ref: null, picking: false });
+    // Snapping the in-plane axes walks the point off a TILTED face — by half the magnet
+    // increment times the tilt — so the draft starts a fraction off its own surface. Put
+    // it back on the plane through the point that was actually picked.
+    setHoleDraft({ at: onFacePlane(at, picked, n), normal: n, diameter: 5, depth: 0, snap, ref: null, picking: false });
     setSelectedFeature(null);
   }
   /** `exact` skips the magnet. The panel's align (=) button and its spacing field both
@@ -4468,7 +4470,9 @@ export default function App() {
       if (!d) return d;
       const at = [...d.at] as [number, number, number];
       at[axis] = exact ? value : snapV(value, d.snap);
-      return { ...d, at };
+      // Moving one in-plane axis leaves the third behind, which is off the surface on a
+      // tilted face — the same drift hover placement suffers. onFacePlane restores it.
+      return { ...d, at: onFacePlane(at, d.at, d.normal) };
     });
   }
   async function applyHole() {

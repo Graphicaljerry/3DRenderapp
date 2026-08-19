@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { mergeGeometries, toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { inPlaneAxes, onFacePlane } from "../cad/facePlane";
 import { installBVH, ensureBoundsTree } from "../three/bvh";
 import { bendAroundY, wallRadius, conformToSurface } from "../text/bend";
 
@@ -1288,18 +1289,19 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       if (!p) return null;
       // Same rules as the typed inputs: magnet increment on the in-plane axes, then a
       // pull onto the reference's axes when the cursor lands close to aligned.
-      const k = [Math.abs(g.normal[0]), Math.abs(g.normal[1]), Math.abs(g.normal[2])].indexOf(
-        Math.max(Math.abs(g.normal[0]), Math.abs(g.normal[1]), Math.abs(g.normal[2])),
-      );
       const out: [number, number, number] = [g.at[0], g.at[1], g.at[2]];
       const pull = Math.max(place.snap, 1);
-      for (const a of k === 0 ? [1, 2] : k === 1 ? [0, 2] : [0, 1]) {
+      for (const a of inPlaneAxes(g.normal)) {
         let v = p.getComponent(a);
         v = place.snap > 0 ? Math.round(v / place.snap) * place.snap : Math.round(v * 100) / 100;
         if (g.ref && Math.abs(v - g.ref[a]) <= pull) v = g.ref[a];
         out[a] = v;
       }
-      return out;
+      // Keeping the third coordinate from the anchor is only right on an axis-aligned
+      // face. On a tilted one it varies across the plane, so the point drifts off the
+      // surface — and the plane test above then rejects the NEXT hit, which is why
+      // placement died after a click or two on a slanted face.
+      return onFacePlane(out, g.at, g.normal);
     };
     // ---- Magnet tool: turn a surface hit into the pocket spot.
     // Work in the FACE's own two in-plane directions, not world X/Y/Z: rounding world

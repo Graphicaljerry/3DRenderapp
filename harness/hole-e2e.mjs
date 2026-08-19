@@ -1,7 +1,7 @@
 // Hole tool e2e: face → Hole… panel, magnet snapping, reference alignment (Δ / spacing),
 // drill commits a real ops-chain version, ghost renders, params still rebuild with it.
 import { chromium } from "playwright";
-import { enterWorkspace, awaitBuild, pickFace } from "./enter.mjs";
+import { enterWorkspace, awaitBuild, pickFace, modelPoints } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -45,10 +45,14 @@ const before1 = await axisVals();
 await page.mouse.move(box.x + box.width * 0.46, box.y + box.height * 0.7);
 await page.waitForTimeout(200);
 check("hover previews without changing the draft", JSON.stringify(await axisVals()) === JSON.stringify(before1));
+// Points on the model, not four guessed canvas fractions. The hole tool only accepts a
+// placement that lands on the ARMED face's own plane, and which face pickFace arms depends
+// on the model and the camera — so a fixed fraction is a bet on geometry the probe never
+// checked. Walk real surface points until one is accepted.
 let placed = null;
-for (const pos of [[0.46, 0.7], [0.44, 0.73], [0.52, 0.7], [0.4, 0.72]]) {
-  await canvas.click({ position: { x: box.width * pos[0], y: box.height * pos[1] } });
-  await page.waitForTimeout(250);
+for (const [gx, gy] of await modelPoints(page)) {
+  await page.mouse.click(gx, gy);
+  await page.waitForTimeout(220);
   const now = await axisVals();
   if (JSON.stringify(now) !== JSON.stringify(before1)) { placed = now; break; }
 }

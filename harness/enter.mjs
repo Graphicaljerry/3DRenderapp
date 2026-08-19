@@ -47,8 +47,22 @@ export async function enterWorkspace(page, timeout = 60_000) {
  *  actually checked that a model appeared. This asks the question the scripts meant. */
 export async function awaitBuild(page, timeout = 180_000) {
   await page.waitForFunction(() => {
-    const n = window.__viewerS?.()?.mesh?.geometry?.getAttribute?.("position")?.count ?? 0;
-    return n > 0 && !document.querySelector(".gen-pill");
+    if (document.querySelector(".gen-pill")) return false; // a build is still running
+    // The viewer's own state is the truest answer, but it is installed behind
+    // `import.meta.env.DEV` (Viewer.tsx), so a bundle from `vite build` — which is what
+    // pwa-e2e drives through `vite preview` — carries no hook at all and the vertex count
+    // reads 0 for a model that built perfectly. Ask the hook only when it EXISTS; a count
+    // of zero WITH a hook still means no model, so every dev-server probe is unchanged.
+    const hook = window.__viewerS;
+    if (typeof hook === "function")
+      return (hook()?.mesh?.geometry?.getAttribute?.("position")?.count ?? 0) > 0;
+    // Production fallback, read from markup the app actually ships: the statusbar's
+    // Export button carries `disabled={!p.geometry}` and the dims readout is an em dash
+    // until a build lands. The digit test is not decoration — a build that produced an
+    // empty shape reports "0 × 0 × 0 mm", which is neither the em dash nor a model.
+    const ex = document.querySelector(".statusbar .export-cta");
+    const dims = document.querySelector(".statusbar .dims")?.textContent ?? "";
+    return !!ex && !ex.disabled && /[1-9]/.test(dims);
   }, null, { timeout });
 }
 
@@ -64,19 +78,33 @@ export async function awaitBuild(page, timeout = 180_000) {
  *  (044ab7f) and owns picking outright, so a bare canvas click selects nothing. */
 /** Screen coordinates that are definitely ON the model, projected through the same
  *  matrices the viewer renders with. Shared because "click a canvas fraction" is a guess
- *  that misses silently — and a probe that misses reads whatever was already on screen. */
+ *  that misses silently — and a probe that misses reads whatever was already on screen.
+ *
+ *  Triangle CENTROIDS, not vertices. A vertex sits on an edge or a corner, where the
+ *  hover-adaptive picker prefers the edge or the corner — and on a curved shell it often
+ *  resolves to nothing at all. Measured on the phone stand from Top view with Modify
+ *  armed: clicking 20 projected vertices selected once; clicking 30 projected centroids
+ *  selected 29 times and offered Hole… 29 times. Centroids are interior points of real
+ *  triangles, so they land in the middle of a face by construction. */
 export async function modelPoints(page) {
   return page.evaluate(async () => {
     const THREE = await import("/node_modules/three/build/three.module.js");
     const s = window.__viewerS?.();
     if (!s?.mesh) return [];
     const r = s.renderer.domElement.getBoundingClientRect();
-    const pos = s.mesh.geometry.getAttribute("position");
+    const geo = s.mesh.geometry;
+    const pos = geo.getAttribute("position");
+    const idx = geo.getIndex();
     s.mesh.updateMatrixWorld(true);
     s.camera.updateMatrixWorld(true);
+    const corner = (i) => {
+      const k = idx ? idx.getX(i) : i;
+      return new THREE.Vector3(pos.getX(k), pos.getY(k), pos.getZ(k));
+    };
+    const tris = Math.floor((idx ? idx.count : pos.count) / 3);
     const out = [];
-    for (let i = 0; i < pos.count; i += Math.max(1, Math.floor(pos.count / 80))) {
-      const p = new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i))
+    for (let t = 0; t < tris; t += Math.max(1, Math.floor(tris / 120))) {
+      const p = corner(t * 3).add(corner(t * 3 + 1)).add(corner(t * 3 + 2)).multiplyScalar(1 / 3)
         .applyMatrix4(s.mesh.matrixWorld).project(s.camera);
       if (p.x < -1 || p.x > 1 || p.y < -1 || p.y > 1) continue;
       out.push([r.x + ((p.x + 1) / 2) * r.width, r.y + ((-p.y + 1) / 2) * r.height]);

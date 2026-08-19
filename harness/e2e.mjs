@@ -1,5 +1,6 @@
 // End-to-end: gallery entry points, one-tap build, fresh-project behavior, live params.
 import { chromium } from "playwright";
+import { awaitBuild } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -34,8 +35,27 @@ check("the deterministic CAD templates carry a real render", imgs >= 6, `${imgs}
 // 2) Tap "Headphone desk hook" → parametric model builds, chat + project + sliders present.
 await page.locator(".overlay").getByTitle(/^Build the headphone desk hook\b/).click();
 await page.waitForSelector(".overlay", { state: "detached" });
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("headphone desk hook"), { timeout: 120_000 });
-check("headphone desk hook built + summary in chat", true);
+// The bubble is the template's SUMMARY, not its name: loadTemplate posts `text: t.summary`
+// (App.tsx), and the desk hook's summary opens "A headphone hook that clamps to your
+// desk…" — it never says "headphone desk hook", so this waited for a string the app does
+// not write. enter.mjs retired exactly this anti-pattern in awaitBuild's docstring, and
+// the point stands twice over: a chat bubble echoing a name proves nothing about a MODEL
+// appearing. Ask the viewer instead, then check the reply separately against the app's
+// own copy so a reworded blurb can't break the probe again.
+await awaitBuild(page);
+const hookSummary = await page.evaluate(async () => {
+  const tpl = await import("/src/cad/templates.ts");
+  return tpl.TEMPLATES.find((t) => t.id === "desk-hook").summary;
+});
+const hookSaid = await page.waitForFunction(
+  (s) => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent?.includes(s)),
+  hookSummary,
+  // Third argument, not second: waitForFunction(fn, arg, options). The options object was
+  // in the ARG slot, so the 120_000 on the line was never read — the log said "Timeout
+  // 30000ms" on a line that reads 120_000.
+  { timeout: 60_000 },
+).then(() => true, () => false);
+check("headphone desk hook built + summary in chat", hookSaid, hookSummary.slice(0, 60));
 const proj = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");
   const all = await mod.listProjects();
@@ -44,28 +64,47 @@ const proj = await page.evaluate(async () => {
 });
 check("project persisted with parametric code", !!proj?.hasCode, JSON.stringify(proj));
 
-// Sliders tab reachable (params extracted from defaultParams).
-const paramsTab = page.getByRole("button", { name: /sliders|param/i }).first();
-check("params/sliders tab present", (await paramsTab.count()) > 0);
+// The dimension sliders are reachable (params extracted from defaultParams).
+// The row is called "Adjust", not "Parameters" or "Sliders" — it is free, no-AI dimension
+// tweaking, and the old engineering word was renamed for that reason (Workspace.tsx:1875).
+// Matching /sliders|param/ found nothing and reported a missing panel that was on screen.
+const paramsTab = page.locator(".dock-list button", { hasText: "Adjust" }).first();
+check("Adjust (dimension sliders) reachable", (await paramsTab.count()) > 0);
 
 // 3) Live params: same code, bigger plate → dims change accordingly.
 const dimsChange = await page.evaluate(async () => {
   const eng = await import("/src/engine/selectEngine.ts");
   const tpl = await import("/src/cad/templates.ts");
   const s = await eng.getEngineSelection();
-  const t = tpl.TEMPLATES.find((x) => x.id === "wall-hook");
+  // "wall-hook" was renamed to "desk-hook" when the gallery was rebuilt to 12 templates,
+  // and plateWidth/hookReach went with it — the old overrides named parameters the program
+  // no longer has, so `t` was undefined and t.code threw. hookLength is the hanger bar,
+  // sketched on XZ and extruded along Y, so a longer hook can only grow X.
+  const t = tpl.TEMPLATES.find((x) => x.id === "desk-hook");
   const a = await s.engine.build({ kind: "code", code: t.code });
-  const b = await s.engine.build({ kind: "code", code: t.code, params: { plateWidth: 50, hookReach: 50 } });
+  const b = await s.engine.build({ kind: "code", code: t.code, params: { hookLength: 80 } });
   return { a: a.dims, b: b.dims };
 });
-check("param overrides change dims", dimsChange.b.x === 50 && dimsChange.b.z > dimsChange.a.z, JSON.stringify(dimsChange));
+// The AXIS, not a literal size: pinning "x === 50" is what made this brittle the first
+// time, and the claim being tested is that an override reaches the program at all.
+check("param overrides change dims", dimsChange.b.x > dimsChange.a.x, JSON.stringify(dimsChange));
 
 // 4) Empty state (new chat) shows the template strip; tapping a card starts a FRESH project.
 await page.getByRole("button", { name: "+ New chat" }).click();
 await page.waitForSelector(".tpl-strip");
 check("empty state shows template strip", true);
 await page.locator(".tpl-strip").getByTitle(/^Build the squeeze bag clip\b/).click();
-await page.waitForFunction(() => document.querySelector(".msg.assistant .bubble")?.textContent?.includes("squeeze bag clip"), { timeout: 120_000 });
+// Same defect on the second template: the card is titled "Squeeze bag clip", the reply is
+// the summary. Wait for the model, then match the app's own text.
+await awaitBuild(page);
+const clipSummary = await page.evaluate(async () => {
+  const tpl = await import("/src/cad/templates.ts");
+  return tpl.TEMPLATES.find((t) => t.id === "bag-clip").summary;
+});
+const clipSaid = await page.waitForFunction(
+  (s) => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent?.includes(s)),
+  clipSummary, { timeout: 60_000 },
+).then(() => true, () => false);
 const names = await page.evaluate(async () => {
   const mod = await import("/src/store/projects.ts");
   return (await mod.listProjects()).map((p) => p.name).sort();

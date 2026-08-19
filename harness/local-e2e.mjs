@@ -140,8 +140,24 @@ const check = (name, ok, detail = "") => { console.log(`${ok ? "PASS" : "FAIL"} 
   await ta.fill("a test cube");
   await ta.press("Enter");
   await page.waitForFunction(() => document.body.innerText.includes("25 × 25 × 25"), null, { timeout: 180_000 });
-  const note = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /on-device model/.test(b.textContent ?? "")));
-  check("cloud unreachable → falls back to the on-device model, with a note", note);
+  // Poll, don't sample. The note is posted BEFORE the on-device retry, so it is always the
+  // earlier bubble — but chat replies TYPE THEMSELVES OUT, and Reveal renders only the
+  // first 35% of the text until the animation finishes. "on-device model" sits at
+  // character 54 of a 138-character sentence, so it is absent from the DOM for the whole
+  // ~650 ms reveal. The string this block waits on ("25 × 25 × 25") is NOT animated — it
+  // is the ChangeStrip chip and the statusbar readout, both painted in the commit the
+  // build lands in — so a single read here lands mid-sentence. shot-local-fallback.png
+  // caught it at "Couldn't reach the cloud brai".
+  const note = await page.waitForFunction(
+    () => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => /on-device model/.test(b.textContent ?? "")),
+    null, { timeout: 15_000 },
+  ).then(() => true, () => false);
+  // A bare false says nothing about WHY. Quote what the transcript actually holds, so a
+  // real regression (the app going silent about the substitution) reads differently from
+  // a timing miss.
+  const said = note ? "" : await page.evaluate(() =>
+    [...document.querySelectorAll(".msg.assistant .bubble")].map((b) => (b.textContent ?? "").trim()).filter(Boolean).join(" | ").slice(0, 200) || "no assistant bubbles at all");
+  check("cloud unreachable → falls back to the on-device model, with a note", note, said);
   await page.screenshot({ path: "shot-local-fallback.png" });
   await page.close();
 }

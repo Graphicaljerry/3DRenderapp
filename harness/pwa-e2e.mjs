@@ -5,8 +5,18 @@ import { chromium } from "playwright";
 import { spawn } from "node:child_process";
 import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
+const APP = "/home/user/3DRenderapp/moldable-lite";
+// Build first. `vite preview` serves whatever happens to be in dist/, so without this the
+// only probe that covers the PRODUCTION bundle was testing an arbitrary older one — it
+// could pass or fail against a build that has nothing to do with the working tree, which
+// is the opposite of what a production check is for.
+await new Promise((res, rej) => {
+  const b = spawn("npx", ["vite", "build"], { cwd: APP, stdio: "ignore" });
+  b.on("exit", (code) => (code === 0 ? res() : rej(new Error(`vite build failed (exit ${code})`))));
+  b.on("error", rej);
+});
 const preview = spawn("npx", ["vite", "preview", "--port", "4173", "--strictPort"], {
-  cwd: "/home/user/3DRenderapp/moldable-lite",
+  cwd: APP,
   stdio: "ignore",
 });
 await new Promise((r) => setTimeout(r, 2500));
@@ -73,11 +83,20 @@ await page.locator(".overlay").getByTitle(/^Build the tolerance test coupon\b/).
 // Exactly the anti-pattern enter.mjs retired: waiting on a chat bubble to echo the
 // template's name proves nothing about a model appearing, and breaks whenever the blurb
 // is reworded. awaitBuild asks the viewer whether it is holding geometry.
-await awaitBuild(page);
-check("offline: template builds a real model (no network)", true);
+// A timeout here is mute, and this is the only probe with no dev server behind it — read
+// back whatever loadTemplate's catch put in the chat so the failure has a name instead of
+// a bare 180 s stack.
+let built = true;
+try { await awaitBuild(page); } catch { built = false; }
+const why = built ? "" : await page.evaluate(() =>
+  [...document.querySelectorAll(".msg.assistant .bubble")].map((b) => (b.textContent ?? "").trim()).filter(Boolean).pop() ?? "no assistant message at all");
+check("offline: template builds a real model (no network)", built, why);
 await page.screenshot({ path: "shot-pwa-offline.png" });
 
 await browser.close();
+// Always, even when a check above threw: `vite preview --strictPort` holds 4173, so a
+// leaked one makes the NEXT run of this probe die on startup for a reason that has
+// nothing to do with the app.
 preview.kill();
 if (fails.length) { console.log("\nFAILED: " + fails.join(", ")); process.exit(1); }
 console.log("\nAll PWA checks passed.");

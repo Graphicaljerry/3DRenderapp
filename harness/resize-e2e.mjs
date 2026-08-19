@@ -132,9 +132,29 @@ check("C2 Fit to plate scales the CAD import (parametric op)", true);
 // No "3D View" tab any more: the stage is never hidden — every Inspector section docks
 // BESIDE a live viewer instead of covering it, so there is nothing to switch back to.
 await page.keyboard.press("Control+z");
-await page.waitForFunction((src) => { const d = eval(src); return d && d[0] === 600; }, sbDims, { timeout: 60_000 });
-const undoErr = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble")].some((b) => b.textContent?.includes("failed to rebuild")));
-check("C3 undo restores the import (STL kind persisted — no STEP re-read crash)", !undoErr);
+// SOFT wait: this is C3's evidence, not a precondition. Written as a hard waitForFunction
+// it threw TimeoutError with an empty log and killed the run two lines before the code
+// that reads the app's own "failed to rebuild" bubble — which made C3 structurally
+// incapable of failing (the check below could only ever be reached on success) and its
+// diagnosis unreachable. Twelve PASS lines and a bare stack was the whole report.
+const undoRestored = await page
+  // 120 s, matching C1's budget for the same kernel: an undo here re-reads the STL
+  // (importShape, 45 s watchdog) AND rebuilds the shape (25 s watchdog), and the suite
+  // runs three lanes on four cores, so 60 s was inside the range this legitimately takes
+  // under load. Soft now, so overrunning it prints a dimension instead of a bare stack.
+  .waitForFunction((src) => { const d = eval(src); return d && d[0] === 600; }, sbDims, { timeout: 120_000 })
+  .then(() => true, () => false);
+// The app reports a failed rebuild as a CHAT bubble, never as a console error, so the
+// console listener at the top of this file never sees it. Quote it: "undo didn't get back
+// to 600" is not a diagnosis; the kernel's own complaint is.
+const undoSays = await page.evaluate(() => {
+  const hits = [...document.querySelectorAll(".msg.assistant .bubble")].filter((b) => /failed to rebuild/.test(b.textContent ?? ""));
+  return hits.length ? (hits[hits.length - 1].textContent ?? "").slice(0, 220) : "";
+});
+const undoDims = await page.evaluate((src) => eval(src), sbDims);
+check("C3 undo restores the import (STL kind persisted — no STEP re-read crash)",
+  undoRestored && !undoSays,
+  `dims=${JSON.stringify(undoDims)}${undoSays ? " — " + undoSays : ""}`);
 
 await browser.close();
 if (fails.length) {

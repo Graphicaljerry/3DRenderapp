@@ -137,6 +137,34 @@ const server = createServer((req, res) => {
         console.log(`[stub] ${hits} BUILD bad-code (${body.length}b)`);
         return;
       }
+      // "REASONING" = stream the model's own thinking before the code, the way the
+      // reasoning models do (OpenRouter puts it on delta.reasoning). Written the way they
+      // actually write it — a bold section title, a hash heading, a bullet list — because
+      // the panel's job is to render that as formatting rather than print the markers.
+      if (/REASONING/.test(body)) {
+        // Chunked so the FIRST frame cuts a bold title in half — that is the state a
+        // reader actually sees most of the time, and the one that used to print the
+        // opening asterisks on screen while the model finished writing the words.
+        const think = [
+          "**Calculating Cabinet",
+          " Geometry**\n\nI'm refining the precise dimensions and cutout placements",
+          " for the speaker cabinet.\n\n## Driver spacing\n\n- Driver hole diameter: 70 mm\n- Knob hole spacing: 20 mm\n",
+          "\nNext I'll define the angled vent slot before proceeding with chamfers and the split joint.",
+        ];
+        // Paced, not dumped: the live panel exists only while the stream is open, and a
+        // fixture that writes every frame in one tick leaves nothing on screen to look at.
+        const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+        void (async () => {
+          for (const t of think) { res.write(frame({ choices: [{ delta: { reasoning: t } }] })); await wait(350); }
+          const code = "Here is the part.\n\n```js\nconst defaultParams = { width: 60, depth: 40, thickness: 24 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane(\"XY\").extrude(p.thickness);\n}\n```";
+          res.write(frame({ choices: [{ delta: { content: code } }] }));
+          res.write(frame({ choices: [{ delta: {} }], usage: { prompt_tokens: 1200, completion_tokens: 300, cost: 0.004 } }));
+          res.write("data: [DONE]\n\n");
+          res.end();
+          console.log(`[stub] ${hits} BUILD reasoning (${body.length}b)`);
+        })();
+        return;
+      }
       const wider = /WIDER/.test(body);
       const dims = thin ? { w: wider ? 50 : 30, d: 20, t: 5 } : { w: wider ? 80 : 60, d: 40, t: 24 };
       const code = `Here is the part.\n\n\`\`\`js\nconst defaultParams = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t} };\nfunction main(replicad, params) {\n  const p = { width: ${dims.w}, depth: ${dims.d}, thickness: ${dims.t}, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane("XY").extrude(p.thickness);\n}\n\`\`\``;

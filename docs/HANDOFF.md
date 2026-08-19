@@ -917,6 +917,30 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 484 — the reasoning panel reads like writing, not like source
+
+- **The model's thinking is markdown, and the panel renders it as such.** Reasoning models
+  title each section `**Like This**` and emit `##` headings and bullet lists; the panel
+  printed the raw string, so the loudest thing in it was the punctuation. It now goes
+  through the same `Markdown` renderer the reply bubble uses — in both places reasoning
+  appears, the live panel under the timeline and the collapsed "Thought process" on the
+  finished reply, which are two separate render paths.
+
+- **At the panel's own scale.** Scoped CSS under `.think-body`: a section title is a bold
+  line the same size as the text around it, not the chapter heading, hairline rule and size
+  jump that give a full answer its skeleton. This is a side channel, not the answer.
+
+- **No half-written marker flashes.** A title arrives one token at a time, so the opening
+  `**` sits unpaired for as long as it takes to write the words after it — which printed
+  the exact punctuation the change exists to remove. `ThinkScroll` closes an odd trailing
+  `**` for the render; the model's own closer takes over a moment later. Live text only:
+  a finished blob with an odd marker in it is the model's own text.
+
+- `harness/thinkmd-e2e.mjs` (10 checks) drives it against a new `REASONING` stub fixture
+  that streams paced `delta.reasoning` frames and deliberately cuts a bold title across two
+  of them. It samples the live panel throughout the stream rather than once, because a
+  single well-timed look would miss the flicker being complained about.
+
 ## Build 483 — the strip says what a picture IS, not where it was taken from
 
 - **"Front" is gone from the thumbnails.** Every first attached picture was tagged Front

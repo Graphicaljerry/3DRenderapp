@@ -6209,7 +6209,7 @@ const MessageRow = memo(function MessageRow({ m, fresh, editing, editText, think
                       ))}
                     </div>
                   )}
-                  {m.thinking && <div className="think-body">{m.thinking}</div>}
+                  {m.thinking && <div className="think-body"><Markdown text={m.thinking} /></div>}
                 </details>
               )}
               {!!m.sources?.length && (
@@ -6352,11 +6352,23 @@ function ThinkSteps({ steps, active }: { steps: string[]; active: string }) {
   );
 }
 
-/** The live reasoning text, auto-pinned to its newest line as it streams. */
+/** The live reasoning text, auto-pinned to its newest line as it streams.
+ *
+ *  Rendered as markdown, because that is what the models write: Gemini and the OpenAI
+ *  reasoning summaries title each section `**Like This**` and some emit `##` headings and
+ *  bullets. Printed raw, those markers were the loudest thing in the panel — asterisks and
+ *  hashes around the words they were meant to style. The same renderer the reply bubble
+ *  uses, at the panel's own quieter type scale. */
 function ThinkScroll({ text }: { text: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { const el = ref.current; if (el) el.scrollTop = el.scrollHeight; }, [text]);
-  return <div ref={ref} className="think-body live">{text}</div>;
+  // A section title arrives one token at a time, so for as long as it takes to finish
+  // writing it the opening `**` has no partner and prints as two asterisks — the exact
+  // punctuation this panel exists to stop showing. Close it for the render; the model's
+  // own closer takes over a moment later. Only the live text needs this: a finished
+  // reasoning blob with an odd marker in it is the model's own text, not a half-written one.
+  const closed = (text.match(/\*\*/g)?.length ?? 0) % 2 ? `${text}**` : text;
+  return <div ref={ref} className="think-body live"><Markdown text={closed} /></div>;
 }
 
 /** Live elapsed-time pill while the AI/kernel is working. */

@@ -141,6 +141,12 @@ await page.locator(".msg.user").first().hover();
 await page.locator(".msg.user .mp-linktrigger").first().click();
 await page.waitForSelector(".mp-menu .mp-item", { timeout: 10_000 });
 await page.locator(".mp-item", { hasText: /custom|compatible/i }).first().click();
+// Wait for the retry's OWN request, not for the absence of a spinner: the pill takes a
+// moment to appear, so "no pill on screen" is true both before the retry starts and after
+// it finishes, and on a loaded machine that read the first one and asserted on nothing.
+for (const deadline = Date.now() + 60_000; bodies.length === before && Date.now() < deadline; ) {
+  await page.waitForTimeout(200);
+}
 await page.waitForFunction(() => !document.querySelector(".gen-pill"), null, { timeout: 180_000 });
 await page.waitForTimeout(1500);
 const again = bodies.slice(before).find((b) => /replicad/i.test(b) && !/Reply with JSON only/.test(b)) ?? "";

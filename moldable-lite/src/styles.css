@@ -474,7 +474,6 @@ button:disabled { cursor: default; }
    the pulse — these are records now, not activity. */
 .think-steps.settled { margin: 6px 0 2px; }
 .think-steps.settled .tstep-dot { animation: none; }
-.think-body { white-space: pre-wrap; }
 /* The working state, un-bubbled: the step timeline sits straight on the chat surface
    so it reads as "still working" rather than as a delivered answer. Same box metrics
    as .bubble minus the fill, so nothing shifts when the reply lands in its bubble. */
@@ -497,7 +496,20 @@ button:disabled { cursor: default; }
 }
 .think-live { margin-top: 8px; border-top: 1px dashed var(--bord); padding-top: 7px; }
 .think-title { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-tiny); font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--subt); }
-.think-body { font-size: var(--fs-sm); line-height: 1.5; color: var(--mut); white-space: pre-wrap; }
+.think-body { font-size: var(--fs-sm); line-height: 1.5; color: var(--mut); }
+/* Reasoning is markdown (see ThinkScroll), rendered at the panel's own scale rather than
+   the reply bubble's: this is a side channel under the timeline, so a section title is a
+   bold line the same size as the text around it — not the chapter heading, hairline rule
+   and size jump that give a full answer its skeleton. */
+.think-body .md { line-height: 1.5; }
+.think-body .md p { margin: 0 0 7px; }
+.think-body .md .md-h, .think-body .md .md-h1 {
+  font-size: inherit; font-weight: 650; color: var(--ink2); margin: 10px 0 3px;
+  border-top: none; padding-top: 0; letter-spacing: 0;
+}
+.think-body .md .md-h:first-child, .think-body .md .md-h1:first-child { margin-top: 0; }
+.think-body .md ul, .think-body .md ol { margin: 3px 0 7px; padding-left: 17px; gap: 2px; }
+.think-body .md .md-code { margin: 5px 0 7px; padding: 6px 8px; font-size: var(--fs-tiny); }
 /* Tall enough to actually READ the reasoning as it streams (was 110px — a report:
    "I can barely see its thinking process"). */
 .think-body.live { max-height: 240px; overflow-y: auto; margin-top: 5px; mask-image: linear-gradient(to bottom, transparent, #000 14px); }

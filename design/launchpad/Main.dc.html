@@ -45,8 +45,12 @@
     .build-tag { font-family: var(--font-mono); font-size: var(--fs-tiny); font-weight: 500; line-height: 1;
       color: var(--ink2); background: var(--ctl); border-radius: var(--r-full); padding: 3px 8px; }
     .launch-top-right { display: flex; align-items: center; gap: 8px; }
-    .ghost { display: inline-flex; align-items: center; background: var(--ctl); border: 1px solid transparent;
-      border-radius: var(--r-md); padding: 5px 10px; font-size: var(--fs-sm); font-weight: 500; color: var(--ink2); }
+    /* One height for every control in the header bar, so the theme toggle (a 17px icon)
+       and Sign in (a 12px text line) stop landing 2px apart. 30px matches the composer's
+       own toggle, so the two rows of chrome agree. */
+    .ghost { display: inline-flex; align-items: center; justify-content: center; box-sizing: border-box;
+      height: 30px; background: var(--ctl); border: 1px solid transparent;
+      border-radius: var(--r-md); padding: 0 10px; font-size: var(--fs-sm); font-weight: 500; color: var(--ink2); }
     .launch-main { display: grid; position: relative; z-index: 1; }
     .launch-col { display: flex; flex-direction: column; }
     .launch-h1 { margin: 0; font-family: var(--font-display); font-weight: 700; text-wrap: balance; }
@@ -127,7 +131,7 @@
       <span class="build-tag">v480</span>
     </div>
     <div class="launch-top-right">
-      <span class="ghost" style="padding: 5px 9px">
+      <span class="ghost" style="padding: 0 9px">
         <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
       </span>
       <span class="ghost">Sign in</span>

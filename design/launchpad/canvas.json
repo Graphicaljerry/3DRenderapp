@@ -1,12 +1,54 @@
 {
   "artboards": [
-    { "file": "Main.dc.html", "title": "Desktop · 1440 × 900", "x": 0, "y": 0, "w": 1440, "h": 900 },
-    { "file": "Tablet.dc.html", "title": "Tablet · 834 × 1112", "x": 1540, "y": 0, "w": 834, "h": 1112 },
-    { "file": "Mobile.dc.html", "title": "Mobile · 390 × 844", "x": 2474, "y": 0, "w": 390, "h": 844 }
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 1440,
+      "h": 900,
+      "title": "Desktop · 1440 × 900"
+    },
+    {
+      "file": "Tablet.dc.html",
+      "x": 1540,
+      "y": 0,
+      "w": 834,
+      "h": 1112,
+      "title": "Tablet · 834 × 1112"
+    },
+    {
+      "file": "Mobile.dc.html",
+      "x": 2474,
+      "y": 0,
+      "w": 390,
+      "h": 844,
+      "title": "Mobile · 390 × 844"
+    }
   ],
   "annotations": [
-    { "id": "state-note", "x": 0, "y": -150, "w": 420, "text": "Two tweaks sit above each artboard.\n\nState: First run shows the blurb, templates and footer. Returning shows the project shelf instead — that switch is veteran = signed in, or 2+ projects.\n\nDark flips the whole palette to the app's real dark tokens." },
-    { "id": "bed-note", "x": 470, "y": -150, "w": 420, "text": "The isometric build plate only appears on desktop: the backdrop measures the space beside the text column and sits out below 420px of it, which every width under ~1120 is. Here it is a still — in the app a nozzle prints the first layer." }
+    {
+      "id": "state-note",
+      "x": 0,
+      "y": -150,
+      "w": 420,
+      "text": "Two tweaks sit above each artboard.\n\nState: First run shows the blurb, templates and footer. Returning shows the project shelf instead — that switch is veteran = signed in, or 2+ projects.\n\nDark flips the whole palette to the app's real dark tokens."
+    },
+    {
+      "id": "bed-note",
+      "x": 470,
+      "y": -150,
+      "w": 420,
+      "text": "The isometric build plate only appears on desktop: the backdrop measures the space beside the text column and sits out below 420px of it, which every width under ~1120 is. Here it is a still — in the app a nozzle prints the first layer."
+    },
+    {
+      "id": "note-1",
+      "x": 2515,
+      "y": 698,
+      "w": 240,
+      "text": "Align these two left side"
+    }
   ],
-  "launch": { "view": "canvas" }
+  "launch": {
+    "view": "canvas"
+  }
 }

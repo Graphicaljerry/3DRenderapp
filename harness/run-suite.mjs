@@ -38,7 +38,7 @@ const STUB_PROBES = [
   "assist-visibility-e2e", "audit-fixes-e2e", "buildfail-e2e", "change-strip-e2e",
   "delete-model-e2e", "launchpad-widths-e2e", "newpart-e2e", "photo-front-e2e",
   "plan-default-e2e", "plan-payload-e2e", "plan-persist-e2e", "retry-photos-e2e",
-  "stop-e2e", "regress-465-e2e", "hd-photo-e2e",
+  "stop-e2e", "regress-465-e2e", "hd-photo-e2e", "photolabel-e2e",
 ];
 
 // Scripts in here that are tools, not tests — they generate screenshots, icons and
@@ -46,7 +46,9 @@ const STUB_PROBES = [
 // as tests would be noise.
 const NOT_TESTS = new Set([
   "app-shots", "canvas-clean", "canvas-shot", "canvas-shots", "dims-probe2", "enter",
-  "gen-icons", "gen-thumbs", "ipad-audit", "lib", "load-perf", "local-debug", "probe",
+  "gen-icons", "gen-thumbs", "ipad-audit", "lib", "load-perf", "local-debug",
+  // The classifier's test set: pictures drawn by photokind-e2e, not a probe of its own.
+  "photokind-fixtures", "probe",
   // stamp-probe was RETIRED, not moved: it asserted `v <sha> · <date>`, a build stamp the
   // app deliberately replaced with a numeric build number. pwa-e2e asserts the current
   // /^v\d+$/ and passes, so the suite was contradicting itself and stamp-probe was the

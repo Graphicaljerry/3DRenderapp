@@ -15,6 +15,7 @@ import type { OrientSuggestion } from "../print/orient";
 import { FASTENER_GROUPS, findFastener, insertBossHint, fastenerHole, fastenerLabel, fastenerFor, fastenerCalNote } from "../cad/fasteners";
 import { TEXTURE_KINDS, PATTERN_KINDS, RIB_KINDS, FX_LABEL, FX_TIP, FX_START, isRib, type SurfacePattern, type SurfFxSlot } from "../engine/previewEngine";
 import { useEscape } from "../lib/useEscape";
+import type { PhotoKind } from "../lib/photoKind";
 
 /** Print-prep controls (Print tab + View menu): overhang heatmap, auto-orientation,
  *  wall-thickness check, elephant-foot chamfer. All local geometry — no AI calls. */
@@ -826,13 +827,29 @@ function MultiViewRow({ views, onPick, onClear, multiViewEngine, mode }: {
  *  and photo 1 read as a different KIND of thing from photos 2-5 when it is the same
  *  kind, just first.
  *
- *  Now: equal thumbnails in order, the first tagged Front because it genuinely leads
- *  (the mesh engines treat it as the front view), one count, one advice line. Individual
- *  removal matters at this size — with ten attached, dropping the blurry one used to
- *  mean clearing the lot and re-picking the other nine. */
-export function PhotoStrip({ urls, max, advice, onRemove, onClear, onPromote, onZoom }: {
+ *  Now: equal thumbnails in order, one count, one advice line. Individual removal matters
+ *  at this size — with ten attached, dropping the blurry one used to mean clearing the lot
+ *  and re-picking the other nine.
+ *
+ *  The tag under each thumbnail says what the picture IS — a drawing or a photograph —
+ *  because that is what changes how it gets read (see lib/photoKind.ts). It used to say
+ *  "Front" on whichever picture happened to land first, which was a claim about the
+ *  viewpoint that nobody had made: attach a dimensioned drawing and the app called it a
+ *  front view. Which picture leads is still shown, by the accent border, and in the foot
+ *  line where a mesh engine genuinely builds from it. */
+export function PhotoStrip({ urls, kinds, onSetKind, frontMatters, max, advice, onRemove, onClear, onPromote, onZoom }: {
   /** Front first, then the extras — the same order they are sent in. */
   urls: string[];
+  /** What each picture was read as, index-aligned with `urls`. An entry is undefined
+   *  while its read is still running — a few milliseconds, but not synchronous — and the
+   *  thumbnail simply carries no tag until it lands. */
+  kinds: (PhotoKind | undefined)[];
+  /** Correct the read on picture `i`. The tags are controls, not captions. */
+  onSetKind: (i: number, kind: PhotoKind) => void;
+  /** Whether the leading picture is about to be used as a FRONT VIEW — true only for the
+   *  mesh engines, which build a model from one viewpoint. In CAD the first picture is the
+   *  main reference and nothing more, so saying "front" there would be inventing a fact. */
+  frontMatters: boolean;
   max: number;
   advice?: string;
   onRemove: (i: number) => void;
@@ -851,19 +868,31 @@ export function PhotoStrip({ urls, max, advice, onRemove, onClear, onPromote, on
       <div className="ps-thumbs">
         {urls.map((u, i) => {
           const promotable = !!onPromote && i > 0;
+          const kind = kinds[i];
           return (
             <div className={`refthumb${i === 0 ? " ps-front" : ""}${promotable ? " ps-pick" : ""}`} key={`${i}-${u}`}>
               {promotable ? (
-                <button type="button" className="ps-imgbtn" title="Use this as the front view" aria-label={`Use reference ${i + 1} as the front view`} onClick={() => onPromote(i)}>
+                <button type="button" className="ps-imgbtn" title={frontMatters ? "Use this as the front view" : "Make this the main reference"} aria-label={frontMatters ? `Use reference ${i + 1} as the front view` : `Use reference ${i + 1} as the main picture`} onClick={() => onPromote(i)}>
                   <img src={u} alt={`Reference ${i + 1}`} />
                 </button>
               ) : (
-                <img src={u} alt={i === 0 ? "Front reference" : `Reference ${i + 1}`}
+                <img src={u} alt={i === 0 ? "Main reference" : `Reference ${i + 1}`}
                   onClick={onZoom ? () => onZoom(u) : undefined}
                   style={onZoom ? { cursor: "zoom-in" } : undefined} />
               )}
-              {i === 0 && <span className="ps-tag" title="The view the engine builds from — click another picture to make it the front">Front</span>}
-              <button type="button" className="mv-x" aria-label={i === 0 ? "Remove the front picture" : `Remove reference ${i + 1}`} onClick={() => onRemove(i)}><IconX /></button>
+              {kind && (
+                <button type="button" className={`ps-tag ps-${kind}`}
+                  aria-label={kind === "sketch"
+                    ? `Picture ${i + 1} is being read as a drawing — activate to read it as a photo`
+                    : `Picture ${i + 1} is being read as a photo — activate to read it as a drawing`}
+                  title={kind === "sketch"
+                    ? "Read as a drawing: its outlines are the part's edges and any written dimensions are used exactly. Click if it's a photo."
+                    : "Read as a photograph: dimensions are estimated from it. Click if it's a drawing."}
+                  onClick={() => onSetKind(i, kind === "sketch" ? "photo" : "sketch")}>
+                  {kind === "sketch" ? "Sketch" : "Photo"}
+                </button>
+              )}
+              <button type="button" className="mv-x" aria-label={i === 0 ? "Remove the main picture" : `Remove reference ${i + 1}`} onClick={() => onRemove(i)}><IconX /></button>
             </div>
           );
         })}
@@ -872,7 +901,12 @@ export function PhotoStrip({ urls, max, advice, onRemove, onClear, onPromote, on
           the two things this row is for — how many are attached, and how to drop them.
           It keeps the same Hint affordance the project composer already used. */}
       <div className="ps-foot">
-        <span className="refstrip-count">{urls.length} of {max}</span>
+        <span className="refstrip-count">
+          {urls.length} of {max}
+          {/* Said here rather than on the thumbnail because it is only true for the mesh
+              engines, and because it is the one place with room to say WHICH picture. */}
+          {frontMatters && urls.length > 1 && " · the first is the front view"}
+        </span>
         {advice && <Hint text={advice} />}
         <button type="button" className="link sm ps-clear" onClick={onClear}>Remove all</button>
       </div>
@@ -2698,6 +2732,9 @@ interface Props {
   onPickImage: (f: File) => void;
   onPickImages: (fs: File[]) => void; // multi-file drop: first = reference, rest = unlabelled extras
   refUrls: string[]; // extra unlabelled reference photos riding with the composer image
+  /** Drawing or photograph for each attached picture, front first — see lib/photoKind.ts. */
+  photoKinds: (PhotoKind | undefined)[];
+  onSetPhotoKind: (i: number, kind: PhotoKind) => void;
   maxPhotos: number; // how many pictures one request carries, front photo included
   onRemoveRef: (i: number) => void;
   /** Make attached photo i the front view — see PhotoStrip's onPromote. */
@@ -3730,6 +3767,9 @@ export function Workspace(p: Props) {
               <>
                 <PhotoStrip
                   urls={[p.imageUrl, ...p.refUrls]}
+                  kinds={p.photoKinds}
+                  onSetKind={p.onSetPhotoKind}
+                  frontMatters={p.mode === "generative"}
                   max={p.maxPhotos}
                   advice={p.photoAdvice}
                   onRemove={(i) => (i === 0 ? p.onRemoveFront() : p.onRemoveRef(i - 1))}

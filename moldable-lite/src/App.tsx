@@ -28,6 +28,7 @@ import { draftPlan, planToPrompt, type BuildPlan } from "./llm/plan";
 import { detectOllama, type OllamaInfo } from "./llm/ollamaDetect";
 import { imageAdvice } from "./llm/imageAdvice";
 import { downscaleImage, fitPhotoBudget, chatThumb, squareAvatar, MAX_PHOTOS, MAX_UPLOAD_BYTES } from "./lib/downscale";
+import { photoKind, type PhotoKind } from "./lib/photoKind";
 import { fetchAsBlob } from "./gen/util";
 import { MAGNET_SIZES, magnetPocket, type MagnetSize, type MagnetFit } from "./lib/magnets";
 import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalFonts, loadLocalFont } from "./text/fonts";
@@ -1600,13 +1601,20 @@ export default function App() {
     markup?: boolean;
     view?: PhotoView;
     region?: PhotoRegion;
+    /** Drawing or photograph — read from the pixels on attach, correctable in the strip.
+     *  Absent for the few milliseconds before the read lands, and for a marked screenshot,
+     *  which is neither. */
+    kind?: PhotoKind;
   } | null>(null);
   // Extra reference angles for multi-view mesh generation (front is `image`).
   type ViewSlot = "left" | "back" | "right";
   const [views, setViews] = useState<Partial<Record<ViewSlot, { blob: Blob; url: string }>>>({});
   // UNLABELLED extra reference photos — what a multi-file drop attaches. The named view
   // slots above stay for users who want to say which side is which; these don't ask.
-  const [refs, setRefs] = useState<{ blob: Blob; url: string }[]>([]);
+  const [refs, setRefs] = useState<{ blob: Blob; url: string; kind?: PhotoKind }[]>([]);
+  /** What each attached picture was read as, in strip order (front first) — the shape
+   *  both composers hand to PhotoStrip. */
+  const photoKinds = [image?.kind, ...refs.map((r) => r.kind)];
   /** What is staged RIGHT NOW — same reason resultRef exists. restorePhotos is reached
    *  through send(), which a memoised chat row can call from a closure several renders
    *  old, and its one decision ("is something already staged?") has to be about the live
@@ -1677,7 +1685,7 @@ export default function App() {
     if (!cur) return;
     if (!rs.length) { clearImage(); return; }
     URL.revokeObjectURL(cur.url);
-    setImage({ blob: rs[0].blob, url: rs[0].url });
+    setImage({ blob: rs[0].blob, url: rs[0].url, kind: rs[0].kind });
     setRefs(rs.slice(1));
   }
 
@@ -1696,9 +1704,43 @@ export default function App() {
     if (i <= 0 || !cur || !pick) return;
     // Deliberately dropped: markup/view/region describe a MARKED screenshot, which is
     // never part of this strip. Carrying them onto a plain reference photo would tell
-    // send() to treat it as an edit pointer.
-    setImage({ blob: pick.blob, url: pick.url });
-    setRefs(rs.map((r, k) => (k === i - 1 ? { blob: cur.blob, url: cur.url } : r)));
+    // send() to treat it as an edit pointer. `kind` travels with the picture, because it
+    // describes the picture rather than the slot.
+    setImage({ blob: pick.blob, url: pick.url, kind: pick.kind });
+    setRefs(rs.map((r, k) => (k === i - 1 ? { blob: cur.blob, url: cur.url, kind: cur.kind } : r)));
+  }
+
+  /** Corrections the user has made, keyed by the picture they were made about.
+   *
+   *  Retry and Edit restore a message's attachments from `sentPhotos`, which keeps blobs
+   *  and nothing else — so without this the re-read on restore would quietly overrule an
+   *  answer the user had already given. Holds blobs for the life of the tab, as
+   *  `sentPhotos` beside it already does, and only for pictures somebody re-labelled. */
+  const kindSaid = useRef(new Map<Blob, PhotoKind>());
+
+  /** Read a freshly attached picture and write the answer back onto it.
+   *
+   *  A second pass rather than part of the attach: the thumbnail has to appear the moment
+   *  the file is picked, and the read costs a decode plus a 96px draw. Matched by blob
+   *  identity rather than by index, so a read that lands after the picture was removed,
+   *  promoted or reordered updates the right one — or nothing at all, which is why the
+   *  refs list is left untouched rather than remapped when the blob is not in it. */
+  function readPhotoKind(blob: Blob) {
+    const said = kindSaid.current.get(blob);
+    void (said ? Promise.resolve(said) : photoKind(blob)).then((kind) => {
+      setImage((cur) => (cur && cur.blob === blob && !cur.markup ? { ...cur, kind } : cur));
+      setRefs((rs) => (rs.some((r) => r.blob === blob) ? rs.map((r) => (r.blob === blob ? { ...r, kind } : r)) : rs));
+    });
+  }
+
+  /** The user disagreeing with that read. Worth honouring rather than arguing with: the
+   *  two are read differently downstream (see the reference lines in send), and the person
+   *  who took the picture knows which it is. */
+  function setPhotoKind(i: number, kind: PhotoKind) {
+    const said = i === 0 ? imageRef.current : refsRef.current[i - 1];
+    if (said) kindSaid.current.set(said.blob, kind);
+    if (i === 0) setImage((cur) => (cur ? { ...cur, kind } : cur));
+    else setRefs((rs) => rs.map((r, k) => (k === i - 1 ? { ...r, kind } : r)));
   }
 
   /** Put a message's attachments back in the composer so the resend carries them.
@@ -1711,6 +1753,8 @@ export default function App() {
     if (!shot || imageRef.current || refsRef.current.length) return false;
     if (shot.front) setImage({ ...shot.front, url: URL.createObjectURL(shot.front.blob) });
     setRefs(shot.refs.map((b) => ({ blob: b, url: URL.createObjectURL(b) })));
+    if (shot.front && !shot.front.markup) readPhotoKind(shot.front.blob);
+    shot.refs.forEach(readPhotoKind);
     setViews(Object.fromEntries(Object.entries(shot.views).map(([k, b]) => [k, { blob: b, url: URL.createObjectURL(b) }])));
     return true;
   }
@@ -2498,6 +2542,7 @@ export default function App() {
         if (prev) URL.revokeObjectURL(prev.url);
         return { blob: eff, url: URL.createObjectURL(eff) };
       });
+      readPhotoKind(eff);
     });
     // In Precise mode with a working AI provider, a photo means "recreate this part
     // as exact CAD" (vision). Otherwise route to the free generative mesh path —
@@ -2544,6 +2589,7 @@ export default function App() {
     if (extras.length) {
       void Promise.all(extras.map((f) => downscaleImage(f))).then((slim) => {
         setRefs((r) => [...r, ...slim.map((b) => ({ blob: b, url: URL.createObjectURL(b) }))]);
+        slim.forEach(readPhotoKind);
       });
     }
   }
@@ -6934,9 +6980,13 @@ export default function App() {
     ]))).flat();
     // Unlabelled extras from a multi-photo drop — same object, angle unstated. The model
     // is told exactly that, so it treats them as additional observations rather than
-    // inventing a side for each.
-    const refParts = (await Promise.all(refBlobs.map(async (b) => [
-      { type: "text" as const, text: "Additional reference photo of the same object (angle unspecified):" },
+    // inventing a side for each. A drawing among them says so: the system prompt already
+    // reads the two differently (a drawn outline is an edge, a written number is a given),
+    // and it had to guess which was which from a mixed set.
+    const refParts = (await Promise.all(refBlobs.map(async (b, i) => [
+      { type: "text" as const, text: visionRefs[i]?.kind === "sketch"
+        ? "Additional DRAWING of the same object — read every dimension written on it as exact:"
+        : "Additional reference photo of the same object (angle unspecified):" },
       await part(b),
     ]))).flat();
     // Product photos the research found, by URL — the PROVIDER fetches them, the only
@@ -6965,7 +7015,9 @@ export default function App() {
               type: "text",
               text: markupEdit
                 ? `Here is the current replicad program:\n\`\`\`js\n${markupCode}\n\`\`\`\n\nThe screenshot shows this model as currently rendered; the red marker circles the region to change.${markupRegionLine}\nApply this change there: ${p || "improve the marked region"}${extras}`
-                : (p || "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.") + extras,
+                : (p || (visionImage?.kind === "sketch"
+                    ? "Build the part this drawing describes as precise, printable CAD. Use the dimensions written on it exactly; where none are written, pick sensible printable proportions and say so."
+                    : "Recreate this part as precise, printable CAD. Estimate dimensions from the photo.")) + extras,
             },
           ],
         }
@@ -7835,6 +7887,8 @@ export default function App() {
         onTogglePlan={setPlan}
         imageUrl={image && !image.markup ? image.url : null}
         refUrls={refs.map((r) => r.url)}
+        photoKinds={photoKinds}
+        onSetPhotoKind={setPhotoKind}
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
         onPromote={promotePhoto}
@@ -7965,6 +8019,8 @@ export default function App() {
         onPickImage={pickImage}
         onPickImages={pickImages}
         refUrls={refs.map((r) => r.url)}
+        photoKinds={photoKinds}
+        onSetPhotoKind={setPhotoKind}
         maxPhotos={MAX_PHOTOS}
         onRemoveRef={removeRef}
         onPromote={promotePhoto}
@@ -9337,7 +9393,7 @@ function LaunchOptions({ engine, onEngine, webMode, onCycleWeb, planOn, onToggle
   );
 }
 
-function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, maxPhotos, onRemoveRef, onPromote, onRemoveFront, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
+function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate, onGuided, onSkip, onSubmit, resume, onResume, recent, recentTotal = 0, onOpenRecent, onAllProjects, accountEmail, cloudOffline = false, onSignIn, onFirstInput, imageUrl, refUrls, photoKinds, onSetPhotoKind, maxPhotos, onRemoveRef, onPromote, onRemoveFront, onPickFiles, onDropUrls, fetchingImages, onClearImage, webMode, onCycleWeb, planOn, onTogglePlan, photoAdvice, improve, animateIn = true }: {
   theme: "light" | "dark";
   onToggleTheme: () => void;
   onExample: () => void;
@@ -9348,6 +9404,8 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
   onSubmit: (text: string, engine: ModePref) => void;
   imageUrl: string | null;
   refUrls: string[];
+  photoKinds: (PhotoKind | undefined)[];
+  onSetPhotoKind: (i: number, kind: PhotoKind) => void;
   maxPhotos: number;
   onRemoveRef: (i: number) => void;
   /** Make attached photo i the front view. */
@@ -9478,6 +9536,9 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
           {imageUrl && (
             <PhotoStrip
               urls={[imageUrl, ...refUrls]}
+              kinds={photoKinds}
+              onSetKind={onSetPhotoKind}
+              frontMatters={engine === "generative"}
               max={maxPhotos}
               advice={photoAdvice}
               onRemove={(i) => (i === 0 ? onRemoveFront() : onRemoveRef(i - 1))}

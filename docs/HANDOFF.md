@@ -917,6 +917,39 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 483 — the strip says what a picture IS, not where it was taken from
+
+- **"Front" is gone from the thumbnails.** Every first attached picture was tagged Front
+  the moment it landed — whatever it was, and whatever engine was going to read it. Attach
+  a dimensioned drawing in CAD mode, where nothing downstream treats any picture as a
+  viewpoint, and the app announced a fact nobody had stated. The tag now says what the
+  picture is: **Sketch** or **Photo**. Which one leads is still shown — by the accent
+  border, and in the foot line ("· the first is the front view") only on the mesh path,
+  where an engine genuinely builds from one viewpoint.
+
+- **Read from the pixels, in `lib/photoKind.ts`.** Not from a vision call: it has to be
+  instant, work with no key and no network, and a wrong answer costs one click. The test
+  is stroke thinness — in a drawing nearly every dark pixel sits against the page, while an
+  object's dark pixels are the inside of a shape and mostly sit against each other.
+  Brightness alone cannot do it, because the photograph the app's own advice asks for (a
+  part on plain white) is as bright and as colourless as a sheet of paper. Colour rules a
+  picture out first; a picture with no marks at all is a photograph, not a blank page.
+  `harness/photokind-e2e.mjs` runs the app's own module against 13 pictures drawn from
+  source in `photokind-fixtures.mjs`, including the ones designed to break it: a grey part
+  on white paper, a shaded pencil sketch, a night photo whose highlights make every dark
+  pixel look like a stroke edge, a drawing photographed with a vignette that eats the page.
+
+- **The tag is a control.** Click it to disagree; the correction is remembered per picture
+  and survives Retry and Edit, which restore a message's attachments from blobs alone and
+  would otherwise let the re-read quietly overrule the answer the user had already given.
+
+- **It reaches the request.** A drawing among the extras is introduced as one ("read every
+  dimension written on it as exact") rather than as "an additional reference photo", and a
+  photo-only ask with a drawing in front asks for the solid the drawing describes instead
+  of estimating from a photograph. `prompts.ts` already read the two differently; it had to
+  guess which was which from a mixed set. `harness/photolabel-e2e.mjs` (15 checks) drives
+  the real UI and reads the request bodies, including the retry's.
+
 ## Builds 470–476 — a suite you can run, and chat photos you can actually look at
 
 - **HD chat photos (474).** Expanding a photo in the transcript showed an enlarged

@@ -917,6 +917,43 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## Build 485 — a reply that ran out of room stops looking like bad code
+
+Reported from a real session: a speaker cabinet failed to build twice on Claude Opus 5,
+about 31k tokens and ~480 credits gone, and the chat said *"Your code must define
+`function main(replicad, params) { ... }` returning a Shape."*
+
+- **The model had not written bad code — it had not finished writing.** Providers say so
+  (Anthropic `stop_reason: "max_tokens"`, OpenAI-compatible `finish_reason: "length"`) and
+  nothing read it. A truncated reply arrives as an ordinary 200 and reads like a complete
+  one; `extractJsBlock` tolerantly returns the unclosed block, and the CAD kernel then
+  blames the model for the shape of a half-written function. Both transports now report the
+  stop reason through `StreamHandlers.onStop`.
+
+- **The ceiling was the cause.** `max_tokens` was hard-coded to 8192 on the Anthropic path
+  and no caller ever raised it. A parametric part with several features and printed notes
+  runs past that. Streaming requests now ask for 32000 — a ceiling, not a reservation — and
+  a model whose own limit is lower is retried at 8192 rather than failed, so there is no
+  per-model table to rot. The non-streaming rescue path stays at 8192, which Anthropic
+  requires for a non-streamed request.
+
+- **The retry stopped making it worse.** A fragment cannot be repaired, and the old loop
+  sent it back with "fix this", so attempt two carried a bigger context into the same
+  ceiling — that is the second full-price call. Now a cut-off reply is answered with
+  `truncatedRetryMessage()` (same part, written compactly, features in loops) and the
+  fragment is kept out of the conversation. One such ask, then it stops: asking twice is
+  asking the same question with nothing new to say.
+
+- **And the message says what happened**: the model ran out of room, ask for the part in
+  pieces or drop a feature. Not the kernel's `main()` line, and not a raw JS SyntaxError
+  (which is what a fragment cut mid-expression actually produces).
+
+- `harness/truncation-e2e.mjs` (11 checks) runs both outcomes through the real UI against a
+  new `TRUNCATE` / `TRUNCATE_ALWAYS` stub fixture, and drives the Anthropic transport
+  directly against a fake fetch — that path has its own body builder and its own stop
+  signal, and the app's OpenAI-compatible stub never exercises it. Four checks go red with
+  the `onStop` wiring removed.
+
 ## Build 484 — the reasoning panel reads like writing, not like source
 
 - **The model's thinking is markdown, and the panel renders it as such.** Reasoning models

@@ -38,7 +38,7 @@ import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/scre
 import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
 import { fetchBalance, loadBalance, saveBalance, usdToCredits, fmtCredits, ageLabel, PRICING, type Balance } from "./llm/credits";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
-import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, hardwareFacts, replicadRepairMessage, jsonRepairMessage } from "./llm/prompts";
+import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, hardwareFacts, replicadRepairMessage, jsonRepairMessage, truncatedRetryMessage } from "./llm/prompts";
 import { fitClearance, fitCalibration, saveFitCalibration, boreNote, boreAllowance, type FitId } from "./lib/fit";
 import { FILAMENT_SWATCHES } from "./print/filament";
 import { reloadIfStaleChunk } from "./lib/staleChunk";
@@ -7045,6 +7045,16 @@ export default function App() {
     let finalRaw = "";
     let ok = false;
     let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
+    /** Set when the provider says the model stopped because it ran out of room, not
+     *  because it had finished. A truncated reply arrives as an ordinary 200 and reads
+     *  like a complete one; the half-written program then failed in the CAD kernel, which
+     *  blamed the model for writing bad code and re-sent the fragment to be "repaired". */
+    let cutOff = false;
+    /** Whether the "write it compactly" ask has already been spent. Asking twice is asking
+     *  the same question with nothing new to say, and each ask is a full-price call — the
+     *  complaint that started this was the bill, not only the message. */
+    let askedCompact = false;
+    const onStop = (reason: string) => { if (/max_tokens|length/i.test(reason)) cutOff = true; };
 
     // ---- edit-block fast path: for a small change to an existing CAD program, ask the
     // model for only the changed lines (SEARCH/REPLACE), apply + re-execute locally, and
@@ -7111,11 +7121,12 @@ export default function App() {
     try {
       for (let attempt = 1; attempt <= 3; attempt++) {
         let raw: string;
+        cutOff = false;
         pushStep(attempt === 1
           ? `Writing the ${kind === "replicad" ? "CAD program" : "model spec"} with ${shortModelName(effLlm.model)}…`
           : `Attempt ${attempt} — feeding the build error back so the model can fix its code…`);
         try {
-          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
+          raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, onStop, signal: abortRef.current?.signal }, effectiveProxy);
         } catch (err: any) {
           // Cloud brain unreachable + the on-device model is already on this machine →
           // answer locally instead of failing (works fully offline).
@@ -7127,7 +7138,7 @@ export default function App() {
             const note = { id: mid(), ts: Date.now(), role: "assistant" as const, text: "Couldn't reach the cloud brain — answering with the **on-device model** instead (smaller: great for simple parts, weaker on complex ones)." };
             return idx < 0 ? [...m, note] : [...m.slice(0, idx), note, ...m.slice(idx)];
           });
-          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
+          raw = await generateLlm({ provider: "local", model: "" }, { anthropic: key, ...llmKeys }, system, history, { onToken, onThinking: onThink, onUsage, onStop, signal: abortRef.current?.signal }, effectiveProxy);
         }
         finalRaw = raw;
         // The stream is only the first half of a build. Aborting the fetch does nothing
@@ -7169,6 +7180,17 @@ export default function App() {
           break;
         } catch (err: any) {
           const msg = String(err?.message ?? err);
+          // A fragment cannot be repaired, and sending it back doubles the context the
+          // next attempt has to fit under the same ceiling — which is how one long part
+          // burned two full-price calls to arrive at the same wall. Ask for the part
+          // written compactly instead, and keep the fragment out of the conversation.
+          if (cutOff && kind === "replicad") {
+            if (askedCompact || attempt === 3) throw new Error(CUT_OFF_MSG);
+            askedCompact = true;
+            history = [...history, { role: "user", content: truncatedRetryMessage() }];
+            setStage("The reply was cut off at the model's output limit — asking for a more compact program…");
+            continue;
+          }
           if (attempt === 3 || msg === lastErrMsg) throw err; // same failure twice → the model is stuck; stop wasting time
           lastErrMsg = msg;
           history = [
@@ -8638,6 +8660,13 @@ function keepNewestPhotos(msgs: ApiMsg[]): ApiMsg[] {
     return { ...m, content: `(${n === 1 ? "A reference photo was" : `${n} reference photos were`} attached here.)\n${text}` };
   });
 }
+
+/** What the user sees when the model kept running out of room. The old text was the CAD
+ *  kernel's — "Your code must define `function main(replicad, params) { ... }`" — which
+ *  blamed the model for the shape of a program it had actually written correctly and just
+ *  hadn't finished, and told the reader nothing they could act on. */
+const CUT_OFF_MSG =
+  "The model ran out of room before it finished writing the program — this part needs more code than it can produce in one reply. Ask for it in pieces (the shell first, then the cutouts), or drop a feature or two and add them once it builds.";
 
 /** Never show a bare "Failed to fetch" — but leave already-crafted messages alone. */
 function friendlyNet(msg: string): string {

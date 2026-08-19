@@ -114,6 +114,11 @@ async function parseSSE(res: Response, h: StreamHandlers): Promise<string> {
         if (j.usage?.prompt_tokens != null || j.usage?.completion_tokens != null) {
           h.onUsage?.({ inTok: j.usage.prompt_tokens, outTok: j.usage.completion_tokens, usd: typeof j.usage.cost === "number" ? j.usage.cost : undefined });
         }
+        // "length" = the model ran out of room mid-sentence. It arrives as an ordinary
+        // 200 alongside a reply that looks finished, so nothing downstream can tell
+        // without being told (see StreamHandlers.onStop).
+        const fin = j.choices?.[0]?.finish_reason;
+        if (fin) h.onStop?.(String(fin));
       } catch {
         /* ignore keep-alives */
       }
@@ -171,6 +176,7 @@ async function attempt(r: CompatRequest, h: StreamHandlers): Promise<string> {
   const data: any = await res2.json();
   const text = data.choices?.[0]?.message?.content ?? "";
   if (!text) throw new Error("The model returned an empty reply.");
+  if (data.choices?.[0]?.finish_reason) h.onStop?.(String(data.choices[0].finish_reason));
   if (data.usage?.prompt_tokens != null || data.usage?.completion_tokens != null) {
     h.onUsage?.({ inTok: data.usage.prompt_tokens, outTok: data.usage.completion_tokens, usd: typeof data.usage.cost === "number" ? data.usage.cost : undefined });
   }

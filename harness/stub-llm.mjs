@@ -137,6 +137,32 @@ const server = createServer((req, res) => {
         console.log(`[stub] ${hits} BUILD bad-code (${body.length}b)`);
         return;
       }
+      // "TRUNCATE" = a reply that ran out of room: half a program, an unclosed fence, and
+      // finish_reason "length". It arrives as an ordinary 200 and reads like a finished
+      // answer, which is exactly why the app has to be told. TRUNCATE_ALWAYS never
+      // recovers; plain TRUNCATE answers properly once asked for a compact program, so a
+      // probe can watch the recovery rather than only the failure.
+      if (/TRUNCATE/.test(body)) {
+        const askedAgain = /cut off before the program finished/.test(body);
+        const always = /TRUNCATE_ALWAYS/.test(body);
+        if (askedAgain && !always) {
+          const code = "```js\nconst defaultParams = { width: 60, depth: 40, thickness: 24 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane(\"XY\").extrude(p.thickness);\n}\n```";
+          res.write(frame({ choices: [{ delta: { content: code } }] }));
+          res.write(frame({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 900, completion_tokens: 200, cost: 0.002 } }));
+          res.write("data: [DONE]\n\n");
+          res.end();
+          console.log(`[stub] ${hits} BUILD truncate-recovered (${body.length}b)`);
+          return;
+        }
+        // No closing fence, and main() stops mid-statement — what a real cut-off looks like.
+        const half = "```js\nconst defaultParams = { width: 260, height: 220, depth: 110, wallThickness: 3 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  const { drawRoundedRectangle } = replicad;\n  const shell = drawRoundedRectangle(p.width, p.depth, 4).sketchOnPlane(\"XY\").extrude(p.hei";
+        res.write(frame({ choices: [{ delta: { content: half } }] }));
+        res.write(frame({ choices: [{ delta: {}, finish_reason: "length" }], usage: { prompt_tokens: 3100, completion_tokens: 8192, cost: 0.031 } }));
+        res.write("data: [DONE]\n\n");
+        res.end();
+        console.log(`[stub] ${hits} BUILD truncated (${body.length}b)`);
+        return;
+      }
       // "REASONING" = stream the model's own thinking before the code, the way the
       // reasoning models do (OpenRouter puts it on delta.reasoning). Written the way they
       // actually write it — a bold section title, a hash heading, a bullet list — because

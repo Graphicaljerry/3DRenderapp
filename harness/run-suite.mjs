@@ -38,7 +38,7 @@ const STUB_PROBES = [
   "assist-visibility-e2e", "audit-fixes-e2e", "buildfail-e2e", "change-strip-e2e",
   "delete-model-e2e", "launchpad-widths-e2e", "newpart-e2e", "photo-front-e2e",
   "plan-default-e2e", "plan-payload-e2e", "plan-persist-e2e", "retry-photos-e2e",
-  "stop-e2e", "regress-465-e2e", "hd-photo-e2e", "photolabel-e2e", "thinkmd-e2e",
+  "stop-e2e", "regress-465-e2e", "hd-photo-e2e", "photolabel-e2e", "thinkmd-e2e", "truncation-e2e",
 ];
 
 // Scripts in here that are tools, not tests — they generate screenshots, icons and

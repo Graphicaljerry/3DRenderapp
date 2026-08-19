@@ -107,8 +107,14 @@ await page.waitForFunction(() => !!document.querySelector(".msg"), null, { timeo
 // A photo with no words earns a Quick check card; skip it — the build call is what carries
 // the reference lines, and answering questions is not what this probe is about.
 const skip = page.locator("button", { hasText: /build what i asked for/i }).first();
-await skip.waitFor({ timeout: 30_000 }).catch(() => {});
+await skip.waitFor({ timeout: 90_000 }).catch(() => {});
 if (await skip.count()) await skip.click();
+// The build's own request, not the absence of a spinner. Three browsers sharing four
+// cores stretch every step, and a probe that reads "no pill" before the pill exists
+// asserts on a conversation that never happened.
+for (const deadline = Date.now() + 90_000; bodies.length < 2 && Date.now() < deadline; ) {
+  await page.waitForTimeout(250);
+}
 await page.waitForFunction(() => !document.querySelector(".gen-pill"), null, { timeout: 180_000 });
 await page.waitForTimeout(1000);
 const build = bodies.find((b) => /replicad/i.test(b) && !/Reply with JSON only/.test(b)) ?? "";

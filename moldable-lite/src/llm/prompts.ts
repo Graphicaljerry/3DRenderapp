@@ -224,6 +224,15 @@ Error: ${err.name}: ${err.message}
 ${err.stack ? "Stack:\n" + err.stack.slice(0, 800) + "\n" : ""}Fix the code and reply with ONLY the corrected single \`\`\`js block. Do not explain.`;
 }
 
+/** The previous reply ran out of room mid-program, so there is nothing to repair — asking
+ *  the model to "fix" a half-written function only produces another long one. Ask for the
+ *  same part written smaller instead, and say what "smaller" means in this language. */
+export function truncatedRetryMessage(): string {
+  return `Your previous reply was cut off before the program finished — it ran past the output limit.
+Write the SAME part again, but compactly: no comments, no blank lines, short local names, and build repeated features (hole patterns, ribs, slots) in a loop rather than writing each one out.
+Reply with ONLY the single \`\`\`js block.`;
+}
+
 export function jsonRepairMessage(message: string): string {
   return `That was not valid for the schema (${message}). Reply with ONLY the corrected JSON object — no prose, no fences.`;
 }

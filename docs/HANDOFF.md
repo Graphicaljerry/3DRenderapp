@@ -955,6 +955,38 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 487 — the test suite stops failing for reasons that aren't bugs
+
+Three flaky probes, three different races. None of them was the app misbehaving; all
+three read as if it were, which is worse than a plain failure.
+
+- **`enter.mjs` waits for the Launchpad door instead of sampling for it.** `.launchpad`
+  mounts a render before its buttons do. Every probe that reloads mid-run went through
+  this helper, and after a reload the helper looked once, saw no button, and reported
+  "found no way into the workspace" about a screen that grew one a moment later. It now
+  waits for the button text. `resize-e2e` went from 42–75s to 12s as a side effect.
+
+- **`resize-e2e` clicks the canvas before Ctrl+Z / Ctrl+Shift+Z.** The app's shortcut
+  handler deliberately ignores keys typed into an INPUT or TEXTAREA so a field's own undo
+  keeps working — and the step before types into the resize menu's `%` box. Whether focus
+  had left it by then depended on how fast the menu closed: fine idle, a coin-flip under
+  three-lane suite load. Its geometry waits also went to 90s across the board, because on
+  a cold vite server the first OCCT rebuild outran the old 30s and the probe called that
+  a crash.
+
+- **`preview-e2e` waits for the explanation text.** `deliverResult` sets the pending
+  proposal (which paints the preview bar) and the caller then rewrites the bubble, so the
+  bar exists one render before the sentence does. The probe read the chat right after the
+  bar appeared and lost the race.
+
+Harness only — no app code changed in this build.
+
+**In plain words:**
+1. Three of the automatic tests were failing on and off. None of them was a real bug in
+   the app — they were reading the screen a split second too early.
+2. They now wait for the thing they're checking instead of guessing it's ready.
+3. This matters because a test that cries wolf makes the real failures easy to ignore.
+
 ## Build 486 — messages stop re-billing dead code, and the credits counter moves when money does
 
 - **trimOldPrograms (llm/extract.ts).** The history sent with every request carried the

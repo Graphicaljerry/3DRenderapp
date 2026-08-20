@@ -18,8 +18,19 @@ export async function enterWorkspace(page, timeout = 60_000) {
   if (!(await page.$(".topbar"))) {
     // Both Launchpad variants (with and without a project shelf) carry this door; the
     // onboarding screen offers "Skip" instead. Match on text, not position.
+    //
+    // WAIT for the door, don't sample for it: `.launchpad` exists a render before its
+    // buttons do, and this was read once and thrown on. The gap is invisible on a warm
+    // machine and reliable after a reload mid-probe (resize-e2e's B6), where it reported
+    // "found no way into the workspace" about a screen that grew one a moment later.
+    const doors = [/open an empty workspace/i, /^skip$/i];
+    await page.waitForFunction(
+      (pats) => [...document.querySelectorAll("button")].some((b) => pats.some((p) => new RegExp(p.source, p.flags).test(b.textContent ?? ""))),
+      doors.map((r) => ({ source: r.source, flags: r.flags })),
+      { timeout },
+    ).catch(() => {});
     let opened = false;
-    for (const re of [/open an empty workspace/i, /^skip$/i]) {
+    for (const re of doors) {
       const door = page.locator("button").filter({ hasText: re }).first();
       if (await door.count()) { await door.click(); opened = true; break; }
     }

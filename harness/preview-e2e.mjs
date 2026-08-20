@@ -59,6 +59,14 @@ check("diff legend shows (green/red overlays computed)", (await page.locator(".a
 // All the assistant bubbles, not just the last. The preview bar and the diff legend both
 // render (checked above), so the flow works — the explanation simply is not the final
 // bubble any more, and .pop() was reading whatever landed after it.
+//
+// Waited for, not sampled: deliverResult sets the pending proposal (which paints the bar)
+// and the CALLER then rewrites the bubble, so the bar exists a render before the sentence
+// does. A single read right after the bar appeared was racing that gap.
+await page.waitForFunction(
+  () => /preview on the canvas/i.test([...document.querySelectorAll(".msg.assistant .bubble, .msg.assistant .bubble-open")].map((b) => b.textContent).join(" | ")),
+  null, { timeout: 30_000 },
+).catch(() => {});
 const chat1 = await page.evaluate(() => [...document.querySelectorAll(".msg.assistant .bubble, .msg.assistant .bubble-open")].map((b) => b.textContent).join(" | "));
 check("chat explains the preview", /preview on the canvas/i.test(chat1), chat1.slice(0, 90));
 

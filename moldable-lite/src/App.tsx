@@ -35,7 +35,7 @@ import { GOOGLE_FONTS, getFont, registerFontBytes, canListLocalFonts, listLocalF
 import { TEXT_DEFAULT, buildTextGeometry, type TextSpec } from "./text/geometry";
 import { bendAroundY } from "./text/bend";
 import { SCREW_SIZES, screwCut, type ScrewSize, type ScrewFit } from "./lib/screws";
-import { loadLedger, resetLedger, fmtUSD, fmtTok } from "./llm/pricing";
+import { loadLedger, resetLedger, fmtUSD, fmtTok, onSpend } from "./llm/pricing";
 import { fetchBalance, loadBalance, saveBalance, usdToCredits, fmtCredits, ageLabel, PRICING, type Balance } from "./llm/credits";
 import { fetchOpenRouterModels, cachedOpenRouterModels, fmtORPrice, recommendedForApp, shortModelName, pickAutoModel, AUTO_MODEL, type ORModel } from "./llm/openrouterModels";
 import { REPLICAD_SYSTEM_PROMPT, FALLBACK_JSON_PROMPT, VISION_ADDENDUM, markupAddendum, IMPORT_ADDENDUM, REPLACEMENT_ADDENDUM, EDIT_BLOCK_ADDENDUM, fitDirective, hardwareFacts, replicadRepairMessage, jsonRepairMessage, truncatedRetryMessage } from "./llm/prompts";
@@ -47,7 +47,7 @@ import { diagnoseMesh, repairMeshForPrint, describeRepair, repairMessage, DIAGNO
 import { preflightExport, preflightSummary } from "./print/preflight";
 import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, scaleAboutBase } from "./print/resize";
 import { blobToDataURL } from "./gen/util";
-import { extractJsBlock, extractJsonObject } from "./llm/extract";
+import { extractJsBlock, extractJsonObject, trimOldPrograms } from "./llm/extract";
 import { parseSpec } from "./cad/spec";
 import { extractParams, humanizeParam, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
@@ -1187,6 +1187,16 @@ export default function App() {
     setPending(null);
     pendingRef.current = null;
     setGeometry(pc.prevGeometry);
+    // The send loop records its exchange into apiHistory when the build SUCCEEDS —
+    // before the user has said Apply or Discard. On Discard that leaves the rejected
+    // program as the conversation's newest code, which the next request would treat as
+    // the part on screen (and trimOldPrograms would keep it as "the current one" while
+    // stubbing the real one). Drop the exchange: a rejected proposal is not context,
+    // and the ask that produced it was answered with "no".
+    const h = apiHistory.current;
+    if (h.length >= 2 && h[h.length - 1].role === "assistant" && h[h.length - 2].role === "user") {
+      apiHistory.current = h.slice(0, -2);
+    }
     if (!silent) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Discarded — the model is unchanged. (The proposal is gone; re-ask any time.)" }]);
   }
   // A follow-up ask that involves the held proposal can't run in the same tick — the
@@ -1476,12 +1486,31 @@ export default function App() {
   const orKey = llmKeys["openrouter"] || "";
   const [balance, setBalance] = useState<Balance | null>(() => loadBalance());
   const [balanceBusy, setBalanceBusy] = useState(false);
-  const refreshBalance = useCallback(async () => {
+  /** When money last left through this app. The provider's ledger endpoint can lag a
+   *  spend by minutes, so for a while after one, a FETCHED figure that is higher than
+   *  what is on screen is the stale one — the screen already subtracted the real spend.
+   *  Persisted, because the bounce this guard prevents is easiest to hit by reloading
+   *  right after a build: the optimistic figure survives in storage, so the guard's
+   *  clock has to survive with it. */
+  const lastSpendAt = useRef(Number(localStorage.getItem("moldable_spend_at") ?? 0) || 0);
+  const refreshBalance = useCallback(async (manual = false) => {
     if (!orKey) { setBalance(null); saveBalance(null); return; }
     setBalanceBusy(true);
     try {
       const b = await fetchBalance(orKey);
-      if (b) { setBalance(b); saveBalance(b); }
+      if (b) {
+        setBalance((cur) => {
+          // The lag guard is for AUTOMATIC reconciles only. A manual refresh is the
+          // user's explicit ask — and the designed top-up flow is exactly "add credits
+          // on openrouter.ai, come back, press refresh", which lands inside the window
+          // and would otherwise hide the money they just added.
+          const lagging = !manual && cur?.remainingUsd != null && b.remainingUsd != null
+            && b.remainingUsd > cur.remainingUsd && Date.now() - lastSpendAt.current < 90_000;
+          const next = lagging ? { ...b, remainingUsd: cur!.remainingUsd, usedUsd: cur!.usedUsd ?? b.usedUsd } : b;
+          saveBalance(next);
+          return next;
+        });
+      }
     } finally {
       setBalanceBusy(false);
     }
@@ -1492,6 +1521,25 @@ export default function App() {
     if (lastStatus.current === "generating" && status === "idle") void refreshBalance();
     lastStatus.current = status;
   }, [status, refreshBalance]);
+  // Every priced call, the moment it is booked: subtract it from the number on screen.
+  // recordSpend is the one door all spends walk through — builds, clarify, routing, the
+  // improve button — so the chip moves with every message instead of waiting for the
+  // next poll of a provider ledger that itself runs minutes behind. Only spends on the
+  // provider the balance belongs to; a build on Anthropic must not drain an OpenRouter
+  // number. The next refresh reconciles against the provider's own figure.
+  useEffect(() => onSpend((u, _kind, provider) => {
+    if (provider !== "openrouter" || u.usd == null || u.usd <= 0) return;
+    lastSpendAt.current = Date.now();
+    try { localStorage.setItem("moldable_spend_at", String(lastSpendAt.current)); } catch { /* private mode */ }
+    setBalance((cur) => {
+      if (cur?.remainingUsd == null) return cur;
+      // Clamped at zero: prepaid credits cannot be negative, and "-3 credits" on the
+      // chip reads as a bug rather than as an empty tank.
+      const next = { ...cur, remainingUsd: Math.max(0, cur.remainingUsd - u.usd!), usedUsd: cur.usedUsd != null ? cur.usedUsd + u.usd! : cur.usedUsd };
+      saveBalance(next);
+      return next;
+    });
+  }), []);
   const [streamingText, setStreamingText] = useState("");
   const [streamingThink, setStreamingThink] = useState(""); // live model reasoning (chat shows it while generating)
   const [codeBuffer, setCodeBuffer] = useState("");
@@ -7041,7 +7089,16 @@ export default function App() {
     // Cap the rolling context so long sessions don't slow down / blow the window, and
     // carry ONE set of pictures — this turn's if it has any, otherwise the last set that
     // did. Attaching new photos supersedes the old ones rather than stacking on them.
-    let history: ApiMsg[] = keepNewestPhotos([...apiHistory.current.slice(-16), userMsg]);
+    // trimOldPrograms: superseded code is dropped from the history before it is billed —
+    // the newest program is kept (it is the code being edited); everything older is a
+    // one-line note. This is the single biggest per-message cost in a long session.
+    // Trimming is what gets SENT, not what gets remembered. `baseHistory` is the
+    // untrimmed conversation; the request below carries a trimmed copy, and the bake at
+    // the end of this function records the untrimmed one. Keeping the stubs would make
+    // the saving destructive — every full-regen success would permanently erase the
+    // older programs from this tab's memory, and nothing could ever get them back.
+    const baseHistory: ApiMsg[] = apiHistory.current.slice(-16);
+    let history: ApiMsg[] = keepNewestPhotos([...trimOldPrograms(baseHistory, true), userMsg]);
     let finalRaw = "";
     let ok = false;
     let lastErrMsg = ""; // stop early when retries hit the IDENTICAL wall — don't burn 3 slow AI calls
@@ -7075,7 +7132,9 @@ export default function App() {
         // Include the recent conversation so the edit has full context — the user may refer back
         // to earlier turns ("make it match what I said before"). The edit-block savings are on
         // OUTPUT tokens (only changed lines come back), so adding input history keeps them intact.
-        const editHistory: ApiMsg[] = [...apiHistory.current.slice(-12), editMsg];
+        // keepNewest=false: editMsg above already carries the current program verbatim, so
+        // every code block in the history is a superseded copy being re-billed.
+        const editHistory: ApiMsg[] = [...trimOldPrograms(apiHistory.current.slice(-12), false), editMsg];
         pushStep(`Writing the change with ${shortModelName(effLlm.model)} (edit mode — only the lines that change)…`);
         const raw = await generateLlm(effLlm, { anthropic: key, ...llmKeys }, system + EDIT_BLOCK_ADDENDUM, editHistory, { onToken, onThinking: onThink, onUsage, signal: abortRef.current?.signal }, effectiveProxy);
         finalRaw = raw;
@@ -7215,7 +7274,10 @@ export default function App() {
         usage: msgUsage(),
       } : x)));
     } finally {
-      if (ok) apiHistory.current = [...history, { role: "assistant", content: finalRaw }]; // already normalised above
+      // The UNTRIMMED conversation plus this turn — see baseHistory above. Retry
+      // repair turns are deliberately not kept: they are scaffolding for one attempt,
+      // not something a later request should read back as context.
+      if (ok) apiHistory.current = [...baseHistory, userMsg, { role: "assistant", content: finalRaw }];
       setStatus("idle");
       setStreamingText("");
     }
@@ -8028,7 +8090,7 @@ export default function App() {
           usd: balance?.remainingUsd ?? null,
           at: balance?.at ?? Date.now(),
           busy: balanceBusy,
-          refresh: () => void refreshBalance(),
+          refresh: () => void refreshBalance(true),
         } : null}
         autoPick={autoPick}
         genProvider={genEng.provider}
@@ -9921,8 +9983,19 @@ function SpendMeter({ orKey }: { orKey?: string }) {
     setBusy(true);
     try {
       const b = await fetchBalance(orKey);
-      if (b) { setBal(b); saveBalance(b); }
-      else setBal(null);
+      if (b) {
+        // Same lag guard as the chip (see refreshBalance): right after a spend,
+        // OpenRouter's ledger still reports the pre-spend figure, and this meter
+        // fetches on OPEN — accepting it verbatim would contradict the chip on
+        // screen and persist the stale number over the chip's live one.
+        const held = loadBalance();
+        const spendAt = Number(localStorage.getItem("moldable_spend_at") ?? 0) || 0;
+        const lagging = held?.remainingUsd != null && b.remainingUsd != null
+          && b.remainingUsd > held.remainingUsd && Date.now() - spendAt < 90_000;
+        const next = lagging ? { ...b, remainingUsd: held!.remainingUsd, usedUsd: held!.usedUsd ?? b.usedUsd } : b;
+        setBal(next);
+        saveBalance(next);
+      } else setBal(null);
     } finally { setBusy(false); }
   }, [orKey]);
   useEffect(() => { void read(); }, [read]);

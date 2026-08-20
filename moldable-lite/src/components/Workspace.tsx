@@ -328,7 +328,9 @@ function BalanceChip({ b, brain, genProvider, genModel }: {
         onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}
       >
         <IconCoin size={12} />
-        <span className="balance-n">{label}</span>
+        {/* Keyed on the value: a change remounts the span and replays the tick
+            animation, so spending visibly moves the counter the moment it happens. */}
+        <span key={label} className="balance-n">{label}</span>
       </button>
       {anchor && (
         <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={296}>

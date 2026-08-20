@@ -108,7 +108,21 @@ export function loadLedger(): Ledger {
   return { usd: 0, inTok: 0, outTok: 0, calls: 0, builds: 0, since: new Date().toISOString().slice(0, 10) };
 }
 
-export function recordSpend(u: Usage, kind: "build" | "utility"): void {
+/** Anyone who wants to hear about money leaving, the moment it leaves.
+ *
+ *  The balance chip is the customer: a spend should move the number on screen NOW, not
+ *  whenever the provider's ledger endpoint next gets polled — the provider's own figure
+ *  can lag a spend by minutes, which reads as "the counter is broken". recordSpend is
+ *  already the one door every priced call walks through, so this is the one place a
+ *  listener can stand and miss nothing. */
+type SpendListener = (u: Usage, kind: "build" | "utility", provider: string) => void;
+const spendListeners = new Set<SpendListener>();
+export function onSpend(fn: SpendListener): () => void {
+  spendListeners.add(fn);
+  return () => spendListeners.delete(fn);
+}
+
+export function recordSpend(u: Usage, kind: "build" | "utility", provider = ""): void {
   try {
     const l = loadLedger();
     l.usd += u.usd ?? 0;
@@ -118,6 +132,9 @@ export function recordSpend(u: Usage, kind: "build" | "utility"): void {
     if (kind === "build") l.builds += 1;
     localStorage.setItem(LS, JSON.stringify(l));
   } catch { /* private mode */ }
+  for (const fn of spendListeners) {
+    try { fn(u, kind, provider); } catch { /* a broken listener must not lose the ledger write */ }
+  }
 }
 
 export function resetLedger(): void {

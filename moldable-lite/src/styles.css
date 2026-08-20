@@ -1447,7 +1447,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   transition: color var(--ms-ui) var(--ease-ui), border-color var(--ms-ui) var(--ease-ui);
 }
 .balance-chip svg { flex: 0 0 auto; opacity: .8; }
-.balance-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.balance-n { font-family: var(--font-mono); font-variant-numeric: tabular-nums; animation: bal-tick .5s ease-out; }
+/* One brief emphasis when the figure changes — money left, the counter moved. Colour
+   only, no motion, so it reads under prefers-reduced-motion rules too (colour is not
+   motion) and never jiggles the row. */
+@keyframes bal-tick { from { color: var(--accent-d); } to { color: inherit; } }
 .balance-chip:hover { color: var(--ink2); border-color: var(--bord-strong); }
 .balance-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* Running out is the one state worth colouring — and it warms rather than alarms,

@@ -20,6 +20,11 @@ The app lives in `moldable-lite/`; it deploys to GitHub Pages from `main`.
   from code reading alone. Then run the production build.
 - Keep chat replies concise and plain-language; Jerry is a designer-developer
   who wants outcomes and honest caveats, not walls of process.
+- **Summaries are numbered/bulleted lists in plain English** (aim for
+  sixth-grade reading level). Jerry knows HTML/CSS and some JavaScript; he does
+  not live in build tooling, LLM plumbing, or CAD kernels — say what changed and
+  why it matters to him, not how clever the plumbing is. Every HANDOFF.md entry
+  ends with an "In plain words" bullet list doing the same.
 - Never put AI model identifiers in commits, code comments, or anything pushed.
 - **Anti-slop guardrail**: before designing/restyling UI, writing microcopy, or
   reviewing code, apply `skills/no-ai-slop/SKILL.md` — and run its review pass

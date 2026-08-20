@@ -917,6 +917,88 @@ The audit's top three findings, all "connect what already exists":
   in the export gate with the why on the button; the ops chain remembers so it
   can't stack.
 
+## How to use /design in Claude Code (written for Jerry)
+
+/design makes picture mockups of your app's screens that you can edit by hand —
+like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
+
+**Making a design:**
+1. In Claude Code, type `/design` and describe what you want. Example:
+   `/design the Launchpad in desktop, tablet and mobile sizes`.
+2. Claude reads the real app's code (colors, fonts, spacing) and draws artboards
+   that match it — not generic mockups.
+3. You get a link to a canvas page. Open it in your browser.
+
+**Editing in the canvas:**
+4. Click anything to select it — a properties panel opens on the right.
+5. Change colors, sizes, spacing, fonts there. Double-click text to retype it.
+6. Undo/redo work like normal (Ctrl+Z / Ctrl+Shift+Z). Pan and zoom the canvas
+   to move between artboards.
+7. Some canvases have little control knobs above the artboards (ours has
+   "State: First run / Returning" and a Dark toggle) — flip them to preview
+   different versions of the same screen.
+
+**Saving and getting it into the app:**
+8. Press **Save** in the canvas. Until you Save, edits live only on your screen.
+9. Saving updates the shared link — it does NOT touch the code.
+10. To bring your edits back: tell Claude "pull my canvas changes into the repo"
+    (paste the link if it's a new session). Claude reads the saved page and
+    updates the design files in git.
+11. To make the real app match: that's a separate ask — "make the real
+    Launchpad match the canvas". Keeping them separate means you can experiment
+    in the canvas without accidentally shipping it.
+
+**Watch out for:**
+- It's a research preview — it may change between Claude Code versions.
+- If you delete an artboard in the canvas, pulling changes back deletes it
+  from the repo too.
+- Each canvas is one link. Asking for a brand-new design makes a NEW link;
+  updating an existing one keeps the same link.
+
+## Build 486 — messages stop re-billing dead code, and the credits counter moves when money does
+
+- **trimOldPrograms (llm/extract.ts).** The history sent with every request carried the
+  full replicad program in each assistant turn, while the current program already travels
+  with the request (system-prompt build-log framing; verbatim in `editMsg` on the edit
+  path). A fifth edit re-billed four superseded copies — thousands of input tokens per
+  message, buying nothing. Older assistant code blocks are now a one-line "superseded"
+  note; the newest is kept on the full-regen path (it is the code being edited) and dropped
+  on the edit path (the user message carries it verbatim). User turns are never touched —
+  their fenced blocks are their message. The trimmed history is what gets recorded, so the
+  stored transcript stops growing by a program per turn too.
+
+- **The credits chip moves the moment money leaves.** `recordSpend` (the one door every
+  priced call walks through) now names its provider and notifies listeners; App subtracts
+  OpenRouter spends from the chip immediately, then reconciles with the provider's own
+  figure. OpenRouter's ledger lags a spend by minutes, so for 90s after one, a fetched
+  figure HIGHER than the displayed one is treated as stale rather than bounced back up.
+  The number plays a brief colour tick when it changes, so spending is visible.
+
+- **Found by an adversarial review pass, fixed before shipping:** a Discarded proposal
+  used to stay in the conversation as the newest program, so the next request built on
+  the change the user had just rejected (`discardPending` now drops that exchange); the
+  trimmed history was written BACK into memory, making the saving destructive — the
+  request now carries a trimmed copy while memory keeps the full one; a manual Refresh
+  is exempt from the lag guard, because "top up, come back, press refresh" lands inside
+  the window; the Settings spend meter uses the same guard as the chip instead of
+  contradicting it; the spend timestamp is persisted so a reload can't bounce the
+  number back up; and the optimistic subtraction is clamped at zero.
+
+- `harness/tokentrim-e2e.mjs` (14 checks): a build and two edits through the real UI,
+  asserting each request's messages carry at most ONE full program, that the edit still
+  works, and the trimmer's own rules (keepNewest, user code untouched, no mutation).
+  `harness/balance-live-e2e.mjs` (3 checks) intercepts openrouter.ai in-page: chip drops
+  without a poll, a stale poll doesn't bounce it, a genuinely fresh figure is accepted.
+
+**In plain words:**
+1. Every message you sent was secretly carrying every old version of your part's code.
+   You paid for all of them, every time. Now old versions are replaced with a short note,
+   and only the current code is sent. Long sessions get much cheaper per message.
+2. The credits number next to the model picker now drops the instant a message costs
+   you something, instead of waiting for OpenRouter to notice. It also refuses to jump
+   back up when OpenRouter's own counter is running behind.
+3. Both are covered by automatic tests that run the real app in a real browser.
+
 ## Build 485 — a reply that ran out of room stops looking like bad code
 
 Reported from a real session: a speaker cabinet failed to build twice on Claude Opus 5,

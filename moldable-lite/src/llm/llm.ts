@@ -199,7 +199,7 @@ export async function generateLlm(
   const outTok = seen.outTok ?? estimateTokens(out.length);
   const usd = seen.usd ?? costUSD(inTok, outTok, priceFor(s.provider, s.model));
   const usage: Usage = { inTok, outTok, usd, est: est && seen.usd == null };
-  recordSpend(usage, h.onToken ? "build" : "utility");
+  recordSpend(usage, h.onToken ? "build" : "utility", s.provider);
   h.onUsage?.({ ...usage, final: true });
   if (aborted) throw aborted;
   return out;

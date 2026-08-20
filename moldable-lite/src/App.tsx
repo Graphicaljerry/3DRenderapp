@@ -48,6 +48,7 @@ import { preflightExport, preflightSummary } from "./print/preflight";
 import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, scaleAboutBase } from "./print/resize";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject, trimOldPrograms } from "./llm/extract";
+import { isNoMainError } from "./worker/workerMessages";
 import { parseSpec } from "./cad/spec";
 import { extractParams, humanizeParam, type CadParams } from "./cad/params";
 import { EXAMPLE_SPEC, EXAMPLE_REPLICAD, IMPORT_PASSTHROUGH } from "./cad/example";
@@ -7267,7 +7268,7 @@ export default function App() {
       const stopped = stoppedRef.current || isAbort(err);
       setMessages((m) => m.map((x) => (x.id === placeholderId ? {
         ...x,
-        text: stopped ? "Stopped. Nothing was built — edit your request and send it again." : friendlyNet(String(err?.message ?? err)),
+        text: stopped ? "Stopped. Nothing was built — edit your request and send it again." : friendlyBuild(String(err?.message ?? err)),
         error: !stopped,
         streaming: false,
         thinking: thinkTrail() || undefined,
@@ -8729,6 +8730,21 @@ function keepNewestPhotos(msgs: ApiMsg[]): ApiMsg[] {
  *  hadn't finished, and told the reader nothing they could act on. */
 const CUT_OFF_MSG =
   "The model ran out of room before it finished writing the program — this part needs more code than it can produce in one reply. Ask for it in pieces (the shell first, then the cutouts), or drop a feature or two and add them once it builds.";
+
+/** The CAD kernel's no-main complaint, said to someone who did not write any code.
+ *
+ *  It reads as "the AI wrote a broken program", and that was usually false — the reply
+ *  carried the program AND a second code block (a recap of the parameters, most often),
+ *  and only one block reached the kernel. Extraction now picks the block that defines
+ *  main, so this is rare; when it still happens, say what to do instead of quoting a rule
+ *  about a function the reader never saw. */
+const NO_MAIN_MSG =
+  "The AI's reply came back without a finished program — the code it sent had nothing to build. Sending the same request again usually fixes it; if it keeps happening, ask for the part in simpler terms.";
+
+/** Turn a kernel error into something the person who typed a description can act on. */
+function friendlyBuild(msg: string): string {
+  return isNoMainError(msg) ? NO_MAIN_MSG : friendlyNet(msg);
+}
 
 /** Never show a bare "Failed to fetch" — but leave already-crafted messages alone. */
 function friendlyNet(msg: string): string {

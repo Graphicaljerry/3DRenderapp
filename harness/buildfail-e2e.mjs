@@ -68,8 +68,11 @@ const state = await page.evaluate(() => ({
   sendDisabled: document.querySelector(".composer .send")?.disabled ?? null,
 }));
 
+// "must define…" is the kernel's own wording, which the app now translates for the no-main
+// case — a reader who typed a description never wrote a main() to be told about. Either
+// phrasing counts here: this probe is about the failure REACHING the chat at all.
 check("the failure is reported IN the chat, not only on the canvas",
-  /must define|didn't build|couldn't build|failed|error/i.test(state.assistantText),
+  /must define|came back without a finished program|didn't build|couldn't build|failed|error/i.test(state.assistantText),
   state.assistantText.replace(/\n/g, " ").slice(0, 140) || "(no assistant text at all)");
 check("the user's own message survives", /BADCODE/i.test(state.bodyText));
 check("the app is idle again, not stuck mid-build", !state.stillWorking);

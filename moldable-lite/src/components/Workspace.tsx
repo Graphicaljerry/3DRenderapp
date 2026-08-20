@@ -7,6 +7,7 @@ import { BuildStage, type BuildProgress } from "./BuildStage";
 import type { Pin } from "../store/types";
 import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { BuildPlan } from "../llm/plan";
+import { paramUnit } from "../llm/plan";
 import { MATERIALS, DEFAULT_MATERIAL, DEFAULT_PRINT, DEFAULT_SPOOL, FILAMENT_SWATCHES, estimateFilament, materialById, fmtGrams, fmtMoney } from "../print/filament";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import { defectLines, needsRepair, DIAGNOSE_BUDGET_TRIANGLES, TINY_SHELL_MM3, type MeshDefects } from "../print/meshdoctor";
@@ -5802,9 +5803,9 @@ function PlanCard({ msgId, st, busy, api }: {
                       type="number"
                       value={prm.value}
                       onChange={(e) => setParamValue(i, Number(e.target.value))}
-                      aria-label={`Parameter ${i + 1} value, mm`}
+                      aria-label={`Parameter ${i + 1} value${paramUnit(prm.name) ? ", mm" : ""}`}
                     />
-                    <span className="plan-param-unit">mm</span>
+                    <span className="plan-param-unit">{paramUnit(prm.name)}</span>
                     <button
                       type="button"
                       className="plan-param-del"
@@ -5817,7 +5818,7 @@ function PlanCard({ msgId, st, busy, api }: {
                 ) : (
                   <>
                     <span className="plan-param-name-ro">{prm.name || "Untitled"}</span>
-                    <span className="plan-param-val-ro">{prm.value} mm</span>
+                    <span className="plan-param-val-ro">{prm.value}{paramUnit(prm.name) && " mm"}</span>
                   </>
                 )}
               </div>

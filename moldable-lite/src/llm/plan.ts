@@ -44,7 +44,7 @@ const SYS = [
   "- steps: 3-7 lines, each a concrete modelling action with its numbers (e.g. \"60 × 40 × 12 mm body, 3 mm corner radius\"). Build order.",
   "- assumptions: 2-5 lines, ONLY things the user did not say that you are deciding for them (wall thickness, tolerance, which way up it prints, a size you inferred). This is the most important field — be specific and numeric.",
   "- printNotes: 0-3 short lines on orientation, supports, wall thickness or fit clearances.",
-  "- parameters: 0-8 numeric dimensions worth leaving adjustable after the build (each becomes a live slider) — main sizes, wall thickness, hole/peg sizes, counts that resize the part. Skip anything already fully captured by size. Each one a plain label a non-engineer would recognise (e.g. \"Wall thickness\", not \"wallThickness\") plus its value in mm.",
+  "- parameters: 0-8 numeric dimensions worth leaving adjustable after the build (each becomes a live slider) — main sizes, wall thickness, hole/peg sizes, counts that resize the part. Skip anything already fully captured by size. Each one a plain label a non-engineer would recognise (e.g. \"Wall thickness\", not \"wallThickness\") plus its value — in mm for a length, a plain number for a count.",
   "- Plain language. No markdown, no preamble.",
   'Reply with JSON only: {"title":"...","summary":"...","size":{"x":0,"y":0,"z":0},"steps":["..."],"assumptions":["..."],"printNotes":["..."],"parameters":[{"name":"...","value":0}]}',
 ].join("\n");
@@ -130,6 +130,16 @@ export async function draftPlan(
 
 /** Fold an (optionally user-edited) plan back into the prompt the engine builds from.
     The plan IS the brief at that point — the original sentence rides along as intent. */
+/** Is this parameter a length, or a count?
+ *
+ *  The planner is explicitly invited to offer "counts that resize the part" — number of
+ *  drivers, number of knob holes — and every parameter was then labelled in millimetres.
+ *  "Number of drivers: 3 mm" is nonsense on the plan card and a unit the builder has to
+ *  ignore in the prompt. Read the label the planner wrote: counts announce themselves. */
+export function paramUnit(name: string): "mm" | "" {
+  return /\b(number|count|quantity|qty|how many)\b/i.test(name) ? "" : "mm";
+}
+
 export function planToPrompt(request: string, plan: BuildPlan): string {
   const lines = [
     request,
@@ -150,7 +160,7 @@ export function planToPrompt(request: string, plan: BuildPlan): string {
   if (plan.parameters?.length) {
     lines.push(
       "Parameters — put these exact values in defaultParams (pick a clear camelCase key for each label, e.g. \"Wall thickness\" -> wallThickness):",
-      ...plan.parameters.map((p) => `- ${p.name}: ${p.value} mm`),
+      ...plan.parameters.map((p) => `- ${p.name}: ${p.value}${paramUnit(p.name) && " mm"}`),
     );
   }
   return lines.join("\n");

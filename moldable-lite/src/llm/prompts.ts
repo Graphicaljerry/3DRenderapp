@@ -1,3 +1,5 @@
+import { isNoMainError } from "../worker/workerMessages";
+
 // System prompts for the two engines + repair-message builders for the self-heal loop.
 
 export const REPLICAD_SYSTEM_PROMPT = `You are Moldable, a parametric CAD assistant. Turn the user's description of a physical object into ONE replicad program that builds a single 3D-printable solid.
@@ -13,6 +15,7 @@ function main(replicad, params) {
 }
 \`\`\`
 ALWAYS start with \`const defaultParams = { ... }\`: the design's key dimensions as numeric mm values with descriptive names (the app turns them into live sliders). Merge them exactly as shown (\`const p = { ...defaultParams, ...params }\`) and use \`p.x\` everywhere — never hard-code a dimension twice. If the user asks to make something adjustable, be able to tune X, or add a parameter for X, that means add it (or promote a hard-coded number) to defaultParams under a clear name — that request is answered by a live slider appearing, not by prose describing the change.
+Never follow the program with a second fenced block — not a recap of defaultParams, not an example. Only one block is read.
 main MUST return a Shape (a Solid) or { shape }. Units = mm. Do NOT import/require/fetch — only use the \`replicad\` argument.
 When the user asks to change the previous design, return the FULL updated program (not a diff).
 Design for FDM: walls >= 1.2 mm, holes >= 3 mm diameter, one connected part, flat bottom on the bed, avoid overhangs steeper than 45 degrees. Use real-world dimensions for named objects.
@@ -219,6 +222,14 @@ export function hardwareFacts(userText: string): string {
 }
 
 export function replicadRepairMessage(err: { name: string; message: string; stack?: string }): string {
+  // No main() nearly always means the reply carried a SECOND code block — a recap of
+  // defaultParams, a fragment quoted back — and "fix your code" is the wrong thing to say
+  // about a program that was right. Ask for one block instead.
+  if (isNoMainError(err.message)) {
+    return `The code block I received had no top-level \`function main(replicad, params)\` in it.
+If your reply contained more than one fenced block — a recap of defaultParams, a fragment, an example — that is the cause: only ONE block comes through.
+Reply with exactly one \`\`\`js block containing the COMPLETE program (defaultParams, then main). No second block, no prose, no \`export\`.`;
+  }
   return `Your replicad code failed to build.
 Error: ${err.name}: ${err.message}
 ${err.stack ? "Stack:\n" + err.stack.slice(0, 800) + "\n" : ""}Fix the code and reply with ONLY the corrected single \`\`\`js block. Do not explain.`;

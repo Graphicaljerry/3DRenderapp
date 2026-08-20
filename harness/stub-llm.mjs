@@ -126,6 +126,20 @@ const server = createServer((req, res) => {
       }
       // "WIDER" = the same part with one number moved, so a probe can see the change
       // strip compute a real before/after rather than a fresh build's size-only case.
+      // "RECAPBLOCK" = the shape that actually broke a real build: a correct program,
+      // followed by a SECOND js block recapping defaultParams. Models do this whenever the
+      // ask ends "put these exact values in defaultParams". Extraction used to take the
+      // last block, so the kernel got the recap — valid JavaScript with no main() — and
+      // blamed the model for a program it had written correctly one block higher up.
+      if (/RECAPBLOCK/.test(body)) {
+        const reply = "Here is the part.\n\n```js\nconst defaultParams = { width: 62, depth: 41, thickness: 23 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane(\"XY\").extrude(p.thickness);\n}\n```\n\nParameters used:\n\n```js\nconst defaultParams = { width: 62, depth: 41, thickness: 23 };\n```";
+        res.write(frame({ choices: [{ delta: { content: reply } }] }));
+        res.write(frame({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1100, completion_tokens: 260, cost: 0.003 } }));
+        res.write("data: [DONE]\n\n");
+        res.end();
+        console.log(`[stub] ${hits} BUILD recap-block (${body.length}b)`);
+        return;
+      }
       // "BADCODE" = a reply the kernel will refuse: a js block with no main(). Exercises
       // the retry-then-give-up path, which is where a real session lost its whole reply.
       if (/BADCODE/.test(body)) {

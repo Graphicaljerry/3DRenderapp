@@ -955,6 +955,53 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 488 — a reply that also recaps its parameters stops failing the build
+
+The failure Jerry hit twice: `Your code must define \`function main(replicad, params) { ... }\`
+returning a Shape.` — 31k tokens and 481 credits spent to be told the AI wrote a broken
+program. It hadn't. It wrote a correct one and then recapped the parameters underneath.
+
+- **Extraction picks the block that defines `main`, not the last block.** A spec ending
+  "put these exact values in defaultParams" reliably gets back the program AND a second
+  ```js block listing the parameters. That recap is valid JavaScript with no `main()` in
+  it, so the kernel refused it and the retry re-sent the same shape to the same wall. The
+  fallback to "last block" is kept for the case the old rule existed for — a wrong first
+  attempt followed by a corrected one — and a probe asserts the later block still wins
+  when both define `main`.
+
+- **Module syntax is stripped instead of rejected.** The program is compiled with
+  `new Function`, which is a script: `export function main(...)` is a SyntaxError and
+  `module.exports = main` a ReferenceError. Both are a correct program wearing the wrong
+  wrapper. Stripped at the last gate before compiling, so it covers hand-edited code and
+  applied edit blocks too.
+
+- **The message says something a reader can act on.** The kernel's wording is right for
+  the code panel and wrong for someone who typed a description; the chat now says the
+  reply came back without a finished program and what to do next. The retry prompt is
+  pointed too — "if your reply contained more than one fenced block, that is the cause" —
+  and the system prompt tells the model up front not to send a recap block.
+
+- **Counts stop being measured in millimetres.** The planner is invited to offer "counts
+  that resize the part", and the plan card and the build prompt then labelled every
+  parameter mm: "Number of drivers: 3 mm". A label carrying number/count/quantity now
+  gets no unit, on the card and in the prompt.
+
+- `harness/mainblock-e2e.mjs` (20 checks): the recap shape builds through the real UI at
+  the size its program describes; a genuinely program-less reply is explained in plain
+  English; and fourteen extractor cases run through the real module against the worker's
+  own compile gate. Proven discriminating — with the block-choice rule removed, five
+  checks go red, including the live one.
+
+**In plain words:**
+1. When you asked for a part and listed the sizes, the AI often wrote the program and
+   then repeated the size list underneath. The app read the size list instead of the
+   program, decided it was broken, and charged you for a second try that failed the
+   same way. It now reads the right one.
+2. If the AI ever does send something with no program in it, the message says so in
+   normal words instead of quoting a rule about code you never wrote.
+3. The plan card used to say things like "Number of drivers: 3 mm". Counts no longer
+   get a millimetre label.
+
 ## Build 487 — the test suite stops failing for reasons that aren't bugs
 
 Three flaky probes, three different races. None of them was the app misbehaving; all

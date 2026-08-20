@@ -1,10 +1,45 @@
-// Tolerant fenced-block extraction for replicad code. Models sometimes emit a
-// partial/wrong block first and a corrected one after — take the LAST complete
-// fenced block, which is the most-corrected version.
+// Tolerant fenced-block extraction for replicad code.
+//
+// The block we want is the one that DEFINES main() — not simply the last one. Models
+// answering a spec that ends "put these exact values in defaultParams" habitually write
+// the program, then recap the parameter object in a second ```js block. Taking the last
+// block handed the kernel that recap: valid JavaScript with no main() in it, which came
+// back as "Your code must define `function main(replicad, params)`" — the kernel blaming
+// the model for a program it had in fact written correctly, one block higher up.
+//
+// Falling back to the last block preserves the original behaviour for the case that rule
+// was written for: a first, wrong attempt followed by a corrected one.
+const FENCE = /```[a-z]*[^\n]*\n([\s\S]*?)```/gi;
+
+/** Does this text define a top-level `main` the kernel can reach? Covers the declaration
+ *  forms models actually use; `export`-prefixed ones count, since stripModuleSyntax()
+ *  turns them into plain declarations before the code is compiled. */
+function definesMain(code: string): boolean {
+  return /^[ \t]*(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+main\s*\(/m.test(code)
+    || /^[ \t]*(?:export\s+)?(?:const|let|var)\s+main\s*=/m.test(code);
+}
+
+/** Remove ES-module and CommonJS syntax the sandbox cannot accept.
+ *
+ *  The kernel compiles the program with `new Function`, which is a script, not a module:
+ *  a leading `export` is a hard SyntaxError and `module.exports` is a ReferenceError. A
+ *  model that writes `export function main(...)` has written a perfectly good program and
+ *  was being failed on a keyword, so strip the wrapper rather than reject the part. */
+export function stripModuleSyntax(code: string): string {
+  return code
+    .replace(/^[ \t]*export\s+default\s+(?=(?:async\s+)?function\s+main\b|class\b)/gm, "")
+    .replace(/^[ \t]*export\s+(?=(?:async\s+)?function\b|(?:const|let|var|class)\b)/gm, "")
+    .replace(/^[ \t]*export\s+default\s+main\s*;?[ \t]*$/gm, "")
+    .replace(/^[ \t]*export\s*\{[^}]*\}\s*;?[ \t]*$/gm, "")
+    .replace(/^[ \t]*module\.exports\s*=[^\n;]*;?[ \t]*$/gm, "");
+}
+
 export function extractJsBlock(text: string): string {
-  const all = [...text.matchAll(/```(?:js|javascript|ts|typescript)?[^\n]*\n([\s\S]*?)```/gi)];
-  if (all.length) return all[all.length - 1][1].trim();
-  const open = text.match(/```(?:js|javascript)?\s*\n([\s\S]*)$/i);
+  const blocks = [...text.matchAll(FENCE)].map((m) => m[1].trim()).filter(Boolean);
+  const withMain = blocks.filter(definesMain);
+  if (withMain.length) return withMain[withMain.length - 1];
+  if (blocks.length) return blocks[blocks.length - 1];
+  const open = text.match(/```[a-z]*[^\n]*\n([\s\S]*)$/i);
   if (open) return open[1].trim();
   return text.trim();
 }

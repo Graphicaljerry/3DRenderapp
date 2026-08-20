@@ -58,3 +58,11 @@ export interface CadWorkerApi {
   build(code: string, params?: Record<string, number>, ops?: WorkerOp[], opts?: { probeLimit?: boolean; coarse?: boolean }): Promise<WorkerBuildResult>;
   exportBlob(code: string, format: ReplicadExportFormat, params?: Record<string, number>, ops?: WorkerOp[]): Promise<Blob>;
 }
+
+/** The kernel's message when a compiled program has no top-level main(), and the test for
+ *  it. Two callers outside the worker read this error and say something else about it —
+ *  the chat, which is talking to someone who wrote no code, and the repair prompt, which
+ *  has to tell the model what to send instead. Kept beside the wording so changing the
+ *  sentence cannot leave either of them silently matching nothing. */
+export const NO_MAIN_ERROR = "Your code must define `function main(replicad, params) { ... }` returning a Shape.";
+export const isNoMainError = (msg: string): boolean => /must define `?function main/i.test(msg);

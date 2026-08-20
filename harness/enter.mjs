@@ -34,7 +34,13 @@ export async function enterWorkspace(page, timeout = 60_000) {
       const door = page.locator("button").filter({ hasText: re }).first();
       if (await door.count()) { await door.click(); opened = true; break; }
     }
-    if (!opened) throw new Error("enterWorkspace: on the Launchpad but found no way into the workspace");
+    if (!opened) {
+      // Name what WAS on screen. This throw has fired twice under three-lane suite load
+      // and passed on the same probe run alone, so the next occurrence needs to say
+      // whether the Launchpad rendered a different set of buttons or none at all.
+      const seen = await page.evaluate(() => [...document.querySelectorAll("button")].map((b) => b.textContent?.trim()).filter(Boolean));
+      throw new Error(`enterWorkspace: on the Launchpad but found no way into the workspace. Buttons present: ${seen.length ? seen.join(" | ") : "(none)"}`);
+    }
   }
   // `.topbar` exists one commit before its buttons do, and callers click Templates or
   // Library on the very next line — returning early made those clicks land on nothing and

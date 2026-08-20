@@ -5,6 +5,8 @@ import { setOC } from "replicad";
 import { expose, transfer } from "comlink";
 import { makeThread } from "./threads";
 import type { CadWorkerApi, WorkerBuildResult, ReplicadExportFormat, FaceMesh, RawFaceMesh, WorkerOp } from "./workerMessages";
+import { NO_MAIN_ERROR } from "./workerMessages";
+import { stripModuleSyntax } from "../llm/extract";
 
 // ---- OCCT boot. locateFile MUST return the ?url import so emscripten fetches the hashed wasm. ----
 let ocReady: Promise<void> | null = null;
@@ -81,8 +83,15 @@ function meshOptsFor(shape: unknown, diag: number): { tolerance: number; angular
  * Some models emit a stray `let main;` / `var main;` alongside `function main(...)`
  * — an instant "Identifier 'main' has already been declared". Strip the bare
  * re-declaration when a function main exists.
+ *
+ * Module syntax goes the same way: the program is compiled with `new Function`, which is
+ * a script, so `export function main(...)` is a SyntaxError and `module.exports = main`
+ * a ReferenceError. Both are a correct program wearing the wrong wrapper. Done here, at
+ * the last gate before compiling, so it covers hand-edited code and applied edit blocks
+ * as well as a fresh generation.
  */
 function sanitize(code: string): string {
+  code = stripModuleSyntax(code);
   if (/function\s+main\s*\(/.test(code)) {
     code = code.replace(/^\s*(?:let|var|const)\s+main\s*;?\s*$/gm, "");
   }
@@ -411,7 +420,7 @@ function runCode(rawCode: string, params?: Record<string, number>): any {
   const rc = Object.freeze({ ...replicad, makeThread: (o: Parameters<typeof makeThread>[1]) => makeThread(replicad, o) });
   const mainFn = factory(rc, undefined, undefined, undefined, undefined, undefined, undefined);
   if (typeof mainFn !== "function") {
-    throw new Error("Your code must define `function main(replicad, params) { ... }` returning a Shape.");
+    throw new Error(NO_MAIN_ERROR);
   }
   // NOTE: the imported shape is passed unfrozen — replicad shapes carry internal caches.
   // A CLONE goes in: user code may translate/rotate it, and replicad transforms delete

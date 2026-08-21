@@ -3553,3 +3553,7 @@ details.guide { margin-top: 10px; }
 /* The credit cost rides inside the button rather than in a separate line of fine print —
    a paid action should carry its price where the finger lands. */
 .dock button.ghost.sm em { font-style: normal; color: var(--subt); font-weight: 400; }
+
+/* Legal pages, beside the build tag: present everywhere, prominent nowhere. */
+.legal-link { font-size: var(--fs-tiny); color: var(--ink2); text-decoration: none; margin-left: 10px; opacity: .75; }
+.legal-link:hover { opacity: 1; text-decoration: underline; }

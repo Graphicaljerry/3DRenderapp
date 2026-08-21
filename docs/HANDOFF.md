@@ -955,6 +955,55 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 490 — security pass: the relay grows teeth, and the site grows a privacy policy
+
+Prompted by "what could get back to me as I scale". Findings first, fixes after; the
+worker's guards are covered by a 13-check Node test (`scratchpad` harness run against
+the real module), the markdown guard by a real React render test.
+
+- **The relay was an open proxy.** `/prox/dl?url=…` fetched ANY address and piped it
+  back — anyone could bounce arbitrary traffic off the worker, spending its bandwidth
+  under its deployer's name. It now refuses everything except https URLs on the
+  generation providers' own CDNs (extensible via `DL_HOSTS`).
+
+- **Any website could embed the relay.** CORS answered `*` with a "lock this down"
+  comment nobody could act on. `ALLOW_ORIGINS` (env) now confines browser use to the
+  sites you name, echoing the matched origin; unset keeps the open dev behaviour.
+
+- **Endpoint spam.** `/prox/*` had no limits at all. Every path now meters per IP per
+  day (default 500, `PROX_DAILY`, KV-backed when bound); the house endpoint's cap now
+  shares the same metering, and one sponsored request can no longer buy an arbitrary
+  amount of output — bodies over 1 MB are refused and `max_tokens` is clamped
+  (`HOUSE_MAX_TOKENS`, default 4096). proxy/DEPLOY.md documents all four knobs.
+
+- **One real XSS hole closed.** Chat markdown built links from MODEL OUTPUT with no
+  scheme check, so a generated `[click me](javascript:…)` ran code on click. Only
+  http(s) URLs become links now; anything else renders as plain text.
+
+- **Privacy policy and Terms of Use exist now** — `/privacy.html` and `/terms.html`,
+  static pages linked beside the version tag on the Launchpad. Written to match how the
+  app actually works (keys and designs stay on the device; sync stores projects, never
+  keys; no analytics) and to carry the load-bearing scaling language: AI output is not
+  human-reviewed, verify before printing, no safety-critical use, no warranty, liability
+  capped. A template to have reviewed properly when the app takes money — not legal advice.
+
+- **Reviewed and fine as-is:** chat renders through React elements (no innerHTML
+  anywhere); API keys live only in localStorage and are sent only to their own provider
+  — `sanitizeProject` keeps them (and photos/blobs) out of cloud sync; no secrets in the
+  repo (the Supabase anon key is public by design, RLS scopes every row); generated CAD
+  code runs in the worker with network globals shadowed — a determined payload could
+  still reach same-origin fetch, but the blast radius is the user's own browser.
+
+**In plain words:**
+1. Your relay could be used by strangers as a free traffic bouncer, from any website,
+   with no limits. It now only talks to your site, only fetches model files from the
+   real providers, and cuts every IP off after a daily allowance.
+2. A malicious AI reply could have planted a booby-trapped link in the chat. Not any more.
+3. The site now has a real Privacy page and Terms page, linked on the front screen.
+   The Terms carry the sentences that protect you as you scale: check sizes before
+   printing, no safety-critical parts, no warranty. Have a lawyer look at them before
+   you charge money.
+
 ## Build 489 — the five accuracy fixes: the part is the size you asked for, and your work survives
 
 The reliability audit's top five items (see the session's roadmap), shipped together.

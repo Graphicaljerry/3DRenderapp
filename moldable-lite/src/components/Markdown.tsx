@@ -17,7 +17,10 @@ function inline(text: string, keyBase: string): ReactNode[] {
     if (m[1]) out.push(<code key={key}>{m[1].slice(1, -1)}</code>);
     else if (m[2]) out.push(<b key={key}>{m[2].slice(2, -2)}</b>);
     else if (m[3]) out.push(<i key={key}>{m[3].slice(1, -1)}</i>);
-    else if (m[4]) out.push(<a key={key} href={m[6]} target="_blank" rel="noopener noreferrer">{m[5]}</a>);
+    // Only web links become links. The href comes out of MODEL OUTPUT, and a
+    // javascript: URL here would run in the app the moment someone clicked it.
+    else if (m[4] && /^https?:\/\//i.test(m[6])) out.push(<a key={key} href={m[6]} target="_blank" rel="noopener noreferrer">{m[5]}</a>);
+    else if (m[4]) out.push(m[5]);
     last = re.lastIndex;
   }
   if (last < text.length) out.push(text.slice(last));

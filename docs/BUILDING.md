@@ -138,3 +138,6 @@ on both.
 - `moldable-lite/README.md` — full architecture & feature notes
 - `docs/HANDOFF.md` — session-to-session state and roadmap
 - `docs/PLAN.md`, `docs/COMMERCIALIZATION.md` — product direction
+
+- **Relay abuse guards** (public deploys): set `ALLOW_ORIGINS` to your site, bind `HOUSE_KV`, tune `PROX_DAILY` / `HOUSE_MAX_TOKENS` / `DL_HOSTS` — see proxy/DEPLOY.md → "Abuse guards".
+- **Legal pages**: `moldable-lite/public/privacy.html` + `terms.html`, linked beside the Launchpad version tag.

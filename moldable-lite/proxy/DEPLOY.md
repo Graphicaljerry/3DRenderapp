@@ -75,3 +75,20 @@ disabled and the option disappears from the app on next load.
 - The same relay also unlocks **Meshy**, **fal (Rodin, Hunyuan 3D Pro)** and
   **Replicate**, plus acts as a CORS fallback for the Precise-mode AI providers.
 - Running locally? You don't need any of this — `npm run dev` has the relay built in.
+
+## Abuse guards (set these when the site is public)
+
+The worker ships with teeth, but two of them only bite once configured:
+
+- `ALLOW_ORIGINS` — comma list of the sites allowed to use the relay from a browser,
+  e.g. `https://graphicaljerry.github.io`. Unset = any site may embed your relay.
+- `PROX_DAILY` — requests per IP per day on `/prox/*` (default 500, `0` disables).
+- `HOUSE_MAX_TOKENS` — per-request output cap on the sponsored endpoint (default 4096).
+- `DL_HOSTS` — extra host suffixes `/prox/dl` may fetch from (it is allowlisted to the
+  generation providers' CDNs; extend only if a provider moves its files).
+- Bind a KV namespace as `HOUSE_KV` to make the per-IP caps global instead of
+  per-isolate best effort:
+  `wrangler kv namespace create HOUSE_KV` then add the binding to wrangler.toml.
+
+Set vars with `wrangler deploy ... --var ALLOW_ORIGINS:https://your.site` or in the
+Cloudflare dashboard under the worker's Settings → Variables.

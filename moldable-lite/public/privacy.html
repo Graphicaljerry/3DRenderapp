@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy — Moldable</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; background: #fff; color: #1a1d1c; font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) { body { background: #101312; color: #e6ebe9; } a { color: #4cc79a; } }
+  main { max-width: 680px; margin: 0 auto; padding: 48px 24px 80px; }
+  h1 { font-size: 1.8rem; letter-spacing: -.02em; margin: 0 0 4px; }
+  h2 { font-size: 1.1rem; margin: 32px 0 8px; }
+  p, li { color: inherit; opacity: .92; }
+  .date { opacity: .6; font-size: .85rem; }
+  a { color: #10855c; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Privacy</h1>
+  <p class="date">Last updated: 21 August 2026</p>
+
+  <p>Moldable is a local-first app. The short version: <b>your designs, chats, photos and
+  API keys live in your own browser</b>, and the app works without an account.</p>
+
+  <h2>What stays on your device</h2>
+  <ul>
+    <li><b>API keys</b> you paste into Settings are stored in your browser's local storage
+    on your device. They are sent only to the AI provider they belong to (or through the
+    relay to that provider, unread and unstored). They are never synced to our servers.</li>
+    <li><b>Projects, chat history, photos and models</b> are stored in your browser
+    (localStorage and IndexedDB) unless you sign in and sync.</li>
+  </ul>
+
+  <h2>What leaves your device</h2>
+  <ul>
+    <li><b>Your prompts and attached images</b> are sent to the AI provider you configured
+    (for example Anthropic, Google, OpenRouter, a mesh-generation service) so it can
+    generate your model. Their handling of that data is governed by their own privacy
+    policies. You choose the provider; we don't see this traffic.</li>
+    <li><b>If you sign in to sync</b>, your projects (designs, chat transcripts, small
+    thumbnails — not your API keys, not full-resolution photos) are stored with our
+    database provider (Supabase) under your account, so your other devices can load them.
+    Your email address is used to operate your account.</li>
+    <li><b>The optional relay</b> (a small proxy that some generation providers require in
+    a browser) forwards your requests to the provider. It does not store your keys or
+    your content.</li>
+  </ul>
+
+  <h2>What we don't do</h2>
+  <ul>
+    <li>No analytics, no tracking pixels, no advertising, no sale of data.</li>
+    <li>We don't train AI models on your designs.</li>
+    <li>We can't read the API keys you use — they never reach a server we keep data on.</li>
+  </ul>
+
+  <h2>Deleting your data</h2>
+  <p>Signed out: clearing this site's data in your browser removes everything. Signed in:
+  deleting projects in the app deletes them from sync too; to close your account entirely,
+  contact us and we'll remove it.</p>
+
+  <h2>Contact</h2>
+  <p>Questions: <a href="mailto:graphicaljerry@gmail.com">graphicaljerry@gmail.com</a></p>
+
+  <p><a href="./terms.html">Terms of Use</a> · <a href="./">Back to Moldable</a></p>
+</main>
+</body>
+</html>

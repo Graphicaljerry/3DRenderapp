@@ -9690,6 +9690,11 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
           >
             v{__BUILD_STAMP__}
           </span>
+          {/* The legal pair lives beside the version tag — always on screen, out of the
+              way, and on the one screen every visitor passes through. Static pages, so
+              they open even when the app itself won't. */}
+          <a className="legal-link" href={`${import.meta.env.BASE_URL}privacy.html`} target="_blank" rel="noopener">Privacy</a>
+          <a className="legal-link" href={`${import.meta.env.BASE_URL}terms.html`} target="_blank" rel="noopener">Terms</a>
         </div>
         <div className="launch-top-right">
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? <IconSun /> : <IconMoon />}</button>

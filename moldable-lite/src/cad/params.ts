@@ -4,19 +4,45 @@
 export type CadParams = Record<string, number>;
 
 export function extractParams(code: string): CadParams | null {
-  const m = code.match(/const\s+defaultParams\s*=\s*\{([\s\S]*?)\}/);
-  if (!m) return null;
+  const start = code.search(/const\s+defaultParams\s*=\s*\{/);
+  if (start < 0) return null;
+  // Brace-balance to the object's true end. The old lazy `\{([\s\S]*?)\}` stopped at the
+  // FIRST close brace, so `hole: { dia: 3.4 }, height: 40` silently lost `height` — and
+  // everything after the nested object.
+  const open = code.indexOf("{", start);
+  let depth = 0;
+  let end = -1;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === "{") depth++;
+    else if (code[i] === "}" && --depth === 0) { end = i; break; }
+  }
+  if (end < 0) return null;
+  // Comments go first: `wall: 3, // minimum printable wall: 1.2` read the 1.2 out of the
+  // comment as a parameter named `wall` — a value the code never uses, forced into the
+  // solid the first time any slider moved (a commit used to send the whole map).
+  const body = code.slice(open + 1, end).replace(/\/\/[^\n]*|\/\*[\s\S]*?\*\//g, "");
+
   const out: CadParams = {};
-  // Full JS number syntax. The old pattern stopped at the mantissa, so `tolerance: 1e-3`
-  // was read as 1 — a thousandfold error that then rode along on every later adjustment
-  // (a commit sends the WHOLE map), silently reshaping the part. A leading-dot literal
-  // (`.5`) was skipped entirely and the row never appeared.
-  const re = /(\w+)\s*:\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)/g;
-  let mm: RegExpExecArray | null;
-  while ((mm = re.exec(m[1]))) {
+  // Depth-0 entries only, each one either a clean numeric literal or skipped whole.
+  // `half: 60 / 2` used to be read as 60 while the code computes 30; `hole: { dia: 3.4 }`
+  // leaked `dia` as a top-level parameter main() never reads. A parameter the app cannot
+  // read exactly gets no slider — no slider beats a wrong one.
+  const NUM = /^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/;
+  let d = 0;
+  let entry = "";
+  const take = (raw: string) => {
+    const mm = /^\s*(\w+)\s*:\s*([\s\S]*?)\s*$/.exec(raw);
+    if (!mm || !NUM.test(mm[2])) return;
     const n = parseFloat(mm[2]);
     if (Number.isFinite(n)) out[mm[1]] = n;
+  };
+  for (const ch of body) {
+    if (ch === "{" || ch === "[" || ch === "(") d++;
+    else if (ch === "}" || ch === "]" || ch === ")") d--;
+    else if (ch === "," && d === 0) { take(entry); entry = ""; continue; }
+    entry += ch;
   }
+  take(entry);
   return Object.keys(out).length ? out : null;
 }
 

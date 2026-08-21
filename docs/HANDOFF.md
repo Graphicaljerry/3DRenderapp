@@ -955,6 +955,68 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 489 — the five accuracy fixes: the part is the size you asked for, and your work survives
+
+The reliability audit's top five items (see the session's roadmap), shipped together.
+`harness/accuracy-e2e.mjs` (13 checks) drives all five through the real UI; removing the
+fixes turns five specific checks red, so the probe is proven discriminating.
+
+- **Rebuilds carry your work (audit item 1).** The full-regeneration path and the Code
+  tab's Re-run built from bare code: committed slider values reverted and every drilled
+  hole, magnet pocket and drag fillet was deleted — then baked into the version, with
+  only "Updated the model" on screen. Both now carry `params` (same keep-rule as the
+  edit fast path: a value survives only where the AI left that default alone) and the op
+  chain. If the ops can't follow a reshaped part, they are shed with an honest note and
+  undo brings them back — never fed to the model as if the code were wrong. Re-run also
+  re-seeds the chat history, so the next AI request sees the program actually on screen.
+
+- **A dimension check after every AI build (item 2, phase A).** `src/lib/dimAudit.ts`
+  pulls every explicit length out of the request (mm/cm/inches), and if a figure appears
+  nowhere — not in the overall size, not in a parameter, not as a literal in the program —
+  the reply says so: "⚠ You asked for 75 mm and I don't see it anywhere in the result."
+  A caution, not a gate: figures honoured as a param or a literal (hole spacing) stay
+  quiet, so it doesn't cry wolf on clearances.
+
+- **extractParams refuses ambiguity (item 3).** It brace-balances instead of stopping at
+  the first `}`, strips comments first, and skips computed values and nested objects —
+  `half: 60 / 2` no longer reads as 60, a comment's number is no longer a parameter, and
+  `hole: { dia: 3.4 }` neither loses the keys after it nor leaks `dia` as a slider. No
+  slider beats a wrong one. And commits now send ONLY the keys that differ from the
+  code's own defaults, so a misread value can no longer be forced into the solid by
+  touching an unrelated slider.
+
+- **True micrometre measurement (item 4).** The worker rounded every dimension to 0.1 mm
+  before anything downstream could check it, and used OCCT's padded bounding box (up to
+  0.014 mm over on curved parts — the reason exported STLs floated above the bed).
+  It now measures with `BRepBndLib.AddOptimal` (true surface extrema), reports at 1 µm,
+  and drops parts to the bed from the tight box. Chat and statusbar round to 0.01 at
+  display, so "60 × 40 × 12" still reads clean.
+
+- **Part fit does something (item 5).** The loose/snug/press control was shown on every
+  Precise build but only reached the model in the guided "fix a broken part" flow. It
+  now rides on every Precise build, with a new guard sentence so a part with no mating
+  features doesn't grow a pointless clearance slider.
+
+- **Found on the way: the plan/questions ping-pong.** With plan mode on (the default),
+  "Skip the plan" → "Build what I asked for" raised a FRESH plan card, whose skip raised
+  fresh questions — forever, burning a utility call per bounce, on exactly the first
+  part of a fresh chat. `buildFromClarify` now passes `skipPlan` too.
+
+**In plain words:**
+1. When the AI rewrote your part the long way round, it used to throw away your slider
+   changes and every hole and pocket you'd added by hand — silently. Now they ride along,
+   and if one truly can't fit the new shape, the app says so and undo brings it back.
+2. If you ask for 75 mm and the part comes back without a 75 anywhere, the reply now
+   warns you instead of announcing the wrong size confidently.
+3. Some sliders used to show numbers the code never used — and touching any slider
+   pushed the wrong number into the real part. Those sliders no longer appear.
+4. The app now measures parts about a hundred times more precisely, and exported files
+   sit exactly on the print bed.
+5. The loose/snug/press "Part fit" choice actually reaches the AI now. Before, it only
+   worked in the "fix a broken part" flow — everywhere else it was decoration.
+6. Bonus bug: skipping the plan and then skipping the questions used to bounce the two
+   cards back and forth forever. Fixed.
+
 ## Build 488 — a reply that also recaps its parameters stops failing the build
 
 The failure Jerry hit twice: `Your code must define \`function main(replicad, params) { ... }\`

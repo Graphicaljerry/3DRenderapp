@@ -126,6 +126,43 @@ const server = createServer((req, res) => {
       }
       // "WIDER" = the same part with one number moved, so a probe can see the change
       // strip compute a real before/after rather than a fresh build's size-only case.
+      // "REGENPATH" = kill the edit fast path so the app falls through to the full
+      // regeneration loop — the path that used to rebuild with no params and no ops.
+      // Only the EDIT-MODE request carries the SEARCH/REPLACE instruction, so keying on
+      // it fails exactly that one request; the regen retry that follows (same keyword,
+      // no edit addendum) is answered by the normal fixtures below.
+      if (/REGENPATH/.test(body) && /SEARCH\/REPLACE blocks only \(see EDIT MODE\)/.test(body)) {
+        // The SSE headers are already written by this point, so a status code can't be
+        // sent — kill the socket instead. The client sees a dropped stream, the edit
+        // path throws, and the app falls through to the regeneration loop.
+        console.log(`[stub] ${hits} EDIT-PATH aborted (regen probe)`);
+        res.destroy();
+        return;
+      }
+      // "SHORTPART" = a clean build at the WRONG size: the request says 75 mm wide, the
+      // program builds 40. Exercises the dimension audit — before it, this was reported
+      // in the same confident tone as a correct build.
+      if (/SHORTPART/.test(body)) {
+        const code = "Here is the part.\n\n```js\nconst defaultParams = { width: 40, depth: 20, thickness: 5 };\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane(\"XY\").extrude(p.thickness);\n}\n```";
+        res.write(frame({ choices: [{ delta: { content: code } }] }));
+        res.write(frame({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 900, completion_tokens: 180, cost: 0.002 } }));
+        res.write("data: [DONE]\n\n");
+        res.end();
+        console.log(`[stub] ${hits} BUILD short-part (${body.length}b)`);
+        return;
+      }
+      // "TRICKY" = a program whose defaultParams carries every extractParams trap at
+      // once: a computed value, a nested object, and a number inside a comment. The
+      // Adjust panel must show sliders only for the four clean numeric keys.
+      if (/TRICKY/.test(body)) {
+        const code = "Here is the part.\n\n```js\nconst defaultParams = {\n  width: 44, // sensible minimum: 12\n  half: 44 / 2,\n  hole: { dia: 3.4, depth: 5 },\n  depth: 22, height: 9, wall: 2.4,\n};\nfunction main(replicad, params) {\n  const p = { ...defaultParams, ...params };\n  const { drawRoundedRectangle } = replicad;\n  return drawRoundedRectangle(p.width, p.depth, 3).sketchOnPlane(\"XY\").extrude(p.height);\n}\n```";
+        res.write(frame({ choices: [{ delta: { content: code } }] }));
+        res.write(frame({ choices: [{ delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 900, completion_tokens: 210, cost: 0.002 } }));
+        res.write("data: [DONE]\n\n");
+        res.end();
+        console.log(`[stub] ${hits} BUILD tricky (${body.length}b)`);
+        return;
+      }
       // "RECAPBLOCK" = the shape that actually broke a real build: a correct program,
       // followed by a SECOND js block recapping defaultParams. Models do this whenever the
       // ask ends "put these exact values in defaultParams". Extraction used to take the

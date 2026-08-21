@@ -48,6 +48,7 @@ import { preflightExport, preflightSummary } from "./print/preflight";
 import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, scaleAboutBase } from "./print/resize";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject, trimOldPrograms } from "./llm/extract";
+import { dimensionAudit } from "./lib/dimAudit";
 import { isNoMainError } from "./worker/workerMessages";
 import { parseSpec } from "./cad/spec";
 import { extractParams, humanizeParam, type CadParams } from "./cad/params";
@@ -118,6 +119,14 @@ function scheduleIdle(fn: () => void): void {
  *  moved, and every named parameter whose value changed. Called only where a build
  *  actually produced geometry, so the size is always worth stating — on a FIRST build
  *  it is the headline fact and there is simply nothing it replaced. */
+/** Dims for prose: two decimals, trailing zeros dropped. The worker now reports true
+ *  micrometre extents (see dimsOf) so checks can see sub-0.1 errors; the chat still
+ *  reads "60 × 40 × 12", not "60.000000001". */
+function dimsStr(d: { x: number; y: number; z: number }): string {
+  const f = (n: number) => String(Math.round(n * 100) / 100);
+  return `${f(d.x)} × ${f(d.y)} × ${f(d.z)} mm`;
+}
+
 function describeChange(
   dims: { x: number; y: number; z: number },
   was?: { x: number; y: number; z: number },
@@ -3135,7 +3144,7 @@ export default function App() {
     const label = changed.map(humanizeParam).join(", ");
     const snap = {
       engine: res.kind,
-      summary: `Adjusted ${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`,
+      summary: `Adjusted ${label} — ${dimsStr(res.dims)}`,
       code: res.source.code,
       params: values,
       ops: res.source.ops,
@@ -3150,6 +3159,17 @@ export default function App() {
     persist(next);
     stampHeadThumb();
   }
+  /** Only the entries that differ from the code's own defaults. Every commit used to
+   *  send the WHOLE merged map as an override — so when extractParams misread a value
+   *  (a computed default, a number in a comment), touching ANY slider forced the misread
+   *  number into the solid. Untouched keys now fall through to what the code computes,
+   *  which is the ground truth by definition. */
+  function paramOverrides(v: CadParams): CadParams | undefined {
+    const defs = cadDefaults ?? {};
+    const out: CadParams = {};
+    for (const [k, val] of Object.entries(v)) if (defs[k] !== val) out[k] = val;
+    return Object.keys(out).length ? out : undefined;
+  }
   /** Params whose value is a rounding/bevel size — the ones a shrinking part outgrows. */
   const RADIUS_PARAM_RE = /rad|fillet|chamfer|round|bevel/i;
   /** The #1 way an Adjust value "won't build": the user shrinks a dimension and a
@@ -3162,7 +3182,7 @@ export default function App() {
     if (!sel || !result || result.source.kind !== "code") return null;
     const src = result.source;
     const tryBuild = async (v: CadParams) => {
-      try { return await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops }); } catch { return null; }
+      try { return await sel.engine.build({ kind: "code", code: src.code, params: paramOverrides(v), ops: src.ops }); } catch { return null; }
     };
     // Only radii the user did NOT just type: their typed value is the intent, the
     // leftover radius is the obstacle. Biggest first — it's the likeliest blocker.
@@ -3203,7 +3223,7 @@ export default function App() {
     const idxs = ops.map((o, i) => (POINTY[o.type] ? i : -1)).filter((i) => i >= 0);
     if (!idxs.length) return null;
     const tryBuild = async (keep: (i: number) => boolean) => {
-      try { return await sel.engine.build({ kind: "code", code: src.code, params: values, ops: ops.filter((_, i) => keep(i)) }); } catch { return null; }
+      try { return await sel.engine.build({ kind: "code", code: src.code, params: paramOverrides(values), ops: ops.filter((_, i) => keep(i)) }); } catch { return null; }
     };
     const label = (i: number) => { const o = ops[i] as PointOp; return `${o.size} mm ${POINTY[o.type] ?? o.type}`; };
     // Newest first — the latest decoration is the likeliest to sit on moved geometry.
@@ -3242,7 +3262,7 @@ export default function App() {
     try {
       // ops MUST ride along: drilled holes and magnet pockets live in the op chain, and
       // rebuilding from code+params alone silently erased every one of them.
-      const res = await sel.engine.build({ kind: "code", code: result.source.code, params: values, ops: result.source.ops });
+      const res = await sel.engine.build({ kind: "code", code: result.source.code, params: paramOverrides(values), ops: result.source.ops });
       lastGoodParams.current = values;
       if (paramGen.current === gen) {
         applyResultNoCommit(res);
@@ -3369,7 +3389,7 @@ export default function App() {
         // preview: coarse mesh, and no limit-probing — an op that stops fitting at a
         // mid-drag value otherwise costs up to eight extra bisection rebuilds per tick
         // to produce an error this loop then throws away.
-        const res = await sel.engine.build({ kind: "code", code: src.code, params: v, ops: src.ops, preview: true });
+        const res = await sel.engine.build({ kind: "code", code: src.code, params: paramOverrides(v), ops: src.ops, preview: true });
         // Mark the mesh as a drag frame. `preview: true` above only ever reached the
         // WORKER (it picks coarse meshing); nothing stamped the BufferGeometry, so the
         // two consumers that already know how to skip work on a drag frame never fired:
@@ -3453,7 +3473,7 @@ export default function App() {
       // 0.25 mm diff tolerance across most of the surface — so affectedFaces saw
       // "everything moved", bailed to null, and the row went dark. That is why it hit
       // clean, rounded, heavily-edited models hardest.
-      const probe = await sel.engine.build({ kind: "code", code: src.code, params: { ...base, [key]: v + bump }, ops: src.ops, probe: true });
+      const probe = await sel.engine.build({ kind: "code", code: src.code, params: paramOverrides({ ...base, [key]: v + bump }), ops: src.ops, probe: true });
       if (seq !== peekSeq.current) return;   // pointer moved on — drop the stale result
       const { affectedFaces } = await import("./print/affected");
       // display = engine - recenter, so probe -> base frame is +rcProbe - rcBase.
@@ -3479,7 +3499,7 @@ export default function App() {
     if (!project || !result || result.source.kind !== "code") return;
     const next = appendVersion(project, {
       engine: result.kind === "replicad" ? "replicad" : "primitive",
-      summary: `Adjusted parameters — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm`,
+      summary: `Adjusted parameters — ${dimsStr(result.dims)}`,
       code: result.source.code,
       params: result.source.params,
       // appendVersion spreads the snapshot onto the PROJECT ROOT, so anything omitted
@@ -3908,11 +3928,11 @@ export default function App() {
         supportsStep: false,
         glb: geometryToSTL(geometry), // STL bytes; loadAnyMesh sniffs STL when re-opening
       };
-      applyResult(res, svgDraft.name, `${verb} ${svgDraft.name}.svg — ${dims.x} × ${dims.y} × ${dims.z} mm`, `svg ${svgDraft.name}`);
+      applyResult(res, svgDraft.name, `${verb} ${svgDraft.name}.svg — ${dimsStr(dims)}`, `svg ${svgDraft.name}`);
       setMode("generative");
       setMessages((m) => [
         ...m,
-        { id: mid(), ts: Date.now(), role: "assistant", text: `${verb} ${svgDraft.name}.svg to a solid (${dims.x} × ${dims.y} × ${dims.z} mm). Check Printability, then export — or drop the SVG again for a different result.` },
+        { id: mid(), ts: Date.now(), role: "assistant", text: `${verb} ${svgDraft.name}.svg to a solid (${dimsStr(dims)}). Check Printability, then export — or drop the SVG again for a different result.` },
       ]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Couldn't build from that SVG: " + String(err?.message ?? err), error: true }]);
@@ -3989,7 +4009,7 @@ export default function App() {
           importKindRef.current = asCad;
           const res = await s.engine.build({ kind: "code", code: IMPORT_PASSTHROUGH, params: {} });
           const cleanName = f.name.replace(/\.(step|stp|stl|3mf)$/i, "");
-          applyResult(res, cleanName, `Imported ${f.name} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `import ${f.name}`);
+          applyResult(res, cleanName, `Imported ${f.name} — ${dimsStr(res.dims)}`, `import ${f.name}`);
           seedHistory("replicad", IMPORT_PASSTHROUGH, undefined);
           setMode("precise");
           const caveat = asCad === "stl"
@@ -4000,7 +4020,7 @@ export default function App() {
             {
               id: mid(),
               role: "assistant",
-              text: `Imported ${f.name} as an editable CAD solid${caveat} (${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
+              text: `Imported ${f.name} as an editable CAD solid${caveat} (${dimsStr(res.dims)}). Tell me what to change — “add two 5 mm mounting holes”, “cut a 20 mm slot through the middle” — or edit the code in Source.`,
             },
           ]);
           if (asCad === "stl" && !is3mf) {
@@ -4100,7 +4120,7 @@ export default function App() {
     setActivePinId(null);
     // Give the model a directive, localized instruction (not just coordinates):
     // what to change, where, and to keep the rest of the part intact.
-    const size = dims ? `The current part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
+    const size = dims ? `The current part measures about ${dimsStr(dims)}. ` : "";
     void send(
       `Modify the current CAD model: ${note}. ${size}` +
         `Apply this change at the marked spot — approximately x=${pin.x} mm, y=${pin.y} mm, z=${pin.z} mm, ` +
@@ -5104,7 +5124,7 @@ export default function App() {
     setSelectedFaces([]);
     setSelectMode(false);
     setFacesText("");
-    const size = dims ? `The whole part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
+    const size = dims ? `The whole part measures about ${dimsStr(dims)}. ` : "";
     const list = faces
       .map((f, i) => `  ${i + 1}. the ${f.label} centred at x=${f.cx}, y=${f.cy}, z=${f.cz} mm, facing (${f.nx}, ${f.ny}, ${f.nz}), about ${f.w} × ${f.h} mm`)
       .join("\n");
@@ -5139,7 +5159,7 @@ export default function App() {
     setSelectedFeature(null);
     setSelectMode(false);
     setFaceText("");
-    const size = dims ? `The whole part measures about ${dims.x} × ${dims.y} × ${dims.z} mm. ` : "";
+    const size = dims ? `The whole part measures about ${dimsStr(dims)}. ` : "";
     void send(
       `Modify the current CAD model: ${note}. ${size}${featureDirective(f)} ` +
         `(coordinates are Z-up, in millimetres). Leave the rest of the part unchanged and return the full updated code.`,
@@ -5202,7 +5222,7 @@ export default function App() {
         type === "extrude" ? `${o.size >= 0 ? "Extruded" : "Recessed"} the face by ${amount} mm`
         : type.includes("chamfer") ? `Chamfered the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${amount} mm`
         : `Rounded the ${f.kind === "face" ? "face" : f.kind === "vertex" ? "corner" : "edge"} by ${amount} mm`;
-      applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `direct ${type}`);
+      applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${dimsStr(res.dims)}`, `direct ${type}`);
       // Plain successes stay out of the chat (History records them); clamped sizes DO get
       // a message — the user asked for a number they didn't get.
       if (note) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `${label}${note}` }]);
@@ -5419,7 +5439,7 @@ export default function App() {
       setSeparated(false);
       const mergedIds = new Set(targets.map((t) => t.id));
       consumedLayers.current = mergedIds; // see consumedLayers: the snapshot runs first
-      applyResult(res, `${project?.name ?? "Model"} + ${names}`, `Merged ${names} into the model — ${dims.x} × ${dims.y} × ${dims.z} mm`, `merge ${names}`);
+      applyResult(res, `${project?.name ?? "Model"} + ${names}`, `Merged ${names} into the model — ${dimsStr(dims)}`, `merge ${names}`);
       consumedLayers.current = new Set();
       setAttachments((a) => a.filter((x) => !mergedIds.has(x.id)));
       setSelAttachIds([]);
@@ -5857,7 +5877,7 @@ export default function App() {
       applyResult(
         { ...result, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(result.meshXform, baked.applied) },
         project?.name ?? deriveName("Edited part"),
-        `${label} — ${baked.dims.x} × ${baked.dims.y} × ${baked.dims.z} mm`,
+        `${label} — ${dimsStr(baked.dims)}`,
         `transform ${commit.kind}`,
       );
       return;
@@ -5885,7 +5905,7 @@ export default function App() {
           : commit.kind === "rotate"
           ? `Rotated ${Math.round(commit.angleDeg)}°`
           : `Scaled to ${Math.round(commit.factor * 100)}%`;
-      applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, `transform ${commit.kind}`);
+      applyResult(res, project?.name ?? deriveName("Edited part"), `${label} — ${dimsStr(res.dims)}`, `transform ${commit.kind}`);
       // Routine transforms stay out of the chat — History and the status bar record them.
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]);
@@ -5912,7 +5932,7 @@ export default function App() {
       applyResult(
         { ...result, geometry: baked.geometry, dims: baked.dims, meshXform: composeXform(result.meshXform, baked.applied) },
         project?.name ?? "Model",
-        `Resized — ${baked.dims.x} × ${baked.dims.y} × ${baked.dims.z} mm`,
+        `Resized — ${dimsStr(baked.dims)}`,
         "resize",
       );
     }
@@ -5923,7 +5943,7 @@ export default function App() {
     if (!result) return;
     const f = fitToBedFactor(result.dims, printer.bed);
     if (f >= 1) {
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Already fits — ${result.dims.x} × ${result.dims.y} × ${result.dims.z} mm in a ${printer.bed.x} × ${printer.bed.y} × ${printer.bed.z} mm build volume.` }]);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Already fits — ${dimsStr(result.dims)} in a ${printer.bed.x} × ${printer.bed.y} × ${printer.bed.z} mm build volume.` }]);
       return;
     }
     await resizeModel([f, f, f]);
@@ -6190,7 +6210,11 @@ export default function App() {
     const c = messages.find((x) => x.id === msgId)?.clarify;
     if (!c || c.done) return;
     setMessages((m) => m.map((x) => (x.id === msgId && x.clarify ? { ...x, clarify: { ...x.clarify, done: true } } : x)));
-    void send(withAnswers ? applyAnswers(c.prompt, c.questions, c.answers) : c.prompt, undefined, { skipClarify: true });
+    // skipPlan too: reaching this card means the plan stage already had its turn (shown
+    // and skipped, or off). Without it, "Skip the plan" -> "Build what I asked for"
+    // raised a fresh plan card, whose skip raised fresh questions — the two cards
+    // ping-ponged forever on a fresh chat, burning a utility call per bounce.
+    void send(withAnswers ? applyAnswers(c.prompt, c.questions, c.answers) : c.prompt, undefined, { skipPlan: true, skipClarify: true });
   }
 
   /** The rewrite itself, with no opinion about which box it came from.
@@ -6727,7 +6751,7 @@ export default function App() {
         const usd = costUsd(provId, modelId) ?? 0;
         recordSpend(provId, modelId, usd); // paid runs land in the local spend ledger
         const spent = usd > 0 ? ` · ${costLabel(provId, modelId)}` : "";
-        const summary = `Generated a mesh — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm (${label}${spent})${fitNote}`;
+        const summary = `Generated a mesh — ${dimsStr(res.dims)} (${label}${spent})${fitNote}`;
         const how = await deliverResult(res, name, summary, p || "(image upload)", true);
         setMessages((m) => m.map((x) => (x.id === ph ? { ...x, text: summary + (how === "pending" ? " — it's on the canvas as a preview: Apply to keep it, or Discard." : ""), streaming: false, model: label } : x)));
       };
@@ -6955,10 +6979,11 @@ export default function App() {
       }
       setStage("Thinking…");
     }
-    // In the guided replacement flow, dial the requested FDM fit into the prompt so
-    // mating features get real clearance (and a `clearance` param to tune live).
-    // Researched dims + fit apply to BOTH the text and the vision message.
-    const fitLine = guided ? fitDirective(fit) : "";
+    // The Part fit control (loose/snug/press) is shown on every Precise build — so it
+    // applies to every Precise build. It used to reach the model only in the guided
+    // replacement flow, which made it a visible control that silently did nothing on
+    // the path everyone actually uses.
+    const fitLine = kind === "replicad" ? fitDirective(fit) : "";
     const factsBlock = researched ? `\n\n[Product measurements researched online — treat as ground truth]\n${researched}` : "";
     // If the request names a piece of standard hardware — a 608, an M5 nyloc, 2020
     // extrusion — hand over its published dimensions rather than letting the model
@@ -7156,12 +7181,15 @@ export default function App() {
           }
           const editParams = Object.keys(kept).length ? kept : undefined;
           const res = await sel.engine.build({ kind: "code", code: newCode, params: editParams, ops: currentOps });
-          const summary = askSummary(`Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, p);
+          const summary = askSummary(`Updated the model — ${dimsStr(res.dims)}`, p);
+          // Same size check as the regen path: a clean build at the wrong size must not
+          // read like a correct one.
+          const caution = dimensionAudit(p, res.dims, newCode);
           // The edit path already has both parameter maps in hand for the "keep the
           // user's adjustments" logic above, so the diff costs nothing extra here.
           const changed = describeChange(res.dims, prevDims, prevDefs, newDefs);
           const how = await deliverResult(res, project?.name ?? deriveName(p), summary, p);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), steps: closeStage(x), streaming: false, changed, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : "") + (caution ? `\n\n${caution}` : ""), steps: closeStage(x), streaming: false, changed, model: shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           // Record the resulting FULL code in history so the next turn has accurate context.
           apiHistory.current = [...apiHistory.current.slice(-16), { role: "user", content: pWithFacts }, { role: "assistant", content: "```js\n" + newCode + "\n```" }];
           ok = true;
@@ -7213,7 +7241,21 @@ export default function App() {
           let name = "";
           let summary = "";
           if (kind === "replicad") {
-            bi = { kind: "code", code: extractJsBlock(raw) };
+            // The user's committed slider values and every direct edit (drilled holes,
+            // magnet pockets, drag fillets, gizmo transforms) MUST ride along, exactly
+            // as they do on the edit fast path above. Rebuilding from bare code silently
+            // reverted the sliders and deleted the whole op chain, then baked the loss
+            // into the committed version — and said only "Updated the model".
+            const newCode = extractJsBlock(raw);
+            const newDefs = extractParams(newCode) ?? {};
+            const prevDefs = cadDefaults ?? {};
+            const kept: CadParams = {};
+            for (const [k, v] of Object.entries(result?.source.kind === "code" ? result.source.params ?? {} : {})) {
+              // Same rule as the edit path: a user's value survives only where the AI
+              // left that parameter's default alone — never over a value it just changed.
+              if (k in newDefs && newDefs[k] === prevDefs[k]) kept[k] = v;
+            }
+            bi = { kind: "code", code: newCode, params: Object.keys(kept).length ? kept : undefined, ops: currentOps?.length ? currentOps : undefined };
           } else {
             const spec = parseSpec(extractJsonObject(raw));
             bi = { kind: "spec", spec };
@@ -7221,7 +7263,19 @@ export default function App() {
             summary = spec.summary ?? spec.name;
           }
           pushStep("Building the solid in the CAD kernel…");
-          const res = await sel.engine.build(bi);
+          // If the carried ops can't apply to the reshaped part (an anchor now points
+          // into thin air), shed them and say so, instead of failing a build whose CODE
+          // is fine — or worse, feeding the op's error back to the model as if the
+          // program were wrong. The no-ops error, when both fail, IS the code's error.
+          let res: EngineResult;
+          let shedOps = false;
+          try {
+            res = await sel.engine.build(bi);
+          } catch (opErr) {
+            if (bi.kind !== "code" || !bi.ops?.length) throw opErr;
+            res = await sel.engine.build({ ...bi, ops: undefined });
+            shedOps = true;
+          }
           // And again on the way out. The kernel runs in a Comlink worker with no signal,
           // so a Stop pressed WHILE it is working cannot interrupt it — but it can still
           // decide the outcome. Delivering a part the user cancelled, and stamping it as a
@@ -7229,13 +7283,20 @@ export default function App() {
           // covers a Stop during the stream; this one covers the slower half.
           if (stoppedRef.current) throw new DOMException("Aborted", "AbortError");
           if (!name) name = deriveName(p);
-          if (!summary) summary = `Updated the model — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`;
+          if (!summary) summary = `Updated the model — ${dimsStr(res.dims)}`;
           summary = askSummary(summary, p);
+          // Did the build honour the sizes the user typed? A clean build at the wrong
+          // size used to be reported in the same confident tone as a correct one.
+          const caution = bi.kind === "code" ? dimensionAudit(p, res.dims, bi.code) : null;
+          const notes = [
+            shedOps ? "The holes, pockets or rounded edges you'd added by hand couldn't follow this change and were removed — undo brings them back." : "",
+            caution ?? "",
+          ].filter(Boolean).map((t) => `\n\n${t}`).join("");
           // A FRESH part has nothing to diff against, so this reports size only; an edit
           // that came the long way round (the fast path bailed) still gets its before.
           const changed = describeChange(res.dims, result?.dims, cadDefaults ?? undefined, bi.kind === "code" ? extractParams(bi.code) ?? undefined : undefined);
           const how = await deliverResult(res, name, summary, p, !!visionImage);
-          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : ""), steps: closeStage(x), streaming: false, changed, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : "") + notes, steps: closeStage(x), streaming: false, changed, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
           ok = true;
           break;
         } catch (err: any) {
@@ -7289,10 +7350,38 @@ export default function App() {
     setStatus("generating");
     try {
       const kind = sel.kind;
-      const bi: BuildInput = kind === "replicad" ? { kind: "code", code: edited } : { kind: "spec", spec: parseSpec(edited) };
-      const res = await sel.engine.build(bi);
-      applyResult(res, project?.name ?? deriveName("Edited part"), `Manual edit — ${res.dims.x} × ${res.dims.y} × ${res.dims.z} mm`, "(manual edit)");
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Re-ran your edited " + (kind === "replicad" ? "code" : "spec") + "." }]);
+      let bi: BuildInput;
+      if (kind === "replicad") {
+        // The op chain and committed slider values ride along here too — "Re-run" is
+        // advertised as the safe, zero-cost path, and it used to be the one that
+        // silently deleted every drilled hole and hand-set value. A slider value
+        // survives only where the edit left that parameter's default alone: a default
+        // the user deliberately changed in the code must win over a stale override.
+        const newDefs = extractParams(edited) ?? {};
+        const prevDefs = cadDefaults ?? {};
+        const kept: CadParams = {};
+        for (const [k, v] of Object.entries(result?.source.kind === "code" ? result.source.params ?? {} : {})) {
+          if (k in newDefs && newDefs[k] === prevDefs[k]) kept[k] = v;
+        }
+        const ops = result?.source.kind === "code" && result.source.ops?.length ? result.source.ops : undefined;
+        bi = { kind: "code", code: edited, params: Object.keys(kept).length ? kept : undefined, ops };
+      } else {
+        bi = { kind: "spec", spec: parseSpec(edited) };
+      }
+      let res: EngineResult;
+      let shedOps = false;
+      try {
+        res = await sel.engine.build(bi);
+      } catch (opErr) {
+        if (bi.kind !== "code" || !bi.ops?.length) throw opErr;
+        res = await sel.engine.build({ ...bi, ops: undefined });
+        shedOps = true;
+      }
+      applyResult(res, project?.name ?? deriveName("Edited part"), `Manual edit — ${dimsStr(res.dims)}`, "(manual edit)");
+      // The next AI request must see the program that is actually on screen, not the
+      // one from before the manual edit.
+      if (bi.kind === "code") seedHistory("replicad", bi.code);
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Re-ran your edited " + (kind === "replicad" ? "code" : "spec") + "." + (shedOps ? " The holes, pockets or rounded edges you'd added couldn't follow the edit and were removed — undo brings them back." : "") }]);
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: String(err?.message ?? err), error: true }]);
     } finally {

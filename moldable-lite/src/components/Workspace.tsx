@@ -2574,7 +2574,9 @@ function fmtDims(d: { x: number; y: number; z: number }, units: "mm" | "in"): st
     const c = (n: number) => (n / 25.4).toFixed(2);
     return `${c(d.x)} × ${c(d.y)} × ${c(d.z)} in`;
   }
-  return `${d.x} × ${d.y} × ${d.z} mm`;
+  // Two decimals, zeros dropped: dims now arrive at true micrometre precision.
+  const f = (n: number) => String(Math.round(n * 100) / 100);
+  return `${f(d.x)} × ${f(d.y)} × ${f(d.z)} mm`;
 }
 
 
@@ -3414,7 +3416,7 @@ export function Workspace(p: Props) {
                     )}
                     {p.geometry && <ColorSwatch label={p.projectName} color={p.partColors["model"]} onPick={(hex) => p.setPartColor("model", hex)} />}
                     {p.geometry && <PlateMenu value={p.plateFor("model")} count={p.plateCtl.count} names={p.plateCtl.names} onPick={(n) => p.plateCtl.assign("model", n)} onNewPlate={() => p.plateCtl.assign("model", p.plateCtl.add())} />}
-                    {p.dims && <span className="lp-sub">{p.dims.x}×{p.dims.y}×{p.dims.z}</span>}
+                    {p.dims && <span className="lp-sub">{[p.dims.x, p.dims.y, p.dims.z].map((n) => Math.round(n * 10) / 10).join("\u00d7")}</span>}
                   </div>
                   {p.geometry && (
                     <button className="ghost sm lp-keep" title="Freeze a copy of the model on its own build plate, beside the live one — then ask for the next variant without losing this version"
@@ -6841,7 +6843,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
         {pieces.map((pc, i) => (
           <div className="split-row" key={i}>
             <span className="split-swatch" style={{ background: pc.color }} />
-            <span className="split-label">Part {i + 1}<span className="fine"> · {pc.dims.x} × {pc.dims.y} × {pc.dims.z} mm{pc.plate != null ? ` · Plate ${pc.plate}` : ""}</span></span>
+            <span className="split-label">Part {i + 1}<span className="fine"> · {[pc.dims.x, pc.dims.y, pc.dims.z].map((n) => Math.round(n * 10) / 10).join(" \u00d7 ")} mm{pc.plate != null ? ` · Plate ${pc.plate}` : ""}</span></span>
             <button className="ghost sm" title={`Download part ${i + 1} as ${format.toUpperCase()}`} onClick={() => splitCtl.exportPiece(i, format)}>{format.toUpperCase()}</button>
           </div>
         ))}

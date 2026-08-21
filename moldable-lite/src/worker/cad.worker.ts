@@ -471,10 +471,35 @@ function buildShape(code: string, params: Record<string, number> | undefined, op
  *  MUST clone: replicad's translate() deletes its source, and `shape` is the build cache —
  *  without the clone the FIRST export killed the cache and every later export failed with
  *  "This object has been deleted" (a real user hit this exporting STL then STEP). */
+/** The TIGHT extents of a shape, via BRepBndLib.AddOptimal — true surface extrema.
+ *
+ *  replicad's own `.boundingBox` uses plain `BRepBndLib.Add`, whose box is padded: on a
+ *  drilled plate it measured 0.002 mm over, on a ⌀40 cylinder 0.014 mm. Every dimension
+ *  the app reports and the bed the exports sit on came from that inflated box. Falls
+ *  back to the padded box if the optimal call ever fails, rather than failing a build
+ *  over a measurement. */
+function tightBounds(shape: any): [number[], number[]] {
+  try {
+    const box = new OCH.Bnd_Box_1();
+    try {
+      OCH.BRepBndLib.AddOptimal(shape.wrapped, box, true, false);
+      const lo = box.CornerMin();
+      const hi = box.CornerMax();
+      const b: [number[], number[]] = [[lo.X(), lo.Y(), lo.Z()], [hi.X(), hi.Y(), hi.Z()]];
+      lo.delete(); hi.delete();
+      return b;
+    } finally {
+      box.delete();
+    }
+  } catch {
+    const bb = shape.boundingBox;
+    return [bb?.bounds?.[0] ?? bb?.min ?? [0, 0, 0], bb?.bounds?.[1] ?? bb?.max ?? [0, 0, 0]];
+  }
+}
+
 function dropToBed(shape: any): any {
   try {
-    const bb = shape.boundingBox;
-    const [min] = bb.bounds as [number[], number[]];
+    const [min] = tightBounds(shape);
     return shape.clone().translate([0, 0, -min[2]]);
   } catch {
     return shape; // unusual bbox API? export as-authored
@@ -482,10 +507,12 @@ function dropToBed(shape: any): any {
 }
 
 function dimsOf(shape: any): { x: number; y: number; z: number } {
-  const bb = shape.boundingBox;
-  const min = bb?.bounds?.[0] ?? bb?.min ?? [0, 0, 0];
-  const max = bb?.bounds?.[1] ?? bb?.max ?? [0, 0, 0];
-  const r = (n: number) => Math.round(n * 10) / 10;
+  const [min, max] = tightBounds(shape);
+  // A micrometre, not a tenth. The old 0.1 mm rounding lived HERE, inside the worker, so
+  // nothing downstream — the chat, a dimension check, a probe — could ever see an error
+  // smaller than 0.1 mm while the app talks about millimetre accuracy. 1e-3 exists only
+  // to absorb float noise off the true extrema; display formatting stays the UI's job.
+  const r = (n: number) => Math.round(n * 1000) / 1000;
   return { x: r(max[0] - min[0]), y: r(max[1] - min[1]), z: r(max[2] - min[2]) };
 }
 

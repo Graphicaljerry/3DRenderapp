@@ -189,7 +189,7 @@ export function fitDirective(fit: FitId): string {
   if (mm === undefined) return "";
   const how = fit === "loose" ? "loose / sliding" : fit === "press" ? "press / interference" : "snug";
   const cal = fitCalibration() != null ? " (calibrated to this user's printer)" : "";
-  return `\n\n[Fit: ${how} — target about ${mm} mm clearance${cal} on any mating/insert dimension (a hole over a shaft, a slot over a tab, a socket for a part). Expose it as a numeric \`clearance\` parameter = ${mm} and apply it only to those fitted features, not to cosmetic or screw-clearance holes.]`;
+  return `\n\n[Fit: ${how} — target about ${mm} mm clearance${cal} on any mating/insert dimension (a hole over a shaft, a slot over a tab, a socket for a part). Expose it as a numeric \`clearance\` parameter = ${mm} and apply it only to those fitted features, not to cosmetic or screw-clearance holes. If the part has no mating or insert features, ignore this note — do not invent a clearance parameter.]`;
 }
 
 /** Nominal dimensions for a piece of real hardware the request names, if it names one.

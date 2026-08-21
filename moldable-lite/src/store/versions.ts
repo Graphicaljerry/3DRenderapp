@@ -16,10 +16,20 @@ export interface Snapshot {
   glb?: Blob;
   meshXform?: number[];
   genSource?: GenSource;
-  surfFx?: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null };
-  texts?: TextLayerSnap[];
-  logos?: LogoLayerSnap[];
-  partColors?: Record<string, string>;
+  /** The decoration state — REQUIRED KEYS, `undefined` allowed as a value.
+   *
+   *  A version records the WHOLE model, and these four ride on every model no matter
+   *  which edit triggered the save. "A snapshot writer forgot a field" has shipped as a
+   *  fix seven separate times — each time as one more patched call site — because these
+   *  were optional: an omission compiled clean and silently erased the user's logos or
+   *  colours from the version AND (via the project-root spread) from the live project.
+   *  Required keys turn the eighth occurrence into a compile error: a writer must now
+   *  SAY `logos: undefined` to drop them, and can no longer simply forget. App.tsx's
+   *  decorSnap() is the way to say "whatever is live on the model right now". */
+  surfFx: { pattern: SurfFxSnap | null; texture: SurfFxSnap | null } | undefined;
+  texts: TextLayerSnap[] | undefined;
+  logos: LogoLayerSnap[] | undefined;
+  partColors: Record<string, string> | undefined;
 }
 
 /** Append a version capturing the new state AND advance HEAD to match. Pure.

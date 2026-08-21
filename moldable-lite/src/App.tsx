@@ -45,6 +45,7 @@ import { reloadIfStaleChunk } from "./lib/staleChunk";
 import { hasEditBlocks, parseEditBlocks, applyEditBlocks } from "./llm/editBlocks";
 import { diagnoseMesh, repairMeshForPrint, describeRepair, repairMessage, DIAGNOSE_BUDGET_TRIANGLES, type MeshDefects } from "./print/meshdoctor";
 import { preflightExport, preflightSummary } from "./print/preflight";
+import { buildReceipt } from "./print/receipt";
 import { bakeMeshTransform, composeXform, applyStoredMeshXform, fitToBedFactor, scaleAboutBase } from "./print/resize";
 import { blobToDataURL } from "./gen/util";
 import { extractJsBlock, extractJsonObject, trimOldPrograms } from "./llm/extract";
@@ -405,6 +406,14 @@ export default function App() {
   // Optional "house AI": if the site owner's relay sponsors a key, visitors get a
   // Built-in brain with zero setup. One health check at boot; null = feature off.
   const [house, setHouse] = useState<HouseStatus | null>(null);
+  // Ask the browser to treat this site's storage as persistent. Without it, everything
+  // — projects, history, keys — sits in "best effort" storage the browser may evict
+  // under pressure (Safari deletes it after 7 days without a visit). One call; the
+  // browser may say no (usually until the user has interacted more), so re-asked each
+  // boot. No prompt in Chromium; Firefox may show one.
+  useEffect(() => {
+    try { void navigator.storage?.persist?.(); } catch { /* very old browsers */ }
+  }, []);
   useEffect(() => {
     void fetchHouseStatus().then((st) => {
       if (!st) return;
@@ -2171,11 +2180,17 @@ export default function App() {
    *  write fails EVERY save, and a banner per keystroke is its own kind of broken. A
    *  save that succeeds re-arms the warning. */
   const saveFailedRef = useRef(false);
+  /** True while writes are failing. The chat message below says it once, but a chat
+   *  line scrolls away — a standing banner is what makes "your work is not being saved"
+   *  impossible to work under without noticing. Clears the moment a save lands. */
+  const [saveBroken, setSaveBroken] = useState(false);
   function autosave(next: Project) {
     void putProject(next).then((stored) => {
       saveFailedRef.current = false;
+      setSaveBroken(false);
       adoptStored(stored);
     }).catch((err: unknown) => {
+      setSaveBroken(true);
       if (saveFailedRef.current) return;
       saveFailedRef.current = true;
       setMessages((m) => [...m, {
@@ -3151,8 +3166,7 @@ export default function App() {
       importFile: importFileRef.current ?? undefined,
       importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: res.dims,
-      surfFx: fxForSnap(),
-      texts: textsForSnap(),
+      ...decorSnap(),
     };
     const next = coalesce ? replaceHeadVersion(proj, snap) : appendVersion(proj, snap);
     next.chat = projectRef.current?.chat ?? proj.chat;
@@ -3510,8 +3524,7 @@ export default function App() {
       importFile: importFileRef.current ?? undefined,
       importKind: importFileRef.current ? importKindRef.current : undefined,
       dims: result.dims,
-      surfFx: fxForSnap(),
-      texts: textsForSnap(),
+      ...decorSnap(),
     });
     persist(next);
     setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Saved the adjusted dimensions as a new version." }]);
@@ -5466,6 +5479,16 @@ export default function App() {
   surfFxRef.current = surfFx;
   /** The live fx for a version snapshot — undefined when plain, so old records stay small. */
   const fxForSnap = () => (surfFxRef.current.pattern || surfFxRef.current.texture ? { ...surfFxRef.current } : undefined);
+  /** The live decoration state, for a version snapshot: "whatever is on the model right
+   *  now". Snapshot's four decor keys are REQUIRED (see store/versions.ts), so a writer
+   *  that records some other kind of edit spreads this instead of hand-listing fields —
+   *  hand-listing is exactly how logos and colours kept falling out of saved versions. */
+  const decorSnap = () => ({
+    surfFx: fxForSnap(),
+    texts: textsForSnap(),
+    logos: logosForSnap(),
+    partColors: { ...partColorsRef.current },
+  });
   const [fxBusy, setFxBusy] = useState(false);
   /** An UNCOMMITTED surface spec the Pattern/Texture panel is trying on: the canvas
    *  shows it, History does not record it. Selecting a tile or dragging a slider sets
@@ -5800,8 +5823,10 @@ export default function App() {
       meshXform: head.meshXform,
       genSource: head.genSource,
       splitPieces: head.splitPieces,
+      ...decorSnap(),
+      // The pattern IS this edit — it overrides the live reading, which still holds the
+      // previous surface at this point.
       surfFx: next.pattern || next.texture ? next : undefined,
-      texts: textsForSnap(),
     });
     persist(snap);
     stampHeadThumb();
@@ -7420,6 +7445,12 @@ export default function App() {
         summary: t.summary,
         code: t.code,
         dims: res.dims,
+        // A template lands in a FRESH project — there are no decorations yet, and the
+        // required keys make that a statement instead of an oversight.
+        surfFx: undefined,
+        texts: undefined,
+        logos: undefined,
+        partColors: undefined,
       });
       projectRef.current = snap; // the chat-sync effect must append to THIS project, not spawn a shell
       persist(snap);
@@ -7468,7 +7499,18 @@ export default function App() {
         const named = made && made.parts > 1 ? ` All ${made.parts} objects are in the one file, named.` : "";
         const caveat = paintCaveat(format);
         const label = `Exported ${format.toUpperCase()}.`;
-        explainOnce("export", `${label} ${preflightSummary(pf)}${named}${caveat ? " " + caveat : ""}`, exportBrief(label, pf, caveat));
+        // The verification receipt: measured size next to the sizes the user asked for,
+        // at the moment the file leaves. Repeat exports of the same part fall back to
+        // the one-line brief — the receipt's facts have not changed.
+        const receipt = buildReceipt({
+          fileName: safeFileName(exportBase(), format),
+          pf,
+          userTexts: messagesRef.current.filter((x) => x.role === "user").map((x) => x.text).reverse(),
+          bed: printer.bed,
+          ops: pf.result.source.kind === "code" ? pf.result.source.ops : undefined,
+          fit,
+        });
+        explainOnce("export", `${receipt}${named ? `\n${named.trim()}` : ""}${caveat ? `\n${caveat}` : ""}`, exportBrief(label, pf, caveat));
       }
     } catch (err: any) {
       setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Export failed: " + String(err?.message ?? err), error: true }]);
@@ -8089,6 +8131,7 @@ export default function App() {
         activeKind={activeKind}
         genLabel={genEng.provider === "auto" ? "Auto — best engine" : getProvider(genEng.provider)?.label ?? genEng.provider}
         fellBack={sel?.fellBack ?? false}
+        saveBroken={saveBroken}
         ollamaOffer={
           ollamaInfo?.models.length && llm.provider !== "ollama" && !ollamaDismissed
             ? {
@@ -10892,8 +10935,28 @@ function SettingsModal({
                 </p>
               )}
               <p className="fine">
-                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and find the tightest hole the peg still fits into with a firm push. Count the notches above it: 0.05 mm for one notch, then +0.1 mm per extra notch. That is the gap per side.
+                Every printer squishes differently — measure yours once: build the <b>Tolerance test coupon</b> from Templates, print it, and push the peg into each hole. Then just tap the tightest hole it firmly fit — counting from the left:
               </p>
+              {/* The coupon's ladder, as buttons: hole i is cut at 0.05 + 0.1·i mm per
+                  side (the template's startClearance/step defaults). Tapping stores the
+                  same number the typed field does — the field stays for anyone who
+                  measured with calipers or reshaped the coupon's parameters. */}
+              <div className="fitpick" role="group" aria-label="Tightest hole the peg fit">
+                {[0, 1, 2, 3, 4, 5].map((i) => {
+                  const c = Math.round((0.05 + 0.1 * i) * 100) / 100;
+                  return (
+                    <button
+                      key={i}
+                      type="button"
+                      className={`chip${fitCal === c ? " active" : ""}`}
+                      title={`${c} mm per side`}
+                      onClick={() => { setFitCalState(c); setFitCalSaved(saveFitCalibration(c)); }}
+                    >
+                      Hole {i + 1}<span className="fitpick-mm"> · {c.toFixed(2)}</span>
+                    </button>
+                  );
+                })}
+              </div>
               <p className="fine">
                 It sets more than the Loose/Snug/Press chip. The difference between your number and the 0.2 mm average is how far your machine drifts from the charts, so it also shifts <b>every hole the app drills</b> — screw clearance and pilot holes, heat-set insert pockets, magnet pockets, and the sockets on cut pieces — off the book figure and onto your printer. Receipts say when a size includes it.
               </p>

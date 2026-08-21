@@ -3557,3 +3557,8 @@ details.guide { margin-top: 10px; }
 /* Legal pages, beside the build tag: present everywhere, prominent nowhere. */
 .legal-link { font-size: var(--fs-tiny); color: var(--ink2); text-decoration: none; margin-left: 10px; opacity: .75; }
 .legal-link:hover { opacity: 1; text-decoration: underline; }
+
+/* Fit calibration: the coupon's six holes as tappable answers. */
+.fitpick { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.fitpick .chip.active { background: var(--accent-weak, var(--ctl)); border-color: var(--accent-d); color: var(--accent-d); }
+.fitpick-mm { opacity: .65; font-variant-numeric: tabular-nums; }

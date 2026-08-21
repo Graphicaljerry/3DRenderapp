@@ -25,13 +25,25 @@ export function requestedMm(text: string): number[] {
   // "2 mm thick" is checkable, "2 mm thicker" is not.
   const REL_AFTER = /^\s*(?:wider|narrower|taller|shorter|longer|thicker|thinner|deeper|shallower|higher|lower|bigger|smaller|larger|more|less|extra|closer|further|apart from)\b/i;
   const REL_BEFORE = /\b(?:by|another|add|remove|grow|shrink|extend|reduce|widen|raise|lower|deepen|thicken)\s*$/i;
+  const toMm = (v: number, u: string) => (u.startsWith("c") ? v * 10 : u.startsWith("i") || u === '"' ? v * 25.4 : v);
+  // Dimension CHAINS first: in "30 x 20 x 5 mm" the one trailing unit belongs to every
+  // member, and reading only the 5 made the receipt confirm a third of what was asked.
+  const chain = /(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*[x×]\s*(\d+(?:\.\d+)?))?\s*(mm|millimet(?:er|re)s?|cm|centimet(?:er|re)s?|in\b|inch(?:es)?|")/gi;
+  const claimed: [number, number][] = [];
   let m: RegExpExecArray | null;
+  while ((m = chain.exec(text))) {
+    claimed.push([m.index, m.index + m[0].length]);
+    for (const g of [m[1], m[2], m[3]]) {
+      const v = parseFloat(g ?? "");
+      if (Number.isFinite(v) && v > 0) out.push(toMm(v, m[4].toLowerCase()));
+    }
+  }
   while ((m = re.exec(text))) {
+    if (claimed.some(([a, b]) => m!.index >= a && m!.index < b)) continue;
     const v = parseFloat(m[1]);
     if (!Number.isFinite(v) || v <= 0) continue;
     if (REL_AFTER.test(text.slice(m.index + m[0].length)) || REL_BEFORE.test(text.slice(0, m.index))) continue;
-    const u = m[2].toLowerCase();
-    out.push(u.startsWith("c") ? v * 10 : u.startsWith("i") || u === '"' ? v * 25.4 : v);
+    out.push(toMm(v, m[2].toLowerCase()));
   }
   return [...new Set(out.map((v) => Math.round(v * 1000) / 1000))];
 }

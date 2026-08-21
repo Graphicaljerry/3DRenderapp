@@ -2590,6 +2590,8 @@ interface Props {
   ollamaOffer: { count: number; model: string; onUse: (m: string) => void; onDismiss: () => void } | null;
   bootError?: string;
   authNotice?: string | null;
+  /** Writes to storage are currently failing — the model on screen is not being saved. */
+  saveBroken?: boolean;
   onDismissAuthNotice?: () => void;
   exportName?: string;
   onExportName?: (v: string) => void;
@@ -3598,6 +3600,12 @@ export function Workspace(p: Props) {
         </div>
       )}
 
+      {p.saveBroken && (
+        <div className="banner" role="alert">
+          <b>Changes aren't being saved.</b> The browser refused the write — usually a full disk or private
+          browsing. What's on screen still works; export your part before closing the tab.
+        </div>
+      )}
       {p.authNotice && (
         <div className="banner ok" role="status">
           {p.authNotice}

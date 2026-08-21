@@ -1302,6 +1302,17 @@ button:disabled { cursor: default; }
 .pocket-where { font-size: var(--fs-tiny); color: var(--subt); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .pocket-row .x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; flex: none; border: 0; background: transparent; color: var(--subt); border-radius: var(--r-sm); cursor: pointer; }
 .pocket-row .x:hover { background: var(--ctl); color: var(--ink); }
+/* Steps panel: the whole op recipe, in the dock. The pocket-row machinery draws the
+   rows; here they live in a full-height panel rather than a flyout, so the list
+   drops the flyout's height cap and each row gains its position number. */
+.steps-panel { display: flex; flex-direction: column; gap: 8px; }
+.steps-panel .pocket-list { max-height: none; }
+.steps-panel .pocket-where { margin-left: auto; }
+.steps-panel .step-n { flex: none; min-width: 14px; font-size: var(--fs-tiny); font-weight: 600; color: var(--subt); font-variant-numeric: tabular-nums; }
+/* Rows whose numbers live in their own tool aren't a click target — don't promise one. */
+.steps-panel .pocket-pick.noedit { cursor: default; }
+.steps-panel .pocket-row:not(.on) .pocket-pick.noedit:hover { background: transparent; }
+.steps-panel .fine, .steps-panel .modify-size { margin: 0; }
 .paint-swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: 7px; }
 .paint-swatches .psw { width: 100%; aspect-ratio: 1; border-radius: var(--r-xs); border: none; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,.28); }
 .paint-swatches .psw:hover { transform: scale(1.12); }

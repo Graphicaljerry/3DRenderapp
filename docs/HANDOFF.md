@@ -955,6 +955,46 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 494 — playbook moves 5–8: the Steps panel, the guided flow closes its loop, and the launch checklist
+
+Moves 5 and 6 verified by two new probes — `harness/steps-e2e.mjs` (8 checks, asserting
+the STORED op chain via IndexedDB, not just pixels) and `harness/guided-e2e.mjs` (4
+checks) — plus the receipt/accuracy/mainblock regression set, all green. The steps probe
+was proven to discriminate by breaking the edit wiring and watching the right checks go
+red; that break test also caught the probe's own store-assertion being vacuous
+(waitForFunction doesn't await async predicates) and it was rewritten to a real poll.
+
+- **The Steps panel (move 5).** A new "Steps" section in the Inspector lists the whole
+  recipe — every hole, rounding, bevel, shape and move, in the order the kernel applies
+  them. Steps one number describes (a bevel's size, a hole's diameter, a rotation's
+  degrees, a scale factor) are retyped in place; every step has a ✕. Each change rebuilds
+  through the same `rebuildWithOps` path the tools already use and lands as a History
+  version, so Undo walks it all back. Screws, shapes and moves list with their numbers
+  shown but edit through their own tools — one input field would misrepresent them.
+
+- **The guided flow closes its loop (move 6).** The fix-a-broken-part flow already
+  shipped end to end (door → replacement-mode prompt → fit directive on every precise
+  build since 489 → receipt on every export since 492). What was missing: after the first
+  guided build, nothing told you what to do when the PRINT comes back tight. One message
+  now does — pointing at Part fit in Build options, the ten-minute hole test in
+  Settings → Printer, and the export receipt. Once, ever.
+
+- **Moves 7–8 are Jerry's moves — prepared, not done.** `docs/LAUNCH_CHECKLIST.md` holds
+  the plan: the desktop-licence checkout options (Lemon Squeezy / Gumroad / Paddle, with
+  cuts and why), the steps only Jerry can do (seller account, product, price), what the
+  code side still needs (a licence field + gentle gate — not built yet), and the free
+  distribution list in effort order with the no-"AI"-framing rule. The receipt shipping
+  in 492 is what unlocked the caliper-audience channels.
+
+**In plain words:**
+1. There's a new "Steps" list showing everything done to your part, like a recipe. Tap a
+   step to retype its number, or ✕ to take it off — and Undo still works on all of it.
+2. After the app builds you a replacement part, it now tells you what to do if the
+   printed part grips too tight: one setting re-cuts every fitted hole.
+3. Selling the desktop app and posting to maker communities are YOUR moves — the plan,
+   the order, and exactly what to click are written down in docs/LAUNCH_CHECKLIST.md.
+4. Two new automated tests drive these features in a real browser before every claim.
+
 ## Build 492 — playbook moves 1–4: no writer can forget a field, storage asks to stay, the coupon is tappable, and exports carry a receipt
 
 The playbook's first four do-next items, verified by `harness/receipt-e2e.mjs` (7 checks)

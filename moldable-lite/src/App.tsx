@@ -4205,6 +4205,126 @@ export default function App() {
     setShapeOpEdit(null);
     await rebuildWithOps(ops, `Reset ${n} rounded edge${n > 1 ? "s" : ""}`, "reset edge ops");
   }
+  // ---- Steps: the whole op chain as one editable list -------------------------
+  // Each tool already keeps ITS ops editable (magnet pockets in the Fasteners
+  // flyout, roundings in Modify, shapes in Shapes) — but seeing the recipe meant
+  // opening three flyouts, and transforms weren't reachable at all. This is the
+  // one place that lists every step in kernel order, retypes the ones a single
+  // number describes, and takes any of them back off.
+  /** One dock row per op: a name, an optional detail line, and — where one number
+   *  honestly describes the step — that number, editable. Screws, shapes and moves
+   *  hold several coupled values, so they list without an input (their own tools
+   *  edit them) rather than pretending one field covers it. */
+  function stepsList() {
+    if (!result || result.source.kind !== "code") return [];
+    const r1 = (n: number) => Math.round(n * 100) / 100;
+    return (result.source.ops ?? []).map((o, index): { index: number; name: string; detail?: string; value?: number; unit?: string } => {
+      switch (o.type) {
+        case "fillet": case "chamfer": case "face-fillet": case "face-chamfer": {
+          const p = o as PointOp;
+          const what = p.pick === "corner" ? "corner" : o.type.startsWith("face-") ? "face" : "edge";
+          return { index, name: `${EDGE_OP_NAME[o.type]} ${what}`, value: r1(Math.abs(p.size)), unit: "mm" };
+        }
+        case "extrude":
+          return { index, name: o.size < 0 ? "Pushed a face in" : "Pulled a face out", value: r1(Math.abs(o.size)), unit: "mm" };
+        case "hole":
+          return o.tag === "magnet"
+            ? { index, name: "Magnet pocket", detail: `⌀${r1(o.diameter)} × ${r1(o.depth)} mm` }
+            : { index, name: "Hole", detail: o.depth > 0 ? `${r1(o.depth)} mm deep` : "straight through", value: r1(o.diameter), unit: "mm ⌀" };
+        case "screw":
+          return { index, name: "Screw hole", detail: `⌀${r1(o.major)} mm${o.pitch > 0 ? ", threaded" : ""}${o.countersink > 0 ? ", countersunk" : ""}` };
+        case "solid": {
+          const size = o.shape === "box" ? `${r1(o.size[0])} × ${r1(o.size[1])} × ${r1(o.size[2])} mm`
+            : o.shape === "cylinder" ? `⌀${r1(o.size[0])} × ${r1(o.size[2])} mm` : `⌀${r1(o.size[0])} mm`;
+          return { index, name: `${o.cut ? "Cut" : "Added"} a ${o.shape === "sphere" ? "ball" : o.shape}`, detail: size };
+        }
+        case "translate":
+          return { index, name: "Moved the part", detail: `${r1(o.delta[0])}, ${r1(o.delta[1])}, ${r1(o.delta[2])} mm` };
+        case "rotate": {
+          const ax = Math.abs(o.axis[0]) > 0.99 ? "about X" : Math.abs(o.axis[1]) > 0.99 ? "about Y" : Math.abs(o.axis[2]) > 0.99 ? "about Z" : "about a tilted axis";
+          return { index, name: "Rotated the part", detail: ax, value: r1(o.angleDeg), unit: "°" };
+        }
+        case "scale":
+          return { index, name: "Scaled the part", value: r1(o.factor), unit: "×" };
+        case "chamferBottom":
+          return { index, name: "Bottom-edge bevel", detail: "elephant-foot guard", value: r1(o.size), unit: "mm" };
+      }
+    });
+  }
+  /** Retype a step's number in place — the op keeps its anchor and its spot in the
+   *  chain, so this is a true edit. Only op types stepsList marks editable land here. */
+  async function editStepValue(index: number, value: number) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code" || !Number.isFinite(value)) return;
+    const ops = [...(cur.source.ops ?? [])];
+    const op = ops[index];
+    if (!op) return; // the chain moved under this row — do nothing
+    let next: CadOp;
+    let summary: string;
+    switch (op.type) {
+      case "fillet": case "chamfer": case "face-fillet": case "face-chamfer": {
+        if (!(value > 0)) return;
+        const what = op.pick === "corner" ? "corner" : op.type.startsWith("face-") ? "face" : "edge";
+        next = { ...op, size: value };
+        summary = `${EDGE_OP_NAME[op.type]} ${what} → ${value} mm`;
+        break;
+      }
+      case "extrude":
+        if (!(value > 0)) return;
+        next = { ...op, size: (op.size < 0 ? -1 : 1) * value };
+        summary = `${op.size < 0 ? "Pushed the face in" : "Pulled the face out"} ${value} mm`;
+        break;
+      case "hole":
+        if (!(value > 0)) return;
+        next = { ...op, diameter: value };
+        summary = `Resized the hole — now ⌀${value} mm`;
+        break;
+      case "rotate":
+        next = { ...op, angleDeg: value };
+        summary = `Rotated ${value}°`;
+        break;
+      case "scale":
+        if (!(value > 0)) return;
+        next = { ...op, factor: value };
+        summary = `Scaled ×${value}`;
+        break;
+      case "chamferBottom":
+        if (!(value > 0)) return;
+        next = { ...op, size: value };
+        summary = `Bottom-edge bevel → ${value} mm`;
+        break;
+      default:
+        return;
+    }
+    ops[index] = next;
+    await rebuildWithOps(ops, summary, "edit step");
+  }
+  /** What a removed step was, for the History label. */
+  function stepNoun(op: CadOp): string {
+    switch (op.type) {
+      case "fillet": case "chamfer": case "face-fillet": case "face-chamfer":
+        return `${EDGE_OP_NAME[op.type].toLowerCase()} ${op.pick === "corner" ? "corner" : op.type.startsWith("face-") ? "face" : "edge"}`;
+      case "extrude": return op.size < 0 ? "face push" : "face pull";
+      case "hole": return op.tag === "magnet" ? "magnet pocket" : "hole";
+      case "screw": return "screw hole";
+      case "solid": return op.shape === "sphere" ? "ball" : op.shape;
+      case "translate": return "move";
+      case "rotate": return "rotation";
+      case "scale": return "scaling";
+      case "chamferBottom": return "bottom bevel";
+    }
+  }
+  async function removeStepAt(index: number) {
+    const cur = resultRef.current;
+    if (!cur || cur.source.kind !== "code") return;
+    const ops = [...(cur.source.ops ?? [])];
+    const op = ops[index];
+    if (!op) return;
+    ops.splice(index, 1);
+    // Removing shifts every later index — each tool's own op-indexed selection is stale now.
+    setShapeOpEdit(null); setShapeEdit(null); setHoleEdit(null);
+    await rebuildWithOps(ops, `Removed the ${stepNoun(op)}`, "remove step");
+  }
   // ---- Shape tool: drop a primitive exactly where you point, then type its numbers.
   // The whole point is the case where describing it in words is slower and less exact
   // than placing it — so nothing here touches the AI, and every value is editable after.
@@ -7322,6 +7442,13 @@ export default function App() {
           const changed = describeChange(res.dims, result?.dims, cadDefaults ?? undefined, bi.kind === "code" ? extractParams(bi.code) ?? undefined : undefined);
           const how = await deliverResult(res, name, summary, p, !!visionImage);
           setMessages((m) => m.map((x) => (x.id === placeholderId ? { ...x, text: summary + (how === "pending" ? " — preview on the canvas (green = added, red = removed): Apply or Discard." : "") + notes, steps: closeStage(x), streaming: false, changed, model: usedLocal ? "on-device" : shortModelName(effLlm.model), thinking: thinkTrail() || undefined, usage: msgUsage() } : x)));
+          // The replacement-part flow ends at the printer, not here: the part is only
+          // "fixed" once a print confirms the fit. The knobs that correct a tight or
+          // loose print all exist — this is the one message that points at them.
+          if (guided && kind === "replicad") explainOnce(
+            "fit-loop",
+            "**When the print is in your hands, check the fit.** Grips too tight, or wobbles? Open **Build options** beside the composer and change **Part fit** — parts with a clearance dial re-fit instantly, no AI call. The ten-minute hole test in **Settings → Printer** measures your printer once, so every later hole comes out right. And each export includes a receipt of the measured sizes.",
+          );
           ok = true;
           break;
         } catch (err: any) {
@@ -8472,6 +8599,11 @@ export default function App() {
             if (!f || !mo || (mo.op === "push" && f.kind !== "face")) return;
             void applyDirectOp(modifyOpType(mo.op, f.kind), mo.op === "push" ? mo.size : Math.abs(mo.size), f);
           },
+        }}
+        stepsCtl={{
+          steps: stepsList(),
+          edit: (i, v) => void editStepValue(i, v),
+          remove: (i) => void removeStepAt(i),
         }}
         exportPaint={{ on: exportPainted, set: setExportPainted, has: !!facePaint }}
         onEditFrozen={(id) => void editFrozen(id)}

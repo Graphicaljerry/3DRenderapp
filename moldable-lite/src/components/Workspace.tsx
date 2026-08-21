@@ -1906,7 +1906,7 @@ function RotateByRow({ busy, onGo }: { busy: boolean; onGo: (axis: "x" | "y" | "
 
 // Structural twin of lib/screws.ts ScrewSize — Workspace stays decoupled from the lib.
 type ScrewSizeLike = { id: string; label: string; d: number; pitch: number; clearance: number; bite: number; head: number; insertBore?: number; insertLen?: number; note?: string };
-type DockPanel = "selection" | "objects" | "params" | "print" | "code" | "history" | "export";
+type DockPanel = "selection" | "objects" | "params" | "steps" | "print" | "code" | "history" | "export";
 // Icons ride the Inspector rows themselves — the old canvas tab strip duplicated this
 // list (every tab was just setDockPanel), so the strip is gone and its icons moved here.
 // "Adjust", not "Parameters": the row is free no-AI dimension tweaking, and "Parameters"
@@ -1915,6 +1915,7 @@ const DOCK_ITEMS: ReadonlyArray<{ key: DockPanel; label: string; icon: JSX.Eleme
   { key: "selection", label: "Selection", icon: <IconPointer size={18} /> },
   { key: "objects", label: "Objects", icon: <IconLayers size={18} /> },
   { key: "params", label: "Adjust", icon: <IconSliders size={18} /> },
+  { key: "steps", label: "Steps", icon: <IconChecklist size={18} /> },
   { key: "print", label: "Printability", icon: <IconPrinter size={18} /> },
   { key: "code", label: "Source", icon: <IconCode size={18} /> },
   { key: "history", label: "History", icon: <IconHistory size={18} /> },
@@ -3041,6 +3042,14 @@ interface Props {
     edit: (i: number, size: number) => void;
     remove: (i: number) => void;
     reset: () => void;
+  };
+  /** Steps: the whole op chain as one dock list — every hole, rounding, shape and
+   *  move in kernel order, retypeable where one number describes the step,
+   *  removable everywhere. */
+  stepsCtl: {
+    steps: { index: number; name: string; detail?: string; value?: number; unit?: string }[];
+    edit: (i: number, value: number) => void;
+    remove: (i: number) => void;
   };
   facesCtl: {
     faces: PickedFeature[];
@@ -5063,6 +5072,9 @@ export function Workspace(p: Props) {
                 {dockPanel === "code" && (
                   <CodePanel activeKind={p.activeKind} codeText={p.codeText} streamingText={p.streamingText} generating={p.status === "generating"} onRerun={p.onRerun} />
                 )}
+                {dockPanel === "steps" && (
+                  <StepsPanel steps={p.stepsCtl.steps} isCad={p.activeKind === "replicad"} hasModel={!!p.geometry} busy={p.status === "generating"} onEdit={p.stepsCtl.edit} onRemove={p.stepsCtl.remove} />
+                )}
                 {dockPanel === "history" && <VersionHistory versions={p.versions} headId={p.headId} restoringId={p.restoringId} onRestore={p.onRestore} onSaveCheckpoint={p.onSaveCheckpoint} syncNote={p.checkpointNote} />}
                 {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
               </div>
@@ -6575,6 +6587,68 @@ function versionLabel(summary: string): { text: string; restored: boolean } {
     restored = true;
   }
   return { text, restored };
+}
+
+/** The recipe, readable and editable in one place. History answers "what happened,
+ *  in time order"; this answers "what is ON the part right now" — every hole,
+ *  rounding, shape and move in the order the kernel applies them. Rows whose step
+ *  one number describes take a retype; every row takes an ✕. Both land as History
+ *  versions (via rebuildWithOps upstream), so Undo walks each change back. */
+function StepsPanel({ steps, isCad, hasModel, busy, onEdit, onRemove }: {
+  steps: { index: number; name: string; detail?: string; value?: number; unit?: string }[];
+  isCad: boolean;
+  hasModel: boolean;
+  busy: boolean;
+  onEdit: (i: number, value: number) => void;
+  onRemove: (i: number) => void;
+}) {
+  const [sel, setSel] = useState<number | null>(null);
+  const cur = sel != null ? steps.find((s) => s.index === sel && s.value != null) ?? null : null;
+  if (!hasModel) return <p className="fine">Build something first — its editable steps will list here.</p>;
+  if (!isCad) return <p className="fine">Steps live on Precise (CAD) models. This part is a mesh, so it has no recipe to edit — use Transform and the mesh tools instead.</p>;
+  if (!steps.length) {
+    return <p className="fine">No steps on the part yet. Holes, roundings, bevels, shapes and moves you apply with the tools stack here — each one stays retypeable or removable later, not baked in.</p>;
+  }
+  return (
+    <div className="steps-panel">
+      <div className="pocket-list">
+        {steps.map((s, i) => (
+          <div key={s.index} className={`pocket-row${cur?.index === s.index ? " on" : ""}`}>
+            <button
+              className={`pocket-pick${s.value != null ? "" : " noedit"}`}
+              disabled={busy}
+              title={s.value != null ? "Edit this step — retype its number below" : "This step's numbers live in its own tool (Fasteners, Shapes or Move)"}
+              onClick={() => s.value != null && setSel(sel === s.index ? null : s.index)}
+            >
+              <span className="step-n">{i + 1}</span>
+              <span className="pocket-size">{s.name}</span>
+              {/* Number first — in a narrow dock the tail truncates, and the size is
+                  the part worth keeping. */}
+              <span className="pocket-where">{s.value != null ? `${s.value} ${s.unit}` : ""}{s.value != null && s.detail ? " · " : ""}{s.detail ?? ""}</span>
+            </button>
+            <button className="x" aria-label={`Remove step ${i + 1}: ${s.name}`} title="Take this step back off the part — undoable" disabled={busy}
+              onClick={() => { setSel(null); onRemove(s.index); }}><IconX /></button>
+          </div>
+        ))}
+      </div>
+      {cur && (
+        <label className="modify-size">
+          <input
+            type="number" step={0.5} key={`${cur.index}:${cur.value}`} defaultValue={cur.value} disabled={busy}
+            aria-label={`New value for ${cur.name}`}
+            onKeyDown={(ev) => {
+              if (ev.key !== "Enter") return;
+              const v = parseFloat((ev.target as HTMLInputElement).value);
+              if (Number.isFinite(v)) onEdit(cur.index, v);
+            }}
+          />
+          <span>{cur.unit}</span>
+          <span className="fine">Enter applies — the part rebuilds with the new number.</span>
+        </label>
+      )}
+      <p className="fine">Every change lands in History, so Undo steps back through it.</p>
+    </div>
+  );
 }
 
 const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore, onSaveCheckpoint, syncNote }: {

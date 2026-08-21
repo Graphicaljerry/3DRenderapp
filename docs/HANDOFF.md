@@ -955,6 +955,48 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 492 — playbook moves 1–4: no writer can forget a field, storage asks to stay, the coupon is tappable, and exports carry a receipt
+
+The playbook's first four do-next items, verified by `harness/receipt-e2e.mjs` (7 checks)
+plus the existing accuracy/mainblock/tokentrim/buildfail/truncation set — 71 checks green.
+
+- **No save path can forget your decorations again (move 1).** The four decoration
+  fields (surface pattern, text layers, logos, part colours) are now REQUIRED keys on the
+  version snapshot type — the compiler itself listed the three forgetful writers (the
+  Adjust commit, Save-as-version, pattern apply) plus the template path, and refuses any
+  future writer that omits one. `decorSnap()` is the one way to say "whatever is on the
+  model now". This bug family shipped as a fix seven times; the eighth is now a compile
+  error instead of lost logos.
+
+- **Storage asks to persist, and failure stands on screen (move 2).** The app now calls
+  `navigator.storage.persist()` at boot (Safari could evict everything after 7 idle
+  days), and while writes are failing a standing banner says so — the old chat-line
+  warning scrolled away with the conversation it was warning about.
+
+- **The fit coupon is tap-to-answer (move 3).** Settings → Printer now shows the
+  coupon's six holes as buttons — tap the tightest one the peg fit and the clearance is
+  stored, same as typing it. Counting notches and typing decimals stays available for
+  caliper people.
+
+- **Exports carry a verification receipt (move 4).** STL/3MF/OBJ exports post: measured
+  size, every requested figure confirmed (✓) or honestly declared "not an overall
+  dimension — check it on the model", watertightness, bed fit, and — when the part has
+  drilled holes — the clearance applied and whether it came from YOUR calibration or the
+  typical-FDM table. Only computed numbers; a line the app can't compute is omitted,
+  never estimated.
+
+- **Found on the way:** "30 x 20 x 5 mm" only counted the 5 — the trailing unit now
+  distributes over the whole chain, in the receipt AND in the build-time size caution.
+
+**In plain words:**
+1. The bug that could silently delete your logos when you adjusted a slider is dead —
+   and the compiler now blocks anyone from reintroducing it.
+2. The browser is asked to protect your projects from cleanup, and if saving ever
+   breaks you get a banner that stays until it's fixed, not a message that scrolls away.
+3. Calibrating your printer is now: print the coupon, push the peg, tap the hole.
+4. Every export ends with a receipt: "you asked for 30 × 20 × 5 — measured 30 × 20 × 5,
+   watertight, fits your bed." That receipt is the thing no competitor has.
+
 ## Build 490 — security pass: the relay grows teeth, and the site grows a privacy policy
 
 Prompted by "what could get back to me as I scale". Findings first, fixes after; the

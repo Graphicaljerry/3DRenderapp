@@ -29,7 +29,7 @@ export interface PrintPrepCtl {
 }
 import type { Version } from "../store/types";
 import { MAX_VERSIONS } from "../store/versions";
-import type { EngineKind, ExportFormat, PointOp } from "../engine/types";
+import type { CadOp, EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
 import { whenAgo } from "../lib/when";
 import { fmtTok, fmtUSD, priceFor, loadLedger } from "../llm/pricing";
@@ -3047,9 +3047,10 @@ interface Props {
    *  move in kernel order, retypeable where one number describes the step,
    *  removable everywhere. */
   stepsCtl: {
-    steps: { index: number; name: string; detail?: string; value?: number; unit?: string }[];
-    edit: (i: number, value: number) => void;
-    remove: (i: number) => void;
+    steps: { index: number; type: CadOp["type"]; name: string; detail?: string; value?: number; unit?: string }[];
+    /** `type` rides along so App can refuse a row whose index went stale. */
+    edit: (i: number, value: number, type: CadOp["type"]) => void;
+    remove: (i: number, type: CadOp["type"]) => void;
   };
   facesCtl: {
     faces: PickedFeature[];
@@ -6595,19 +6596,19 @@ function versionLabel(summary: string): { text: string; restored: boolean } {
  *  one number describes take a retype; every row takes an ✕. Both land as History
  *  versions (via rebuildWithOps upstream), so Undo walks each change back. */
 function StepsPanel({ steps, isCad, hasModel, busy, onEdit, onRemove }: {
-  steps: { index: number; name: string; detail?: string; value?: number; unit?: string }[];
+  steps: Props["stepsCtl"]["steps"];
   isCad: boolean;
   hasModel: boolean;
   busy: boolean;
-  onEdit: (i: number, value: number) => void;
-  onRemove: (i: number) => void;
+  onEdit: (i: number, value: number, type: CadOp["type"]) => void;
+  onRemove: (i: number, type: CadOp["type"]) => void;
 }) {
   const [sel, setSel] = useState<number | null>(null);
   const cur = sel != null ? steps.find((s) => s.index === sel && s.value != null) ?? null : null;
-  if (!hasModel) return <p className="fine">Build something first — its editable steps will list here.</p>;
+  if (!hasModel) return <p className="fine">Build something first. Its editable steps will list here.</p>;
   if (!isCad) return <p className="fine">Steps live on Precise (CAD) models. This part is a mesh, so it has no recipe to edit — use Transform and the mesh tools instead.</p>;
   if (!steps.length) {
-    return <p className="fine">No steps on the part yet. Holes, roundings, bevels, shapes and moves you apply with the tools stack here — each one stays retypeable or removable later, not baked in.</p>;
+    return <p className="fine">No steps on the part yet. Holes, roundings, bevels, shapes and moves you apply with the tools stack here, and each one stays retypeable or removable later, never baked in.</p>;
   }
   return (
     <div className="steps-panel">
@@ -6617,7 +6618,7 @@ function StepsPanel({ steps, isCad, hasModel, busy, onEdit, onRemove }: {
             <button
               className={`pocket-pick${s.value != null ? "" : " noedit"}`}
               disabled={busy}
-              title={s.value != null ? "Edit this step — retype its number below" : "This step's numbers live in its own tool (Fasteners, Shapes or Move)"}
+              title={s.value != null ? "Edit this step: retype its number below" : "This step's numbers live in its own tool (Fasteners, Shapes or Move)"}
               onClick={() => s.value != null && setSel(sel === s.index ? null : s.index)}
             >
               <span className="step-n">{i + 1}</span>
@@ -6627,7 +6628,7 @@ function StepsPanel({ steps, isCad, hasModel, busy, onEdit, onRemove }: {
               <span className="pocket-where">{s.value != null ? `${s.value} ${s.unit}` : ""}{s.value != null && s.detail ? " · " : ""}{s.detail ?? ""}</span>
             </button>
             <button className="x" aria-label={`Remove step ${i + 1}: ${s.name}`} title="Take this step back off the part — undoable" disabled={busy}
-              onClick={() => { setSel(null); onRemove(s.index); }}><IconX /></button>
+              onClick={() => { setSel(null); onRemove(s.index, s.type); }}><IconX /></button>
           </div>
         ))}
       </div>
@@ -6639,11 +6640,13 @@ function StepsPanel({ steps, isCad, hasModel, busy, onEdit, onRemove }: {
             onKeyDown={(ev) => {
               if (ev.key !== "Enter") return;
               const v = parseFloat((ev.target as HTMLInputElement).value);
-              if (Number.isFinite(v)) onEdit(cur.index, v);
+              // Same number = nothing to do. Without this, Enter on an untouched field
+              // rebuilt anyway — and rounded the stored value to the 2-dp display copy.
+              if (Number.isFinite(v) && v !== cur.value) onEdit(cur.index, v, cur.type);
             }}
           />
           <span>{cur.unit}</span>
-          <span className="fine">Enter applies — the part rebuilds with the new number.</span>
+          <span className="fine">Enter applies. The part rebuilds with the new number.</span>
         </label>
       )}
       <p className="fine">Every change lands in History, so Undo steps back through it.</p>

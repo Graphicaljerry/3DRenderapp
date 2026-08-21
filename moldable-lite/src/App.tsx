@@ -4191,7 +4191,9 @@ export default function App() {
     const op = ops[index];
     if (!op || !EDGE_OP_NAME[op.type]) return;
     ops.splice(index, 1);
-    setShapeOpEdit(null); // removing shifts every later index
+    // Removing shifts every later index — clear the other op-indexed selections too
+    // (holeEdit used to survive this and point one op off).
+    setShapeOpEdit(null); setShapeEdit(null); setHoleEdit(null);
     await rebuildWithOps(ops, `Removed the ${EDGE_OP_NAME[op.type].toLowerCase()} edge`, "remove edge op");
   }
   /** Take every rounding and bevel back off in one go — the "reset" half of the ask.
@@ -4218,47 +4220,49 @@ export default function App() {
   function stepsList() {
     if (!result || result.source.kind !== "code") return [];
     const r1 = (n: number) => Math.round(n * 100) / 100;
-    return (result.source.ops ?? []).map((o, index): { index: number; name: string; detail?: string; value?: number; unit?: string } => {
+    return (result.source.ops ?? []).map((o, index): { index: number; type: CadOp["type"]; name: string; detail?: string; value?: number; unit?: string } => {
       switch (o.type) {
         case "fillet": case "chamfer": case "face-fillet": case "face-chamfer": {
-          const p = o as PointOp;
-          const what = p.pick === "corner" ? "corner" : o.type.startsWith("face-") ? "face" : "edge";
-          return { index, name: `${EDGE_OP_NAME[o.type]} ${what}`, value: r1(Math.abs(p.size)), unit: "mm" };
+          const what = o.pick === "corner" ? "corner" : o.type.startsWith("face-") ? "face" : "edge";
+          return { index, type: o.type, name: `${EDGE_OP_NAME[o.type]} ${what}`, value: r1(Math.abs(o.size)), unit: "mm" };
         }
         case "extrude":
-          return { index, name: o.size < 0 ? "Pushed a face in" : "Pulled a face out", value: r1(Math.abs(o.size)), unit: "mm" };
+          return { index, type: o.type, name: o.size < 0 ? "Pushed a face in" : "Pulled a face out", value: r1(Math.abs(o.size)), unit: "mm" };
         case "hole":
           return o.tag === "magnet"
-            ? { index, name: "Magnet pocket", detail: `⌀${r1(o.diameter)} × ${r1(o.depth)} mm` }
-            : { index, name: "Hole", detail: o.depth > 0 ? `${r1(o.depth)} mm deep` : "straight through", value: r1(o.diameter), unit: "mm ⌀" };
+            ? { index, type: o.type, name: "Magnet pocket", detail: `⌀${r1(o.diameter)} × ${r1(o.depth)} mm` }
+            : { index, type: o.type, name: "Hole", detail: o.depth > 0 ? `${r1(o.depth)} mm deep` : "straight through", value: r1(o.diameter), unit: "mm ⌀" };
         case "screw":
-          return { index, name: "Screw hole", detail: `⌀${r1(o.major)} mm${o.pitch > 0 ? ", threaded" : ""}${o.countersink > 0 ? ", countersunk" : ""}` };
+          return { index, type: o.type, name: "Screw hole", detail: `⌀${r1(o.major)} mm${o.pitch > 0 ? ", threaded" : ""}${o.countersink > 0 ? ", countersunk" : ""}` };
         case "solid": {
           const size = o.shape === "box" ? `${r1(o.size[0])} × ${r1(o.size[1])} × ${r1(o.size[2])} mm`
             : o.shape === "cylinder" ? `⌀${r1(o.size[0])} × ${r1(o.size[2])} mm` : `⌀${r1(o.size[0])} mm`;
-          return { index, name: `${o.cut ? "Cut" : "Added"} a ${o.shape === "sphere" ? "ball" : o.shape}`, detail: size };
+          return { index, type: o.type, name: `${o.cut ? "Cut" : "Added"} a ${o.shape === "sphere" ? "ball" : o.shape}`, detail: size };
         }
         case "translate":
-          return { index, name: "Moved the part", detail: `${r1(o.delta[0])}, ${r1(o.delta[1])}, ${r1(o.delta[2])} mm` };
+          return { index, type: o.type, name: "Moved the part", detail: `${r1(o.delta[0])}, ${r1(o.delta[1])}, ${r1(o.delta[2])} mm` };
         case "rotate": {
           const ax = Math.abs(o.axis[0]) > 0.99 ? "about X" : Math.abs(o.axis[1]) > 0.99 ? "about Y" : Math.abs(o.axis[2]) > 0.99 ? "about Z" : "about a tilted axis";
-          return { index, name: "Rotated the part", detail: ax, value: r1(o.angleDeg), unit: "°" };
+          return { index, type: o.type, name: "Rotated the part", detail: ax, value: r1(o.angleDeg), unit: "°" };
         }
         case "scale":
-          return { index, name: "Scaled the part", value: r1(o.factor), unit: "×" };
+          return { index, type: o.type, name: "Scaled the part", value: r1(o.factor), unit: "×" };
         case "chamferBottom":
-          return { index, name: "Bottom-edge bevel", detail: "elephant-foot guard", value: r1(o.size), unit: "mm" };
+          return { index, type: o.type, name: "Bottom-edge bevel", detail: "elephant-foot guard", value: r1(o.size), unit: "mm" };
       }
     });
   }
   /** Retype a step's number in place — the op keeps its anchor and its spot in the
-   *  chain, so this is a true edit. Only op types stepsList marks editable land here. */
-  async function editStepValue(index: number, value: number) {
+   *  chain, so this is a true edit. Only op types stepsList marks editable land here.
+   *  `expect` is the op type the ROW believed it was editing: another panel's remove,
+   *  an undo or an AI apply can shift the chain under an open row, and without the
+   *  check Enter would land a fillet radius as a rotation angle. */
+  async function editStepValue(index: number, value: number, expect: CadOp["type"]) {
     const cur = resultRef.current;
     if (!cur || cur.source.kind !== "code" || !Number.isFinite(value)) return;
     const ops = [...(cur.source.ops ?? [])];
     const op = ops[index];
-    if (!op) return; // the chain moved under this row — do nothing
+    if (!op || op.type !== expect) return; // the chain moved under this row — do nothing
     let next: CadOp;
     let summary: string;
     switch (op.type) {
@@ -4314,12 +4318,12 @@ export default function App() {
       case "chamferBottom": return "bottom bevel";
     }
   }
-  async function removeStepAt(index: number) {
+  async function removeStepAt(index: number, expect: CadOp["type"]) {
     const cur = resultRef.current;
     if (!cur || cur.source.kind !== "code") return;
     const ops = [...(cur.source.ops ?? [])];
     const op = ops[index];
-    if (!op) return;
+    if (!op || op.type !== expect) return; // same staleness guard as editStepValue
     ops.splice(index, 1);
     // Removing shifts every later index — each tool's own op-indexed selection is stale now.
     setShapeOpEdit(null); setShapeEdit(null); setHoleEdit(null);
@@ -4819,7 +4823,9 @@ export default function App() {
       // for AI replies, offers and errors, per Jerry's standing rule.
       applyResult(res, project?.name ?? "Model", summary, prompt);
     } catch (err: any) {
-      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't rebuild after the hole edit: ${String(err?.message ?? err)}`, error: true }]);
+      // Name the change that failed — this path serves every op edit (holes, bevels,
+      // shapes, moves, Steps rows), and "the hole edit" misdescribed most of them.
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: `Couldn't make that change (${summary}): ${String(err?.message ?? err)}`, error: true }]);
     } finally {
       setStatus("idle");
     }
@@ -7445,9 +7451,11 @@ export default function App() {
           // The replacement-part flow ends at the printer, not here: the part is only
           // "fixed" once a print confirms the fit. The knobs that correct a tight or
           // loose print all exist — this is the one message that points at them.
-          if (guided && kind === "replicad") explainOnce(
+          // Not on a pending proposal: this fires once ever, and burning it on a build
+          // the user may Discard would spend it congratulating the wrong part.
+          if (guided && kind === "replicad" && how !== "pending") explainOnce(
             "fit-loop",
-            "**When the print is in your hands, check the fit.** Grips too tight, or wobbles? Open **Build options** beside the composer and change **Part fit** — parts with a clearance dial re-fit instantly, no AI call. The ten-minute hole test in **Settings → Printer** measures your printer once, so every later hole comes out right. And each export includes a receipt of the measured sizes.",
+            "**When the print is in your hands, check the fit.** Grips too tight, or wobbles? Open **Build options** beside the composer and change **Part fit** — parts with a clearance dial re-fit instantly, no AI call. To match holes to your printer, print the **Tolerance test coupon** from Templates and tap the best-fitting hole in **Settings → Printer**. Each export includes a receipt of the measured sizes.",
           );
           ok = true;
           break;
@@ -8602,8 +8610,8 @@ export default function App() {
         }}
         stepsCtl={{
           steps: stepsList(),
-          edit: (i, v) => void editStepValue(i, v),
-          remove: (i) => void removeStepAt(i),
+          edit: (i, v, type) => void editStepValue(i, v, type),
+          remove: (i, type) => void removeStepAt(i, type),
         }}
         exportPaint={{ on: exportPainted, set: setExportPainted, has: !!facePaint }}
         onEditFrozen={(id) => void editFrozen(id)}

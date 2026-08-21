@@ -955,7 +955,7 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
-## Build 494 — playbook moves 5–8: the Steps panel, the guided flow closes its loop, and the launch checklist
+## Build 495 — playbook moves 5–8: the Steps panel, the guided flow closes its loop, and the launch checklist
 
 Moves 5 and 6 verified by two new probes — `harness/steps-e2e.mjs` (8 checks, asserting
 the STORED op chain via IndexedDB, not just pixels) and `harness/guided-e2e.mjs` (4
@@ -963,6 +963,12 @@ checks) — plus the receipt/accuracy/mainblock regression set, all green. The s
 was proven to discriminate by breaking the edit wiring and watching the right checks go
 red; that break test also caught the probe's own store-assertion being vacuous
 (waitForFunction doesn't await async predicates) and it was rewritten to a real poll.
+The diff-review pass then hardened the panel: edit/remove carry the op TYPE and bail
+if the chain shifted under an open row (another panel's remove could have landed a
+fillet radius as a rotation angle), Enter on an untouched field no longer rebuilds
+and rounds, rebuild errors name the change that failed instead of saying "hole edit",
+and the guided loop-closer no longer burns its once-ever flag on a preview the user
+may Discard.
 
 - **The Steps panel (move 5).** A new "Steps" section in the Inspector lists the whole
   recipe — every hole, rounding, bevel, shape and move, in the order the kernel applies

@@ -18,6 +18,22 @@ The app lives in `moldable-lite/`; it deploys to GitHub Pages from `main`.
 - **Verify before you ship**: drive the real UI with Playwright against the
   local vite dev server and a stub LLM server — never claim a feature works
   from code reading alone. Then run the production build.
+- **Every change ships with a test that was actually run.** Write the checks
+  into a Playwright script under `harness/`, run it, and paste the PASS/FAIL
+  lines — a change is not done until a script has confirmed it. Rules:
+  1. **Prove the check discriminates.** Break the feature on purpose and
+     confirm the check FAILS, then restore. A check that passes both ways is
+     worse than no check, because it is believed.
+  2. **A scan that inspected nothing is a failure, not a pass.** Count what
+     was examined and assert on the count.
+  3. **Measure geometry, not vibes.** `getBoundingClientRect`,
+     `elementFromPoint`, the stored record — never "it looked right".
+     Remember a clipped element still reports its full rect.
+  4. **Update the probes a change invalidates.** If a structural change makes
+     an old assertion meaningless, rewrite the assertion to state what is now
+     true; never delete it to get to green.
+  5. Scope a new script to the change. The broad regressions already have
+     their own files — run them alongside, don't fold them in.
 - Keep chat replies concise and plain-language; Jerry is a designer-developer
   who wants outcomes and honest caveats, not walls of process.
 - **Summaries are numbered/bulleted lists in plain English** (aim for

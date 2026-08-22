@@ -16,7 +16,9 @@
 //  10  The Adjust slider's hover highlight arrives promptly, not a second later
 //  11  estimatePrintTime returns the numbers its own header claims it was checked against
 //  12  A removed step stays removed through a sync merge, not just through a reload
+//  13  The build plate stays put when a size parameter changes
 import { chromium } from "playwright";
+import { PNG } from "pngjs";
 import { enterWorkspace, awaitBuild } from "./enter.mjs";
 
 const PORT = process.env.PORT ?? 5173;
@@ -378,6 +380,67 @@ for (const [file, here] of [["privacy.html", "Privacy"], ["terms.html", "Terms o
   // The step you're ON can never be removed — there would be nothing on screen.
   check("the current step offers no remove control",
     (await page.locator(".vrow-wrap:has(.vrow.current) .vdel").count()) === 0);
+  await page.close();
+}
+
+// ------------------------------- 13. the bed does not move when the part changes ----
+{
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  page.on("pageerror", (e) => console.error("[PAGEERROR]", e.message));
+  await page.addInitScript(() => { localStorage.setItem("moldable_signin_prompted", "1"); localStorage.setItem("moldable_theme", "dark"); });
+  await page.goto(`${URL}/`, { waitUntil: "domcontentloaded" });
+  await enterWorkspace(page);
+  await page.getByRole("button", { name: "Templates", exact: true }).click();
+  await page.locator(".overlay").getByTitle(/^Build the box with lid\b/).click();
+  await awaitBuild(page);
+  await page.waitForTimeout(1500);
+  await page.getByRole("button", { name: "Adjust", exact: true }).click();
+  await page.waitForSelector(".prow", { timeout: 20_000 });
+
+  const cv = page.locator("canvas").first();
+  const grab = async () => PNG.sync.read(await cv.screenshot());
+  /** How much a strip of the canvas changed. The strip is BELOW the part and above the
+   *  canvas edge, so in both frames it is bare bed — grid lines and nothing else. If the
+   *  bed is where a bed belongs, those pixels are identical no matter what the part does.
+   *
+   *  Deliberately not a colour threshold: the slab, the void and the backdrop are all
+   *  dark neutrals within a few counts of each other, and three attempts to separate
+   *  them by colour ended up measuring the canvas edge instead of the bed. */
+  const stripDiff = (a, b) => {
+    // Measured band. A row-by-row diff of this exact scene showed the part occupying
+    // roughly 30-66% of the canvas height and the dimension label — a sprite drawn INTO
+    // the canvas, whose text changes with the size — living below 85%. Between them,
+    // 68-83% is bed and nothing else.
+    const y0 = Math.round(a.height * 0.68), y1 = Math.round(a.height * 0.83);
+    let n = 0, tot = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = 0; x < a.width; x++) {
+        const i = (a.width * y + x) << 2;
+        const d = Math.abs(a.data[i] - b.data[i]) + Math.abs(a.data[i + 1] - b.data[i + 1]) + Math.abs(a.data[i + 2] - b.data[i + 2]);
+        tot++;
+        if (d > 12) n++;
+      }
+    }
+    return { pct: +(100 * n / tot).toFixed(2), tot };
+  };
+
+  const before = await grab();
+  const row = page.locator(".prow").filter({ has: page.locator(".pn-human", { hasText: /^Inner width$/ }) }).first();
+  await row.locator(".pf-input").click();
+  await row.locator(".pf-input").fill("95");
+  await row.locator(".pf-input").press("Enter");
+  await awaitBuild(page);
+  await page.waitForTimeout(1800);
+  const after = await grab();
+  const dims = await page.locator(".statusbar .dims").innerText();
+  const d = stripDiff(before, after);
+  check("widening the part actually rebuilt it", /210/.test(dims), dims);
+  // Calibrated, not guessed: measured 1.5% with the bed pinned and 5.13% with the old
+  // follow-the-model behaviour, on this exact scene. The 1.5% floor is the part's contact
+  // shadow spreading as it grows, which is real and should change. 3% sits between them.
+  // `tot` is asserted too — a strip that sampled nothing would score 0% and pass.
+  check("the build plate stays where the printer's bed is",
+    d.pct < 3 && d.tot > 50_000, `${d.pct}% of the bare-bed strip changed (${d.tot}px sampled)`);
   await page.close();
 }
 

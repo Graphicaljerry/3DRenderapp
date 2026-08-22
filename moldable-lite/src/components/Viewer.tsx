@@ -3207,6 +3207,17 @@ export const Viewer = forwardRef<ViewerHandle, Props>(function Viewer({ geometry
       while (centre.some((k) => k != null && Math.abs(k - free * stride) < stride * 0.5)) free++;
       return free++ * stride;
     });
+    // ONE plate is the printer's bed, and a bed does not move. Centring it under the
+    // model made the picture contradict the readout: widen a part past the bed and
+    // "Fits bed" flipped to No while the slab slid along underneath, so the part still
+    // looked comfortably placed. It also meant that dragging a size slider slid the
+    // whole world sideways under the model, which is what made an edit feel unmoored.
+    //
+    // Multi-plate layouts keep the follow behaviour below: there the slabs ARE the
+    // layout, and a slab that ignored its own objects would sit beside the parts it
+    // belongs to. It is only the single-plate case — the printer you own, at its own
+    // origin — that has a right answer independent of the model.
+    if (n === 1) at[0] = 0;
     plateAt.current = at;
     for (let i = 0; i < n; i++) {
       const one = buildPlate(bed, theme, plateColor);

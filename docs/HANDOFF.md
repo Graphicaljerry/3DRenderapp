@@ -955,6 +955,42 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 502 — the build plate stops chasing the model
+
+Reported from use: "adjusting a parameter makes the object bigger, but the buildplate
+moves with it — one part of the model stays put and the plate slides."
+
+- **The bed is pinned to the printer's origin when there is one plate.** The slab's X
+  position was computed from the model's bounding-box centre on every rebuild, so widening
+  a part slid the bed along under it. Two costs. Dragging a size slider moved the whole
+  world sideways, which is what made an edit feel unmoored. And worse — it hid the answer
+  the app exists to give: grow a part past the bed and **Fits bed** flipped to *No* while
+  the slab slid along underneath, so the picture still showed the part sitting comfortably
+  on a plate. The number said no and the render said yes.
+
+- **Multi-plate layouts are unchanged.** There the slabs ARE the layout, and a slab that
+  ignored its own objects would sit beside the parts it belongs to. It is only the
+  single-plate case — the printer you own, at its own origin — that has a right answer
+  independent of the model. `plates-e2e` passes untouched.
+
+- **Verifying it was harder than fixing it**, and the method is worth recording. Three
+  attempts to find the bed by colour all ended up measuring the canvas edge instead: the
+  slab (35,37,40), the void (20,20,22) and the backdrop are all dark neutrals within a few
+  counts of each other. What worked was a row-by-row diff of the same scene before and
+  after an edit, which showed the part occupying 30–66% of the canvas height and the
+  dimension label — a sprite drawn INTO the canvas — below 85%. Between them, 68–83% is
+  bare bed. The check samples that band and is calibrated against both behaviours: **1.5%
+  of it changes with the bed pinned** (the part's contact shadow spreading, which is real)
+  **against 5.13% with the old behaviour.**
+
+**In plain words:**
+1. You were right — the build plate was following the model around instead of staying
+   put like a real printer bed. It does now.
+2. That mattered for more than looks: when a part grew too big for your printer, the plate
+   slid along under it, so it still *looked* like it fitted while the readout said it
+   didn't.
+3. Layouts with several plates work exactly as before.
+
 ## Build 500 — ten reported niggles: history stops duplicating, the sliders answer at once, and the stats card says how long
 
 Ten things from one round of use, plus the review pass that found nine more.

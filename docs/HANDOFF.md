@@ -955,6 +955,47 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 499 — mobile UI: legal in a footer, New chat and dark mode behind the avatar
+
+From two phone screenshots. The Launchpad header carried the wordmark, the version,
+Privacy, Terms, a theme toggle and Sign in — at 390px the sign-in button truncated to
+"Sign…". The workspace top row had four controls fighting for the same space.
+
+- **Privacy and Terms moved to a standing footer.** Deliberately not the existing
+  `launch-foot`, which only renders for first-time visitors: a privacy policy shown only
+  to newcomers is not a privacy policy. It is a separate element, on every visit.
+
+- **"+ New chat" and the light/dark switch moved into the account menu**, beside Settings
+  and the account, which were already there. Below 760px the top row is now a wordmark
+  and a face. Templates and Library are hidden at that width, so the menu carries them
+  too — on a phone that menu IS the navigation row.
+
+- **Three mobile bugs fixed on the way**, each of which this change would otherwise have
+  made worse. The menu was gated on being signed in, so folding controls into it would
+  have taken New chat and dark mode away from every signed-out visitor. It dismissed on
+  `onMouseLeave`, a gesture a finger cannot make, so on a phone it could only be closed by
+  picking something out of it. And a second tap on the avatar closed it and instantly
+  reopened it, because the outside-tap handler fires before the trigger's own click — the
+  first gesture anyone tries. It is built on the app's `AnchoredMenu` primitive now:
+  outside tap, Escape, one-menu-at-a-time, and viewport clamping.
+
+- **Harness**: five probes drove the moved controls and would have broken. `enter.mjs`
+  gained `accountMenu`/`newChat`/`toggleTheme`; `accuracy-e2e`, `assist-visibility-e2e`,
+  `e2e`, `resize-e2e` and `theme-toggle-e2e` now go through the menu. New `mobileui-e2e`
+  (19 checks) drives a 390px viewport end to end. `launchpad-widths-e2e` still passes
+  17/17, which is the probe that guards the project shelf staying above the fold — so the
+  new footer costs the shelf nothing.
+
+**In plain words:**
+1. Privacy and Terms are at the bottom of the start screen now, where people look for
+   them — and the "Sign in" button has room to say "Sign in" again.
+2. New chat and dark mode live under your profile picture, along with Templates,
+   Library, Settings and Sign out. The top of the app is just the logo and your face.
+3. Three phone bugs went with it: the menu used to need you signed in, it could not be
+   closed by tapping away, and tapping your face twice reopened it instead of closing it.
+4. Two rounds of review caught things the first pass missed, including two automated
+   tests that would have quietly started failing.
+
 ## Build 495 — playbook moves 5–8: the Steps panel, the guided flow closes its loop, and the launch checklist
 
 Moves 5 and 6 verified by two new probes — `harness/steps-e2e.mjs` (8 checks, asserting

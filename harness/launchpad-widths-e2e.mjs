@@ -61,7 +61,7 @@ for (const width of WIDTHS) {
     // Every child of the row, measured individually: the row's own box can look innocent
     // while a flex child overflows it (the row has no right-edge constraint).
     const kids = [...document.querySelectorAll(".launch-composer-foot > *")]
-      .filter((el) => el.getBoundingClientRect().width > 0)
+      .filter((el) => el.getBoundingClientRect().width > 0 && !el.classList.contains("send"))
       .map((el) => {
         const r = el.getBoundingClientRect();
         return { label: (el.innerText || el.getAttribute("aria-label") || el.tagName).trim().slice(0, 22), right: r.right, top: r.top, bottom: r.bottom };
@@ -77,12 +77,30 @@ for (const width of WIDTHS) {
       clash: clash.map((k) => `${k.label} overruns by ${Math.round(k.right - sr.left)}px`),
       // Nothing may spill off the right edge of the screen either.
       offscreen: kids.filter((k) => k.right > window.innerWidth).map((k) => k.label),
+      // The WORST deviation in either direction. Comparing against Math.max of the
+      // siblings' centres only caught a chip sitting BELOW the send button; one sitting
+      // above it read as perfectly aligned. `-1` on an empty row so the check fails
+      // loudly rather than reporting -Infinity.
+      centreOff: kids.length
+        ? Math.round(Math.max(...kids.map((k) => Math.abs((k.top + k.bottom) / 2 - (sr.top + sr.bottom) / 2))) * 10) / 10
+        : -1,
     };
   });
 
+  // The send button is now the LAST ITEM IN THIS ROW rather than a separately anchored
+  // box in the opposite corner, so a chip cannot slide under it — flex items push. The
+  // check that still earns its keep is that they never touch: a zero-gap row would mean
+  // the row had run out of space and something was about to be clipped. (`kids` excludes
+  // the send button itself above; without that it would be measured against itself and
+  // report a 34px overrun at every width.)
   check(`${width}px: composer row clears the send button by ${MIN_CLEAR}px+`,
     m.clash.length === 0 && m.clearance >= MIN_CLEAR,
     m.clash.length ? m.clash.join("; ") : `${m.clearance}px clear, last chip "${m.last.label}"`);
+  // Same row, same centre line. Two separately positioned boxes sat 3px apart however
+  // carefully their `bottom` matched, because they were different heights.
+  check(`${width}px: send button sits on the row's centre line`,
+    m.centreOff >= 0 && m.centreOff <= 0.6,
+    m.centreOff < 0 ? "no controls found in the row to measure against" : `off by ${m.centreOff}px`);
   check(`${width}px: nothing spills off screen`, m.offscreen.length === 0, m.offscreen.join(", "));
 
   // Vertical fit. The headline grew and the project tiles shrank to pay for it, so the

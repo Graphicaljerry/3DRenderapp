@@ -72,7 +72,7 @@ import type { GenProgress } from "./gen/types";
 import { providerBalance, BALANCE_CAPABLE, BALANCE_DASHBOARDS } from "./gen/balance";
 import { newProject, putProject, getProject, listProjects } from "./store/projects";
 import { mergeProjects, mergeChanged } from "./store/merge";
-import { appendVersion, replaceHeadVersion, restoreVersion, saveCheckpoint, navigateHead, headIndex, buildLog, formatBuildLog, buildLogText } from "./store/versions";
+import { appendVersion, replaceHeadVersion, restoreVersion, saveCheckpoint, navigateHead, headIndex, buildLog, formatBuildLog, buildLogText, alreadyAt, deleteVersion, whyNotDeletable } from "./store/versions";
 import { resolveHistoryMove, looksLikeHistoryRequest } from "./llm/history";
 import type { Project, Pin, Version, TextLayerSnap, LogoLayerSnap } from "./store/types";
 import { uid } from "./lib/id";
@@ -3451,16 +3451,88 @@ export default function App() {
   // The overlay is parented to the model's vertices, so it goes stale the moment the
   // model rebuilds — and nothing cleared it: leaving the Adjust panel unmounts the rows
   // without a pointerleave, so a highlight could sit on the canvas indefinitely.
-  useEffect(() => { endParamPeek(); }, [geometry, cadDefaults]);
+  useEffect(() => { endParamPeek(); stopWarming(); }, [geometry, cadDefaults]);
+
+  /** The cache key for one parameter, computed without starting anything. `peekParam`
+   *  needs to know whether an answer already exists BEFORE it decides to wait. */
+  function peekKeyFor(key: string): string | null {
+    const src = result?.source;
+    if (src?.kind !== "code") return null;
+    const base = { ...(src.params ?? {}), ...paramValues };
+    if (typeof base[key] !== "number") return null;
+    return peekKey(src.code, src.ops, base, key);
+  }
+  /** The ONE place the peek cache key is built. It used to be written out twice —
+   *  character for character — in the hover path and the probe, and if those two ever
+   *  drifted the warm-up would fill a cache the hover never read: no error, no warning,
+   *  the feature just quietly back to slow. */
+  const peekKey = (code: string, ops: unknown, vals: CadParams, key: string) =>
+    `${peekKeyBase(code, vals)}:${hashStr(JSON.stringify(ops ?? []))}|${key}`;
 
   function peekParam(key: string) {
     if (peekTimer.current) clearTimeout(peekTimer.current);
+    // An answer we already hold costs nothing, so it lands on the hover itself. Waiting
+    // 260 ms to show a highlight that was sitting in a Map is where "the highlight takes
+    // a second or two" came from on every row after the first look — hover intent exists
+    // to protect the KERNEL from a sweep, and a cache hit doesn't touch the kernel.
+    const ck = peekKeyFor(key);
+    if (ck && peekCache.current.has(ck)) {
+      peekSeq.current++;               // a probe still in flight must not overwrite this
+      setParamPeek(peekCache.current.get(ck) ?? null);
+      return;
+    }
     // Hover intent: sweeping the cursor across a stack of sliders must not fire a build
     // per row. Only a deliberate rest on one triggers the probe.
-    peekTimer.current = setTimeout(() => void runParamPeek(key), 260);
+    peekTimer.current = setTimeout(() => void runParamPeek(key), 160);
   }
 
-  async function runParamPeek(key: string) {
+  /** Probe every slider once while the panel sits idle, so the FIRST hover on each row is
+   *  a cache hit too. Without this the warm path above only ever helps the second look at
+   *  a row, and the complaint was about the first.
+   *
+   *  Deliberately timid: one probe at a time, never while the kernel is busy with the
+   *  user's own work, abandoned the moment anything else starts, and stopped early on a
+   *  model where probes are expensive — a warm-up that makes the machine hot is worse
+   *  than the delay it removes. */
+  const warmRun = useRef(0);
+  /** One probe is what a hover costs anyway. Past that the warm-up is spending the
+   *  kernel on work nobody asked for, so a model where the first probe is slow gets
+   *  exactly one and then stops. */
+  const WARM_FIRST_PROBE_MS = 1200;
+  const WARM_TOTAL_MS = 6000;
+  const WARM_MAX_ROWS = 8;
+  function stopWarming() { warmRun.current++; }
+  async function warmParamPeeks(keys: string[]) {
+    const run = ++warmRun.current;
+    let spent = 0;
+    let done = 0;
+    for (const key of keys.slice(0, WARM_MAX_ROWS)) {
+      // Checked before EVERY probe, not only after: this loop must never be what starts
+      // a kernel build while the user is dragging, mid-generation, or has moved on.
+      // A build already in flight can't be recalled — the worker owns it — so the honest
+      // guarantee is "we never start another", and the gap below keeps that window small.
+      if (run !== warmRun.current) return;
+      if (status === "generating" || liveParamRun.current.running || paramBusy.current) return;
+      const ck = peekKeyFor(key);
+      if (!ck || peekCache.current.has(ck)) continue;
+      const t0 = performance.now();
+      await runParamPeek(key, true);
+      const cost = performance.now() - t0;
+      spent += cost;
+      done++;
+      // The measured stop. On a heavy part a probe is a full OCCT rebuild, and eight of
+      // them in the background is a hot laptop for a highlight nobody asked to see yet.
+      // The first one tells us which kind of model this is; if it was slow, that one was
+      // the whole budget.
+      if (done === 1 && cost > WARM_FIRST_PROBE_MS) return;
+      if (spent > WARM_TOTAL_MS) return;
+      await new Promise((r) => setTimeout(r, 120)); // leave the main thread a gap
+    }
+  }
+
+  /** @param warm true = fill the cache only. A warm probe must not paint the canvas (no
+   *  pointer is on a row) and must not touch peekSeq, which belongs to real hovers. */
+  async function runParamPeek(key: string, warm = false) {
     const src = result?.source;
     if (!sel || !result || src?.kind !== "code" || status === "generating") return;
     // A scrub that starts inside the hover-intent window must cancel the probe: the live
@@ -3468,15 +3540,17 @@ export default function App() {
     // build landing mid-drag — which also evicts the kernel's single-entry base cache
     // and makes every following drag tick recompile from scratch.
     if (liveParamRun.current.running || paramBusy.current) return;
-    const seq = ++peekSeq.current;
+    const warmAt = warmRun.current;
+    const seq = warm ? peekSeq.current : ++peekSeq.current;
+    const stale = () => (warm ? warmAt !== warmRun.current : seq !== peekSeq.current);
     const base = { ...(src.params ?? {}), ...paramValues };
     const v = base[key];
     if (typeof v !== "number") return;
     // ops in the key AND the build: rotations (gizmo, lay-flat) and drilled/magnet/screw
     // pockets live in the op chain — probing without them diffed the displayed (rotated)
     // model against an unrotated probe, so the highlight drew the part's OLD pose.
-    const ck = `${peekKeyBase(src.code, base)}:${hashStr(JSON.stringify(src.ops ?? []))}|${key}`;
-    if (peekCache.current.has(ck)) { setParamPeek(peekCache.current.get(ck) ?? null); return; }
+    const ck = peekKey(src.code, src.ops, base, key);
+    if (peekCache.current.has(ck)) { if (!warm) setParamPeek(peekCache.current.get(ck) ?? null); return; }
     // Big enough to be visible at a glance, small enough that the shape stays itself.
     const bump = Math.max(Math.abs(v) * 0.18, 1.5);
     try {
@@ -3488,7 +3562,7 @@ export default function App() {
       // "everything moved", bailed to null, and the row went dark. That is why it hit
       // clean, rounded, heavily-edited models hardest.
       const probe = await sel.engine.build({ kind: "code", code: src.code, params: paramOverrides({ ...base, [key]: v + bump }), ops: src.ops, probe: true });
-      if (seq !== peekSeq.current) return;   // pointer moved on — drop the stale result
+      if (stale()) return;                  // pointer moved on — drop the stale result
       const { affectedFaces } = await import("./print/affected");
       // display = engine - recenter, so probe -> base frame is +rcProbe - rcBase.
       const rcB = result.recenter ?? [0, 0, 0];
@@ -3503,7 +3577,7 @@ export default function App() {
       // parameter stayed dark until the code, params or ops changed. Failures are worth
       // retrying; successes are worth keeping.
       if (faces) peekCache.current.set(ck, faces);
-      if (seq !== peekSeq.current) return;
+      if (warm || stale()) return;
       setParamPeek(faces);
     } catch { /* a value that doesn't build just shows no peek */ }
   }
@@ -6634,12 +6708,19 @@ export default function App() {
             ? {
                 ...x,
                 streaming: false,
-                error: how !== "ok",
+                error: how !== "ok" && how !== "same",
                 text: how === "ok"
                   ? `${move!.say || "Went back."} Restored **${target.summary}** — step ${target.n} of ${entries.length}. **Undo** returns to where you were, and nothing was thrown away: every later step is still in History.`
                   : how === "busy"
                     ? "Still finishing the last change — give it a moment and ask again."
-                    : `Found the step you meant — **${target.summary}** — but it wouldn't rebuild: ${restoreErr.current || "unknown error"}. It's still in History (the clock icon) if you want to try it there.`,
+                    // "same" is not a failure. `buildLog` marks a row current by id, but
+                    // the model can be sitting on a RESTORE of that row — a copy with its
+                    // own id — so the store answers "already there" for a step the log
+                    // still thinks you haven't visited. Reporting that as "it wouldn't
+                    // rebuild: unknown error" was the app calling its own success a crash.
+                    : how === "same"
+                      ? `That's what's on screen already — **${target.summary}**. History (the clock icon) lists every step if you want a different one.`
+                      : `Found the step you meant — **${target.summary}** — but it wouldn't rebuild: ${restoreErr.current || "unknown error"}. It's still in History (the clock icon) if you want to try it there.`,
               }
             : x)));
           return;
@@ -7745,7 +7826,10 @@ export default function App() {
       if (!opts?.quiet) setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: "Still building the last change — give it a moment, then pick that version again.", error: true }]);
       return "busy";
     }
-    if (cur.headId === versionId) return "same"; // already sitting on it; rebuilding changes nothing
+    // "Already there" covers the restore STEP as well as the row itself — after restoring
+    // step 4 you are sitting on a copy of step 4, and clicking step 4 again used to read
+    // as a fresh restore and record another row for a model that never changed.
+    if (cur.headId === versionId || alreadyAt(cur, versionId)) return "same";
     setRestoringId(versionId);
     dissolveSeparation(); // restoring rebuilds the model — drop the sandbox's floating parts
     const next = restoreVersion(cur, versionId);
@@ -7767,6 +7851,21 @@ export default function App() {
     }
   }
   restoreRef.current = (id) => void restoreTo(id);
+
+  /** Remove one recorded step. The rules (never the step you're on, never a named one,
+   *  never the last one left) live in the store beside the delete itself; this reports
+   *  whichever one refused rather than failing quietly. */
+  const onDeleteVersion = useCallback((id: string) => {
+    const cur = projectRef.current;
+    if (!cur) return;
+    const why = whyNotDeletable(cur, id);
+    if (why) {
+      setMessages((m) => [...m, { id: mid(), ts: Date.now(), role: "assistant", text: why, error: true }]);
+      return;
+    }
+    persist(deleteVersion(cur, id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** "Save this version": a named checkpoint, pushed to the account NOW rather than on
    *  the autosave's debounce. The whole point is to be able to walk to another machine
@@ -8395,6 +8494,8 @@ export default function App() {
         paramPeek={paramPeek}
         onPeekParam={peekParam}
         onPeekParamEnd={endParamPeek}
+        onPeekWarm={warmParamPeeks}
+        onPeekWarmStop={stopWarming}
         holeCtl={{
           draft: holeDraft,
           canStart: !!selectedFeature && selectedFeature.kind === "face" && !selectedFeature.curved && activeKind === "replicad",
@@ -8719,6 +8820,7 @@ export default function App() {
         headId={project?.headId}
         restoringId={restoringId}
         onRestore={onRestoreStable}
+        onDeleteVersion={onDeleteVersion}
         onSaveCheckpoint={(n) => void saveNamedVersion(n)}
         checkpointNote={checkpointNote}
         undoCtl={{ undo, redo, canUndo, canRedo, busy: navBusy || status === "generating" }}
@@ -9994,18 +10096,42 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
                 with nothing on the canvas to correct it against. A button rather than an
                 always-on pass, for the same reason as in there — words that become a
                 physical object should be words the user saw. */}
+            {/* WITH A WORD on this screen: as a bare sparkle it was the one control here
+                nobody could name, and greyed out — the honest state with an empty box —
+                it read as broken rather than as waiting.
+
+                `aria-disabled`, not `disabled`. A disabled button receives no pointer
+                events in any browser, so its tooltip never opens and the explanation of
+                why it is off could only be read by someone who didn't need it. This one
+                stays focusable and answers on press, which reaches touch and screen
+                readers as well as a mouse. */}
             <button
               type="button"
-              className={`improve${improve.busy ? " busy" : ""}`}
-              title="Improve this description — fills in the measurements and details a buildable request needs. Uses your reference photos too."
-              aria-label="Improve this description"
-              disabled={(!draft.trim() && !imageUrl) || improve.busy}
-              onClick={() => void runImprove()}
+              className={`improve${improve.busy ? " busy" : ""}${(!draft.trim() && !imageUrl) ? " off" : ""}`}
+              title={(!draft.trim() && !imageUrl)
+                ? "Describe your part first (or add a photo) — then this fills in the measurements and details a buildable request needs."
+                : "Rewrite what you typed into a buildable description — fills in the measurements and details, and you can put your own words back."}
+              aria-label={improve.busy ? "Improving this description" : "Improve this description"}
+              aria-disabled={(!draft.trim() && !imageUrl) || improve.busy}
+              onClick={() => {
+                if (improve.busy) return;
+                if (!draft.trim() && !imageUrl) {
+                  setImproveNote("Describe your part first (or add a photo) — then Improve fills in the measurements a buildable request needs.");
+                  return;
+                }
+                void runImprove();
+              }}
             >
               {improve.busy ? <span className="spinner sm" /> : <IconSparkle size={15} />}
+              <span className="improve-lab">{improve.busy ? "Improving…" : "Improve"}</span>
             </button>
+            {/* In the SAME row as the rest of the controls, not absolutely positioned in
+                the opposite corner. Two separately-anchored boxes sat 3px apart on their
+                centre lines however carefully they were aligned, and on a narrow phone
+                the row could slide underneath this circle — where a covered chip taps as
+                Send. One flex row can do neither. */}
+            <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>
           </div>
-          <button type="submit" className="send" aria-label="Build it" disabled={!draft.trim() && !imageUrl}><IconArrowUp /></button>
         </form>
         {(improveBefore !== null || improveNote) && (
           <div className="improve-note launch-improve-note" role="status">

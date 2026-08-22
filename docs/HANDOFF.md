@@ -955,6 +955,103 @@ like a mini Figma that lives at a claude.ai link. We used it for the Launchpad.
 - Each canvas is one link. Asking for a brand-new design makes a NEW link;
   updating an existing one keeps the same link.
 
+## Build 500 — ten reported niggles: history stops duplicating, the sliders answer at once, and the stats card says how long
+
+Ten things from one round of use, plus the review pass that found nine more.
+
+- **History no longer breeds copies.** Restoring appended a full row every single press —
+  browsing five steps back left five near-identical rows tagged `restored`. Three rules
+  now: the summary keeps its ORIGINAL wording and the fact rides as a `restoredFrom` id
+  (the old scheme rewrote it to `Restored “…”` and restoring a restore wrapped it again);
+  a restore that changes nothing isn't recorded at all; and a restore step still sitting at
+  the tip is REWRITTEN rather than stacked beside. Browsing now leaves one row.
+  Researched against Shapr3D's Project Versions ("Restore as Latest" appends with a
+  structured "Copy of" back-pointer), Onshape (rollback moves a pointer; a history restore
+  appends), Fusion (suppress vs delete), Figma and Google Docs (restore appends, but
+  autosaves collapse and only unnamed versions can be removed). Appending was kept
+  deliberately: `mergeProjects` picks HEAD by which version was created last, so a
+  pointer-only restore would lose to a newer step on another device.
+
+- **Steps can be removed, and stay removed.** A ✕ per row with an inline confirm — never
+  the step you're on, never one you named, never the last one left; the rule lives once in
+  `whyNotDeletable` and both the control and the guard ask it. The part that took the work
+  is `Project.dropped`: `store/merge.ts` exists precisely because a merge that deleted once
+  cost a user a day of history, so it never drops a version — which meant a deletion would
+  come straight back from the account on the next sync. Tombstones are the one explicit
+  exception, and they travel both ways.
+
+- **A print-time estimate, in the stats card.** New `src/print/printtime.ts`. It is a
+  harder number than grams and says so: grams follow from geometry, but the same file is
+  ~25 min on an X1C and ~1 h 50 m on an Ender 3, so the machine class is an INPUT (defaulted
+  from the printer already chosen in Settings) and the answer is a range, skewed upward
+  because everything it leaves out — supports, brim, raft, purge tower — adds time. Layer
+  height is a picker. The three published check figures are pinned in the harness.
+
+- **The Adjust sliders answer at once.** The highlight cost a full OCCT rebuild per hover.
+  Two changes: a cached answer now applies on the hover itself (it was waiting out the
+  260 ms hover-intent to show something already in a Map), and the probes are run in the
+  background while the panel sits idle. Measured on a box-with-lid: **730–816 ms before,
+  247–265 ms after** for a first look at a row. The warm-up is deliberately timid — one
+  probe at a time, never while a build or a drag is running, and it stops after the first
+  probe if that probe was slow, because on a heavy part eight background rebuilds is a hot
+  laptop for a highlight nobody asked to see.
+
+- **View ▾ behaves like a button.** No open state, and a second press closed it on
+  mousedown then its own click reopened it — "it disappears for a second and comes back".
+  Same `ignore` fix the account menu got, applied to all five button-triggered menus
+  (balance, build options, view, colour swatch, plate).
+
+- **Stats stays off.** It was the one View ▾ switch that forgot.
+
+- **Breadcrumb at the top of Privacy and Terms.** There was a way home already, at the
+  bottom, past a screen of legal text.
+
+- **Improve says what it is.** A bare sparkle nobody could name, greyed out with no
+  explanation. It has the word "Improve" on the Launchpad now, and `aria-disabled` rather
+  than `disabled` so the reason it is off can actually be read — a disabled button receives
+  no pointer events, so its tooltip never opens for the person who needs it.
+
+- **The send button was 3px low.** It and the controls row were two separately anchored
+  boxes in opposite corners of the composer with the same `bottom` and different heights.
+  One flex row now, which also makes the old phone bug (the row sliding under the send
+  circle, where a covered chip tapped as SEND) structurally impossible.
+
+- **Export stopped covering the printer chip.** Measured at 390px: 61×40px of the bedchip
+  sat under an opaque sticky Export. The statusbar is two boxes now — the facts scroll
+  inside their own, Export sits beside it. Also found: `.mesh-stats` is `pointer-events:
+  none`, so the material picker inside it had never been clickable.
+
+- **Harness**: new `batch-fixes-e2e.mjs` (31 checks) covering only this batch. Two probes
+  were fixed rather than accepted: `enterWorkspace` waited for a door the app never renders
+  when it resumes itself, and `resize-e2e`'s redo never fired because focus hadn't returned
+  to the canvas — both were being written off as flakes. `launchpad-widths-e2e`'s
+  centre-line check was one-sided and has been rewritten. **CLAUDE.md gained the standing
+  rule** Jerry asked for: every change ships with an executed test, and the check must be
+  proved to fail when the feature is broken.
+
+- **Review found nine real bugs in the first pass**, all fixed: a restore made the row it
+  came from a silent dead click and made the chat's "go back" report a bogus rebuild error;
+  `saveCheckpoint` and `replaceHeadVersion` both inherited `restoredFrom`; superseding could
+  destroy the last surviving copy of an aged-out snapshot; the speed class never followed a
+  printer change; and the full-width controls row swallowed clicks meant for the text box.
+
+**In plain words:**
+1. Going back in History used to leave a copy every time you clicked. Now it leaves one
+   row no matter how much you browse, and you can delete steps you don't want.
+2. The sliders light up the part they change about three times faster — because the app
+   works the answers out in the background while you read the panel.
+3. The stats card now tells you roughly how long the print will take. It asks which kind
+   of printer you have, because that changes the answer by four times, and it gives a
+   range rather than pretending to know.
+4. The View button now looks pressed when its menu is open, and closes when you press it
+   again. Turning Stats off sticks.
+5. Privacy and Terms have a link home at the top. The "Improve" button says "Improve",
+   and tells you why it's greyed out instead of just looking broken.
+6. The green send button is properly lined up now, and Export no longer sits on top of
+   your printer name on a phone.
+7. A review pass found nine more real bugs in my own work before it shipped — including
+   one where clicking a history row did nothing at all.
+
 ## Build 499 — mobile UI: legal in a footer, New chat and dark mode behind the avatar
 
 From two phone screenshots. The Launchpad header carried the wordmark, the version,

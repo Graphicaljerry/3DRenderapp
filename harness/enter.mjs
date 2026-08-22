@@ -24,11 +24,20 @@ export async function enterWorkspace(page, timeout = 60_000) {
     // machine and reliable after a reload mid-probe (resize-e2e's B6), where it reported
     // "found no way into the workspace" about a screen that grew one a moment later.
     const doors = [/open an empty workspace/i, /^skip$/i];
+    // Wait for a door OR for the workspace to arrive on its own. The app RESUMES a recent
+    // session without being asked, so after a reload the Launchpad can be a frame the
+    // page passes through rather than a screen it stops on: the door never renders, this
+    // wait ran its full timeout, and the throw below then listed the whole workspace
+    // chrome while insisting it was on the Launchpad. That is the intermittent failure
+    // resize-e2e's B6 has been reporting — a probe defect, not an app one, and which side
+    // of the race a run lands on is pure timing.
     await page.waitForFunction(
-      (pats) => [...document.querySelectorAll("button")].some((b) => pats.some((p) => new RegExp(p.source, p.flags).test(b.textContent ?? ""))),
+      (pats) => !!document.querySelector(".topbar")
+        || [...document.querySelectorAll("button")].some((b) => pats.some((p) => new RegExp(p.source, p.flags).test(b.textContent ?? ""))),
       doors.map((r) => ({ source: r.source, flags: r.flags })),
       { timeout },
     ).catch(() => {});
+    if (await page.$(".topbar")) return awaitChrome(page, timeout); // resumed itself
     let opened = false;
     for (const re of doors) {
       const door = page.locator("button").filter({ hasText: re }).first();
@@ -42,9 +51,13 @@ export async function enterWorkspace(page, timeout = 60_000) {
       throw new Error(`enterWorkspace: on the Launchpad but found no way into the workspace. Buttons present: ${seen.length ? seen.join(" | ") : "(none)"}`);
     }
   }
-  // `.topbar` exists one commit before its buttons do, and callers click Templates or
-  // Library on the very next line — returning early made those clicks land on nothing and
-  // hang on `.overlay`. Wait for the chrome to be populated, not merely present.
+  return awaitChrome(page, timeout);
+}
+
+/** `.topbar` exists one commit before its buttons do, and callers click Templates or
+ *  Library on the very next line — returning early made those clicks land on nothing and
+ *  hang on `.overlay`. Wait for the chrome to be populated, not merely present. */
+async function awaitChrome(page, timeout) {
   await page.waitForSelector(".topbar", { timeout });
   await page.waitForFunction(
     () => (document.querySelector(".topbar")?.querySelectorAll("button").length ?? 0) >= 3

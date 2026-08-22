@@ -2,6 +2,14 @@
 
 _Last updated: 2026-07-02 · grounded in the market research in [`RESEARCH.md`](./RESEARCH.md) and the July 2026 competitor/demand audit._
 
+> **⚠️ Numbers below are out of date (checked 22 August 2026).** The Stage 1 unit economics
+> assume a mesh generation costs $0.03–0.40; competitive-quality engines are $0.23–0.38
+> wholesale today, while Tripo *retails* comparable models at $0.10–0.16 — so "300 credits
+> inside a $15 plan" is loss-making, not a 60–80% margin. "A CAD generation costs pennies"
+> holds only on Flash-class models. Also wrong: "Tripo free = non-commercial" (its public
+> models are CC BY 4.0). The refreshed read, including what to sell instead, is in the
+> strategy review of 22 Aug 2026. Don't plan against the table below until it is rewritten.
+
 ---
 
 ## The one-sentence strategy

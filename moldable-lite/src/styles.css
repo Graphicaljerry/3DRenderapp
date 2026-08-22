@@ -957,6 +957,31 @@ button:disabled { cursor: default; }
 /* The whole row is the control: a big thumbnail beside a stacked label / meta / state.
    The previous layout put a Restore button in the row next to the thumbnail, which in
    a 262px dock left ~70px for the summary and clipped every label to two characters. */
+/* The row is itself a button, so the ✕ can't live inside it — it sits over the row's
+   top-right corner instead, revealed on hover (and always present under a coarse
+   pointer, where there is no hover to reveal it with). */
+.vrow-wrap { position: relative; }
+.vdel {
+  position: absolute; top: 5px; right: 5px; width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--bord); border-radius: var(--r-full);
+  background: var(--card); color: var(--mut); cursor: pointer;
+  opacity: 0; transition: opacity .12s ease, color .12s ease, border-color .12s ease;
+}
+.vrow-wrap:hover .vdel, .vdel:focus-visible { opacity: 1; }
+.vdel:hover { color: var(--danger); border-color: var(--danger); }
+.vdel:disabled { cursor: default; }
+.vdel-ask {
+  position: absolute; inset: 0; display: flex; align-items: center; justify-content: flex-end;
+  gap: 6px; padding-right: 8px; border-radius: var(--r-md);
+  background: color-mix(in srgb, var(--card) 88%, transparent); backdrop-filter: blur(2px);
+}
+.vdel-ask button { border-radius: var(--r-full); border: 1px solid var(--bord); padding: 4px 11px; font-size: var(--fs-tiny); font-weight: 600; cursor: pointer; }
+.vdel-yes { background: var(--danger); border-color: var(--danger); color: #fff; }
+.vdel-no { background: var(--ctl); color: var(--ink); }
+@media (pointer: coarse) {
+  .vdel { opacity: 1; width: 28px; height: 28px; }
+}
 .vrow { display: flex; align-items: stretch; gap: 9px; width: 100%; padding: 7px 8px; text-align: left; background: var(--ctl); border: 1px solid transparent; border-radius: var(--r-md); cursor: pointer; }
 .vrow:not(:disabled):hover { border-color: var(--bord-strong); background: var(--surf); }
 .vrow:disabled { cursor: default; }
@@ -982,8 +1007,12 @@ button:disabled { cursor: default; }
 /* Wraps whole chips to the next line when narrow — the pieces themselves never
    break internally ("140 × 44 × 32 / mm" split across lines read as a bug). */
 /* Below the canvas card, on the page itself — a caption line, not a bar. */
-.statusbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; padding: 9px 4px 0; border-top: none; background: transparent; }
-.export-wrap { margin-left: auto; }
+.statusbar { display: flex; align-items: center; gap: 10px 14px; padding: 9px 4px 0; border-top: none; background: transparent; }
+/* The facts take the room that's left and wrap (or, on a phone, scroll) inside their own
+   box; the Export button is the statusbar's other child and keeps its width whatever
+   they do. */
+.statusbar-facts { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 14px; flex: 1 1 auto; min-width: 0; }
+.export-wrap { flex: 0 0 auto; margin-left: auto; }
 .dims { font-size: var(--fs-md); font-weight: 600; color: var(--ink); white-space: nowrap; }
 /* The chosen 3D-printer plate, always visible; tap → printer settings. */
 /* Accent-outlined on the bare page — the one chip down here you're meant to notice,
@@ -1783,23 +1812,35 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 }
 .launch-composer:focus-within textarea { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent); }
 .launch-composer textarea::placeholder { color: var(--subt); }
-.launch-composer-foot { position: absolute; left: 14px; bottom: 12px; display: flex; align-items: center; gap: 8px; }
+/* Spans the composer so the send button can be the row's last item. `pointer-events:
+   none` on the ROW (and auto on its children) because that width now sits over the
+   textarea's own bottom padding: without it the empty space between the last chip and
+   the send circle swallowed the clicks that used to land in the field and place a
+   cursor. */
+.launch-composer-foot { position: absolute; left: 14px; right: 12px; bottom: 12px; display: flex; align-items: center; gap: 8px; pointer-events: none; }
+.launch-composer-foot > * { pointer-events: auto; }
 .launch-attach { display: inline-flex; align-items: center; gap: 7px; padding: 5px 9px; border: none; border-radius: var(--r-sm); background: none; color: var(--mut); font-size: var(--fs-md); }
 .launch-attach:hover { background: var(--chrome); color: var(--ink2); }
-.launch-composer .send { position: absolute; right: 12px; bottom: 12px; width: 34px; height: 34px; border: none; border-radius: var(--r-full); background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
+/* Last item in the foot row, pushed right by its own margin. It used to be anchored to
+   the composer's bottom-right corner while the row was anchored to the bottom-LEFT — same
+   `bottom`, different heights, so the two sat 3px apart on their centre lines and the
+   send circle read as slightly low against the controls beside it. In the row it is
+   centred by the row. */
+.launch-composer .send { flex: 0 0 auto; margin-left: auto; width: 34px; height: 34px; border: none; border-radius: var(--r-full); background: var(--accent); color: var(--on-accent); display: inline-flex; align-items: center; justify-content: center; }
 .launch-composer .send:disabled { opacity: .45; }
-/* Phone. The foot row and the send button are both absolutely positioned inside the
-   composer, in opposite bottom corners, and the send button comes later in the DOM — so
-   when the row outgrows the space between them nothing pushes and nothing wraps: the row
-   slides underneath and the send circle paints over it, and the covered part of a chip
-   taps as SEND. Room is freed in the order that costs the least meaning — the paperclip
-   drops its word, the two toggles keep their state readout, and the spacing tightens.
+/* Phone. The row and the send button are ONE flex row now, so a chip can no longer
+   slide under the send circle and tap as SEND — items push each other instead. What is
+   still needed here is room: below 760px the row frees it in the order that costs the
+   least meaning — the paperclip drops its word, the two toggles keep their state
+   readout, and the spacing tightens.
    MUST stay after the base .launch-composer-foot rule: same specificity, so the later
    one wins, and while this block sat further up the file its gap was silently dead.
    Measured at 320/344/360/375/390/414 by harness/launchpad-widths-e2e.mjs. */
-/* Sits with the paperclip and the options chip, not with the send button — it acts on
-   what is IN the box, like the clip does. */
-.launch-composer-foot .improve { width: 30px; height: 30px; }
+/* Improve is 30px rather than the row's 34: it carries a word, so it reads as a control
+   without needing the height, and the four px go to the chips that state a setting. */
+.launch-composer-foot .improve { width: auto; height: 30px; gap: 5px; padding: 0 10px; border-radius: var(--r-full); }
+.improve-lab { display: none; font-size: var(--fs-sm); font-weight: 500; }
+.launch-composer-foot .improve .improve-lab { display: inline; }
 .launch-improve-note { margin: 8px 4px 0; }
 @media (max-width: 760px) {
   .launch-composer-foot { gap: 6px; }
@@ -1810,7 +1851,11 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
      options chip its state readout on a 320px row, and that chip is the only thing
      saying what the next build will do. 34px still clears the 32px this row's other
      controls run at, and the chip keeps its words. */
-  .launch-composer-foot .improve { width: 34px; height: 34px; }
+  .launch-composer-foot .improve { width: auto; height: 34px; padding: 0 9px; }
+  /* Below 400px the word is what goes: the paperclip has already dropped its label and
+     the two toggles have to keep their state readouts, which are the only thing on the
+     row saying what the next build will do. */
+  @media (max-width: 400px) { .launch-composer-foot .improve .improve-lab { display: none; } .launch-composer-foot .improve { width: 34px; padding: 0; } }
 }
 /* One options chip replaced three controls, so the row has room again — but the label
    grows with what is off-default ("Sculpted model · No research · No plan"), which is
@@ -2028,7 +2073,10 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
   border: none; border-radius: var(--r-full); background: transparent; color: var(--mut); cursor: pointer;
 }
 .improve:hover:not(:disabled) { background: var(--surf); color: var(--accent-d); }
-.improve:disabled { opacity: .4; cursor: default; }
+/* `.off` rather than `:disabled` — the button stays live so it can say why it is off.
+   Same look, still reachable. */
+.improve:disabled, .improve.off { opacity: .4; }
+.improve.off { cursor: default; }
 .improve:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .improve.busy { color: var(--accent-d); }
 /* The revert offer. Deliberately a full sentence with a real verb rather than "Undo":
@@ -2468,8 +2516,11 @@ details.guide { margin-top: 10px; }
      wordmark on the Launchpad, where it is the only thing that answers "did my update
      land?" — the one question a phone user has no other way to check, and the exact
      confusion that cost a round trip when a docs-only commit desynced the number. */
-  .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 8px; padding: 5px 2px max(6px, env(safe-area-inset-bottom)); }
-  .statusbar > * { flex: 0 0 auto; }
+  .statusbar { flex-wrap: nowrap; gap: 8px; padding: 5px 2px max(6px, env(safe-area-inset-bottom)); }
+  /* The scroll moved INSIDE the facts box, so what scrolls out of view is a readout, and
+     the one action on the bar keeps its own ground instead of covering one. */
+  .statusbar-facts { flex-wrap: nowrap; overflow-x: auto; gap: 8px; }
+  .statusbar-facts > * { flex: 0 0 auto; }
   .statusbar .build-tag, .statusbar .update-chip { display: none; }
   .bedchip-name { display: none; } /* the volume identifies the printer well enough here */
   .statusbar .primary { padding: 0 14px; font-size: var(--fs-sm); }
@@ -2485,7 +2536,7 @@ details.guide { margin-top: 10px; }
      the one ACTION on it ever going out of reach again. */
   .ec-full { display: none; }
   .ec-short { display: inline; }
-  .export-wrap { position: sticky; right: 0; z-index: 1; padding-left: 10px; background: var(--page); }
+  .export-wrap { padding-left: 2px; }
   /* The statusbar is `overflow-x: auto`, which clips on BOTH axes — an absolutely
      positioned menu above it is cut off at the bar's own top edge, not floated over
      the canvas. `fixed` leaves the scroll container entirely (nothing in this subtree
@@ -3372,8 +3423,9 @@ details.guide { margin-top: 10px; }
   .project, .project-edit { max-width: 30vw; }
   /* One statusbar row: it scrolls sideways rather than stacking a second band under
      the canvas, and Export keeps its own auto margin. */
-  .statusbar { flex-wrap: nowrap; overflow-x: auto; gap: 10px; }
-  .statusbar > * { flex: 0 0 auto; }
+  .statusbar { flex-wrap: nowrap; gap: 10px; }
+  .statusbar-facts { flex-wrap: nowrap; overflow-x: auto; gap: 10px; }
+  .statusbar-facts > * { flex: 0 0 auto; }
   .statusbar .build-tag { display: none; }
   /* The cards still float — full-bleed is the phone's answer, and a tablet has the
      room to keep the app's grammar. */
@@ -3392,8 +3444,9 @@ details.guide { margin-top: 10px; }
 @media (min-width: 901px) and (max-height: 860px) and (orientation: landscape) {
   .topbar { height: 48px; flex: 0 0 48px; padding: 0 14px; }
   .split { padding: 0 12px 8px; }
-  .statusbar { flex-wrap: nowrap; overflow-x: auto; }
-  .statusbar > * { flex: 0 0 auto; }
+  .statusbar { flex-wrap: nowrap; }
+  .statusbar-facts { flex-wrap: nowrap; overflow-x: auto; }
+  .statusbar-facts > * { flex: 0 0 auto; }
   .statusbar .build-tag { display: none; }
   /* The zoom cluster steps out of the rail's column. Both are pinned to the bottom-left
      and on a short stage the rail reaches down into the zoom cluster's 132px (measured
@@ -3530,7 +3583,11 @@ details.guide { margin-top: 10px; }
    label because the answer is wrong for anyone printing PETG, and re-deriving it from
    a settings pane two screens away is not a thing people do mid-design. */
 .ms-filament b em { font-style: normal; color: var(--subt); font-weight: 400; }
-.ms-mat { appearance: none; border: none; background: none; padding: 0; margin: 0; font: inherit; font-size: inherit; color: inherit; cursor: pointer; }
+/* .mesh-stats is pointer-events:none so the card never eats a drag on the model behind
+   it — but that also killed the one control inside it. The pickers opt back IN; the card
+   around them stays transparent to the mouse. Without this the material select had been
+   decorative since it shipped: elementFromPoint over it returned the canvas. */
+.ms-mat { appearance: none; border: none; background: none; padding: 0; margin: 0; font: inherit; font-size: inherit; color: inherit; cursor: pointer; pointer-events: auto; }
 .ms-mat:hover { color: var(--ink); text-decoration: underline; }
 .ms-mat option { background: var(--bg); color: var(--ink); }
 /* The credit cost rides inside the button rather than in a separate line of fine print —

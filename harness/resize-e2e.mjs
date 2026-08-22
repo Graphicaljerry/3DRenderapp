@@ -107,7 +107,12 @@ await page.locator("canvas").first().click({ position: { x: 5, y: 5 } });
 await page.keyboard.press("Control+z");
 await page.waitForFunction(({ src, w }) => { const d = eval(src); return d && Math.abs(d[0] - w) < 1.5; }, { src: sbDims, w: wBefore }, { timeout: 90_000 });
 check("B5 undo steps the mesh resize back", true);
-// Redo the 50% so the persisted HEAD is the resized state for the reload check
+// Redo the 50% so the persisted HEAD is the resized state for the reload check.
+// Re-focus the canvas FIRST, for the same reason the undo above does: the rebuild the
+// undo triggers can move focus, and the app's shortcut handler ignores keys typed into
+// an input. Without this the redo simply never fired and the wait below reported a 90s
+// timeout — the probe's own coin-flip, not the app's.
+await page.locator("canvas").first().click({ position: { x: 5, y: 5 } });
 await page.keyboard.press("Control+Shift+z");
 await page.waitForFunction(({ src, w }) => { const d = eval(src); return d && Math.abs(d[0] - w / 2) < 1.5; }, { src: sbDims, w: wBefore }, { timeout: 90_000 });
 await page.waitForTimeout(1200); // let the debounced project save land

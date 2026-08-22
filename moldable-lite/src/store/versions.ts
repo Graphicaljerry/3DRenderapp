@@ -104,6 +104,10 @@ export function replaceHeadVersion(project: Project, snap: Snapshot): Project {
   const prev = project.versions[i];
   const v: Version = {
     ...prev,
+    // The content is being replaced, so a `restoredFrom` inherited from the step this is
+    // overwriting would point at a snapshot this version no longer holds — and would keep
+    // the origin row un-clickable for a model that has since been edited away from it.
+    restoredFrom: undefined,
     summary: snap.summary,
     engine: snap.engine,
     code: snap.code,
@@ -142,14 +146,64 @@ export function replaceHeadVersion(project: Project, snap: Snapshot): Project {
   };
 }
 
-/** Set a past snapshot as HEAD; records the restore as a new append-only version. Pure. */
+/** The snapshot a row really stands for. A restore step is a copy of an older version,
+ *  so for every question that matters — "is the model already here?", "is this the same
+ *  place I just came from?" — it counts as that older version, not as itself. */
+export function originOf(v: Version): string {
+  return v.restoredFrom ?? v.id;
+}
+
+/** Is the model already showing what this row holds? True for the row itself AND for
+ *  the restore step that put it on screen — without the second case, clicking the row
+ *  you just restored looked like a fresh restore and recorded another one. */
+export function alreadyAt(project: Project, versionId: string): boolean {
+  const head = project.versions.find((v) => v.id === project.headId);
+  const t = project.versions.find((v) => v.id === versionId);
+  return !!head && !!t && originOf(head) === originOf(t);
+}
+
+/** Remember an id as deliberately gone, so no merge can bring it back. Bounded: the
+ *  list rides the sync row, and only recent deletions can still be resurrected by a
+ *  device that has been offline. */
+function withDropped(project: Project, ids: string[]): string[] {
+  return [...(project.dropped ?? []), ...ids].slice(-200);
+}
+
+/** Set a past snapshot as HEAD; records the restore as a new append-only version. Pure.
+ *
+ *  Appending — rather than just moving HEAD, as undo does — is what makes a restore
+ *  TRAVEL: mergeProjects picks HEAD by which version was created last, so a restore that
+ *  wrote no version would lose to any newer step on another device.
+ *
+ *  But a plain append per click is what filled the panel with near-identical rows: every
+ *  visit to an old step left a permanent copy behind, and browsing five steps back left
+ *  five. So when the step at the tip is ITSELF a restore that nothing has been built on
+ *  since, this rewrites that one instead of stacking another beside it. Browsing history
+ *  now leaves exactly one row — which is the truth about where the model is. */
 export function restoreVersion(project: Project, versionId: string): Project {
   const t = project.versions.find((v) => v.id === versionId);
   if (!t) throw new Error("Version not found.");
+  // A restore of a restore points at the ORIGINAL, so the chain never nests.
+  const from = originOf(t);
+  const tip = project.versions[project.versions.length - 1];
+  // Superseding is only safe at the very tip: anything appended after this step (a real
+  // edit) makes it part of the lineage, and an undo that walked HEAD off it means the
+  // user is somewhere else entirely. A named checkpoint is never superseded.
+  // And only when the snapshot the tip stands for is STILL in the list. Past 60 steps the
+  // original can age out through trimVersions, at which point the restore step is the only
+  // copy of that geometry left anywhere — dropping it would destroy it for good, on every
+  // device, because `dropped` is a tombstone no merge can undo.
+  const tipOriginLives = !!tip?.restoredFrom && project.versions.some((x) => x.id === tip.restoredFrom);
+  const supersede = !!tip && tip.id === project.headId && !!tip.restoredFrom && !tip.keep && tipOriginLives
+    ? tip.id
+    : null;
   const v: Version = {
     id: uid(),
     createdAt: Date.now(),
-    summary: `Restored “${t.summary}”`,
+    // The original wording, unchanged. Rewriting it to `Restored “…”` and then restoring
+    // that produced `Restored “Restored “…””`; the tag below carries the fact instead.
+    summary: t.summary,
+    restoredFrom: from,
     engine: t.engine,
     code: t.code,
     params: t.params,
@@ -171,8 +225,10 @@ export function restoreVersion(project: Project, versionId: string): Project {
     partColors: t.partColors,
     thumb: t.thumb,
   };
+  const kept = supersede ? project.versions.filter((x) => x.id !== supersede) : project.versions;
   return {
     ...project,
+    dropped: supersede ? withDropped(project, [supersede]) : project.dropped,
     engine: t.engine,
     code: t.code,
     params: t.params,
@@ -184,8 +240,49 @@ export function restoreVersion(project: Project, versionId: string): Project {
     meshXform: t.meshXform,
     genSource: t.genSource,
     updatedAt: Date.now(),
-    versions: trimVersions([...project.versions, v]),
+    versions: trimVersions([...kept, v]),
     headId: v.id,
+  };
+}
+
+/** Why a version can't be removed, or null if it can.
+ *
+ *  The one place the rule lives. The History panel calls it to decide whether to offer a
+ *  ✕ at all, and `deleteVersion` calls it again to enforce — so the control and the guard
+ *  can never disagree about what is removable.
+ *
+ *  The sentences are real user-facing copy, not decoration: they surface when the two
+ *  disagree in TIME rather than in logic — a press that lands just after an undo made
+ *  that row the current one, say — and App reports whichever rule bit rather than
+ *  failing silently. */
+export function whyNotDeletable(project: Pick<Project, "versions" | "headId">, versionId: string): string | null {
+  const v = project.versions.find((x) => x.id === versionId);
+  if (!v) return "That step is no longer in this project.";
+  // `originOf`, not the raw id: after a restore, TWO rows describe where the model is —
+  // the step you went back to and the copy of it at the tip. Both read as Current, and
+  // offering a remove control on one of them would both contradict that label and leave
+  // the restore step pointing at a snapshot that no longer exists.
+  const head = project.versions.find((x) => x.id === project.headId);
+  if (head && originOf(head) === originOf(v)) return "This is the step you're on — go to another one first.";
+  if (v.keep) return "This is a version you saved by name — History keeps those on purpose.";
+  if (project.versions.length <= 1) return "A project keeps at least one step.";
+  return null;
+}
+
+/** Remove one recorded step for good. Pure.
+ *
+ *  The blobs a version holds (its mesh, its imported file, its thumbnail) live inside the
+ *  project record, so dropping it from the array is what frees them — the next putProject
+ *  writes the smaller record. The tombstone is the part that makes it stick: see
+ *  Project.dropped. */
+export function deleteVersion(project: Project, versionId: string): Project {
+  const why = whyNotDeletable(project, versionId);
+  if (why) throw new Error(why);
+  return {
+    ...project,
+    updatedAt: Date.now(),
+    versions: project.versions.filter((v) => v.id !== versionId),
+    dropped: withDropped(project, [versionId]),
   };
 }
 
@@ -237,7 +334,11 @@ export function saveCheckpoint(project: Project, name: string): Project {
   const i = headIndex(project);
   const t = project.versions[i];
   if (!t) throw new Error("Nothing to save yet — build something first.");
-  const v: Version = { ...t, id: uid(), createdAt: Date.now(), summary: name, keep: true };
+  // `restoredFrom: undefined` explicitly. The spread copies HEAD, and if HEAD happens to
+  // be a restore step the checkpoint would inherit its origin — which would tag a version
+  // you named as "restored", and make `alreadyAt` treat the checkpoint as standing for
+  // that older snapshot, so the older row could never be restored again.
+  const v: Version = { ...t, id: uid(), createdAt: Date.now(), summary: name, keep: true, restoredFrom: undefined };
   return {
     ...project,
     updatedAt: Date.now(),

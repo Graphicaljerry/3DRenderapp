@@ -14,10 +14,23 @@
   p, li { color: inherit; opacity: .92; }
   .date { opacity: .6; font-size: .85rem; }
   a { color: #10855c; }
+  /* Breadcrumb — see privacy.html for why. These are standalone files with no shared
+     stylesheet, so the rules are duplicated on purpose. */
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: .9rem; margin: 0 0 20px; }
+  .crumbs a { text-decoration: none; }
+  .crumbs a:hover { text-decoration: underline; }
+  .crumbs .sep { opacity: .45; }
+  .crumbs .here { opacity: .6; }
 </style>
 </head>
 <body>
 <main>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="./">Moldable</a>
+    <span class="sep" aria-hidden="true">/</span>
+    <span class="here" aria-current="page">Terms of Use</span>
+  </nav>
+
   <h1>Terms of Use</h1>
   <p class="date">Last updated: 21 August 2026</p>
 

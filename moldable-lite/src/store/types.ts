@@ -86,6 +86,13 @@ export interface Version {
    *  trim (a checkpoint you named is not something to quietly age out from under you),
    *  and History marks it, so a long list still has findable landmarks in it. */
   keep?: boolean;
+  /** Set on a version created by RESTORING an older one, and holding that older one's
+   *  id. Two jobs. It lets History tag the row without reading the summary — the old
+   *  scheme rewrote the text to `Restored “…”` and restoring a restore nested it, which
+   *  is the same runaway git warns about for `Reapply "Reapply "…""`. And it lets a
+   *  second restore RECOGNISE the first as standing for the same snapshot, which is what
+   *  stops the panel filling with near-identical rows. */
+  restoredFrom?: string;
   /** Split-to-fit-bed metadata: the merged mesh concatenates the pieces in order, so
    *  [vertex count, colour, dims] per piece is enough to reconstruct the per-piece
    *  export list after undo/redo/reopen without re-running the CSG. */
@@ -180,6 +187,13 @@ export interface Project {
   photos?: Record<string, Blob[]>;
   versions: Version[]; // append-only, oldest -> newest
   headId?: string; // which version the HEAD (live) fields mirror; enables undo/redo over `versions`
+  /** Ids of versions deliberately removed — a delete, or a superseded restore step.
+   *
+   *  A merge NEVER drops a version (store/merge.ts exists because a merge that deleted
+   *  cost a user a day of history), so without this list a removed step would come
+   *  straight back from the account or a sibling device on the next sync. This is the
+   *  one exception, and it is explicit: an id in here stays gone everywhere. */
+  dropped?: string[];
   /** Which running copy of the app last wrote this record. Not an identity or a device —
    *  just "was it me". A second tab, a second browser, or the sync cycle writing a copy
    *  it pulled down all leave a different mark here, and that is the signal to MERGE the

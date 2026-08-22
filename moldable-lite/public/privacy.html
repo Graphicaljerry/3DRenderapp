@@ -14,10 +14,25 @@
   p, li { color: inherit; opacity: .92; }
   .date { opacity: .6; font-size: .85rem; }
   a { color: #10855c; }
+  /* Breadcrumb. These pages open in their own tab from a footer link, and the only way
+     back used to be a line at the very bottom — past a full screen of legal text. The
+     trail states where you are and puts the door at the top, where a reader who opened
+     the wrong one looks for it. */
+  .crumbs { display: flex; align-items: center; gap: 8px; font-size: .9rem; margin: 0 0 20px; }
+  .crumbs a { text-decoration: none; }
+  .crumbs a:hover { text-decoration: underline; }
+  .crumbs .sep { opacity: .45; }
+  .crumbs .here { opacity: .6; }
 </style>
 </head>
 <body>
 <main>
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a href="./">Moldable</a>
+    <span class="sep" aria-hidden="true">/</span>
+    <span class="here" aria-current="page">Privacy</span>
+  </nav>
+
   <h1>Privacy</h1>
   <p class="date">Last updated: 21 August 2026</p>
 

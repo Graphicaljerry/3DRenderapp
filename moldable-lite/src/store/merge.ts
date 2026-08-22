@@ -37,14 +37,18 @@ function meldVersion(mine: Version, theirs: Version): Version {
  *  reliable and "the same version" never means "the same array index" — which matters,
  *  because two devices editing in parallel produce lists of the same length that agree
  *  on nothing. */
-function unionVersions(mine: Version[], theirs: Version[]): Version[] {
+function unionVersions(mine: Version[], theirs: Version[], dropped: Set<string>): Version[] {
   const byId = new Map<string, Version>();
   for (const v of theirs) byId.set(v.id, v);
   for (const v of mine) {
     const t = byId.get(v.id);
     byId.set(v.id, t ? meldVersion(v, t) : v);
   }
-  const all = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt);
+  // The ONE exception to "a merge never deletes": a step either side deliberately
+  // removed. Without it, deleting a step here and syncing would hand it straight back
+  // from the account — and a superseded restore step would reappear as the clutter it
+  // was removed to stop. Both sides' lists apply, so the deletion travels either way.
+  const all = [...byId.values()].filter((v) => !dropped.has(v.id)).sort((a, b) => a.createdAt - b.createdAt);
   // The cap is still the cap — but it now bites a merged list, so trim from the OLD end
   // only, and never a named checkpoint (trimVersions owns both rules).
   return trimVersions(all);
@@ -61,7 +65,8 @@ export interface MergeOpts {
  *  that arrived (from the cloud, or from another tab that wrote to the same database).
  *  Pure — callers decide what to do with the result. */
 export function mergeProjects(mine: Project, theirs: Project, opts: MergeOpts = {}): Project {
-  const versions = unionVersions(mine.versions ?? [], theirs.versions ?? []);
+  const dropped = [...new Set([...(mine.dropped ?? []), ...(theirs.dropped ?? [])])].slice(-200);
+  const versions = unionVersions(mine.versions ?? [], theirs.versions ?? [], new Set(dropped));
   const at = (id?: string) => (id ? versions.find((v) => v.id === id) : undefined);
   const myHead = at(mine.headId);
   const theirHead = at(theirs.headId);
@@ -92,6 +97,7 @@ export function mergeProjects(mine: Project, theirs: Project, opts: MergeOpts = 
     createdAt: Math.min(mine.createdAt ?? Date.now(), theirs.createdAt ?? Date.now()),
     updatedAt: Math.max(mine.updatedAt ?? 0, theirs.updatedAt ?? 0),
     versions,
+    dropped: dropped.length ? dropped : undefined,
     headId: head?.id,
     engine: head?.engine ?? owner.engine,
     code: head?.code ?? owner.code,

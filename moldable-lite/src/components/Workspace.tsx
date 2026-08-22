@@ -9,6 +9,7 @@ import type { ChatMessage, ClarifyState, Mode, ModePref } from "../App";
 import type { BuildPlan } from "../llm/plan";
 import { paramUnit } from "../llm/plan";
 import { MATERIALS, DEFAULT_MATERIAL, DEFAULT_PRINT, DEFAULT_SPOOL, FILAMENT_SWATCHES, estimateFilament, materialById, fmtGrams, fmtMoney } from "../print/filament";
+import { SPEED_CLASSES, COMMON_LAYER_HEIGHTS, DEFAULT_LAYER_MM, speedClassById, speedClassForPrinter, estimatePrintTime, fmtDuration } from "../print/printtime";
 import type { PrintabilityReport, PrinterDefaults } from "../print/printability";
 import { defectLines, needsRepair, DIAGNOSE_BUDGET_TRIANGLES, TINY_SHELL_MM3, type MeshDefects } from "../print/meshdoctor";
 import type { ThinWallReport } from "../print/thinwalls";
@@ -28,7 +29,7 @@ export interface PrintPrepCtl {
   chamfer: { can: boolean; done: boolean; apply: (size: number) => void };
 }
 import type { Version } from "../store/types";
-import { MAX_VERSIONS } from "../store/versions";
+import { MAX_VERSIONS, originOf, whyNotDeletable } from "../store/versions";
 import type { CadOp, EngineKind, ExportFormat, PointOp } from "../engine/types";
 import { paramSoftRange, paramHardRange, isCountParam, humanizeParam, evalParamInput, groupParams, type CadParams } from "../cad/params";
 import { whenAgo } from "../lib/when";
@@ -354,7 +355,7 @@ function BalanceChip({ b, brain, genProvider, genModel }: {
         <span key={label} className="balance-n">{label}</span>
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={296}>
+        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={296} ignore={btn}>
           <CreditsPanel b={b} brain={brain} genProvider={genProvider} genModel={genModel} />
         </AnchoredMenu>
       )}
@@ -491,7 +492,7 @@ function BuildOptions({ p }: { p: Props }) {
         <span className="web-state">{notes.length ? notes.join(" · ") : "Build options"}</span>
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={252}>
+        <AnchoredMenu anchor={anchor} onClose={() => setAnchor(null)} width={252} ignore={btn}>
           {p.modePref !== "generative" && (
             <button role="menuitem" className="pmenu-item" onClick={p.onCycleWeb}>
               <b>Research · {p.webMode}</b>
@@ -566,12 +567,12 @@ function ViewMenu({ dimsMode, setDimsMode, wireframe, setWireframe, gray, setGra
   );
   return (
     <span>
-      <button ref={btn} className="ghost sm iconbtn" aria-haspopup="menu" aria-expanded={!!anchor} title="View options — dimensions, wireframe, stats, units, showcase"
+      <button ref={btn} className={`ghost sm iconbtn${anchor ? " on" : ""}`} aria-haspopup="menu" aria-expanded={!!anchor} title="View options — dimensions, wireframe, stats, units, showcase"
         onClick={() => setAnchor(anchor ? null : btn.current!.getBoundingClientRect())}>
         <IconWireframe /><span className="btn-label">View</span>
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={close} width={230}>
+        <AnchoredMenu anchor={anchor} onClose={close} width={230} ignore={btn}>
           <div className="pmenu-item pmenu-choice" role="none">
             <b>Dimensions</b>
             <span>Size lines + bounding box</span>
@@ -628,7 +629,7 @@ function ColorSwatch({ color, fallback, onPick, label }: { color?: string; fallb
         <span className="lp-swatch-dot" style={{ background: shown }} />
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={close} width={188}>
+        <AnchoredMenu anchor={anchor} onClose={close} width={188} ignore={btn}>
           <div className="swatch-head" role="none">Fill colour</div>
           <div className="swatch-grid" role="none">
             {FILAMENT_SWATCHES.map((c) => (
@@ -669,7 +670,7 @@ function PlateMenu({ value, count, names, onPick, onNewPlate }: { value: number;
         P{value} ▾
       </button>
       {anchor && (
-        <AnchoredMenu anchor={anchor} onClose={close} width={170}>
+        <AnchoredMenu anchor={anchor} onClose={close} width={170} ignore={btn}>
           {Array.from({ length: count }, (_, i) => i + 1).map((n) => (
             <button key={n} role="menuitem" className={`pmenu-item${n === value ? " on" : ""}`} onClick={() => { close(); onPick(n); }}>
               Plate {n}{names?.[n] ? ` · ${names[n]}` : ""}{n === value ? " ✓" : ""}
@@ -2039,9 +2040,29 @@ function BuildTag() {
   );
 }
 
-function MeshStats({ report, material, onMaterial, nozzleMM }: {
-  report: PrintabilityReport; material: string; onMaterial: (id: string) => void; nozzleMM: number;
+function MeshStats({ report, material, onMaterial, nozzleMM, printerName }: {
+  report: PrintabilityReport; material: string; onMaterial: (id: string) => void; nozzleMM: number; printerName?: string;
 }) {
+  // How long, not just how much. The two levers the arithmetic can't guess live here:
+  // the machine's speed class (defaulted from the printer already chosen in Settings —
+  // the same file is 25 minutes on one printer and two hours on another) and the layer
+  // height. Both remembered, because nobody re-picks their own printer per part.
+  // The stored value is the user's OVERRIDE, not the answer. Until they pick one the
+  // class is re-derived from the printer on every render, so changing printers in
+  // Settings moves the estimate — which matters more here than anywhere else in the app,
+  // because the machine is a 4× swing on the number. A stored id that no longer exists is
+  // ignored rather than shown, so the label and the arithmetic can't disagree.
+  const [speedPref, setSpeedPref] = useState<string | null>(() => {
+    const v = localStorage.getItem("moldable_speed_class");
+    return v && SPEED_CLASSES.some((c) => c.id === v) ? v : null;
+  });
+  const speed = speedPref ?? speedClassForPrinter(printerName);
+  const setSpeed = (v: string) => { setSpeedPref(v); try { localStorage.setItem("moldable_speed_class", v); } catch { /* private mode */ } };
+  const [layerMM, setLayerState] = useState(() => {
+    const v = parseFloat(localStorage.getItem("moldable_layer_mm") ?? "");
+    return COMMON_LAYER_HEIGHTS.includes(v) ? v : DEFAULT_LAYER_MM;
+  });
+  const setLayer = (v: number) => { setLayerState(v); try { localStorage.setItem("moldable_layer_mm", String(v)); } catch { /* private mode */ } };
   const heavy = report.triangleCount > HEAVY_TRIANGLES;
   const wt = report.manifold.isWatertight;
   const fit = report.bedFit;
@@ -2049,6 +2070,11 @@ function MeshStats({ report, material, onMaterial, nozzleMM }: {
   // Watertight is the precondition for the volume being real at all — a mesh with open
   // edges has no inside, so quoting grams off it would be inventing a number.
   const est = wt ? estimateFilament(report.volume.approxVolume, report.volume.surfaceArea, mat, { ...DEFAULT_PRINT, nozzleMM }) : null;
+  // Time runs off the EXTRUDED volume the line above computed (walls + infill), not the
+  // part's solid volume — a 15%-infill box takes a fraction of the time its bounding
+  // solid would, and that is most of what makes one part quick and another slow.
+  const cls = speedClassById(speed);
+  const time = est ? estimatePrintTime(est.cm3 * 1000, report.boundingBox.size.z, cls, layerMM, nozzleMM) : null;
   return (
     <div className="mesh-stats" role="status" aria-label="Mesh and print stats">
       <div className="ms-row"><span>Triangles</span><b className={heavy ? "warn" : ""}>{report.triangleCount.toLocaleString()}{heavy ? " · heavy" : ""}</b></div>
@@ -2067,6 +2093,24 @@ function MeshStats({ report, material, onMaterial, nozzleMM }: {
             </select>
           </span>
           <b>{fmtGrams(est.grams)} · {est.cost != null ? fmtMoney(est.cost, DEFAULT_SPOOL.currency) : "—"} <em>≈{Math.round(est.metres)} m</em></b>
+        </div>
+      )}
+      {/* Time, on the same terms as the grams above it: derived from the plastic that
+          line already counted, stated as a RANGE, and honest about the one thing that
+          moves it most — which machine. A single confident figure here would be the
+          least defensible number in the app. */}
+      {time && (
+        <div className="ms-row ms-time" title={`Estimate for a ${cls.label.toLowerCase()} machine (${cls.note}) at ${layerMM} mm layers: ${fmtDuration(time.lowMinutes)} to ${fmtDuration(time.highMinutes)} across ${time.layers} layers. It leaves out supports, brim, raft and any purge tower, all of which ADD time — so it is more likely to be low than high. Your slicer has the real answer.`}>
+          <span>
+            <select className="ms-mat" value={speed} onChange={(e) => setSpeed(e.target.value)} aria-label="Printer speed class">
+              {SPEED_CLASSES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+            </select>
+            {" · "}
+            <select className="ms-mat" value={String(layerMM)} onChange={(e) => setLayer(parseFloat(e.target.value))} aria-label="Layer height">
+              {COMMON_LAYER_HEIGHTS.map((h) => <option key={h} value={h}>{h.toFixed(2)} mm</option>)}
+            </select>
+          </span>
+          <b>≈{fmtDuration(time.minutes)} <em>{fmtDuration(time.lowMinutes)}–{fmtDuration(time.highMinutes)}</em></b>
         </div>
       )}
     </div>
@@ -2685,6 +2729,8 @@ interface Props {
   /** Grabbing/hovering a parameter slider previews WHERE it acts on the model. */
   onPeekParam: (key: string) => void;
   onPeekParamEnd: () => void;
+  onPeekWarm: (keys: string[]) => void;
+  onPeekWarmStop: () => void;
   holeCtl: {
     draft: {
       at: [number, number, number];
@@ -2964,6 +3010,7 @@ interface Props {
   headId?: string; // which version the model is actually showing
   restoringId: string | null; // a restore is rebuilding this one right now
   onRestore: (id: string) => void;
+  onDeleteVersion: (id: string) => void;
   onSaveCheckpoint: (name: string) => void;
   checkpointNote: string;
   undoCtl: { undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean; busy: boolean };
@@ -3232,7 +3279,15 @@ export function Workspace(p: Props) {
   chatWRef.current = chatW;
   const chatResize = useRef<{ startX: number; startW: number } | null>(null);
   const saveChatW = (w: number) => { try { localStorage.setItem("moldable_chat_w", String(w)); } catch { /* private mode */ } };
-  const [showStats, setShowStats] = useState(true); // mesh/print stats overlay in the 3D view
+  /** Mesh/print stats overlay in the 3D view. Persisted, like every other View ▾ switch
+   *  (Grayscale, Build plate, Dimensions): turning a display off and finding it back on
+   *  next launch reads as the app ignoring you, and this was the one toggle in that menu
+   *  that forgot. Default ON — the numbers are the point of the panel. */
+  const [showStats, setShowStatsState] = useState(() => localStorage.getItem("moldable_stats") !== "0");
+  const setShowStats = (v: boolean) => {
+    setShowStatsState(v);
+    try { localStorage.setItem("moldable_stats", v ? "1" : "0"); } catch { /* private mode */ }
+  };
   /** Which filament the grams-and-cost line is quoting. Remembered, because almost
    *  everybody prints one material for months at a time and re-picking it on every part
    *  would make the number feel like a toy rather than an answer. */
@@ -4876,7 +4931,7 @@ export function Workspace(p: Props) {
                   top of each other (Objects over the selection inspector, most
                   visibly). A flex column can't overlap itself. */}
               <div className="right-dock">
-                {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} material={material} onMaterial={setMaterial} nozzleMM={p.printer.nozzleMM} />}
+                {p.tab === "3d" && showStats && p.geometry && p.report && <MeshStats report={p.report} material={material} onMaterial={setMaterial} nozzleMM={p.printer.nozzleMM} printerName={p.printer.name} />}
                 {showHelp && (p.tab === "3d" || p.tab === "params") && <HelpSheet onClose={() => setShowHelp(false)} />}
                 {(p.tab === "3d" || p.tab === "params") && p.modelSelected && p.geometry && p.dims && (
                   <SelectionInspector dims={p.dims} units={p.units} busy={p.status === "generating"} canScale={p.activeKind !== "primitive"} onScale={p.onScaleTo} onDeselect={() => p.onModelSelect(false)} onAdjust={() => { setDockPanel("params"); setDockOpen(true); }} />
@@ -5099,7 +5154,7 @@ export function Workspace(p: Props) {
                 )}
                 {dockPanel === "objects" && objectsPanel}
                 {dockPanel === "params" && (
-                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onLive={p.onLiveParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} />
+                  <ParamsPanel defaults={p.cadDefaults} values={p.paramValues} busy={p.status === "generating"} isCad={p.activeKind === "replicad"} onApply={p.onApplyParams} onLive={p.onLiveParams} onSave={p.onSaveParams} onPeek={p.onPeekParam} onPeekEnd={p.onPeekParamEnd} onWarm={p.onPeekWarm} onWarmStop={p.onPeekWarmStop} />
                 )}
                 {dockPanel === "print" && (
                   <PrintabilityPanel report={p.report} defects={p.defects} canRepair={p.activeKind !== "replicad" && !!p.geometry} busy={p.status === "generating"} onRepair={p.onRepair} onSimplify={p.onSimplify} onSplit={p.onSplit} onFitToPlate={p.onFitToPlate} prep={p.printPrep} nozzleMM={p.printer.nozzleMM} pockets={p.pockets} />
@@ -5110,13 +5165,19 @@ export function Workspace(p: Props) {
                 {dockPanel === "steps" && (
                   <StepsPanel steps={p.stepsCtl.steps} isCad={p.activeKind === "replicad"} hasModel={!!p.geometry} busy={p.status === "generating"} onEdit={p.stepsCtl.edit} onRemove={p.stepsCtl.remove} />
                 )}
-                {dockPanel === "history" && <VersionHistory versions={p.versions} headId={p.headId} restoringId={p.restoringId} onRestore={p.onRestore} onSaveCheckpoint={p.onSaveCheckpoint} syncNote={p.checkpointNote} />}
+                {dockPanel === "history" && <VersionHistory versions={p.versions} headId={p.headId} restoringId={p.restoringId} onRestore={p.onRestore} onDelete={p.onDeleteVersion} onSaveCheckpoint={p.onSaveCheckpoint} syncNote={p.checkpointNote} />}
                 {dockPanel === "export" && <ExportPanel p={p} busy={!!p.exporting || p.status === "generating"} />}
               </div>
             </aside>
           </div>
 
           <div className="statusbar">
+            {/* The FACTS scroll; the action does not. Export used to be a sticky element
+                inside the one scrolling row, which on a phone put an opaque button on top
+                of the printer chip — 61px of it hidden behind Export at rest, before any
+                scrolling. Two boxes: this one takes whatever width is left and scrolls
+                inside itself, Export sits beside it and can never cover anything. */}
+            <div className="statusbar-facts">
             <span className="dims">{p.dims ? fmtDims(p.dims, p.units) : "—"}</span>
             {p.geometry && <EngineChip kind={p.activeKind} busy={p.status === "generating"} onSculpt={p.onSculptAsMesh} />}
             <button
@@ -5132,6 +5193,7 @@ export function Workspace(p: Props) {
             {p.status === "generating" && <GenTimer />}
             <BuildTag />
             <DesktopUpdateChip />
+            </div>
             {/* Opens the Export panel in the dock rather than a dropdown of its own. The
                 old .export-menu opted out of the app's solo-menu invariant and had no
                 Escape or outside-click dismissal — it closed on re-click, onMouseLeave,
@@ -6608,13 +6670,20 @@ function PrintabilityPanel({ report, defects, canRepair, busy, onRepair, onSimpl
   );
 }
 
-/** Restoring records a new version whose summary quotes the old one — restore twice
- *  and every row reads `Restored "Restored "Adjusted…""`, which is how a history panel
- *  ends up looking like the same row eight times. Unwrap to the change that actually
- *  happened and carry "restored" as a tag instead. */
-function versionLabel(summary: string): { text: string; restored: boolean } {
-  let text = summary;
-  let restored = false;
+/** The row's text and whether it is a restore step.
+ *
+ *  A restore now keeps the original wording and records its origin in `restoredFrom`, so
+ *  the fact rides as a tag rather than in the prose. Restoring used to REWRITE the summary
+ *  to `Restored "…"`, and restoring a restore wrapped it again — `Restored "Restored
+ *  "Adjusted…""` — which is how the panel ended up looking like the same row eight times.
+ *  Projects saved before the flag existed still carry those wrappers, so they are unwound
+ *  here rather than left on screen. */
+function versionLabel(v: Version): { text: string; restored: boolean } {
+  // Versions recorded before `restoredFrom` existed carry the fact inside their wording
+  // — possibly several layers deep, because restoring a restore re-wrapped it. Unwrap
+  // those; new ones just answer the flag.
+  let text = v.summary;
+  let restored = !!v.restoredFrom;
   for (;;) {
     const m = text.match(/^Restored\s+[“"](.*)[”"]$/s);
     if (!m) break;
@@ -6688,14 +6757,19 @@ function StepsPanel({ steps, isCad, hasModel, busy, onEdit, onRemove }: {
   );
 }
 
-const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore, onSaveCheckpoint, syncNote }: {
+const VersionHistory = memo(function VersionHistory({ versions, headId, restoringId, onRestore, onDelete, onSaveCheckpoint, syncNote }: {
   versions: Version[];
   headId?: string; // where the model actually IS — undo moves this without touching the list
   restoringId: string | null;
   onRestore: (id: string) => void;
+  onDelete: (id: string) => void;
   onSaveCheckpoint: (name: string) => void;
   syncNote: string;
 }) {
+  /** Which row is asking "remove this?". One at a time, inline, no dialog: a single
+   *  unnamed step is small enough that a modal over the whole app is the wrong weight —
+   *  but it is gone for good, so it still takes a second press. */
+  const [confirming, setConfirming] = useState<string | null>(null);
   const [naming, setNaming] = useState(false);
   const [draftName, setDraftName] = useState("");
   const saveRow = (
@@ -6725,7 +6799,12 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
   // "Current" is HEAD, not the newest row. After an undo those differ, and marking
   // the tip current put a Restore button on the state you were already in — press it
   // and the model rebuilds to exactly what's on screen, which reads as a dead button.
-  const head = headId && versions.some((v) => v.id === headId) ? headId : versions[versions.length - 1]?.id;
+  const headV = versions.find((v) => v.id === headId) ?? versions[versions.length - 1];
+  const head = headV?.id;
+  // A restore step stands for the snapshot it copied, so BOTH rows are "where you are".
+  // Comparing only ids left the original row enabled and offering "Go back to this" while
+  // the store refused the restore as a no-op — a button that did nothing at all.
+  const hereNow = headV ? originOf(headV) : null;
   return (
     <div className="panel vhistory">
       <div className="vhead">
@@ -6735,21 +6814,27 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
       {saveRow}
       <div className="vlist">
         {list.map(({ v, step }) => {
-          const { text, restored } = versionLabel(v.summary);
+          const { text, restored } = versionLabel(v);
           const isHead = v.id === head;
+          const atHere = !!hereNow && originOf(v) === hereNow; // this row, or its restore step
           const busy = restoringId === v.id;
+          // One rule, asked of the store rather than restated here. It answers null when
+          // the row can go and a sentence when it can't, so the ✕ and its explanation can
+          // never drift from what `deleteVersion` actually enforces.
+          const noDelete = whyNotDeletable({ versions, headId: head }, v.id);
+          const asking = confirming === v.id;
           const meta = `${step} · ${whenAgo(v.createdAt)}${v.dims ? ` · ${v.dims.x}×${v.dims.y}×${v.dims.z} mm` : ` · ${v.engine}`}`;
           // The ROW is the control. A separate Restore button next to a big thumbnail
           // left about seventy pixels for the summary in a 262px dock, which clipped
           // every label to two characters — and "click the version you want" is what
           // people try first anyway.
           return (
+            <div className={`vrow-wrap${asking ? " asking" : ""}`} key={v.id}>
             <button
-              key={v.id}
               type="button"
-              className={`vrow${isHead ? " current" : ""}${busy ? " loading" : ""}`}
-              disabled={isHead || !!restoringId}
-              title={isHead ? `${text} — this is what you're looking at` : `Go back to: ${text}`}
+              className={`vrow${atHere ? " current" : ""}${busy ? " loading" : ""}`}
+              disabled={atHere || !!restoringId}
+              title={atHere ? `${text} — this is what you're looking at` : `Go back to: ${text}`}
               onClick={() => onRestore(v.id)}
             >
               {v.thumb
@@ -6758,18 +6843,44 @@ const VersionHistory = memo(function VersionHistory({ versions, headId, restorin
               <span className="vbody">
                 <span className="vsum">{text}</span>
                 <span className="vmeta">{meta}</span>
+                {/* The "restored" mark sits OUTSIDE the current/loading choice. It used
+                    to be an alternative to them, so the one row where it matters most —
+                    the restore you are standing on — never showed it, and now that the
+                    summary keeps the original wording instead of being rewritten to
+                    `Restored “…”` there was nothing left saying how you got here. */}
                 <span className="vstate">
                   {v.keep && <span className="vtag kept">Saved</span>}
-                  {isHead ? <span className="vtag now">Current</span>
+                  {restored && <span className="vtag">restored</span>}
+                  {atHere ? <span className="vtag now">Current</span>
                     : busy ? <span className="vtag">Loading…</span>
-                      : <><span className="vgo">Go back to this</span>{restored && <span className="vtag">restored</span>}</>}
+                      : <span className="vgo">Go back to this</span>}
                 </span>
               </span>
             </button>
+            {!noDelete && (asking ? (
+              <span className="vdel-ask">
+                <button type="button" className="vdel-yes" onClick={() => { setConfirming(null); onDelete(v.id); }}>Remove</button>
+                <button type="button" className="vdel-no" onClick={() => setConfirming(null)}>Keep</button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="vdel"
+                aria-label={`Remove step ${step}`}
+                title="Remove this step from History. The model on screen doesn't change."
+                disabled={!!restoringId}
+                onClick={() => setConfirming(v.id)}
+              >
+                <IconX size={13} />
+              </button>
+            ))}
+            </div>
           );
         })}
       </div>
-      <p className="fine">Restoring adds a step rather than deleting any — nothing is lost. Unnamed steps drop off past {MAX_VERSIONS}; versions you save by name never do.</p>
+      <p className="fine">Going back doesn't delete your work — browsing leaves one row, not one per click.
+        History keeps your last {MAX_VERSIONS} steps and versions you save by name are kept for good.
+        Removing a step with ✕ <b>is</b> permanent, on every device.</p>
     </div>
   );
 });
@@ -6972,7 +7083,7 @@ function SplitPiecesPanel({ splitCtl }: { splitCtl: Props["splitCtl"] }) {
   );
 }
 
-function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, onPeek, onPeekEnd }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams, editedKey?: string) => void; onLive: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void }) {
+function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, onPeek, onPeekEnd, onWarm, onWarmStop }: { defaults: CadParams | null; values: CadParams; busy: boolean; isCad: boolean; onApply: (v: CadParams, editedKey?: string) => void; onLive: (v: CadParams) => void; onSave: () => void; onPeek: (k: string) => void; onPeekEnd: () => void; onWarm: (keys: string[]) => void; onWarmStop: () => void }) {
   const [local, setLocal] = useState<CadParams>(values);
   const [editing, setEditing] = useState<Record<string, string>>({});
   // The scrub's pointermove/pointerup handlers outlive the render that attached them,
@@ -7001,6 +7112,23 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
   // "Cannot access 'outstanding' before initialization", which white-screened the entire
   // app the moment you opened Adjust.
   const outstanding = useRef<CadParams[]>([]);
+  // Probe the rows before they're hovered. The highlight costs a full kernel rebuild the
+  // first time it is asked for any row, which is the second or two people were waiting
+  // through; done here, while the panel is just sitting open, the first hover on each
+  // row is already answered. App owns the throttling and the abort — this only says
+  // which rows exist and in what order they're read.
+  const warmKeys = defaults && isCad ? groupParams(defaults, values).flatMap((g) => g.rows.map((r) => r.key)) : [];
+  // The cached answers are keyed by every current value, so an edit invalidates all of
+  // them and the rows go slow again — hence re-warming when the numbers settle, not only
+  // when the panel opens. Debounced, because a scrub emits a value per frame and each
+  // warm run starts a kernel build.
+  const warmSig = `${warmKeys.join(",")}|${warmKeys.map((k) => values[k]).join(",")}`;
+  useEffect(() => {
+    if (busy || !warmKeys.length) return;
+    const t = setTimeout(() => onWarm(warmKeys), 600);
+    return () => { clearTimeout(t); onWarmStop(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [warmSig, busy]);
   useEffect(() => {
     if (draggingRef.current) return; // a drag is the authority on its own row
     const q = outstanding.current;
@@ -7033,7 +7161,8 @@ function ParamsPanel({ defaults, values, busy, isCad, onApply, onLive, onSave, o
     o: { step: number; isInt: boolean; min: number; max: number; onTap?: () => void },
   ) => {
     if (busy) return;
-    onPeekEnd(); // a press cancels the hover-intent probe — it must not build mid-drag
+    onPeekEnd();   // a press cancels the hover-intent probe — it must not build mid-drag
+    onWarmStop();  // …and the background warm-up, which would queue a build behind the drag
     const el = e.currentTarget;
     const id = e.pointerId;
     el.setPointerCapture(id);

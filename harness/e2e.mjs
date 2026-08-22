@@ -1,6 +1,6 @@
 // End-to-end: gallery entry points, one-tap build, fresh-project behavior, live params.
 import { chromium } from "playwright";
-import { awaitBuild } from "./enter.mjs";
+import { awaitBuild, newChat } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const page = await browser.newPage({ viewport: { width: 1440, height: 950 } });
@@ -90,7 +90,7 @@ const dimsChange = await page.evaluate(async () => {
 check("param overrides change dims", dimsChange.b.x > dimsChange.a.x, JSON.stringify(dimsChange));
 
 // 4) Empty state (new chat) shows the template strip; tapping a card starts a FRESH project.
-await page.getByRole("button", { name: "+ New chat" }).click();
+await newChat(page);
 await page.waitForSelector(".tpl-strip");
 check("empty state shows template strip", true);
 await page.locator(".tpl-strip").getByTitle(/^Build the squeeze bag clip\b/).click();

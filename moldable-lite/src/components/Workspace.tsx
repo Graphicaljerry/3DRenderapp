@@ -109,7 +109,7 @@ function useSoloMenu(open: boolean, close: () => void) {
   }, [open]);
 }
 
-export function AnchoredMenu({ anchor, onClose, children, width = 190 }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number }) {
+export function AnchoredMenu({ anchor, onClose, children, width = 190, className = "" }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useSoloMenu(true, onClose); // mounted == open
   const [h, setH] = useState(0);
@@ -138,7 +138,7 @@ export function AnchoredMenu({ anchor, onClose, children, width = 190 }: { ancho
   const openUp = anchor.bottom + h + 8 > window.innerHeight && anchor.top - h - 8 > 0;
   const top = openUp ? anchor.top - h - 4 : anchor.bottom + 4;
   return createPortal(
-    <div ref={ref} className="pmenu" role="menu" style={{ left, top, width, visibility: h ? "visible" : "hidden" }}>
+    <div ref={ref} className={`pmenu${className ? ` ${className}` : ""}`} role="menu" style={{ left, top, width, visibility: h ? "visible" : "hidden" }}>
       {children}
     </div>,
     document.body,
@@ -3173,7 +3173,12 @@ export function Workspace(p: Props) {
   useEffect(growComposer, [p.input]); // covers dictation, sends (clear), and programmatic sets
   const [dragOver, setDragOver] = useState(false);
   const [dragOverCanvas, setDragOverCanvas] = useState(false);
-  const [profileMenu, setProfileMenu] = useState(false);
+  // The account menu is an anchored popover, not a boolean panel: it is now the phone's
+  // whole navigation row, so it has to dismiss the way every other menu here does.
+  const [profileAnchor, setProfileAnchor] = useState<DOMRect | null>(null);
+  const profileBtn = useRef<HTMLButtonElement>(null);
+  /** Run a menu action and shut the menu — every row does both. */
+  const pickProfile = (run: () => void) => { setProfileAnchor(null); run(); };
   const [logoOpen, setLogoOpen] = useState(false);
   const [patternOpen, setPatternOpen] = useState(false);
   const [logoOver, setLogoOver] = useState(false);
@@ -3552,37 +3557,42 @@ export function Workspace(p: Props) {
         <div className="topbar-right">
           <span className={`pill ${p.activeKind === "primitive" ? "pill-warn" : ""}`}>{enginePill}</span>
           {/* Navigation, not actions: these read as text with an underline on hover.
-              Only "+ New chat" keeps a filled button, because it is the one thing here
-              that CHANGES something. Boxing all four made none of them primary. */}
+              Both are hidden below 760px, which is exactly why the account menu carries
+              them as well — on a phone that menu IS this row. */}
           <button className="navlink" onClick={p.onOpenTemplates}>Templates</button>
           <button className="navlink" onClick={p.onOpenLibrary}>Library</button>
-          <button className="primary sm" onClick={p.onNew} title="Start a fresh chat & model (your current one stays in the Library)">+ New chat</button>
-          {/* The two icons are stacked and cross-faded rather than swapped, so the
-              switch is one continuous motion instead of a pop. */}
-          <button
-            className={`theme-toggle${p.theme === "dark" ? " is-dark" : ""}`}
-            onClick={p.onToggleTheme}
-            title={p.theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label="Toggle dark mode"
-            aria-pressed={p.theme === "dark"}
-          >
-            <span className="tt-ico tt-sun"><IconSun /></span>
-            <span className="tt-ico tt-moon"><IconMoon /></span>
-          </button>
+          {/* One door instead of three. "+ New chat" and the light/dark switch used to
+              stand out here as their own controls; on a 390px phone that left four
+              things fighting over the row and the sign-in button truncating to "Sign…".
+              They moved inside, next to Settings and the account, which were already
+              there — so the row is a wordmark and a face, and nothing else.
+
+              The menu opens for signed-OUT visitors too. It used to be gated behind an
+              account, so folding these controls in without lifting that gate would have
+              taken New chat and dark mode away from anyone who had not signed in. */}
           <div className="profile-wrap">
             <button
+              ref={profileBtn}
               className="ghost profile"
-              onClick={() => (p.accountEmail ? setProfileMenu((v) => !v) : p.onOpenProfile())}
-              title={p.accountEmail ? `${p.accountEmail} — account menu` : "Sign in & settings"}
-              aria-label="Account menu"
-              aria-expanded={profileMenu}
+              onClick={() => setProfileAnchor(profileAnchor ? null : profileBtn.current!.getBoundingClientRect())}
+              title={p.accountEmail ? `${p.accountEmail} — menu & account` : "Menu, settings & sign in"}
+              aria-label="Menu and account"
+              aria-haspopup="menu"
+              aria-expanded={!!profileAnchor}
             >
               {p.avatar ? <span className="avatar"><img src={p.avatar} alt="" /></span>
                 : p.accountEmail ? <span className="avatar">{p.accountEmail[0].toUpperCase()}</span>
                   : <IconUser />}
             </button>
-            {profileMenu && p.accountEmail && (
-              <div className="profile-menu" onMouseLeave={() => setProfileMenu(false)}>
+          </div>
+          {/* AnchoredMenu rather than the hand-rolled panel this used to be. That one
+              closed on onMouseLeave — a gesture a finger cannot make — so on a phone it
+              could only be dismissed by picking something out of it. This one takes an
+              outside tap and Escape, obeys the app's one-menu-at-a-time rule, and clamps
+              itself inside the viewport instead of hanging off the screen edge. */}
+          {profileAnchor && (
+            <AnchoredMenu anchor={profileAnchor} onClose={() => setProfileAnchor(null)} width={236} className="account-menu">
+              {p.accountEmail && (
                 <div className="pm-head">
                   <span className="pm-avatar">{p.avatar ? <img src={p.avatar} alt="" /> : p.accountEmail[0].toUpperCase()}</span>
                   <span className="pm-who">
@@ -3590,16 +3600,19 @@ export function Workspace(p: Props) {
                     <span className="pm-email">{p.accountEmail}</span>
                   </span>
                 </div>
-                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onNew(); }}>New chat</button>
-                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenLibrary(); }}>Library</button>
-                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenSettings(); }}>Settings</button>
-                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onOpenProfile(); }}>Account &amp; sync</button>
-                <button className="pm-item" onClick={() => { setProfileMenu(false); p.onToggleTheme(); }}>{p.theme === "dark" ? "Light mode" : "Dark mode"}</button>
-                <div className="pm-sep" />
-                <button className="pm-item danger" onClick={() => { setProfileMenu(false); p.onSignOut(); }}>Sign out</button>
-              </div>
-            )}
-          </div>
+              )}
+              <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onNew)}>New chat</button>
+              <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenTemplates)}>Templates</button>
+              <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenLibrary)}>Library</button>
+              <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenSettings)}>Settings</button>
+              {p.accountEmail && <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenProfile)}>Account &amp; sync</button>}
+              <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onToggleTheme)}>{p.theme === "dark" ? "Light mode" : "Dark mode"}</button>
+              <div className="pm-sep" />
+              {p.accountEmail
+                ? <button role="menuitem" className="pm-item danger" onClick={() => pickProfile(p.onSignOut)}>Sign out</button>
+                : <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenProfile)}>Sign in</button>}
+            </AnchoredMenu>
+          )}
         </div>
       </header>
 

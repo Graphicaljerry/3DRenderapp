@@ -2307,7 +2307,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 
 /* ---------- profile dropdown menu ---------- */
 .profile-wrap { position: relative; }
-.profile-menu { position: absolute; right: 0; top: calc(100% + 6px); width: 232px; background: var(--bg); border: 1px solid var(--bord); border-radius: var(--r-lg); box-shadow: var(--shadow-md); padding: 6px; z-index: var(--z-popover); display: flex; flex-direction: column; }
 .pm-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 12px; border-bottom: 1px solid var(--bord); margin-bottom: 4px; }
 .pm-avatar { width: 32px; height: 32px; flex: 0 0 32px; border-radius: 50%; background: var(--accent); color: #fff; font-size: var(--fs-lg); font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .pm-who { display: flex; flex-direction: column; min-width: 0; }
@@ -2335,6 +2334,9 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .pm-item:hover { background: var(--surf); }
 .pm-item.danger { color: var(--danger); }
 .pm-sep { height: 1px; background: var(--bord); margin: 4px 4px; }
+/* The account menu carries the whole top row on a phone, so it sits a touch roomier
+   than the settings popovers that share .pmenu. */
+.pmenu.account-menu { padding: 6px; }
 
 /* ---------- topbar: clickable brand + profile ---------- */
 /* The brand navigates home, so it needs to read as a control. A colour shift on the
@@ -2483,7 +2485,7 @@ details.guide { margin-top: 10px; }
      Height only — the type stays where it is, so the bars do not get louder, they get
      easier to hit. The topbar's 48px already had the room; the statusbar's top padding
      comes down 3px to pay for most of its own. */
-  .topbar .brandbtn, .topbar .primary.sm { min-height: 40px; }
+  .topbar .brandbtn { min-height: 40px; }
   .statusbar .primary, .statusbar .bedchip, .statusbar .engine-chip { min-height: 40px; }
   .statusbar .bedchip, .statusbar .engine-chip { padding-top: 0; padding-bottom: 0; }
   /* ---- the statusbar has more facts than a phone has width ----
@@ -2509,8 +2511,6 @@ details.guide { margin-top: 10px; }
      do. "+ New chat" wearing the same accent fill made *starting over* the loudest
      element above the canvas, and with only four items left in a 48px bar it became the
      screen's visual anchor. It keeps its size and its place; it loses the fill. */
-  .topbar .primary.sm { background: var(--ctl); color: var(--ink2); font-weight: 500; }
-  .topbar .primary.sm:hover { background: var(--ctl-h); color: var(--ink); }
   /* The stats card was the worst collider on the short canvas, and every number in it
      is one tap away in Printability. */
   .mesh-stats { display: none; }
@@ -3566,7 +3566,9 @@ details.guide { margin-top: 10px; }
 .dock button.ghost.sm em { font-style: normal; color: var(--subt); font-weight: 400; }
 
 /* Legal pages, beside the build tag: present everywhere, prominent nowhere. */
-.legal-link { font-size: var(--fs-tiny); color: var(--ink2); text-decoration: none; margin-left: 10px; opacity: .75; }
+/* The launchpad's standing footer — the last row on the page, every visit. */
+.legal-foot { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px)); }
+.legal-link { font-size: var(--fs-tiny); color: var(--ink2); text-decoration: none; opacity: .75; }
 .legal-link:hover { opacity: 1; text-decoration: underline; }
 
 /* Fit calibration: the coupon's six holes as tappable answers. */

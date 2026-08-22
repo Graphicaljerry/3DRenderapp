@@ -2,7 +2,7 @@
 // switch to LIGHT in-app, and the composer must follow — the reported bug was a
 // black input in a light UI because the inline color-scheme never updated.
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, toggleTheme } from "./enter.mjs";
 
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
 const fails = [];
@@ -56,8 +56,8 @@ const probe = async () => {
 const atDark = await probe();
 check("dark boot: composer is dark", atDark.theme === "dark" && atDark.dark, JSON.stringify(atDark));
 
-// Toggle to light via the topbar theme button.
-await page.getByRole("button", { name: "Toggle dark mode" }).click();
+// Toggle to light. The switch lives in the account menu now, not the top row.
+await toggleTheme(page);
 await page.waitForTimeout(200);
 const atLight = await probe();
 check("toggle → light theme applied", atLight.theme === "light", JSON.stringify(atLight));
@@ -65,7 +65,7 @@ check("inline color-scheme follows the toggle", atLight.scheme === "light", atLi
 check("composer input turns light (the reported bug)", atLight.light, atLight.bg);
 
 // And back to dark for completeness.
-await page.getByRole("button", { name: "Toggle dark mode" }).click();
+await toggleTheme(page);
 await page.waitForTimeout(200);
 const back = await probe();
 check("toggle back → composer dark again", back.theme === "dark" && back.dark && back.scheme === "dark", JSON.stringify(back));

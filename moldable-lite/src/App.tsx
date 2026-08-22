@@ -9873,11 +9873,6 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
           >
             v{__BUILD_STAMP__}
           </span>
-          {/* The legal pair lives beside the version tag — always on screen, out of the
-              way, and on the one screen every visitor passes through. Static pages, so
-              they open even when the app itself won't. */}
-          <a className="legal-link" href={`${import.meta.env.BASE_URL}privacy.html`} target="_blank" rel="noopener">Privacy</a>
-          <a className="legal-link" href={`${import.meta.env.BASE_URL}terms.html`} target="_blank" rel="noopener">Terms</a>
         </div>
         <div className="launch-top-right">
           <button className="ghost sm" aria-label="Toggle dark mode" title="Toggle dark mode" onClick={onToggleTheme}>{theme === "dark" ? <IconSun /> : <IconMoon />}</button>
@@ -10138,6 +10133,17 @@ function Launchpad({ theme, onToggleTheme, onExample, onAllTemplates, onTemplate
         )}
        </div>
       </main>
+
+      {/* Legal, in the footer where people look for it. It used to sit beside the
+          wordmark up top, which on a 390px phone was the difference between "Sign in"
+          and a truncated "Sign…". This footer is deliberately OUTSIDE the first-run
+          launch-foot above: that one is hidden for returning visitors, and a privacy
+          policy you only show to newcomers is not a privacy policy. Static pages, so
+          they still open when the app itself will not. */}
+      <footer className="legal-foot">
+        <a className="legal-link" href={`${import.meta.env.BASE_URL}privacy.html`} target="_blank" rel="noopener">Privacy</a>
+        <a className="legal-link" href={`${import.meta.env.BASE_URL}terms.html`} target="_blank" rel="noopener">Terms</a>
+      </footer>
     </div>
   );
 }

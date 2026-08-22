@@ -3,7 +3,7 @@
 // fit to the plate and resized by typed mm/%, and the baked transform survives
 // undo and a full reload (meshXform replay over the original glb).
 import { chromium } from "playwright";
-import { enterWorkspace } from "./enter.mjs";
+import { enterWorkspace, newChat } from "./enter.mjs";
 
 // Every geometry wait below is 90s. These steps are OCCT/mesh rebuilds behind a Comlink
 // worker with no signal, and on a COLD vite server — the first probe after a source edit,
@@ -121,7 +121,7 @@ check("B6 resized mesh size survives reload (meshXform replay)", true);
 
 // ---------- C: STL drops convert to a CAD solid — fit works there too, and UNDO
 // no longer re-reads the STL as STEP (importKind persisted; was a real crash) ----------
-await page.getByRole("button", { name: "+ New chat", exact: true }).click();
+await newChat(page);
 await page.evaluate(async () => {
   const THREE = await import("/node_modules/three/build/three.module.js");
   const { geometryToSTL } = await import("/src/print/stl.ts");

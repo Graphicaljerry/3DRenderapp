@@ -54,6 +54,28 @@ export async function enterWorkspace(page, timeout = 60_000) {
   );
 }
 
+/** Open the account menu and pick a row.
+ *
+ *  "+ New chat" and the light/dark switch used to be their own buttons in the top row.
+ *  They now live behind the avatar, so every probe that drove them by name would click
+ *  nothing. One helper rather than the menu dance copied into each script — and it
+ *  waits for the menu to CLOSE, because the click that follows in the caller would
+ *  otherwise land on the popover still covering the page.
+ */
+export async function accountMenu(page, label) {
+  await page.locator(".topbar .profile").click();
+  const menu = page.locator(".pmenu.account-menu");
+  await menu.waitFor({ timeout: 15_000 });
+  await menu.locator("button", { hasText: label }).first().click();
+  await menu.waitFor({ state: "detached", timeout: 15_000 });
+}
+
+/** Start a fresh chat & model, wherever that control currently lives. */
+export const newChat = (page) => accountMenu(page, /^New chat$/);
+
+/** Flip light/dark. The row names the theme it switches TO, so match either. */
+export const toggleTheme = (page) => accountMenu(page, /^(Light|Dark) mode$/);
+
 /** Wait for a build to actually land: the viewer holds real geometry and nothing is still
  *  generating.
  *

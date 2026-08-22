@@ -10,6 +10,7 @@
 //    inside a comment must produce NO slider rather than a wrong one.
 // 4. Part fit reaches the model on an ordinary Precise build, not only the guided flow.
 import { chromium } from "playwright";
+import { newChat } from "./enter.mjs";
 
 await fetch("http://localhost:8899/_reset");
 const browser = await chromium.launch({ executablePath: "/opt/pw-browsers/chromium" });
@@ -121,8 +122,8 @@ check("…and the hand-added chamfer op survived into the committed version", he
 check("…with the kept value recorded, not the whole map", !!head.params && head.params.thickness === 8, JSON.stringify(head.params));
 
 // ---- 5) wrong-size build earns the caution -----------------------------------------
-await page.locator("button", { hasText: /new chat/i }).first().click();
-// "+ New chat" empties the workspace chat in place — the composer survives. Wait for
+await newChat(page);
+// New chat empties the workspace chat in place — the composer survives. Wait for
 // the transcript to actually clear so the send lands in the fresh conversation.
 await page.waitForFunction(() => document.querySelectorAll(".msg").length === 0, null, { timeout: 30_000 });
 await send("A SHORTPART bracket exactly 75 mm wide", true);
@@ -132,7 +133,7 @@ const warn = await chatText();
 check("wrong-size build is cautioned, naming the figure", /⚠/.test(warn) && /75 mm/.test(warn), warn.slice(-140));
 
 // ---- 6) extractParams refuses ambiguity through the real Adjust panel --------------
-await page.locator("button", { hasText: /new chat/i }).first().click();
+await newChat(page);
 await page.waitForFunction(() => document.querySelectorAll(".msg").length === 0, null, { timeout: 30_000 });
 await send("A TRICKY bracket please", true);
 // Prove the TRICKY build landed before reading its sliders — Adjust would otherwise

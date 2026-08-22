@@ -26,12 +26,12 @@ check("sync payload is gzip-compressed inside the envelope", crypt.gz && crypt.s
 check("compressed payload round-trips losslessly", crypt.roundtrip);
 
 // ---- 2) Grouped Settings modal. ----
-// Signed out, the avatar's job is getting signed IN — it opens the sign-in popup, not a
-// settings pane (App.tsx: "Signed out, the avatar's job is getting signed IN"), and the
-// profile MENU that carries the Settings item only renders for a signed-in account. So
-// this opened nothing and then waited 20 s for a modal that was never going to appear.
-// The status bar's printer chip opens Settings in any state; every tab is one click away
-// from there.
+// The status bar's printer chip, not the avatar. When this was written the avatar
+// opened the sign-in popup while signed out and its menu — the one carrying Settings —
+// rendered only for an account, so driving Settings from up there waited 20 s for a
+// modal that was never coming. The avatar now opens a menu in every auth state with
+// Settings in it, so that route works too; this one is kept because the chip opens
+// Settings in one click from any state, which is still the shortest path.
 await page.locator(".statusbar .bedchip").click();
 await page.waitForSelector(".card .stabs", { timeout: 20_000 });
 const groups = async () => page.locator(".sgroup .sgroup-head b").allInnerTexts();

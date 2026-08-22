@@ -2334,9 +2334,6 @@ button.p2p-step:hover .p2p-dot.pending { border-color: var(--accent); }
 .pm-item:hover { background: var(--surf); }
 .pm-item.danger { color: var(--danger); }
 .pm-sep { height: 1px; background: var(--bord); margin: 4px 4px; }
-/* The account menu carries the whole top row on a phone, so it sits a touch roomier
-   than the settings popovers that share .pmenu. */
-.pmenu.account-menu { padding: 6px; }
 
 /* ---------- topbar: clickable brand + profile ---------- */
 /* The brand navigates home, so it needs to read as a control. A colour shift on the
@@ -2476,15 +2473,6 @@ details.guide { margin-top: 10px; }
   .statusbar .build-tag, .statusbar .update-chip { display: none; }
   .bedchip-name { display: none; } /* the volume identifies the printer well enough here */
   .statusbar .primary { padding: 0 14px; font-size: var(--fs-sm); }
-  /* ---- thumb-sized targets in the fixed chrome ----
-     Measured on a 390×664 phone: the wordmark (the way home) was a 22px tap target,
-     the bed chip 23px, Export 27px, "+ New chat" 30px. Every one of them is a thing
-     you reach for with a thumb while holding the phone, and every one was under half
-     Apple's 44pt. They were sized by their text because they inherited desktop rules
-     where the pointer is a pixel.
-     Height only — the type stays where it is, so the bars do not get louder, they get
-     easier to hit. The topbar's 48px already had the room; the statusbar's top padding
-     comes down 3px to pay for most of its own. */
   .topbar .brandbtn { min-height: 40px; }
   .statusbar .primary, .statusbar .bedchip, .statusbar .engine-chip { min-height: 40px; }
   .statusbar .bedchip, .statusbar .engine-chip { padding-top: 0; padding-bottom: 0; }
@@ -2825,24 +2813,8 @@ details.guide { margin-top: 10px; }
 
 /* Theme toggle: sun and moon stacked in one box, cross-faded and counter-rotated so
    switching is a single continuous motion. */
-.theme-toggle {
-  position: relative; width: 32px; height: 32px; flex: 0 0 auto;
-  display: inline-grid; place-items: center;
-  background: none; border: none; border-radius: var(--r-full); color: var(--ink2);
-  transition: background-color .15s ease, color .15s ease;
-}
-.theme-toggle:hover { background: var(--ctl); color: var(--ink); }
-.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.theme-toggle .tt-ico {
-  grid-area: 1 / 1; display: inline-flex;
-  transition: opacity .26s ease, transform .34s cubic-bezier(.22,1,.36,1);
-}
-.theme-toggle .tt-sun  { opacity: 0; transform: rotate(-70deg) scale(.6); }
-.theme-toggle .tt-moon { opacity: 1; transform: rotate(0deg) scale(1); }
-.theme-toggle.is-dark .tt-sun  { opacity: 1; transform: rotate(0deg) scale(1); }
-.theme-toggle.is-dark .tt-moon { opacity: 0; transform: rotate(70deg) scale(.6); }
 @media (prefers-reduced-motion: reduce) {
-  .navlink::after, .theme-toggle .tt-ico { transition: none; }
+  .navlink::after { transition: none; }
 }
 
 /* ---------- tool rail: names on hover ----------
@@ -3524,7 +3496,7 @@ details.guide { margin-top: 10px; }
   /* …except inside the head pill, whose whole 43px row is the target: a 40px minimum
      on its inner segments would inflate the capsule past the rail it is matched to. */
   .viewer-head .viewer-tools .seg button { min-height: 0; }
-  .theme-toggle, .navlink { min-height: 44px; min-width: 44px; }
+  .navlink { min-height: 44px; min-width: 44px; }
   .zoom-ctl button { width: 40px; height: 40px; }
   .view-snaps button { min-height: 40px; }
   .dock-item { min-height: 44px; }
@@ -3565,7 +3537,6 @@ details.guide { margin-top: 10px; }
    a paid action should carry its price where the finger lands. */
 .dock button.ghost.sm em { font-style: normal; color: var(--subt); font-weight: 400; }
 
-/* Legal pages, beside the build tag: present everywhere, prominent nowhere. */
 /* The launchpad's standing footer — the last row on the page, every visit. */
 .legal-foot { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 20px 20px calc(20px + env(safe-area-inset-bottom, 0px)); }
 .legal-link { font-size: var(--fs-tiny); color: var(--ink2); text-decoration: none; opacity: .75; }

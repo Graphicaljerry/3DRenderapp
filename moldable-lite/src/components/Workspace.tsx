@@ -109,30 +109,50 @@ function useSoloMenu(open: boolean, close: () => void) {
   }, [open]);
 }
 
-export function AnchoredMenu({ anchor, onClose, children, width = 190, className = "" }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number; className?: string }) {
+export function AnchoredMenu({ anchor, onClose, children, width = 190, className = "", ignore }: { anchor: DOMRect; onClose: () => void; children: ReactNode; width?: number; className?: string; ignore?: { current: HTMLElement | null } }) {
   const ref = useRef<HTMLDivElement>(null);
   useSoloMenu(true, onClose); // mounted == open
   const [h, setH] = useState(0);
   useLayoutEffect(() => setH(ref.current?.offsetHeight ?? 0), []);
+  // Read through refs so the subscription is registered ONCE, on mount — the same
+  // reasoning useEscape documents. Every caller passes `onClose={() => setAnchor(null)}`,
+  // a fresh arrow on each render, so listing it as a dependency tore the listeners down
+  // and re-armed them inside a setTimeout(0) on EVERY re-render of the page behind the
+  // menu. A mousedown that landed in one of those gaps hit nothing, and the menu stayed
+  // open — reproducibly, once the app was re-rendering for its own reasons.
+  const latest = useRef(onClose);
+  latest.current = onClose;
+  const ignoreRef = useRef(ignore);
+  ignoreRef.current = ignore;
   useEffect(() => {
-    const onDown = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
-    const onScroll = (e: Event) => { if (!ref.current?.contains(e.target as Node)) onClose(); };
+    const close = () => latest.current();
+    // `ignore` is the button that opened this. Without it a second press on that button
+    // closes the menu on mousedown and its own click re-opens it a tick later, so the
+    // control that opens a menu cannot shut it again — which on a phone is the gesture
+    // people reach for first.
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || ignoreRef.current?.current?.contains(t)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    const onScroll = (e: Event) => { if (!ref.current?.contains(e.target as Node)) close(); };
+    const onResize = () => close();
     // Defer, so the click that opened the menu doesn't instantly close it.
     const t = setTimeout(() => {
       document.addEventListener("mousedown", onDown);
       document.addEventListener("keydown", onKey);
       document.addEventListener("scroll", onScroll, true);
-      window.addEventListener("resize", onClose);
+      window.addEventListener("resize", onResize);
     }, 0);
     return () => {
       clearTimeout(t);
       document.removeEventListener("mousedown", onDown);
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("scroll", onScroll, true);
-      window.removeEventListener("resize", onClose);
+      window.removeEventListener("resize", onResize);
     };
-  }, [onClose]);
+  }, []);
   const vw = window.innerWidth;
   const left = Math.max(8, Math.min(anchor.right - width, vw - width - 8));
   const openUp = anchor.bottom + h + 8 > window.innerHeight && anchor.top - h - 8 > 0;
@@ -3562,10 +3582,11 @@ export function Workspace(p: Props) {
           <button className="navlink" onClick={p.onOpenTemplates}>Templates</button>
           <button className="navlink" onClick={p.onOpenLibrary}>Library</button>
           {/* One door instead of three. "+ New chat" and the light/dark switch used to
-              stand out here as their own controls; on a 390px phone that left four
-              things fighting over the row and the sign-in button truncating to "Sign…".
-              They moved inside, next to Settings and the account, which were already
-              there — so the row is a wordmark and a face, and nothing else.
+              stand out here as their own controls, which on a phone left four of them
+              crowding a 390px row — and Templates and Library are hidden at that width,
+              so two of the four were duplicated inside the menu anyway. They moved in
+              beside Settings and the account, which were already there; below 760px this
+              row is now a wordmark and a face.
 
               The menu opens for signed-OUT visitors too. It used to be gated behind an
               account, so folding these controls in without lifting that gate would have
@@ -3591,9 +3612,9 @@ export function Workspace(p: Props) {
               outside tap and Escape, obeys the app's one-menu-at-a-time rule, and clamps
               itself inside the viewport instead of hanging off the screen edge. */}
           {profileAnchor && (
-            <AnchoredMenu anchor={profileAnchor} onClose={() => setProfileAnchor(null)} width={236} className="account-menu">
+            <AnchoredMenu anchor={profileAnchor} onClose={() => setProfileAnchor(null)} width={236} className="account-menu" ignore={profileBtn}>
               {p.accountEmail && (
-                <div className="pm-head">
+                <div className="pm-head" role="presentation">
                   <span className="pm-avatar">{p.avatar ? <img src={p.avatar} alt="" /> : p.accountEmail[0].toUpperCase()}</span>
                   <span className="pm-who">
                     <span className="pm-label">Signed in</span>
@@ -3601,13 +3622,13 @@ export function Workspace(p: Props) {
                   </span>
                 </div>
               )}
-              <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onNew)}>New chat</button>
+              <button role="menuitem" className="pm-item" title="Start a fresh chat &amp; model (your current one stays in the Library)" onClick={() => pickProfile(p.onNew)}>New chat</button>
               <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenTemplates)}>Templates</button>
               <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenLibrary)}>Library</button>
               <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenSettings)}>Settings</button>
               {p.accountEmail && <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenProfile)}>Account &amp; sync</button>}
               <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onToggleTheme)}>{p.theme === "dark" ? "Light mode" : "Dark mode"}</button>
-              <div className="pm-sep" />
+              <div className="pm-sep" role="separator" />
               {p.accountEmail
                 ? <button role="menuitem" className="pm-item danger" onClick={() => pickProfile(p.onSignOut)}>Sign out</button>
                 : <button role="menuitem" className="pm-item" onClick={() => pickProfile(p.onOpenProfile)}>Sign in</button>}

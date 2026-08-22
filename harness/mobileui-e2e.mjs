@@ -28,11 +28,23 @@ const signin = page.locator(".launch-top-right button", { hasText: /sign in/i })
 const fit = await signin.evaluate((el) => ({ s: el.scrollWidth, c: el.clientWidth, t: el.innerText }));
 check("Sign in is no longer truncated", fit.s <= fit.c + 1, `"${fit.t}" scroll ${fit.s} vs client ${fit.c}`);
 
-// A returning visitor (veteran) must still get the footer — it sits outside launch-foot.
-await page.evaluate(() => localStorage.setItem("moldable_seen_launch", "1"));
+// The claim this footer exists for: a RETURNING visitor still gets it. `veteran` is
+// `!!accountEmail || recent.length >= 2` (App.tsx), so two saved projects is the honest
+// way in without an account — and it is the state that hides the first-run launch-foot,
+// which is exactly why the legal links could not live in there.
+await page.evaluate(async () => {
+  const { newProject, putProject } = await import("/src/store/projects.ts");
+  for (const n of ["Bracket", "Spacer"]) await putProject(newProject(n, "replicad"));
+});
 await page.reload({ waitUntil: "domcontentloaded" });
 await page.waitForSelector(".launch-composer textarea", { timeout: 60_000 });
-check("the footer survives a reload", await page.locator(".legal-foot .legal-link").count() === 2);
+await page.waitForFunction(() => document.querySelectorAll(".launch-recents .lp-card, .launch-recents a, .launch-recents button").length >= 2, null, { timeout: 30_000 }).catch(() => {});
+const asVeteran = await page.evaluate(() => ({
+  firstRunFooter: !!document.querySelector(".launch-foot"),
+  legal: document.querySelectorAll(".legal-foot .legal-link").length,
+}));
+check("a returning visitor has no first-run footer", !asVeteran.firstRunFooter, JSON.stringify(asVeteran));
+check("…but still gets Privacy and Terms", asVeteran.legal === 2, JSON.stringify(asVeteran));
 
 await page.screenshot({ path: "shot-mobile-launch.png" });
 
@@ -45,9 +57,9 @@ check("no stand-alone theme toggle in the top row", await page.locator(".topbar 
 // Signed OUT, the menu must still open — it used to be gated behind an account.
 await page.locator(".topbar .profile").click();
 const menu = page.locator(".pmenu.account-menu");
-await menu.waitFor({ timeout: 10_000 });
-const items = (await menu.innerText()).split("\n").map((s) => s.trim()).filter(Boolean);
-check("the account menu opens when signed out", true, items.join(" · "));
+const opened = await menu.waitFor({ timeout: 10_000 }).then(() => true, () => false);
+const items = opened ? (await menu.innerText()).split("\n").map((s) => s.trim()).filter(Boolean) : [];
+check("the account menu opens when signed out", opened, items.join(" · "));
 for (const want of ["New chat", "Templates", "Library", "Settings"]) {
   check(`…and carries ${want}`, items.includes(want));
 }
@@ -66,11 +78,28 @@ const after = await page.evaluate(() => document.documentElement.dataset.theme ?
 check("the menu's switch changes the theme", before !== after, `${before || "(unset)"} → ${after || "(unset)"}`);
 check("…and picking an item closes the menu", await page.locator(".pmenu.account-menu").count() === 0);
 
-// The touch dismissal the old panel could not do: tap outside.
+// A second tap on the avatar closes it. AnchoredMenu's outside-mousedown handler used to
+// fire before the trigger's own click, so the press that should have shut the menu shut
+// it and immediately re-opened it — the first gesture anyone tries on a phone.
 await page.locator(".topbar .profile").click();
 await menu.waitFor({ timeout: 10_000 });
-await page.mouse.click(195, 700);
+await page.locator(".topbar .profile").click();
 await page.waitForTimeout(400);
+check("a second tap on the avatar closes the menu", await page.locator(".pmenu.account-menu").count() === 0);
+
+// The touch dismissal the old panel could not do: tap outside.
+//
+// Tapped on the canvas by its own box rather than at a hand-picked x,y — a magic
+// coordinate is a guess about layout, and this one silently stopped landing on the
+// element it was chosen for. The settle wait matters too: AnchoredMenu arms its
+// outside-tap listener in a setTimeout after mount, so a tap fired the instant the
+// menu attaches can beat the listener and prove nothing.
+await page.locator(".topbar .profile").click();
+await menu.waitFor({ timeout: 10_000 });
+await page.waitForTimeout(300);
+const canvas = await page.locator(".viewer, canvas").first().boundingBox();
+await page.mouse.click(canvas.x + canvas.width / 2, canvas.y + canvas.height * 0.75);
+await page.waitForTimeout(500);
 check("an outside tap closes the menu", await page.locator(".pmenu.account-menu").count() === 0);
 
 await browser.close();

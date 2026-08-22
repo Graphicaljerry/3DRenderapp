@@ -14,6 +14,7 @@
 //     requests carry the reasoning param).
 //  4. Research resets to auto for a new part, same contract the plan won in 447.
 import { chromium } from "playwright";
+import { accountMenu } from "./enter.mjs";
 
 const STUB = "http://localhost:8899";
 await fetch(`${STUB}/_reset`);
@@ -151,11 +152,14 @@ const seedInto = (page, extra = {}) => page.addInitScript((all) => {
   // reaches the pages above or below it — which is also why each block can seed its
   // own preconditions without clearing up after the last one.
 
-  // The workspace's own overlay, reached from the account button. Signed out that is
-  // the sign-in popup (the full Settings pane sits behind an account, which this probe
-  // has no way to create) — either way it is an overlay raised from the WORKSPACE, not
-  // the Launchpad, so it covers the other half of the app.
-  await page.locator("button.ghost.profile").first().click();
+  // The workspace's own overlay, reached through the account menu. Signed out, its Sign
+  // in row raises the sign-in popup (the full Settings pane sits behind an account, which
+  // this probe has no way to create) — either way it is an overlay raised from the
+  // WORKSPACE, not the Launchpad, so it covers the other half of the app.
+  //
+  // Two steps now rather than one: the avatar used to open this overlay directly, and it
+  // now opens the menu holding New chat, Settings and the light/dark switch.
+  await accountMenu(page, /^Sign in$/);
   await page.waitForSelector(".overlay", { timeout: 15_000 });
   await page.keyboard.press("Escape");
   await page.waitForSelector(".overlay", { state: "detached", timeout: 5_000 }).catch(() => {});
